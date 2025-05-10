@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Web Push Demo</title>
+</head>
+<body>
+  <h1>Web Push Demo</h1>
+  <button id="subscribe">Subscribe to Notifications</button>
+
+  <script>
+    const subscribeButton = document.getElementById('subscribe');
+    const publicKeyUrl = '/notifications/publicKey';
+    const subscribeUrl = '/notifications/subscribe';
+
+    function urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding)
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+      const rawData = atob(base64);
+      return new Uint8Array([...rawData].map(char => char.charCodeAt(0)));
+    }
+
+    subscribeButton.addEventListener('click', async () => {
+      if (!('serviceWorker' in navigator)) {
+        alert('Service workers not supported');
+        return;
+      }
+      if (!('PushManager' in window)) {
+        alert('Push messaging not supported');
+        return;
+      }
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js');
+        console.log('Service Worker registered');
+
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          alert('Permission denied');
+          return;
+        }
+
+        const response = await fetch(publicKeyUrl);
+        const { public_key } = await response.json();
+
+        const subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(public_key)
+        });
+
+        const res = await fetch(subscribeUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(subscription)
+        });
+
+        if (res.ok) {
+          alert('Subscribed successfully!');
+        } else {
+          alert('Subscription failed');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Error during subscription');
+      }
+    });
+  </script>
+</body>
+</html>

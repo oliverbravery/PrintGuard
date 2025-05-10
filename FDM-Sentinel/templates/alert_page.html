@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Defect Alert</title>
+  <style> body { font-family: sans-serif; } #snapshot, #live { max-width: 45%; } </style>
+</head>
+<body>
+  <h1>Defect Detected</h1>
+  <p>Countdown: <span id="timer"></span></p>
+  <img id="snapshot" src="/alert/{{ alert_id }}/snapshot" alt="Snapshot" />
+  <img id="live" alt="Live Feed" />
+  <br/>
+  <button id="dismiss">Dismiss Alert</button>
+  <button id="terminate">Stop Print & Dismiss</button>
+  <script>
+    const alertId = "{{ alert_id }}";
+    const timeoutSec = {{ countdown_time }};
+    const warningIntervals = {{ warning_intervals }};
+    const detectedAt = {{ start_time }};
+    let remaining = Math.max(0, timeoutSec - (Date.now()/1000 - detectedAt));
+    const timerEl = document.getElementById('timer');
+    let intervalId = null;
+
+    function updateTimer() {
+      const m = Math.floor(remaining/60);
+      const s = Math.floor(remaining % 60);
+      timerEl.textContent = m + ":" + s.toString().padStart(2,'0');
+      if (warningIntervals.includes(remaining)) {
+        console.warn(`Warning: ${remaining} seconds remaining`);
+        timerEl.style.color = 'orange';
+      }
+      if (remaining <= 0) {
+        clearInterval(intervalId);
+        timerEl.textContent = "Timeout reached";
+      }
+      remaining--;
+    }
+    intervalId = setInterval(updateTimer, 1000);
+    updateTimer();
+
+    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = location.host;
+    const liveImg = document.getElementById('live');
+    let liveFeedWs = new WebSocket(wsProtocol + '//' + wsHost + '/ws/camera_feed');
+    liveImg.src = "";
+
+    liveFeedWs.binaryType = 'arraybuffer';
+    liveFeedWs.onmessage = (ev) => {
+      if (ev.data instanceof ArrayBuffer) {
+        const blob = new Blob([ev.data], {type:'image/jpeg'});
+        if (liveImg.src) URL.revokeObjectURL(liveImg.src);
+        liveImg.src = URL.createObjectURL(blob);
+      } else {
+        console.log("Non-binary message from camera_feed:", ev.data);
+      }
+    };
+    liveFeedWs.onclose = () => console.log("Live feed WebSocket closed.");
+    liveFeedWs.onerror = (err) => console.error("Live feed WebSocket error:", err);
+
+    document.getElementById('dismiss').onclick = async () => {
+      clearInterval(intervalId);
+      if (liveFeedWs) liveFeedWs.close();
+      try {
+        await fetch(`/alert/${alertId}/dismiss`, { method: 'POST' });
+        window.location.href = "/";
+      } catch (e) {
+        console.error("Failed to dismiss alert on server:", e);
+      }
+    };
+
+    document.getElementById('terminate').onclick = async () => {
+      clearInterval(intervalId);
+      if (liveFeedWs) liveFeedWs.close();
+      try {
+        await fetch('/live/stop', { method: 'POST' });
+        await fetch(`/alert/${alertId}/dismiss`, { method: 'POST' }); 
+        window.close();
+      } catch (e) {
+        console.error("Failed to stop live detection or dismiss alert:", e);
+      }
+    };
+
+    window.addEventListener('beforeunload', () => {
+        if (liveFeedWs) liveFeedWs.close();
+        clearInterval(intervalId);
+    });
+  </script>
+</body>
+</html>

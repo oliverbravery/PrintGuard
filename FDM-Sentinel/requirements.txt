@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pywebpush
+apscheduler
+python-dotenv
+torch
+torchvision
+pillow
+opencv-python
+torch
+python-multipart
