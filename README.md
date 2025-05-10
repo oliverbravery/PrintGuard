@@ -1,4 +1,4 @@
-# 3D Print Sentinel - Print Failure Detection
+# FDM Sentinel - Print Failure Detection
 
 A system that uses computer vision to detect failures in 3D printing and sends web push notifications when a defect is detected.
 
