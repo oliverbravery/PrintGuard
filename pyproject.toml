@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "FDM-Sentinel"
+version = "0.1.0"
+description = "FDM Sentinel - Real-time Defect Detection on Edge-devices"
+authors = [
+    { name = "Oliver Bravery", email = "dev@oliverbravery.uk" }
+]
+readme = "README.md"
+requires-python = ">=3.8"
+
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pywebpush",
+    "apscheduler",
+    "python-dotenv",
+    "torch",
+    "torchvision",
+    "pillow",
+    "opencv-python",
+    "python-multipart"
+]
+
+[project.scripts]
+start-service = "fdm_sentinel.app:run"
+
+[tool.black]
+line-length = 88
