@@ -9,17 +9,6 @@
 </head>
 <body>
 
-    <div id="subscriptionModal" class="modal">
-        <div class="modal-content">
-            <h2>Print Sentinel</h2>
-            <p>Little explanation on what Subscribe is.</p>
-            <div class="modal-buttons">
-                <button id="subscribeBtnModal">Subscribe</button>
-                <button id="continueWithoutSubBtn" class="button-secondary">Continue without Sub</button>
-            </div>
-        </div>
-    </div>
-
     <header class="app-header">
         <h1>Print Sentinel</h1>
     </header>
@@ -53,182 +42,15 @@
                 <div class="status-area" id="statusArea">
                     <!-- Status will be updated here by JavaScript -->
                     <div class="status-inactive">Detection Inactive</div>
-                    <!-- Example States (to be shown/hidden via JS):
-                    <div class="status-defect">
-                        Defect Detected!
-                        <div class="defect-details">
-                            <img src="placeholder_defect_image.png" alt="Defect Screenshot">
-                            <p>Screenshot Time: 00:00</p>
-                            <p>Alert Countdown: 00:00</p>
-                            <button class="button-secondary">Dismiss</button>
-                        </div>
-                    </div>
-                    <div class="status-no-defect">
-                        No defects detected.
-                    </div>
-                    -->
                 </div>
                  <div class="settings-button-container">
                     <button id="settingsBtn" onclick="window.location.href='/settings'">Settings</button>
-                    <button id="pushSubscribeBtn" class="button-secondary">Subscribe to Notifications</button>
-                    <button id="testPushBtn" class="button-secondary">Send Test Notification</button>
                 </div>
             </section>
         </div>
     </div>
 
     <script>
-        function setCookie(name, value, days) {
-            let expires = "";
-            if (days) {
-                const date = new Date();
-                date.setTime(date.getTime() + days * 24 * 60 * 60 * 1000);
-                expires = "; expires=" + date.toUTCString();
-            }
-            document.cookie = name + "=" + (value || "") + expires + "; path=/";
-        }
-
-        function getCookie(name) {
-            const nameEQ = name + "=";
-            const ca = document.cookie.split(';');
-            for (let i = 0; i < ca.length; i++) {
-                let c = ca[i];
-                while (c.charAt(0) === ' ') c = c.substring(1);
-                if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length);
-            }
-            return null;
-        }
-
-        // Basic Modal Logic
-        const modal = document.getElementById('subscriptionModal');
-        const subscribeButton = document.getElementById('subscribeBtnModal');
-        const continueButton = document.getElementById('continueWithoutSubBtn');
-        const legacySubscribeButton = document.getElementById('subscribe');
-
-        if (legacySubscribeButton && legacySubscribeButton !== subscribeButton) {
-            legacySubscribeButton.style.display = 'none';
-        }
-        
-        if (!localStorage.getItem('visitedPrintSentinel')) {
-            modal.style.display = 'block';
-            localStorage.setItem('visitedPrintSentinel', 'true');
-        }
-
-        subscribeButton.onclick = function() {
-            modal.style.display = 'none';
-            console.log("Subscribe clicked");
-            triggerNotificationSubscription(); 
-        }
-
-        continueButton.onclick = function() {
-            modal.style.display = 'none';
-            console.log("Continue without subscribing");
-        }
-
-        window.onclick = function(event) {
-            if (event.target == modal) {
-                modal.style.display = 'none';
-            }
-        }
-
-        async function registerSW() {
-            if (!navigator.serviceWorker.controller) {
-                const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-                console.log('Service Worker registered with scope:', reg.scope);
-            }
-            const registration = await navigator.serviceWorker.ready;
-            console.log('Service Worker ready:', registration);
-            return registration;
-        }
-
-        async function triggerNotificationSubscription() {
-            if (!('serviceWorker' in navigator)) {
-                alert('Service workers not supported');
-                return;
-            }
-            if (!('PushManager' in window)) {
-                alert('Push messaging not supported');
-                return;
-            }
-            try {
-                const registration = await registerSW();
-                console.log('Service Worker registration obtained:', registration);
-
-                const permission = await Notification.requestPermission();
-                if (permission !== 'granted') {
-                    alert('Permission denied for notifications');
-                    return;
-                }
-
-                console.log('Fetching public key from: {{ url_for('route_public_key_ep') }}');
-                const response = await fetch("{{ url_for('route_public_key_ep') }}");
-                if (!response.ok) {
-                    throw new Error(`Public key fetch failed: ${response.status} ${response.statusText}`);
-                }
-                const data = await response.json();
-                const publicKey = data.public_key;
-                if (!publicKey) {
-                    throw new Error('Empty public key returned');
-                }
-
-                let subscription = await registration.pushManager.getSubscription();
-                if (!subscription) {
-                    subscription = await registration.pushManager.subscribe({
-                        userVisibleOnly: true,
-                        applicationServerKey: urlBase64ToUint8Array(publicKey)
-                    });
-                    console.log('New subscription created');
-                } else {
-                    console.log('Using existing subscription');
-                }
-
-                console.log('Obtained PushSubscription:', subscription);
-                console.log('Subscription endpoint:', subscription.endpoint);
-                console.log('Subscription keys:', subscription.toJSON().keys);
-
-                console.log('Sending subscription to: {{ url_for('route_subscribe_ep') }}');
-                const res = await fetch("{{ url_for('route_subscribe_ep') }}", { // Adjusted path
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(subscription)
-                });
-                console.log('Subscription POST response:', res);
-                if (!res.ok) {
-                    const errorText = await res.text();
-                    throw new Error(`Subscription failed: ${res.status} ${errorText}`);
-                }
-                setCookie('pushSubscribed', 'true', 365);
-                alert('Subscribed to notifications successfully!');
-                const resultJson = await res.json();
-                const subId = resultJson.subscription_id;
-                console.log('Stored subscription ID:', subId);
-                localStorage.setItem('pushSubId', subId);
-                try {
-                    const testMsg = { title: 'Test Notification', body: 'Push is working!', url: window.location.origin };
-                    const testRes = await fetch(`/notifications/send/${subId}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(testMsg)
-                    });
-                    console.log('Test notification response:', testRes);
-                } catch (e) {
-                    console.error('Error sending test notification:', e);
-                }
-            } catch (err) {
-                console.error('Subscription error:', err);
-                alert('Error during notification subscription: ' + (err.message || err));
-            }
-        }
-        
-        function urlBase64ToUint8Array(base64String) {
-            const padding = '='.repeat((4 - base64String.length % 4) % 4);
-            const base64 = (base64String + padding)
-                .replace(/-/g, '+')
-                .replace(/_/g, '/');
-            const rawData = atob(base64);
-            return new Uint8Array([...rawData].map(char => char.charCodeAt(0)));
-        }
-
         const statusArea = document.getElementById('statusArea');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
@@ -402,23 +224,6 @@
         window.addEventListener('load', syncLiveStatus);
         setInterval(syncLiveStatus, 5000);
 
-        function showDefect(imageUrl, time, countdown) {
-            statusArea.innerHTML = `
-                <div class="status-defect">
-                    Defect Detected!
-                    <div class="defect-details">
-                        <img src="${imageUrl}" alt="Defect Screenshot">
-                        <p>Screenshot Time: ${time}</p>
-                        <p>Alert Countdown: ${countdown}</p>
-                        <button class="button-secondary" onclick="dismissDefect()">Dismiss</button>
-                    </div>
-                </div>`;
-        }
-
-        function dismissDefect() {
-            statusArea.innerHTML = '<div class="status-inactive">Detection Inactive (Defect Dismissed)</div>';
-        }
-        
         async function retryCamera(cameraIndex) {
             try {
                 if (cameraStatuses[cameraIndex] && cameraStatuses[cameraIndex].running) {
@@ -506,43 +311,6 @@
 
             syncLiveStatus();
         });
-
-        const pushSubscribeBtn = document.getElementById('pushSubscribeBtn');
-        if (pushSubscribeBtn) {
-            pushSubscribeBtn.addEventListener('click', () => {
-                console.log('Manual subscribe button clicked');
-                triggerNotificationSubscription();
-            });
-        }
-
-        const testPushBtn = document.getElementById('testPushBtn');
-        if (testPushBtn) {
-            testPushBtn.addEventListener('click', async () => {
-                const subId = localStorage.getItem('pushSubId');
-                if (!subId) {
-                    alert('No stored subscription ID. Please subscribe first.');
-                    return;
-                }
-                const msg = { title: 'Test Notification', body: 'This is a test push.', url: window.location.href };
-                try {
-                    const res = await fetch(`/notifications/send/${subId}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(msg)
-                    });
-                    console.log('Test notification response:', res);
-                    if (res.ok) {
-                        alert('Test notification sent!');
-                    } else {
-                        const err = await res.text();
-                        alert('Failed to send test notification: ' + err);
-                    }
-                } catch (e) {
-                    console.error('Error sending test notification:', e);
-                    alert('Error sending test notification: ' + e);
-                }
-            });
-        }
 
         (function() {
             const countdownStart = {{ countdown_time }};
