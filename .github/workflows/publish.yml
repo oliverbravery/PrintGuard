@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  build-and-publish:
+  pypi-publish:
     runs-on: ubuntu-latest
     environment:
       name: pypi
