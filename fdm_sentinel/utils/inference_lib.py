@@ -4,6 +4,13 @@ import torch
 from PIL import Image
 from torchvision import transforms
 import cv2
+import sys
+
+try:
+    import fdm_sentinel.protonets as _pn
+    sys.modules['protonets'] = _pn
+except ImportError:
+    pass
 
 def load_model(model_path, options_path, device):
     model = torch.load(model_path, weights_only=False)

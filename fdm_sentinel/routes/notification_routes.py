@@ -1,6 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks
 
-from utils.notification_utils import (
+from ..utils.notification_utils import (
     Subscription, Message, ScheduleRequest,
     subscribe_client, unsubscribe_client, send_notification_now, schedule_notification,
     get_public_key, get_debug_subscriptions

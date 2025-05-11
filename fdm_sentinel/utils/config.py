@@ -15,9 +15,11 @@ VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY")
 VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY")
 VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
 
-MODEL_PATH = "model/best_model.pt"
-MODEL_OPTIONS_PATH = "model/opt.json"
-PROTOTYPES_DIR = "model/prototypes"
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "model", "best_model.pt")
+MODEL_OPTIONS_PATH = os.path.join(BASE_DIR, "model", "opt.json")
+PROTOTYPES_DIR = os.path.join(BASE_DIR, "model", "prototypes")
+
 SUCCESS_LABEL = "success"
 DEVICE_TYPE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 SENSITIVITY = 1.0

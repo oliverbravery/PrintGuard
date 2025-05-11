@@ -7,20 +7,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import os
 
-from utils.inference_lib import (
+from .utils.inference_lib import (
     compute_prototypes, load_model, make_transform, setup_device
 )
-from utils.config import (
+from .utils.config import (
     MODEL_PATH, MODEL_OPTIONS_PATH, PROTOTYPES_DIR, SUCCESS_LABEL, DEVICE_TYPE,
     VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY
 )
-from routes.notification_routes import router as notification_router
-from routes.alert_routes import router as alert_router
-from routes.detection_routes import router as detection_router
-from routes.live_detection_routes import router as live_detection_router
-from routes.settings_routes import settings_router
-from utils import config
+from .routes.notification_routes import router as notification_router
+from .routes.alert_routes import router as alert_router
+from .routes.detection_routes import router as detection_router
+from .routes.live_detection_routes import router as live_detection_router
+from .routes.settings_routes import settings_router
+from .utils import config
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
@@ -75,6 +76,7 @@ app.state.device = None
 app.state.prototypes = None
 app.state.class_names = ['Successful', 'Defective']
 app.state.defect_idx = -1
+app.state.alerts = {}
 
 app.state.camera_states = {}
 
@@ -97,9 +99,11 @@ def get_camera_state(camera_index):
 
 get_camera_state(config.CAMERA_INDEX)
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-templates = Jinja2Templates(directory="templates")
+base_dir = os.path.dirname(__file__)
+static_dir = os.path.join(base_dir, "static")
+templates_dir = os.path.join(base_dir, "templates")
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+templates = Jinja2Templates(directory=templates_dir)
 
 @app.get("/", include_in_schema=False)
 async def serve_index(request: Request):
@@ -116,7 +120,8 @@ async def serve_index(request: Request):
 
 @app.get("/sw.js", include_in_schema=False)
 async def serve_sw():
-    return FileResponse("static/js/sw.js", media_type="application/javascript")
+    sw_path = os.path.join(static_dir, "js", "sw.js")
+    return FileResponse(sw_path, media_type="application/javascript")
 
 app.include_router(notification_router, prefix="/notifications", tags=["notifications"])
 app.include_router(alert_router) 
@@ -124,8 +129,11 @@ app.include_router(detection_router)
 app.include_router(live_detection_router)
 app.include_router(settings_router, prefix="", tags=["settings"])
 
-if __name__ == "__main__":
+def run():
     import uvicorn
     if not all([VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY]):
         print("Warning: VAPID keys not configured. Push notifications will fail.")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, ssl_certfile=".cert.pem", ssl_keyfile=".key.pem")
+
+if __name__ == "__main__":
+    run()

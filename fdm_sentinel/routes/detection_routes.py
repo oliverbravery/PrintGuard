@@ -1,4 +1,3 @@
-
 import asyncio
 import io
 import json
@@ -9,7 +8,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, WebSocket, WebSo
 from fastapi.responses import StreamingResponse
 from PIL import Image
 
-from utils.model_utils import _process_image, _run_inference
+from ..utils.model_utils import _process_image, _run_inference
 
 router = APIRouter()
 

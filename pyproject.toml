@@ -10,7 +10,7 @@ authors = [
     { name = "Oliver Bravery", email = "dev@oliverbravery.uk" }
 ]
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 
 dependencies = [
     "fastapi",
@@ -30,3 +30,16 @@ start-service = "fdm_sentinel.app:run"
 
 [tool.black]
 line-length = 88
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["fdm_sentinel", "fdm_sentinel.*", "protonets", "protonets.*"]
+
+[tool.setuptools.package-data]
+"fdm_sentinel" = [
+    "static/**/*",
+    "templates/**/*",
+    "model/**/*"
+]

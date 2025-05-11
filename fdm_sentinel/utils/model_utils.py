@@ -6,8 +6,8 @@ import torch
 from PIL import Image
 from fastapi import HTTPException, UploadFile
 
-from utils.inference_lib import predict_batch
-from utils.config import SENSITIVITY
+from .inference_lib import predict_batch
+from .config import SENSITIVITY
 
 async def _process_image(file: UploadFile, transform: Any, device: torch.device) -> torch.Tensor:
     try:

@@ -5,19 +5,15 @@ import uuid
 import numpy as np
 
 import cv2
-import utils.config as config
+from . import config
 from PIL import Image
 from fastapi import WebSocket, WebSocketDisconnect
 
-from utils.config import (
-    CAMERA_INDEX, DETECTION_WINDOW, DETECTION_THRESHOLD, BASE_URL
-)
-from utils.model_utils import _run_inference
-
-alerts = {}
+from .config import CAMERA_INDEX, DETECTION_WINDOW, DETECTION_THRESHOLD, BASE_URL
+from .model_utils import _run_inference
 
 async def _webcam_generator(model, transform, device, class_names, prototypes, defect_idx, camera_index, app_state):
-    from app import get_camera_state
+    from fdm_sentinel.app import get_camera_state
     
     camera_state = get_camera_state(camera_index)
     
@@ -59,8 +55,8 @@ async def _webcam_generator(model, transform, device, class_names, prototypes, d
         cap.release()
 
 async def _live_detection_loop(app_state, camera_index):
-    from utils.notification_utils import send_defect_notification
-    from app import get_camera_state
+    from fdm_sentinel.utils.notification_utils import send_defect_notification
+    from fdm_sentinel.app import get_camera_state
     
     camera_state = get_camera_state(camera_index)
     
@@ -104,7 +100,7 @@ async def _live_detection_loop(app_state, camera_index):
                 if len(camera_state["detection_times"]) >= DETECTION_THRESHOLD and camera_state["current_alert_id"] is None:
                     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
                     _, img_buf = cv2.imencode('.jpg', frame)
-                    alerts[alert_id] = {
+                    app_state.alerts[alert_id] = {
                         'timestamp': now,
                         'snapshot': img_buf.tobytes(),
                         'camera_index': camera_index
@@ -118,7 +114,7 @@ async def _live_detection_loop(app_state, camera_index):
 async def websocket_camera_feed_handler(websocket: WebSocket):
     await websocket.accept()
     try:
-        from app import get_camera_state
+        from fdm_sentinel.app import get_camera_state
         camera_state = get_camera_state(CAMERA_INDEX)
 
         try:

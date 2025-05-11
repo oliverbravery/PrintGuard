@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Request, Form
-from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse
-import utils.config as config
+from ..utils import config
 import cv2
+import os
+from fastapi.templating import Jinja2Templates
+
+template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
+templates = Jinja2Templates(directory=template_dir)
 
 settings_router = APIRouter()
-
-templates = Jinja2Templates(directory="templates")
 
 @settings_router.get("/settings", include_in_schema=False)
 async def settings_page(request: Request):
@@ -31,7 +33,6 @@ async def update_settings(request: Request,
     countdown_time: int = Form(...),
     warning_intervals: str = Form(...),
 ):
-    # Update runtime configuration
     config.SENSITIVITY = sensitivity
     config.CAMERA_INDEX = camera_index
     config.BRIGHTNESS = brightness
@@ -63,7 +64,6 @@ async def camera_feed():
 @settings_router.post('/settings/update_video', include_in_schema=False)
 async def update_video_settings(request: Request):
     data = await request.json()
-    # Update individual video settings
     if 'brightness' in data:
         config.BRIGHTNESS = float(data['brightness'])
     if 'contrast' in data:

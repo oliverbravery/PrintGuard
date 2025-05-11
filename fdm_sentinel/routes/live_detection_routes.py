@@ -2,13 +2,13 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request, Body
 from fastapi.responses import StreamingResponse
 
-from utils.camera_utils import _webcam_generator, _live_detection_loop
+from ..utils.camera_utils import _webcam_generator, _live_detection_loop
 
 router = APIRouter()
 
 @router.get("/live")
 async def live_detection_feed(request: Request):
-    from utils.config import CAMERA_INDEX
+    from ..utils.config import CAMERA_INDEX
     
     if (request.app.state.model is None or
         request.app.state.transform is None or
@@ -32,8 +32,8 @@ async def live_detection_feed(request: Request):
 
 @router.post("/live/start")
 async def start_live_detection(request: Request):
-    from utils.config import CAMERA_INDEX
-    from app import get_camera_state
+    from ..utils.config import CAMERA_INDEX
+    from ..app import get_camera_state
     
     camera_state = get_camera_state(CAMERA_INDEX)
     
@@ -49,8 +49,8 @@ async def start_live_detection(request: Request):
 
 @router.post("/live/stop")
 async def stop_live_detection(request: Request):
-    from utils.config import CAMERA_INDEX
-    from app import get_camera_state
+    from ..utils.config import CAMERA_INDEX
+    from ..app import get_camera_state
     
     camera_state = get_camera_state(CAMERA_INDEX)
     
@@ -82,9 +82,9 @@ async def stop_live_detection(request: Request):
 
 @router.post("/live/camera", include_in_schema=False)
 async def set_camera_index(camera_index: int = Body(..., embed=True)):
-    import utils.config as config
+    from ..utils import config
     import cv2
-    from app import get_camera_state
+    from ..app import get_camera_state
 
     camera_state = get_camera_state(camera_index)
     
@@ -108,7 +108,6 @@ async def set_camera_index(camera_index: int = Body(..., embed=True)):
 async def live_alerts_feed(request: Request):
     async def events():
         import asyncio, json
-        from utils.camera_utils import alerts
         last_ids = set()
         def any_camera_running():
             return any(
@@ -117,16 +116,16 @@ async def live_alerts_feed(request: Request):
             )
         
         while any_camera_running():
-            new_ids = set(alerts.keys()) - last_ids
+            new_ids = set(request.app.state.alerts.keys()) - last_ids
             for alert_id in new_ids:
-                info = alerts[alert_id]
+                info = request.app.state.alerts[alert_id]
                 alert_data = {
                     'alert_id': alert_id, 
                     'timestamp': info['timestamp']
                 }
                 if 'camera_index' in info:
                     alert_data['camera_index'] = info['camera_index']
-                    
+                
                 yield f"data: {json.dumps(alert_data)}\n\n"
                 last_ids.add(alert_id)
                 
@@ -139,8 +138,8 @@ async def live_status(request: Request):
     Returns whether live detection is running and the current camera index.
     Also returns status for all active cameras.
     """
-    from utils.config import CAMERA_INDEX
-    from app import get_camera_state
+    from ..utils.config import CAMERA_INDEX
+    from ..app import get_camera_state
     
     camera_state = get_camera_state(CAMERA_INDEX)
     camera_statuses = {}

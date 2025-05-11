@@ -8,7 +8,7 @@ from fastapi import BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from pywebpush import WebPushException, webpush
 
-from utils.config import VAPID_PRIVATE_KEY, VAPID_CLAIMS, VAPID_PUBLIC_KEY
+from .config import VAPID_PRIVATE_KEY, VAPID_CLAIMS, VAPID_PUBLIC_KEY
 
 subscriptions: Dict[str, dict] = {}
 scheduler = BackgroundScheduler()

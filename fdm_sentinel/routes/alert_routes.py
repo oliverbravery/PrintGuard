@@ -3,15 +3,16 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket
 from fastapi.responses import StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-import utils.config as config
+from ..utils import config
 
-from utils.camera_utils import websocket_camera_feed_handler, alerts
+from ..utils.camera_utils import websocket_camera_feed_handler
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
 @router.get("/alert/{alert_id}", include_in_schema=False)
 async def alert_page_ep(request: Request, alert_id: str):
+    alerts = request.app.state.alerts
     if alert_id not in alerts:
         raise HTTPException(status_code=404, detail="Alert not found")
     alert_info = alerts[alert_id]
@@ -25,8 +26,9 @@ async def alert_page_ep(request: Request, alert_id: str):
     return templates.TemplateResponse("alert_page.html", context)
 
 @router.post("/alert/{alert_id}/dismiss", include_in_schema=False)
-async def dismiss_alert_ep(alert_id: str, request: Request):
+async def dismiss_alert_ep(request: Request, alert_id: str):
     app_state = request.app.state
+    alerts = app_state.alerts
     if alert_id not in alerts:
         raise HTTPException(status_code=404, detail="Alert not found to dismiss.")
     camera_index = alerts[alert_id].get('camera_index')
@@ -48,7 +50,8 @@ async def dismiss_alert_ep(alert_id: str, request: Request):
     return {"message": f"Alert {alert_id} dismissed."}
 
 @router.get("/alert/{alert_id}/snapshot", include_in_schema=False)
-async def alert_snapshot_ep(alert_id: str):
+async def alert_snapshot_ep(request: Request, alert_id: str):
+    alerts = request.app.state.alerts
     if alert_id not in alerts or 'snapshot' not in alerts[alert_id]:
         raise HTTPException(status_code=404, detail="Snapshot not found for this alert.")
     data = alerts[alert_id]['snapshot']
