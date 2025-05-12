@@ -91,6 +91,7 @@ def get_camera_state(camera_index, reset=False):
             "detection_times": deque(),
             "detection_history": deque(maxlen=MAX_CAMERA_HISTORY),
             "live_detection_running": False,
+            "live_detection_task": None,
             "last_result": None,
             "last_time": None,
             "start_time": None,

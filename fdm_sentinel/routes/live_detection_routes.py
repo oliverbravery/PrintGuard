@@ -1,5 +1,5 @@
 import asyncio
-from fastapi import APIRouter, HTTPException, Request, Body
+from fastapi import APIRouter, HTTPException, Request, Body, WebSocket
 from fastapi.responses import StreamingResponse
 import time
 from ..utils.camera_utils import _webcam_generator, _live_detection_loop
@@ -59,10 +59,7 @@ async def stop_live_detection(request: Request, camera_index: int = Body(..., em
     if not camera_state["live_detection_running"]:
         return {"message": f"Live detection not running for camera {camera_index}"}
     live_detection_task = camera_state["live_detection_task"]
-    update_camera_state(camera_index, {"start_time": None,
-                                       "live_detection_running": False,
-                                       "live_detection_task": None})
-    
+    print(f"camera_state: {camera_state}")
     if live_detection_task:
         try:
             await asyncio.wait_for(live_detection_task, timeout=5.0)
@@ -75,32 +72,11 @@ async def stop_live_detection(request: Request, camera_index: int = Body(..., em
             print(f"Error stopping live detection task for camera {camera_index}: {e}")
         finally:
             live_detection_task = None
+    update_camera_state(camera_index, {"start_time": None,
+                                    "live_detection_running": False,
+                                    "live_detection_task": None})
     
     return {"message": f"Live detection stopped for camera {camera_index}"}
-
-@router.post("/live/camera", include_in_schema=False)
-async def set_camera_index(camera_index: int = Body(..., embed=True)):
-    from ..utils import config
-    import cv2
-    from ..app import get_camera_state
-
-    camera_state = get_camera_state(camera_index)
-    
-    try:
-        cap = cv2.VideoCapture(camera_index)
-        if not cap.isOpened():
-            camera_state["error"] = f"Cannot open camera {camera_index}"
-            config.CAMERA_INDEX = camera_index
-            return {"message": f"Camera index set to {camera_index}, but camera is not available", "error": camera_state["error"]}
-        camera_state["error"] = None
-        cap.release()
-    except Exception as e:
-        camera_state["error"] = f"Error accessing camera {camera_index}: {str(e)}"
-        config.CAMERA_INDEX = camera_index
-        return {"message": f"Camera index set to {camera_index}, but with error", "error": camera_state["error"]}
-    config.CAMERA_INDEX = camera_index
-    
-    return {"message": f"Camera index set to {camera_index}"}
 
 @router.get("/live/alerts")
 async def live_alerts_feed(request: Request):
@@ -130,28 +106,36 @@ async def live_alerts_feed(request: Request):
             await asyncio.sleep(0.5)
     return StreamingResponse(events(), media_type="text/event-stream")
 
-@router.get("/live/status", tags=["live"])
-async def live_status(request: Request):
+@router.post("/live/camera", include_in_schema=False)
+async def get_camera_state(request: Request, camera_index: int = Body(..., embed=True)):
     """
-    Returns whether live detection is running and the current camera index.
-    Also returns status for all active cameras.
+    Get the state of a specific camera index.
     """
-    from ..utils.config import CAMERA_INDEX
-    from ..app import get_camera_state
-    
-    camera_state = get_camera_state(CAMERA_INDEX)
-    camera_statuses = {}
-    for cam_idx in request.app.state.camera_states:
-        cam_state = request.app.state.camera_states[cam_idx]
-        camera_statuses[str(cam_idx)] = {
-            "running": cam_state["live_detection_running"],
-            "last_result": cam_state.get("last_result"),
-            "last_time": cam_state.get("last_time"),
-            "error": cam_state.get("error")
-        }
-    
-    return {
-        "running": camera_state["live_detection_running"],
-        "camera_index": CAMERA_INDEX,
-        "camera_statuses": camera_statuses
+    from ..app import get_camera_state as _get_camera_state  # avoid name clash
+    # retrieve camera state (ensures default state exists)
+    camera_state = _get_camera_state(camera_index)
+    # build JSON-serializable response
+    response = {
+        "start_time": camera_state.get("start_time"),
+        "last_result": camera_state.get("last_result"),
+        "last_time": camera_state.get("last_time"),
+        "detection_times": list(camera_state.get("detection_times", [])),
+        "error": camera_state.get("error"),
     }
+    return response
+
+@router.websocket("/ws/camera/{camera_index}")
+async def camera_ws(websocket: WebSocket, camera_index: int):
+    from ..app import get_camera_state as _get_camera_state
+    await websocket.accept()
+    while True:
+        state = _get_camera_state(camera_index)
+        data = {
+            "start_time": state.get("start_time"),
+            "last_result": state.get("last_result"),
+            "last_time": state.get("last_time"),
+            "detection_times": list(state.get("detection_times", [])),
+            "error": state.get("error"),
+        }
+        await websocket.send_json(data)
+        import asyncio; await asyncio.sleep(2)

@@ -11,7 +11,6 @@
       data-stop-url="{{ url_for('stop_live_detection') }}"
       data-live-feed-url="{{ url_for('live_detection_feed') }}"
       data-live-status-url="/live/status"
-      data-set-camera-url="{{ url_for('set_camera_index') }}"
       data-alerts-feed-url="{{ url_for('live_alerts_feed') }}"
       data-camera-feed-url="{{ url_for('camera_feed') }}"
       data-countdown-time="{{ countdown_time }}"
@@ -51,18 +50,16 @@
                     <div class="grid-container four-by-four-grid">
                         <div class="grid-item">
                             {% set current_cam_state = camera_states.get(camera_index) %}
-                            {% if current_cam_state and "start_time" in current_cam_state and current_cam_state.start_time is not none %}
-                                <p>{{ (current_time - current_cam_state["start_time"]) | round(2) }}s elapsed</p>
-                            {% else %}
-                                <p>N/A</p>
-                            {% endif %}
+                            <p id="elapsedTimeDisplay">
+                                N/A
+                            </p>
                         </div>
                         <div class="grid-item">
-                            <p>{{ current_cam_state["last_result"] if current_cam_state else "N/A" }}</p>
-                            <p>detected at {{ current_cam_state["last_time"] if current_cam_state else "N/A" }}</p>
+                            <p id="lastResultDisplay">N/A</p>
+                            <p>detected at <span id="lastTimeValue">N/A</span></p>
                         </div>
                         <div class="grid-item">
-                            <p>{{ current_cam_state["detection_times"] | length if current_cam_state else "N/A" }}</p>
+                            <p id="totalDetectionsDisplay">N/A</p>
                             <p>total detections</p>
                         </div>
                         <div class="grid-item">
@@ -86,6 +83,32 @@
         const stopBtn = document.getElementById('stopBtn');
         const videoPreview = document.getElementById('videoPreview');
         const cameraSelect = document.getElementById('cameraSelect');
+
+        const elapsedTimeDisplay = document.getElementById('elapsedTimeDisplay');
+        const lastResultDisplay = document.getElementById('lastResultDisplay');
+        const lastTimeValue = document.getElementById('lastTimeValue');
+        const totalDetectionsDisplay = document.getElementById('totalDetectionsDisplay');
+
+        let camSocket;
+        function connectCameraWS(){
+            if(camSocket) camSocket.close();
+            const idx = cameraSelect.value;
+            const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+            const wsUrl = `${protocol}://${location.host}/ws/camera/${idx}`;
+            camSocket = new WebSocket(wsUrl);
+            camSocket.onmessage = event => {
+                const d = JSON.parse(event.data);
+                elapsedTimeDisplay.textContent = d.start_time ? `${((Date.now()/1000)-d.start_time).toFixed(2)}s elapsed` : 'N/A';
+                lastResultDisplay.textContent = d.last_result || 'N/A';
+                lastTimeValue.textContent = d.last_time || 'N/A';
+                totalDetectionsDisplay.textContent = d.detection_times.length || 'N/A';
+            };
+        }
+        cameraSelect.addEventListener('change', () => {
+            videoPreview.src = `${document.body.dataset.cameraFeedUrl}?camera_id=${cameraSelect.value}&t=${Date.now()}`;
+            connectCameraWS();
+        });
+        connectCameraWS();
 
         startBtn.addEventListener('click', function() {
             const selectedCamera = cameraSelect.value;
