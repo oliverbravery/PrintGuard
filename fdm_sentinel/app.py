@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import os
-
+import time
 from .utils.inference_lib import (
     compute_prototypes, load_model, make_transform, setup_device
 )
@@ -91,13 +91,15 @@ def get_camera_state(camera_index):
             "detection_times": deque(),
             "detection_history": deque(maxlen=MAX_CAMERA_HISTORY),
             "live_detection_running": False,
-            "live_detection_task": None,
             "last_result": None,
             "last_time": None,
+            "start_time": None,
             "error": None,
             "brightness": config.BRIGHTNESS,
             "contrast": config.CONTRAST,
             "focus": config.FOCUS,
+            "countdown_time": config.COUNTDOWN_TIME,
+            "warning_intervals": ",".join(str(x) for x in config.WARNING_INTERVALS)
         }
     return app.state.camera_states[camera_index]
 
@@ -111,17 +113,12 @@ templates = Jinja2Templates(directory=templates_dir)
 
 @app.get("/", include_in_schema=False)
 async def serve_index(request: Request):
-    camera_index = config.CAMERA_INDEX # Or determine active camera some other way
-    current_camera_state = get_camera_state(camera_index)
+    camera_index = list(app.state.camera_states.keys())[0] if app.state.camera_states else config.CAMERA_INDEX
     return templates.TemplateResponse("index.html", {
+        "camera_states": app.state.camera_states,
         "request": request,
-        "sensitivity": config.SENSITIVITY,
         "camera_index": camera_index,
-        "brightness": current_camera_state["brightness"],
-        "contrast": current_camera_state["contrast"],
-        "focus": current_camera_state["focus"],
-        "countdown_time": config.COUNTDOWN_TIME,
-        "warning_intervals": ",".join(str(x) for x in config.WARNING_INTERVALS),
+        "current_time": time.time(),
     })
 
 @app.get("/sw.js", include_in_schema=False)

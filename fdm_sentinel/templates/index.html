@@ -46,7 +46,21 @@
                     <button id="startBtn">Start</button>
                     <button id="stopBtn" class="button-secondary">Stop</button>
                 </div>
-
+                <div class="camera-stats">
+                    <h2>Detection Metrics - Camera {{ camera_index }}</h2>
+                    <div class="grid-container">
+                        <div class="grid-item">
+                            {% set current_cam_state = camera_states.get(camera_index) %}
+                            {% if current_cam_state and "start_time" in current_cam_state and current_cam_state.start_time is not none %}
+                                <p>{{ (current_time - current_cam_state["start_time"]) | round(2) }}s elapsed</p>
+                            {% else %}
+                                <p>N/A</p>
+                            {% endif %}
+                        </div>
+                        <div class="grid-item">most recent detection result</div>
+                        <div class="grid-item">total detections for this print</div>
+                        <div class="grid-item">Something</div>
+                </div>
                 <div class="status-area" id="statusArea">
                     <div class="status-inactive">Detection Inactive</div>
                 </div>
