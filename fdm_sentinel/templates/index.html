@@ -29,7 +29,7 @@
                 <label for="cameraSelect" class="camera-select-label">Select Camera:</label>
                 <select id="cameraSelect" name="camera">
                 {% for camera_id in camera_states %}
-                    <option value="{{camera_id}}" {% if camera_index == camera_id %}selected{% endif %}>{{camera_id}}</option>
+                    <option value="{{ camera_id }}" {% if camera_index == camera_id %}selected{% endif %}>{{ camera_id }}</option>
                 {% endfor %}
                 </select>
             </section>
@@ -47,7 +47,7 @@
                     <button id="stopBtn" class="button-secondary">Stop</button>
                 </div>
                 <div class="camera-stats">
-                    <h2>Detection Metrics - Camera {{ camera_index }}</h2>
+                    <h2>Detection Metrics</h2>
                     <div class="grid-container four-by-four-grid">
                         <div class="grid-item">
                             {% set current_cam_state = camera_states.get(camera_index) %}
@@ -65,7 +65,10 @@
                             <p>{{ current_cam_state["detection_times"] | length if current_cam_state else "N/A" }}</p>
                             <p>total detections</p>
                         </div>
-                        <div class="grid-item">Something</div>
+                        <div class="grid-item">
+                            <p>TBC</p>
+                            <p>detections per second</p>
+                        </div>
                 </div>
                 <div class="status-area" id="statusArea">
                     <div class="status-inactive">Detection Inactive</div>
@@ -85,14 +88,8 @@
         const cameraSelect = document.getElementById('cameraSelect');
 
         startBtn.addEventListener('click', function() {
-        });
-
-        stopBtn.addEventListener('click', function() {
-        });
-
-        cameraSelect.addEventListener('change', function() {
             const selectedCamera = cameraSelect.value;
-            fetch(`/live/camera`, { 
+            fetch(`/live/start`, { 
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -101,9 +98,31 @@
             })
                 .then(response => {
                     if (response.ok) {
-                        console.log('Camera index set successfully');
+                        console.log('Live detection started successfully');
+                        statusArea.classList.remove('status-inactive');
+                        statusArea.classList.add('status-active');
                     } else {
-                        console.error('Failed to set camera index');
+                        console.error('Failed to start live detection');
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        });
+
+        stopBtn.addEventListener('click', function() {
+            fetch(`/live/stop`, { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ camera_index: cameraSelect.value })
+            })
+                .then(response => {
+                    if (response.ok) {
+                        console.log('Live detection stopped successfully');
+                        statusArea.classList.remove('status-active');
+                        statusArea.classList.add('status-inactive');
+                    } else {
+                        console.error('Failed to stop live detection');
                     }
                 })
                 .catch(error => console.error('Error:', error));

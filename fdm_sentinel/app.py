@@ -80,12 +80,12 @@ app.state.alerts = {}
 
 app.state.camera_states = {}
 
-def get_camera_state(camera_index):
+def get_camera_state(camera_index, reset=False):
     """
     Get or create a state object for a specific camera index.
     This function is exported for use by other modules.
     """
-    if camera_index not in app.state.camera_states:
+    if camera_index not in app.state.camera_states or reset:
         app.state.camera_states[camera_index] = {
             "current_alert_id": None,
             "detection_times": deque(),
@@ -103,7 +103,24 @@ def get_camera_state(camera_index):
         }
     return app.state.camera_states[camera_index]
 
+def update_camera_state(camera_index, new_states):
+    """
+    Update states of a specific camera index.
+    new_states should be a dictionary only containing the keys to be updated.
+    """
+    if camera_index in app.state.camera_states:
+        camera_state = app.state.camera_states[camera_index]
+        for key, value in new_states.items():
+            if key in camera_state:
+                camera_state[key] = value
+            else:
+                print(f"Warning: Key '{key}' not found in camera state.")
+    else:
+        print(f"Warning: Camera index '{camera_index}' not found in camera states.")
+    return app.state.camera_states[camera_index]
+
 get_camera_state(config.CAMERA_INDEX)
+get_camera_state(1)
 
 base_dir = os.path.dirname(__file__)
 static_dir = os.path.join(base_dir, "static")
