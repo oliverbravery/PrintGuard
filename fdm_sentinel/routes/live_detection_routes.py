@@ -1,7 +1,7 @@
 import asyncio
 from fastapi import APIRouter, HTTPException, Request, Body
 from fastapi.responses import StreamingResponse
-
+import time
 from ..utils.camera_utils import _webcam_generator, _live_detection_loop
 
 router = APIRouter()
@@ -31,54 +31,52 @@ async def live_detection_feed(request: Request):
     )
 
 @router.post("/live/start")
-async def start_live_detection(request: Request):
-    from ..utils.config import CAMERA_INDEX
-    from ..app import get_camera_state
-    
-    camera_state = get_camera_state(CAMERA_INDEX)
-    
+async def start_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
+    """
+    Starts live detection for the specified camera index.
+    Resets the camera state before starting detection.
+    """
+    from ..app import get_camera_state, update_camera_state
+    camera_state = get_camera_state(camera_index)
     if camera_state["live_detection_running"]:
-        return {"message": f"Live detection already running for camera {CAMERA_INDEX}"}
-    
-    camera_state["live_detection_running"] = True
-    camera_state["live_detection_task"] = asyncio.create_task(
-        _live_detection_loop(request.app.state, CAMERA_INDEX)
-    )
-    
-    return {"message": f"Live detection started for camera {CAMERA_INDEX}"}
+        return {"message": f"Live detection already running for camera {camera_index}"}
+    else:
+        camera_state = get_camera_state(camera_index, reset=True)
+    update_camera_state(camera_index, {"start_time": time.time(),
+                                       "live_detection_running": True,
+                                       "live_detection_task": asyncio.create_task(
+                                           _live_detection_loop(request.app.state, camera_index)
+                                           )})
+    return {"message": f"Live detection started for camera {camera_index}"}
 
 @router.post("/live/stop")
-async def stop_live_detection(request: Request):
-    from ..utils.config import CAMERA_INDEX
-    from ..app import get_camera_state
-    
-    camera_state = get_camera_state(CAMERA_INDEX)
-    
+async def stop_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
+    """
+    Stops live detection for the specified camera index.
+    """
+    from ..app import get_camera_state, update_camera_state
+    camera_state = get_camera_state(camera_index)
     if not camera_state["live_detection_running"]:
-        return {"message": f"Live detection not running for camera {CAMERA_INDEX}"}
+        return {"message": f"Live detection not running for camera {camera_index}"}
+    live_detection_task = camera_state["live_detection_task"]
+    update_camera_state(camera_index, {"start_time": None,
+                                       "live_detection_running": False,
+                                       "live_detection_task": None})
     
-    camera_state["live_detection_running"] = False
-    
-    if camera_state["live_detection_task"]:
+    if live_detection_task:
         try:
-            await asyncio.wait_for(camera_state["live_detection_task"], timeout=5.0) 
+            await asyncio.wait_for(live_detection_task, timeout=5.0)
+            print(f"Live detection task for camera {camera_index} finished successfully.")
         except asyncio.TimeoutError:
-            print(f"Live detection task for camera {CAMERA_INDEX} did not finish in time.")
-            if camera_state["live_detection_task"]:
-                camera_state["live_detection_task"].cancel()
+            print(f"Live detection task for camera {camera_index} did not finish in time.")
+            if live_detection_task:
+                live_detection_task.cancel()
         except Exception as e:
-            print(f"Error stopping live detection task for camera {CAMERA_INDEX}: {e}")
+            print(f"Error stopping live detection task for camera {camera_index}: {e}")
         finally:
-            camera_state["live_detection_task"] = None
+            live_detection_task = None
     
-    camera_state["current_alert_id"] = None
-    if camera_state["detection_times"]:
-        camera_state["detection_times"].clear()
-    
-    camera_state["last_result"] = None
-    camera_state["last_time"] = None
-    
-    return {"message": f"Live detection stopped for camera {CAMERA_INDEX}"}
+    return {"message": f"Live detection stopped for camera {camera_index}"}
 
 @router.post("/live/camera", include_in_schema=False)
 async def set_camera_index(camera_index: int = Body(..., embed=True)):
