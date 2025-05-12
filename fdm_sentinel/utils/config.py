@@ -28,13 +28,13 @@ DETECTION_TIMEOUT = int(os.getenv("DETECTION_TIMEOUT", "5"))  # minutes
 BASE_URL = os.getenv("BASE_URL", "https://localhost:8000")
 DETECTION_THRESHOLD = int(os.getenv("DETECTION_THRESHOLD", "3"))
 DETECTION_WINDOW = int(os.getenv("DETECTION_WINDOW", "20"))  # seconds
-MAX_CAMERA_HISTORY = int(os.getenv("MAX_CAMERA_HISTORY", "10000"))  # detection history size
+MAX_CAMERA_HISTORY = int(os.getenv("MAX_CAMERA_HISTORY", "10000"))
 
-# Camera adjustment defaults
+## Camera adjustment defaults
 BRIGHTNESS = float(os.getenv("BRIGHTNESS", "1.0"))
 CONTRAST = float(os.getenv("CONTRAST", "1.0"))
 FOCUS = float(os.getenv("FOCUS", "1.0"))
 
-# Countdown timer and warning intervals
+## Countdown timer and warning intervals
 COUNTDOWN_TIME = int(os.getenv("COUNTDOWN_TIME", "60"))  # seconds
 WARNING_INTERVALS = [int(x) for x in os.getenv("WARNING_INTERVALS", "30,15").split(",")]
