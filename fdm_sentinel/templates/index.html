@@ -7,7 +7,15 @@
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='css/style-additions.css') }}">
 </head>
-<body>
+<body data-start-url="{{ url_for('start_live_detection') }}"
+      data-stop-url="{{ url_for('stop_live_detection') }}"
+      data-live-feed-url="{{ url_for('live_detection_feed') }}"
+      data-live-status-url="/live/status"
+      data-set-camera-url="{{ url_for('set_camera_index') }}"
+      data-alerts-feed-url="{{ url_for('live_alerts_feed') }}"
+      data-camera-feed-url="{{ url_for('camera_feed') }}"
+      data-countdown-time="{{ countdown_time }}"
+      data-settings-url="{{ url_for('settings_page') }}">
 
     <header class="app-header">
         <h1>Print Sentinel</h1>
@@ -20,9 +28,9 @@
                 <img id="videoPreview" src="{{ url_for('camera_feed') }}" alt="Live Video Feed Preview" />
                 <label for="cameraSelect" class="camera-select-label">Select Camera:</label>
                 <select id="cameraSelect" name="camera">
-                    <option value="0" {% if camera_index == 0 %}selected{% endif %}>Camera 0</option>
-                    <option value="1" {% if camera_index == 1 %}selected{% endif %}>Camera 1</option>
-                    <option value="2" {% if camera_index == 2 %}selected{% endif %}>Camera 2</option>
+                {% for camera_id in camera_states %}
+                    <option value="{{camera_id}}" {% if camera_index == camera_id %}selected{% endif %}>{{camera_id}}</option>
+                {% endfor %}
                 </select>
             </section>
 
@@ -40,7 +48,6 @@
                 </div>
 
                 <div class="status-area" id="statusArea">
-                    <!-- Status will be updated here by JavaScript -->
                     <div class="status-inactive">Detection Inactive</div>
                 </div>
                  <div class="settings-button-container">
@@ -55,328 +62,33 @@
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const videoPreview = document.getElementById('videoPreview');
-
-        let liveEventSource = null;
-
-        async function startLiveDetection() {
-            const selectedCam = parseInt(cameraSelect.value, 10);
-            
-            if (!cameraStatuses[selectedCam] || !cameraStatuses[selectedCam].running) {
-                await fetch("{{ url_for('start_live_detection') }}", { method: 'POST' });
-            }
-            
-            if (liveEventSource) liveEventSource.close();
-
-            liveEventSource = new EventSource("{{ url_for('live_detection_feed') }}");
-            liveEventSource.onmessage = (e) => {
-                const data = JSON.parse(e.data);
-
-                if (data.error) {
-                    console.error(`Camera error: ${data.error}`);
-                    statusArea.innerHTML = `<div class="status-error">
-                        ${data.error}
-                        <small>(Camera ${data.camera_index !== undefined ? data.camera_index : selectedCam})</small>
-                        <button onclick="retryCamera(${data.camera_index !== undefined ? data.camera_index : selectedCam})" class="button-secondary">Retry Camera</button>
-                    </div>`;
-                    
-                    const camIdx = data.camera_index !== undefined ? data.camera_index : selectedCam;
-                    if (!cameraStatuses[camIdx]) {
-                        cameraStatuses[camIdx] = {};
-                    }
-                    cameraStatuses[camIdx].error = data.error;
-                    return;
-                }
-
-                if (data.camera_index !== undefined && parseInt(data.camera_index, 10) === parseInt(cameraSelect.value, 10)) {
-                    if (!cameraStatuses[data.camera_index]) {
-                        cameraStatuses[data.camera_index] = {};
-                    }
-                    cameraStatuses[data.camera_index].last_result = data.result;
-                    cameraStatuses[data.camera_index].last_time = data.time;
-                    cameraStatuses[data.camera_index].running = true;
-                    cameraStatuses[data.camera_index].error = null;
-                    
-                    statusArea.innerHTML = `<div class="status-${data.result.toLowerCase().replace(/\s+/g, '-')}">
-                        ${data.result} @ ${new Date(data.time * 1000).toLocaleTimeString()}
-                        <small>(Camera ${data.camera_index})</small>
-                    </div>`;
-                }
-            };
-            
-            liveEventSource.onerror = (e) => {
-                console.error("EventSource failed:", e);
-                if (liveEventSource) { liveEventSource.close(); liveEventSource = null; }
-                statusArea.innerHTML = `<div class="status-error">
-                    Error connecting to live feed for camera ${selectedCam}
-                    <small>Check console for details</small>
-                    <button onclick="retryCamera(${selectedCam})" class="button-secondary">Retry Camera</button>
-                </div>`;
-                videoPreview.src = "{{ url_for('camera_feed') }}?_=" + Date.now();
-                
-                if (cameraStatuses[selectedCam]) {
-                    cameraStatuses[selectedCam].running = false;
-                    cameraStatuses[selectedCam].error = "Connection error";
-                }
-            };
-        }
-
-        async function stopLiveDetection() {
-            const selectedCam = parseInt(cameraSelect.value, 10);
-            await fetch("{{ url_for('stop_live_detection') }}", { method: 'POST' });
-            
-            if (liveEventSource) { 
-                liveEventSource.close(); 
-                liveEventSource = null; 
-            }
-            
-            statusArea.innerHTML = `<div class="status-inactive">Detection Inactive for Camera ${selectedCam}</div>`;
-            videoPreview.src = "{{ url_for('camera_feed') }}?_=" + Date.now();
-
-            if (cameraStatuses[selectedCam]) {
-                cameraStatuses[selectedCam].running = false;
-                cameraStatuses[selectedCam].last_result = null;
-                cameraStatuses[selectedCam].last_time = null;
-            }
-        }
-
-        startBtn.removeEventListener('click', null);
-        stopBtn.removeEventListener('click', null);
-        startBtn.addEventListener('click', startLiveDetection);
-        stopBtn.addEventListener('click', stopLiveDetection);
-
-        const cameraStatuses = {};
-
-        async function syncLiveStatus() {
-            try {
-                const res = await fetch('/live/status');
-                if (!res.ok) return;
-                const { running, camera_index: activeCam, camera_statuses } = await res.json();
-                const selectedCam = parseInt(cameraSelect.value, 10);
-
-                Object.assign(cameraStatuses, camera_statuses || {});
-                
-                if (cameraStatuses[selectedCam] && cameraStatuses[selectedCam].error) {
-                    statusArea.innerHTML = `<div class="status-error">
-                        ${cameraStatuses[selectedCam].error}
-                        <small>(Camera ${selectedCam})</small>
-                    </div>`;
-                    return;
-                }
-                
-                const currentCamStatus = cameraStatuses[selectedCam] || { running: false };
-                
-                if (currentCamStatus.running && !liveEventSource) {
-                    liveEventSource = new EventSource("{{ url_for('live_detection_feed') }}");
-                    liveEventSource.onmessage = (e) => {
-                        const data = JSON.parse(e.data);
-
-                        if (data.camera_index !== undefined && parseInt(data.camera_index, 10) === selectedCam) {
-                            if (!cameraStatuses[data.camera_index]) {
-                                cameraStatuses[data.camera_index] = {};
-                            }
-                            cameraStatuses[data.camera_index].last_result = data.result;
-                            cameraStatuses[data.camera_index].last_time = data.time;
-                            cameraStatuses[data.camera_index].running = true;
-
-                            statusArea.innerHTML = `<div class="status-${data.result.toLowerCase().replace(/\s+/g, '-')}">
-                                ${data.result} @ ${new Date(data.time * 1000).toLocaleTimeString()}
-                                <small>(Camera ${data.camera_index})</small>
-                            </div>`;
-                        }
-                    };
-                    
-                    liveEventSource.onerror = (e) => {
-                        console.error("EventSource failed:", e);
-                        if (liveEventSource) { liveEventSource.close(); liveEventSource = null; }
-                        statusArea.innerHTML = `<div class="status-inactive">Error connecting to live feed for camera ${selectedCam}. Check console.</div>`;
-                        videoPreview.src = "{{ url_for('camera_feed') }}";
-                    };
-                } 
-                else if (!currentCamStatus.running && liveEventSource) {
-                    liveEventSource.close();
-                    liveEventSource = null;
-                    statusArea.innerHTML = `<div class="status-inactive">Detection Inactive for camera ${selectedCam}</div>`;
-                }
-                else if (liveEventSource && currentCamStatus.running) {
-                    const statusClass = currentCamStatus.last_result ? 
-                        `status-${currentCamStatus.last_result.toLowerCase().replace(/\s+/g, '-')}` : 
-                        'status-inactive';
-                    const timeDisplay = currentCamStatus.last_time ? 
-                        new Date(currentCamStatus.last_time * 1000).toLocaleTimeString() :
-                        'N/A';
-                    
-                    statusArea.innerHTML = `<div class="${statusClass}">
-                        ${currentCamStatus.last_result || 'Unknown'} @ ${timeDisplay}<br>
-                        <small>Camera ${selectedCam} - Detection Active</small>
-                    </div>`;
-                }
-                else if (!currentCamStatus.running) {
-                    statusArea.innerHTML = `<div class="status-inactive">Detection inactive for camera ${selectedCam}</div>`;
-
-                    if (videoPreview.src.indexOf('_=') === -1) {
-                        videoPreview.src = "{{ url_for('camera_feed') }}?_=" + Date.now();
-                    }
-                }
-            } catch (e) {
-                console.error('Error syncing live status:', e);
-            }
-        }
-        window.addEventListener('load', syncLiveStatus);
-        setInterval(syncLiveStatus, 5000);
-
-        async function retryCamera(cameraIndex) {
-            try {
-                if (cameraStatuses[cameraIndex] && cameraStatuses[cameraIndex].running) {
-                    await fetch("{{ url_for('stop_live_detection') }}", { method: 'POST' });
-                }
-                
-                if (parseInt(cameraSelect.value, 10) !== cameraIndex) {
-                    await fetch("{{ url_for('set_camera_index') }}", {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ camera_index: cameraIndex })
-                    });
-                    cameraSelect.value = cameraIndex;
-                    document.getElementById('videoPreview').src = "{{ url_for('camera_feed') }}?_=" + Date.now();
-                }
-                
-                if (cameraStatuses[cameraIndex]) {
-                    cameraStatuses[cameraIndex].error = null;
-                }
-                
-                statusArea.innerHTML = `<div class="status-inactive">Attempting to reconnect to camera ${cameraIndex}...</div>`;
-
-                await startLiveDetection();
-            } catch (e) {
-                console.error(`Error retrying camera ${cameraIndex}:`, e);
-                statusArea.innerHTML = `<div class="status-error">
-                    Failed to reconnect to camera ${cameraIndex}
-                    <small>${e.message || 'Unknown error'}</small>
-                    <button onclick="retryCamera(${cameraIndex})" class="button-secondary">Retry Again</button>
-                </div>`;
-            }
-        }
-
-        const settingsBtn = document.getElementById('settingsBtn');
-        settingsBtn.addEventListener('click', () => {
-            window.location.href = "{{ url_for('settings_page') }}";
-        });
-
         const cameraSelect = document.getElementById('cameraSelect');
-        cameraSelect.addEventListener('change', async () => {
-            const idx = parseInt(cameraSelect.value, 10);
 
-            if (liveEventSource) {
-                liveEventSource.close();
-                liveEventSource = null;
-            }
-
-            await fetch("{{ url_for('set_camera_index') }}", {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ camera_index: idx })
-            });
-
-            document.getElementById('videoPreview').src = "{{ url_for('camera_feed') }}?_=" + Date.now();
-
-            const camStatus = cameraStatuses[idx];
-
-            if (camStatus && camStatus.error) {
-                statusArea.innerHTML = `<div class="status-error">
-                    ${camStatus.error}
-                    <small>(Camera ${idx})</small>
-                </div>`;
-                return;
-            }
-            
-            if (camStatus && camStatus.running) {
-                startLiveDetection();
-                
-                const statusClass = camStatus.last_result ? 
-                    `status-${camStatus.last_result.toLowerCase().replace(/\s+/g, '-')}` : 
-                    'status-active';
-                const timeDisplay = camStatus.last_time ? 
-                    new Date(camStatus.last_time * 1000).toLocaleTimeString() :
-                    'N/A';
-                
-                statusArea.innerHTML = `<div class="${statusClass}">
-                    ${camStatus.last_result || 'Active'} @ ${timeDisplay}<br>
-                    <small>(Camera ${idx})</small>
-                </div>`;
-                
-                startLiveDetection();
-            } else {
-                statusArea.innerHTML = `<div class="status-inactive">Detection Inactive for Camera ${idx}</div>`;
-            }
-
-            syncLiveStatus();
+        startBtn.addEventListener('click', function() {
         });
 
-        (function() {
-            const countdownStart = {{ countdown_time }};
-            const alertSource = new EventSource("{{ url_for('live_alerts_feed') }}");
-            alertSource.onmessage = e => {
-                const { alert_id, timestamp, camera_index } = JSON.parse(e.data);
-                showAlertOverlay(alert_id, timestamp, camera_index);
-            };
+        stopBtn.addEventListener('click', function() {
+        });
 
-            function showAlertOverlay(id, ts, cameraIndex) {
-                if (document.getElementById(`alert-overlay-${id}`)) return;
-                const overlay = document.createElement('div');
-                overlay.id = `alert-overlay-${id}`;
-                overlay.style.cssText = 'position:fixed;top:20px;right:20px;background:#fff;border:2px solid #f00;z-index:10000;padding:15px;max-width:300px;box-shadow:0 0 10px rgba(0,0,0,0.5);';
-                const img = document.createElement('img');
-                img.src = `/alert/${id}/snapshot`;
-                img.style.width = '100%';
-                overlay.appendChild(img);
-                const cameraP = document.createElement('p');
-                cameraP.style.fontWeight = 'bold';
-                cameraP.textContent = cameraIndex !== undefined ? `Camera ${cameraIndex}` : 'Unknown Camera';
-                overlay.appendChild(cameraP);
-                const timeP = document.createElement('p');
-                timeP.textContent = 'Detected at: ' + new Date(ts * 1000).toLocaleTimeString();
-                overlay.appendChild(timeP);
-                const countdownP = document.createElement('p');
-                const elapsed = Math.floor(Date.now() / 1000 - ts);
-                let remaining = countdownStart - elapsed;
-                if (remaining < 0) remaining = 0;
-                countdownP.textContent = `Dismiss in: ${remaining}s`;
-                overlay.appendChild(countdownP);
-                const timer = setInterval(() => {
-                    remaining -= 1;
-                    if (remaining <= 0) {
-                        clearInterval(timer);
-                        removeOverlay();
+        cameraSelect.addEventListener('change', function() {
+            const selectedCamera = cameraSelect.value;
+            fetch(`/live/camera`, { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ camera_index: selectedCamera })
+            })
+                .then(response => {
+                    if (response.ok) {
+                        console.log('Camera index set successfully');
                     } else {
-                        countdownP.textContent = `Dismiss in: ${remaining}s`;
+                        console.error('Failed to set camera index');
                     }
-                }, 1000);
-                const btnDismiss = document.createElement('button');
-                btnDismiss.textContent = 'Dismiss';
-                btnDismiss.onclick = () => { clearInterval(timer); removeOverlay(); dismissAlert(id); };
-                overlay.appendChild(btnDismiss);
-                const btnCancel = document.createElement('button');
-                btnCancel.textContent = 'Cancel Print';
-                btnCancel.style.marginLeft = '8px';
-                btnCancel.onclick = () => { clearInterval(timer); removeOverlay(); cancelPrint(); dismissAlert(id); };
-                overlay.appendChild(btnCancel);
-                document.body.appendChild(overlay);
+                })
+                .catch(error => console.error('Error:', error));
+        });
 
-                function removeOverlay() {
-                    overlay.remove();
-                }
-            }
-
-            async function dismissAlert(id) {
-                try {
-                    await fetch(`/alert/${id}/dismiss`, { method: 'POST' });
-                } catch (e) { console.error('Dismiss alert failed', e); }
-            }
-
-            function cancelPrint() {
-                console.log('Cancel print requested');
-            }
-        })();
     </script>
 </body>
 </html>
