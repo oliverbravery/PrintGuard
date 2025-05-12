@@ -28,6 +28,7 @@ DETECTION_TIMEOUT = int(os.getenv("DETECTION_TIMEOUT", "5"))  # minutes
 BASE_URL = os.getenv("BASE_URL", "https://localhost:8000")
 DETECTION_THRESHOLD = int(os.getenv("DETECTION_THRESHOLD", "3"))
 DETECTION_WINDOW = int(os.getenv("DETECTION_WINDOW", "20"))  # seconds
+MAX_CAMERA_HISTORY = int(os.getenv("MAX_CAMERA_HISTORY", "10000"))  # detection history size
 
 # Camera adjustment defaults
 BRIGHTNESS = float(os.getenv("BRIGHTNESS", "1.0"))

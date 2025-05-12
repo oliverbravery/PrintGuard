@@ -14,7 +14,7 @@ from .utils.inference_lib import (
 )
 from .utils.config import (
     MODEL_PATH, MODEL_OPTIONS_PATH, PROTOTYPES_DIR, SUCCESS_LABEL, DEVICE_TYPE,
-    VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY
+    VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, MAX_CAMERA_HISTORY
 )
 from .routes.notification_routes import router as notification_router
 from .routes.alert_routes import router as alert_router
@@ -89,11 +89,15 @@ def get_camera_state(camera_index):
         app.state.camera_states[camera_index] = {
             "current_alert_id": None,
             "detection_times": deque(),
+            "detection_history": deque(maxlen=MAX_CAMERA_HISTORY),
             "live_detection_running": False,
             "live_detection_task": None,
             "last_result": None,
             "last_time": None,
-            "error": None
+            "error": None,
+            "brightness": config.BRIGHTNESS,
+            "contrast": config.CONTRAST,
+            "focus": config.FOCUS,
         }
     return app.state.camera_states[camera_index]
 
@@ -107,13 +111,15 @@ templates = Jinja2Templates(directory=templates_dir)
 
 @app.get("/", include_in_schema=False)
 async def serve_index(request: Request):
+    camera_index = config.CAMERA_INDEX # Or determine active camera some other way
+    current_camera_state = get_camera_state(camera_index)
     return templates.TemplateResponse("index.html", {
         "request": request,
         "sensitivity": config.SENSITIVITY,
-        "camera_index": config.CAMERA_INDEX,
-        "brightness": config.BRIGHTNESS,
-        "contrast": config.CONTRAST,
-        "focus": config.FOCUS,
+        "camera_index": camera_index,
+        "brightness": current_camera_state["brightness"],
+        "contrast": current_camera_state["contrast"],
+        "focus": current_camera_state["focus"],
         "countdown_time": config.COUNTDOWN_TIME,
         "warning_intervals": ",".join(str(x) for x in config.WARNING_INTERVALS),
     })
