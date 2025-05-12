@@ -48,7 +48,7 @@
                 </div>
                 <div class="camera-stats">
                     <h2>Detection Metrics - Camera {{ camera_index }}</h2>
-                    <div class="grid-container">
+                    <div class="grid-container four-by-four-grid">
                         <div class="grid-item">
                             {% set current_cam_state = camera_states.get(camera_index) %}
                             {% if current_cam_state and "start_time" in current_cam_state and current_cam_state.start_time is not none %}
@@ -57,8 +57,14 @@
                                 <p>N/A</p>
                             {% endif %}
                         </div>
-                        <div class="grid-item">most recent detection result</div>
-                        <div class="grid-item">total detections for this print</div>
+                        <div class="grid-item">
+                            <p>{{ current_cam_state["last_result"] if current_cam_state else "N/A" }}</p>
+                            <p>detected at {{ current_cam_state["last_time"] if current_cam_state else "N/A" }}</p>
+                        </div>
+                        <div class="grid-item">
+                            <p>{{ current_cam_state["detection_times"] | length if current_cam_state else "N/A" }}</p>
+                            <p>total detections</p>
+                        </div>
                         <div class="grid-item">Something</div>
                 </div>
                 <div class="status-area" id="statusArea">
