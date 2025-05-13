@@ -106,11 +106,12 @@ async def camera_ws(websocket: WebSocket, camera_index: int):
     await websocket.accept()
     while True:
         state = _get_camera_state(camera_index)
+        total_detections = len(state.get("detection_history", []))
         data = {
             "start_time": state.get("start_time"),
             "last_result": state.get("last_result"),
             "last_time": state.get("last_time"),
-            "detection_times": list(state.get("detection_times", [])),
+            "total_detections": total_detections,
             "error": state.get("error"),
         }
         await websocket.send_json(data)
