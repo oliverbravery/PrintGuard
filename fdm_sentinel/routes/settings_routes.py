@@ -14,32 +14,33 @@ settings_router = APIRouter()
 async def settings_page(request: Request):
     return templates.TemplateResponse("settings.html", {
         "request": request,
-        "sensitivity": config.SENSITIVITY,
+        "camera_states": request.app.state.camera_states,
         "camera_index": config.CAMERA_INDEX,
-        "brightness": config.BRIGHTNESS,
-        "contrast": config.CONTRAST,
-        "focus": config.FOCUS,
-        "countdown_time": config.COUNTDOWN_TIME,
-        "warning_intervals": ",".join(str(x) for x in config.WARNING_INTERVALS),
     })
 
 @settings_router.post("/settings", include_in_schema=False)
 async def update_settings(request: Request,
-    sensitivity: float = Form(...),
-    camera_index: int = Form(...),
-    brightness: float = Form(...),
-    contrast: float = Form(...),
-    focus: float = Form(...),
-    countdown_time: int = Form(...),
-    warning_intervals: str = Form(...),
-):
-    config.SENSITIVITY = sensitivity
-    config.CAMERA_INDEX = camera_index
-    config.BRIGHTNESS = brightness
-    config.CONTRAST = contrast
-    config.FOCUS = focus
-    config.COUNTDOWN_TIME = countdown_time
-    config.WARNING_INTERVALS = [int(x) for x in warning_intervals.split(",") if x.strip().isdigit()]
+                          camera_index: int = Form(...),
+                          sensitivity: float = Form(...),
+                          brightness: float = Form(...),
+                          contrast: float = Form(...),
+                          focus: float = Form(...),
+                          countdown_time: int = Form(...),
+                          warning_intervals: str = Form(...),
+                          majority_vote_threshold: int = Form(...),
+                          majority_vote_window: int = Form(...),
+                          ):
+    from ..app import update_camera_state
+    update_camera_state(camera_index, {
+        "sensitivity": sensitivity,
+        "brightness": brightness,
+        "contrast": contrast,
+        "focus": focus,
+        "countdown_time": countdown_time,
+        "majority_vote_threshold": majority_vote_threshold,
+        "majority_vote_window": majority_vote_window,
+        "warning_intervals": [int(x) for x in warning_intervals.split(",") if x.strip().isdigit()],
+    })
     return RedirectResponse("/settings", status_code=303)
 
 def generate_frames():
