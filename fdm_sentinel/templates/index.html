@@ -11,7 +11,6 @@
       data-stop-url="{{ url_for('stop_live_detection') }}"
       data-live-status-url="/live/status"
       data-alerts-feed-url="{{ url_for('live_alerts_feed') }}"
-      data-camera-feed-url="{{ url_for('camera_feed') }}"
       data-countdown-time="{{ countdown_time }}"
       data-settings-url="{{ url_for('settings_page') }}">
 
@@ -23,7 +22,7 @@
         <div class="main-layout">
             <section class="video-section">
                 <h2>Live Video Feed</h2>
-                <img id="videoPreview" src="{{ url_for('camera_feed') }}" alt="Live Video Feed Preview" />
+                <img id="videoPreview" src="" alt="Live Video Feed Preview" />
                 <label for="cameraSelect" class="camera-select-label">Select Camera:</label>
                 <select id="cameraSelect" name="camera">
                 {% for camera_id in camera_states %}
@@ -166,7 +165,7 @@
             };
         }
         cameraSelect.addEventListener('change', () => {
-            videoPreview.src = `${document.body.dataset.cameraFeedUrl}?camera_id=${cameraSelect.value}&t=${Date.now()}`;
+            videoPreview.src = `https://localhost:8000/camera_feed/${cameraSelect.value}`;
             connectCameraWS();
         });
         connectCameraWS();

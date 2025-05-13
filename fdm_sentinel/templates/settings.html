@@ -6,7 +6,7 @@
     <title>Print Sentinel - Settings</title>
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
 </head>
-<body data-camera-feed-url="{{ url_for('camera_feed') }}" data-get-settings-url="{{ url_for('get_camera_state') }}">
+<body data-get-settings-url="{{ url_for('get_camera_state') }}">
     <header class="app-header">
         <h1>Print Sentinel</h1>
     </header>
@@ -16,7 +16,7 @@
 
         <section class="video-section">
             <h2>Live Video Feed</h2>
-            <img id="videoPreview" src="{{ url_for('camera_feed') }}" alt="Live Video Feed Preview" />
+            <img id="videoPreview" src="" alt="Live Video Feed Preview" />
             <label for="cameraSelect" class="camera-select-label">Select Camera:</label>
             <select id="cameraSelect" name="camera">
             {% for camera_id in camera_states %}
@@ -88,7 +88,7 @@
         }
 
         function updateSelectedCamera() {
-            videoPreview.src = `${document.body.dataset.cameraFeedUrl}?camera_id=${cameraSelect.value}&t=${Date.now()}`;
+            videoPreview.src = `https://localhost:8000/camera_feed/${cameraSelect.value}`;
             updateSelectedCameraSettings();
         }
 
