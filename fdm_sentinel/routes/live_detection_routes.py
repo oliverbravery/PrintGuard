@@ -89,7 +89,7 @@ async def get_camera_state(request: Request, camera_index: int = Body(..., embed
     """
     Get the state of a specific camera index.
     """
-    from ..app import get_camera_state as _get_camera_state  # avoid name clash
+    from ..app import get_camera_state as _get_camera_state
     camera_state = _get_camera_state(camera_index)
     response = {
         "start_time": camera_state.get("start_time"),
@@ -97,6 +97,16 @@ async def get_camera_state(request: Request, camera_index: int = Body(..., embed
         "last_time": camera_state.get("last_time"),
         "detection_times": list(camera_state.get("detection_times", [])),
         "error": camera_state.get("error"),
+        "live_detection_running": camera_state.get("live_detection_running"),
+        "live_detection_task": camera_state.get("live_detection_task"),
+        "brightness": camera_state.get("brightness"),
+        "contrast": camera_state.get("contrast"),
+        "focus": camera_state.get("focus"),
+        "countdown_time": camera_state.get("countdown_time"),
+        "warning_intervals": camera_state.get("warning_intervals"),
+        "majority_vote_threshold": camera_state.get("majority_vote_threshold"),
+        "majority_vote_window": camera_state.get("majority_vote_window"),
+        "current_alert_id": camera_state.get("current_alert_id")
     }
     return response
 
