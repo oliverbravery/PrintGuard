@@ -5,131 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Print Sentinel - Settings</title>
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
-    <style>
-        .settings-container {
-            background: #fff;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            max-width: 800px;
-            margin: 20px auto;
-        }
-        .settings-container h1 {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .settings-form label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: bold;
-        }
-        .settings-form input[type="number"],
-        .settings-form input[type="text"] {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 20px;
-            border-radius: 5px;
-            border: 1px solid #ccc;
-            box-sizing: border-box;
-        }
-        .settings-form button[type="submit"] {
-            width: 100%;
-            padding: 12px;
-            font-size: 18px;
-        }
-        .settings-form input[type="range"] {
-            width: 100%;
-        }
-        #cameraFeedWrap {
-            text-align: center;
-            margin-bottom: 30px;
-            border: 1px solid #ddd;
-            padding: 10px;
-            border-radius: 5px;
-            background: #f9f9f9;
-        }
-        #videoFeed {
-            max-width: 100%;
-            height: auto;
-            border-radius: 4px;
-        }
-        .back-link {
-            display: block;
-            text-align: center;
-            margin-top: 30px;
-            color: #5cb85c;
-            text-decoration: none;
-            font-weight: bold;
-        }
-        .back-link:hover {
-            text-decoration: underline;
-        }
-        
-        /* Camera Status Section Styles */
-        .camera-status-section {
-            margin: 30px 0;
-            background: #f9f9f9;
-            padding: 15px;
-            border-radius: 8px;
-            border: 1px solid #ddd;
-        }
-        .camera-status-section h2 {
-            text-align: center;
-            margin-bottom: 15px;
-        }
-        .active-cameras {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            justify-content: center;
-        }
-        .camera-status-card {
-            background: white;
-            border-radius: 8px;
-            padding: 15px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            width: 200px;
-            border-left: 4px solid #ccc;
-        }
-        .camera-active {
-            border-left-color: #5cb85c;
-        }
-        .camera-error {
-            border-left-color: #d9534f;
-        }
-        .camera-inactive {
-            border-left-color: #999;
-        }
-        .camera-status-card h3 {
-            margin: 0 0 10px 0;
-            font-size: 16px;
-        }
-        .camera-status-card p {
-            margin: 5px 0;
-            font-size: 14px;
-        }
-        .status-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 5px;
-        }
-        .status-active { background: #5cb85c; }
-        .status-inactive { background: #999; }
-        .status-error { background: #d9534f; }
-        .camera-controls {
-            margin-top: 10px;
-            text-align: center;
-        }
-        .camera-controls button {
-            padding: 5px 10px;
-            font-size: 14px;
-            margin: 0 5px;
-        }
-    </style>
 </head>
-<body>
+<body data-camera-feed-url="{{ url_for('camera_feed') }}" data-get-settings-url="{{ url_for('get_camera_state') }}">
     <header class="app-header">
         <h1>Print Sentinel</h1>
     </header>
@@ -137,39 +14,44 @@
     <div class="container settings-container">
         <h1>Settings</h1>
 
-        <div id="cameraFeedWrap">
-            <img id="videoFeed" src="{{ url_for('camera_feed') }}" width="640" height="480" alt="Live Camera Feed Preview" />
-        </div>
-
-        <!-- Camera Status Section -->
-        <div id="cameraStatusSection" class="camera-status-section">
-            <h2>Active Camera Detections</h2>
-            <div id="activeCameras" class="active-cameras">
-                <p>Loading camera status...</p>
-            </div>
-        </div>
+        <section class="video-section">
+            <h2>Live Video Feed</h2>
+            <img id="videoPreview" src="{{ url_for('camera_feed') }}" alt="Live Video Feed Preview" />
+            <label for="cameraSelect" class="camera-select-label">Select Camera:</label>
+            <select id="cameraSelect" name="camera">
+            {% for camera_id in camera_states %}
+                <option value="{{ camera_id }}" {% if camera_index == camera_id %}selected{% endif %}>{{ camera_id }}</option>
+            {% endfor %}
+            </select>
+        </section>
 
         <form action="{{ url_for('update_settings') }}" method="post" class="settings-form">
-            <label for="sensitivity">Sensitivity: <span id="sensitivityVal">{{ sensitivity }}</span></label>
-            <input type="range" id="sensitivity" name="sensitivity" min="0" max="3" step="0.01" value="{{ sensitivity }}" />
-
             <label for="camera_index">Camera Index:</label>
-            <input type="number" id="camera_index" name="camera_index" step="1" min="0" value="{{ camera_index }}">
+            <input type="hidden" id="camera_index" name="camera_index" value="{{ camera_index }}">
 
-            <label for="brightness">Brightness: <span id="brightnessVal">{{ brightness }}</span></label>
-            <input type="range" id="brightness" name="brightness" min="0" max="2" step="0.1" value="{{ brightness }}" />
+            <label for="sensitivity">Sensitivity: <span id="sensitivity_val"></span></label>
+            <input type="range" id="sensitivity" name="sensitivity" min="0" max="3" step="0.01" value="-" />
 
-            <label for="contrast">Contrast: <span id="contrastVal">{{ contrast }}</span></label>
-            <input type="range" id="contrast" name="contrast" min="0" max="2" step="0.1" value="{{ contrast }}" />
+            <label for="brightness">Brightness: <span id="brightness_val"></span></label>
+            <input type="range" id="brightness" name="brightness" min="0" max="2" step="0.1" value="-" />
 
-            <label for="focus">Focus: <span id="focusVal">{{ focus }}</span></label>
-            <input type="range" id="focus" name="focus" min="0" max="5" step="0.1" value="{{ focus }}" />
+            <label for="contrast">Contrast: <span id="contrast_val"></span></label>
+            <input type="range" id="contrast" name="contrast" min="0" max="2" step="0.1" value="-" />
 
-            <label for="countdown_time">Countdown Time (s): <span id="countdownTimeVal">{{ countdown_time }}</span></label>
-            <input type="range" id="countdown_time" name="countdown_time" min="0" max="300" step="1" value="{{ countdown_time }}" />
+            <label for="focus">Focus: <span id="focus_val"></span></label>
+            <input type="range" id="focus" name="focus" min="0" max="5" step="0.1" value="-" />
+
+            <label for="countdown_time">Countdown Time (s): <span id="countdown_time_val"></span></label>
+            <input type="range" id="countdown_time" name="countdown_time" min="0" max="300" step="1" value="-" />
+
+            <label for="majority_vote_threshold">Majority Vote Threshold: <span id="majority_vote_threshold_val"></span></label>
+            <input type="range" id="majority_vote_threshold" name="majority_vote_threshold" min="1" max="100" value="-">
+
+            <label for="majority_vote_window">Majority Vote Window (frames): <span id="majority_vote_window_val"></span></label>
+            <input type="range" id="majority_vote_window" name="majority_vote_window" min="1" max="100" value="-">
 
             <label for="warning_intervals">Warning Intervals (sec, comma separated):</label>
-            <input type="text" id="warning_intervals" name="warning_intervals" placeholder="e.g. 5,10,20" value="{{ warning_intervals }}">
+            <input type="text" id="warning_intervals" name="warning_intervals" placeholder="e.g. 5,10,20" value="{{ camera_states[camera_index]['warning_intervals'] }}">
 
             <button type="submit">Save Settings</button>
         </form>
@@ -178,127 +60,47 @@
     </div>
 
     <script>
-        const fields = ['brightness', 'contrast', 'focus'];
-        fields.forEach(name => {
-            const input = document.querySelector(`input[name="${name}"]`);
-            if (input) {
-                input.addEventListener('input', () => {
-                    fetch("{{ url_for('update_video_settings') }}", { // Ensure this route is correct
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ [name]: input.value })
-                    });
+        const cameraSelect = document.getElementById('cameraSelect');
+        const videoPreview = document.getElementById('videoPreview');
+
+        function updateSelectedCameraSettings() {
+            fetch(`${document.body.dataset.getSettingsUrl}?`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ camera_index: cameraSelect.value })
+            })
+                .then(response => response.json())
+                .then(settings => {
+                    document.getElementById('camera_index').value = cameraSelect.value;
+                    document.getElementById('sensitivity').value = settings.sensitivity;
+                    document.getElementById('brightness').value = settings.brightness;
+                    document.getElementById('contrast').value = settings.contrast;
+                    document.getElementById('focus').value = settings.focus;
+                    document.getElementById('countdown_time').value = settings.countdown_time;
+                    document.getElementById('majority_vote_threshold').value = settings.majority_vote_threshold;
+                    document.getElementById('majority_vote_window').value = settings.majority_vote_window;
+                    document.getElementById('warning_intervals').value = settings.warning_intervals;
                 });
-            }
+        }
+
+        function updateSelectedCamera() {
+            videoPreview.src = `${document.body.dataset.cameraFeedUrl}?camera_id=${cameraSelect.value}&t=${Date.now()}`;
+            updateSelectedCameraSettings();
+        }
+
+        cameraSelect.addEventListener('change', function() {
+            updateSelectedCamera();
         });
 
-        const sliderDisplayMap = {
-            sensitivity: 'sensitivityVal',
-            brightness: 'brightnessVal',
-            contrast: 'contrastVal',
-            focus: 'focusVal',
-            countdown_time: 'countdownTimeVal'
-        };
-        Object.entries(sliderDisplayMap).forEach(([inputId, displayId]) => {
-            const input = document.getElementById(inputId);
-            const display = document.getElementById(displayId);
-            if (input && display) {
-                input.addEventListener('input', () => {
-                    display.textContent = input.value;
-                });
-            }
+        document.querySelectorAll('input[type="range"]').forEach(input => {
+            input.addEventListener('input', function() {
+                document.getElementById(`${input.id}_val`).textContent = input.value;
+            });
         });
 
-        const activeCamerasContainer = document.getElementById('activeCameras');
-
-        function formatTime(timestamp) {
-            if (!timestamp) return 'N/A';
-            return new Date(timestamp * 1000).toLocaleTimeString();
-        }
-
-        async function updateCameraStatus() {
-            try {
-                const response = await fetch('/live/status');
-                if (!response.ok) {
-                    activeCamerasContainer.innerHTML = '<p>Failed to fetch camera status</p>';
-                    return;
-                }
-
-                const data = await response.json();
-                const { camera_statuses } = data;
-
-                if (!camera_statuses || Object.keys(camera_statuses).length === 0) {
-                    activeCamerasContainer.innerHTML = '<p>No camera data available</p>';
-                    return;
-                }
-
-                let html = '';
-                for (const [camIdx, status] of Object.entries(camera_statuses)) {
-                    const statusClass = status.error ? 'camera-error' : 
-                                       status.running ? 'camera-active' : 'camera-inactive';
-                    const statusIndicator = status.error ? 'status-error' : 
-                                           status.running ? 'status-active' : 'status-inactive';
-                    const statusText = status.error ? 'Error' : 
-                                       status.running ? 'Active' : 'Inactive';
-                    
-                    html += `
-                    <div class="camera-status-card ${statusClass}" id="camera-${camIdx}">
-                        <h3><span class="status-indicator ${statusIndicator}"></span> Camera ${camIdx}</h3>
-                        <p>Status: ${statusText}</p>
-                        <p>Last Result: ${status.last_result || 'N/A'}</p>
-                        <p>Last Update: ${formatTime(status.last_time)}</p>
-                        ${status.error ? `<p class="error-message">Error: ${status.error}</p>` : ''}
-                        <div class="camera-controls">
-                            ${!status.running ? 
-                              `<button onclick="startCamera(${camIdx})">Start</button>` : 
-                              `<button onclick="stopCamera(${camIdx})">Stop</button>`}
-                        </div>
-                    </div>`;
-                }
-                
-                activeCamerasContainer.innerHTML = html;
-            } catch (error) {
-                console.error('Error updating camera status:', error);
-                activeCamerasContainer.innerHTML = '<p>Error loading camera status</p>';
-            }
-        }
-
-        async function startCamera(cameraIdx) {
-            try {
-                await fetch('/live/camera', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ camera_index: cameraIdx })
-                });
-
-                await fetch('/live/start', { method: 'POST' });
-
-                updateCameraStatus();
-            } catch (error) {
-                console.error(`Error starting camera ${cameraIdx}:`, error);
-                alert(`Failed to start camera ${cameraIdx}`);
-            }
-        }
-
-        async function stopCamera(cameraIdx) {
-            try {
-                await fetch('/live/camera', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ camera_index: cameraIdx })
-                });
-
-                await fetch('/live/stop', { method: 'POST' });
-
-                updateCameraStatus();
-            } catch (error) {
-                console.error(`Error stopping camera ${cameraIdx}:`, error);
-                alert(`Failed to stop camera ${cameraIdx}`);
-            }
-        }
-
-        updateCameraStatus();
-        setInterval(updateCameraStatus, 5000);
+        updateSelectedCamera();
     </script>
 </body>
 </html>
