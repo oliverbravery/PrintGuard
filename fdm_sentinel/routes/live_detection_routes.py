@@ -2,34 +2,11 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request, Body, WebSocket
 from fastapi.responses import StreamingResponse
 import time
-from ..utils.camera_utils import _webcam_generator, _live_detection_loop
+from ..utils.camera_utils import _live_detection_loop
 from ..utils.config import DETECTION_POLLING_RATE
 
 router = APIRouter()
 
-@router.get("/live")
-async def live_detection_feed(request: Request):
-    from ..utils.config import CAMERA_INDEX
-    
-    if (request.app.state.model is None or
-        request.app.state.transform is None or
-        request.app.state.device is None or
-        request.app.state.prototypes is None):
-        raise HTTPException(status_code=503, detail="Model not loaded or not ready.")
-    
-    return StreamingResponse(
-        _webcam_generator(
-            request.app.state.model, 
-            request.app.state.transform, 
-            request.app.state.device, 
-            request.app.state.class_names, 
-            request.app.state.prototypes, 
-            request.app.state.defect_idx,
-            CAMERA_INDEX,
-            request.app.state
-        ), 
-        media_type="text/event-stream"
-    )
 
 @router.post("/live/start")
 async def start_live_detection(request: Request, camera_index: int = Body(..., embed=True)):

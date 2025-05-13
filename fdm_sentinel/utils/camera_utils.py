@@ -12,51 +12,9 @@ from fastapi import WebSocket, WebSocketDisconnect
 from .config import CAMERA_INDEX, DETECTION_WINDOW, DETECTION_THRESHOLD, BASE_URL
 from .model_utils import _run_inference
 
-async def _webcam_generator(model, transform, device, class_names, prototypes, defect_idx, camera_index, app_state):
-    from fdm_sentinel.app import get_camera_state
-    
-    camera_state = get_camera_state(camera_index)
-    
-    try:
-        cap = cv2.VideoCapture(camera_index)
-        if not cap.isOpened():
-            print(f"Warning: Cannot open camera at index {camera_index}")
-            # Instead of raising an error, yield an error message and exit
-            yield f"data: {json.dumps({'error': f'Cannot open camera {camera_index}', 'camera_index': camera_index})}\n\n"
-            return
-            
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                print(f"Warning: Failed to read frame from camera {camera_index}")
-                break
-            frame = cv2.convertScaleAbs(frame, alpha=config.CONTRAST, beta=int((config.BRIGHTNESS - 1.0) * 255))
-            if config.FOCUS and config.FOCUS != 1.0:
-                blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=config.FOCUS)
-                frame = cv2.addWeighted(frame, 1.0 + config.FOCUS, blurred, -config.FOCUS, 0)
-            image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            tensor = transform(image).unsqueeze(0).to(device)
-            prediction = await _run_inference(model, tensor, prototypes, defect_idx, device)
-            numeric = prediction[0] if isinstance(prediction, list) else prediction
-            label = class_names[numeric] if isinstance(numeric, int) and 0 <= numeric < len(class_names) else str(numeric)
-            current_time = time.time()
-
-            camera_state["last_result"] = label
-            camera_state["last_time"] = current_time
-            
-            rst = {
-                "time": current_time, 
-                "result": label, 
-                "camera_index": camera_index
-            }
-            yield f"data: {json.dumps(rst)}\n\n"
-            await asyncio.sleep(0.1)
-    finally:
-        cap.release()
-
 async def _live_detection_loop(app_state, camera_index):
     from fdm_sentinel.utils.notification_utils import send_defect_notification
-    from fdm_sentinel.app import get_camera_state
+    from fdm_sentinel.app import get_camera_state, update_camera_state
     
     camera_state = get_camera_state(camera_index)
     
@@ -67,17 +25,19 @@ async def _live_detection_loop(app_state, camera_index):
             camera_state["error"] = f"Cannot open camera {camera_index}"
             camera_state["live_detection_running"] = False
             return
-
-        camera_state["error"] = None
+        update_camera_state(camera_index, {"error": None})
         
         while camera_state["live_detection_running"]:
             ret, frame = cap.read()
             if not ret:
                 break
-            frame = cv2.convertScaleAbs(frame, alpha=config.CONTRAST, beta=int((config.BRIGHTNESS - 1.0) * 255))
-            if config.FOCUS and config.FOCUS != 1.0:
-                blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=config.FOCUS)
-                frame = cv2.addWeighted(frame, 1.0 + config.FOCUS, blurred, -config.FOCUS, 0)
+            contrast = camera_state["contrast"]
+            brightness = camera_state["brightness"]
+            focus = camera_state["focus"]
+            frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=int((brightness - 1.0) * 255))
+            if focus and focus != 1.0:
+                blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=focus)
+                frame = cv2.addWeighted(frame, 1.0 + focus, blurred, -focus, 0)
             image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             tensor = app_state.transform(image).unsqueeze(0).to(app_state.device)
             try:
@@ -88,16 +48,17 @@ async def _live_detection_loop(app_state, camera_index):
                 numeric = None
 
             label = app_state.class_names[numeric] if isinstance(numeric, int) and 0 <= numeric < len(app_state.class_names) else str(numeric)
-            camera_state["last_result"] = label
-            camera_state["last_time"] = time.time()
-            
+            now = time.time()
+            print(f"Camera {camera_index} prediction: {label}, last_time: {now}")
+            update_camera_state(camera_index, {"last_result": label, "last_time": now})
             if isinstance(numeric, int) and numeric == app_state.defect_idx:
-                now = time.time()
-                camera_state["detection_times"].append(now)
-                while camera_state["detection_times"] and now - camera_state["detection_times"][0] > DETECTION_WINDOW:
-                    camera_state["detection_times"].popleft()
+                temp_detection_times = camera_state["detection_times"]
+                current_alert_id = camera_state["current_alert_id"]
+                temp_detection_times.append(now)
+                while temp_detection_times and now - temp_detection_times[0] > DETECTION_WINDOW:
+                    temp_detection_times.popleft()
                 
-                if len(camera_state["detection_times"]) >= DETECTION_THRESHOLD and camera_state["current_alert_id"] is None:
+                if len(temp_detection_times) >= DETECTION_THRESHOLD and current_alert_id is None:
                     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
                     _, img_buf = cv2.imencode('.jpg', frame)
                     app_state.alerts[alert_id] = {
@@ -105,8 +66,9 @@ async def _live_detection_loop(app_state, camera_index):
                         'snapshot': img_buf.tobytes(),
                         'camera_index': camera_index
                     }
-                    camera_state["current_alert_id"] = alert_id
+                    update_camera_state(camera_index, {"current_alert_id": alert_id})
                     send_defect_notification(alert_id, BASE_URL, camera_index=camera_index)
+                update_camera_state(camera_index, {"detection_times": temp_detection_times})
             await asyncio.sleep(0.1)
     finally:
         cap.release()
