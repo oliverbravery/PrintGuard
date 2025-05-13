@@ -66,8 +66,8 @@
                             <p>detections per second</p>
                         </div>
                 </div>
-                <div class="status-area" id="statusArea">
-                    <div class="status-inactive">Detection Inactive</div>
+                <div class="status-area" id="camStatusArea">
+                    <div class="status-inactive" id="camStatusDisplay">Detection Inactive</div>
                 </div>
                  <div class="settings-button-container">
                     <button id="settingsBtn" onclick="window.location.href='/settings'">Settings</button>
@@ -77,7 +77,8 @@
     </div>
 
     <script>
-        const statusArea = document.getElementById('statusArea');
+        const camStatusArea = document.getElementById('camStatusArea');
+        const camStatusDisplay = document.getElementById('camStatusDisplay');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const videoPreview = document.getElementById('videoPreview');
@@ -130,6 +131,18 @@
             doc_element.textContent = fps.toFixed(2);
         }
 
+        function toggleStatusArea(isActive) {
+            if (isActive) {
+                camStatusArea.classList.remove('status-inactive');
+                camStatusArea.classList.add('status-active');
+                camStatusDisplay.textContent = 'Detection Active';
+            } else {
+                camStatusArea.classList.remove('status-active');
+                camStatusArea.classList.add('status-inactive');
+                camStatusDisplay.textContent = 'Detection Inactive';
+            }
+        }
+
         function updatePolledDetectionData(d) {
             // Update the UI elements with the data from the server
             console.log('Polled data:', d);
@@ -170,8 +183,7 @@
                 .then(response => {
                     if (response.ok) {
                         console.log('Live detection started successfully');
-                        statusArea.classList.remove('status-inactive');
-                        statusArea.classList.add('status-active');
+                        toggleStatusArea(true);
                     } else {
                         console.error('Failed to start live detection');
                     }
@@ -190,8 +202,7 @@
                 .then(response => {
                     if (response.ok) {
                         console.log('Live detection stopped successfully');
-                        statusArea.classList.remove('status-active');
-                        statusArea.classList.add('status-inactive');
+                        toggleStatusArea(false);
                     } else {
                         console.error('Failed to stop live detection');
                     }
