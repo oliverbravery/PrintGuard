@@ -40,4 +40,4 @@ COUNTDOWN_TIME = int(os.getenv("COUNTDOWN_TIME", "60"))  # seconds
 WARNING_INTERVALS = [int(x) for x in os.getenv("WARNING_INTERVALS", "30,15").split(",")]
 
 ## Page constants
-DETECTION_POLLING_RATE = int(os.getenv("DETECTION_POLLING_RATE", "250"))  # milliseconds
+DETECTION_POLLING_RATE = float(os.getenv("DETECTION_POLLING_RATE", "0.25"))  # seconds

@@ -63,7 +63,7 @@ async def stop_live_detection(request: Request, camera_index: int = Body(..., em
     print(f"camera_state: {camera_state}")
     if live_detection_task:
         try:
-            await asyncio.wait_for(live_detection_task, timeout=5.0)
+            await asyncio.wait_for(live_detection_task, timeout=0.25)
             print(f"Live detection task for camera {camera_index} finished successfully.")
         except asyncio.TimeoutError:
             print(f"Live detection task for camera {camera_index} did not finish in time.")
