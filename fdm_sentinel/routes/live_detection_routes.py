@@ -106,7 +106,8 @@ async def get_camera_state(request: Request, camera_index: int = Body(..., embed
         "warning_intervals": camera_state.get("warning_intervals"),
         "majority_vote_threshold": camera_state.get("majority_vote_threshold"),
         "majority_vote_window": camera_state.get("majority_vote_window"),
-        "current_alert_id": camera_state.get("current_alert_id")
+        "current_alert_id": camera_state.get("current_alert_id"),
+        "sensitivity": camera_state.get("sensitivity")
     }
     return response
 
