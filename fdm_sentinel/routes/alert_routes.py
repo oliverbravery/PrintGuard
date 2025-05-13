@@ -5,8 +5,6 @@ from fastapi.templating import Jinja2Templates
 
 from ..utils import config
 
-from ..utils.camera_utils import websocket_camera_feed_handler
-
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
@@ -56,7 +54,3 @@ async def alert_snapshot_ep(request: Request, alert_id: str):
         raise HTTPException(status_code=404, detail="Snapshot not found for this alert.")
     data = alerts[alert_id]['snapshot']
     return StreamingResponse(io.BytesIO(data), media_type='image/jpeg')
-
-@router.websocket("/ws/camera_feed")
-async def websocket_camera_feed_ep(websocket: WebSocket):
-    await websocket_camera_feed_handler(websocket)
