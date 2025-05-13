@@ -9,7 +9,6 @@
 </head>
 <body data-start-url="{{ url_for('start_live_detection') }}"
       data-stop-url="{{ url_for('stop_live_detection') }}"
-      data-live-feed-url="{{ url_for('live_detection_feed') }}"
       data-live-status-url="/live/status"
       data-alerts-feed-url="{{ url_for('live_alerts_feed') }}"
       data-camera-feed-url="{{ url_for('camera_feed') }}"
@@ -89,6 +88,49 @@
         const lastTimeValue = document.getElementById('lastTimeValue');
         const totalDetectionsDisplay = document.getElementById('totalDetectionsDisplay');
 
+        function updateElapsedTime(start_time, doc_element) {
+            if (!start_time) {
+                doc_element.textContent = '-';
+                return;
+            }
+            const elapsedTime = ((Date.now() / 1000) - start_time).toFixed(0);
+            doc_element.textContent = `${elapsedTime}s elapsed`;
+        }
+
+        function updateRecentDetectionResult(result, doc_element) {
+            doc_element.textContent = result || 'in-active';
+        }
+
+        function updateRecentDetectionTime(last_time, doc_element) {
+            try {
+                if (!last_time) {throw 'exit';}
+                const date = new Date(last_time * 1000);
+                const timeString = date.toISOString().substr(11, 8);
+                doc_element.textContent = timeString;
+                return;
+            } catch (e) {
+                doc_element.textContent = '-';
+            }
+        }
+
+        function updateTotalDetectionsCount(detection_times, doc_element) {
+            console.log('detection_times:', detection_times);
+            if (!detection_times) {
+                doc_element.textContent = '-';
+                return;
+            }
+            doc_element.textContent = detection_times.length;
+        }
+
+        function updatePolledDetectionData(d) {
+            // Update the UI elements with the data from the server
+            console.log('Polled data:', d);
+            updateElapsedTime(d.start_time, elapsedTimeDisplay);
+            updateRecentDetectionResult(d.last_result, lastResultDisplay);
+            updateRecentDetectionTime(d.last_time, lastTimeValue);
+            updateTotalDetectionsCount(d.detection_times, totalDetectionsDisplay);
+        }
+
         let camSocket;
         function connectCameraWS(){
             if(camSocket) camSocket.close();
@@ -98,10 +140,7 @@
             camSocket = new WebSocket(wsUrl);
             camSocket.onmessage = event => {
                 const d = JSON.parse(event.data);
-                elapsedTimeDisplay.textContent = d.start_time ? `${((Date.now()/1000)-d.start_time).toFixed(2)}s elapsed` : 'N/A';
-                lastResultDisplay.textContent = d.last_result || 'N/A';
-                lastTimeValue.textContent = d.last_time || 'N/A';
-                totalDetectionsDisplay.textContent = d.detection_times.length || 'N/A';
+                updatePolledDetectionData(d);
             };
         }
         cameraSelect.addEventListener('change', () => {
