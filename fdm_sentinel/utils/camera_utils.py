@@ -9,12 +9,12 @@ from . import config
 from PIL import Image
 from fastapi import WebSocket, WebSocketDisconnect
 
-from .config import CAMERA_INDEX, DETECTION_WINDOW, DETECTION_THRESHOLD, BASE_URL
+from .config import CAMERA_INDEX, BASE_URL
 from .model_utils import _run_inference
 
 async def _live_detection_loop(app_state, camera_index):
     from fdm_sentinel.utils.notification_utils import send_defect_notification
-    from fdm_sentinel.app import get_camera_state, update_camera_state
+    from fdm_sentinel.app import get_camera_state, update_camera_state, update_camera_detection_history
     
     camera_state = get_camera_state(camera_index)
     
@@ -49,16 +49,14 @@ async def _live_detection_loop(app_state, camera_index):
 
             label = app_state.class_names[numeric] if isinstance(numeric, int) and 0 <= numeric < len(app_state.class_names) else str(numeric)
             now = time.time()
-            print(f"Camera {camera_index} prediction: {label}, last_time: {now}")
+            update_camera_detection_history(camera_index, label, now)
             update_camera_state(camera_index, {"last_result": label, "last_time": now})
             if isinstance(numeric, int) and numeric == app_state.defect_idx:
-                temp_detection_times = camera_state["detection_times"]
-                current_alert_id = camera_state["current_alert_id"]
-                temp_detection_times.append(now)
-                while temp_detection_times and now - temp_detection_times[0] > DETECTION_WINDOW:
-                    temp_detection_times.popleft()
-                
-                if len(temp_detection_times) >= DETECTION_THRESHOLD and current_alert_id is None:
+                detection_history = camera_state["detection_history"]
+                majority_vote_window = camera_state["majority_vote_window"]
+                majority_vote_threshold = camera_state["majority_vote_threshold"]
+                detection_window_results = detection_history[-min(len(detection_history), majority_vote_window):]
+                if len([res for res in detection_window_results if res[1] == app_state.defect_idx]) >= majority_vote_threshold:
                     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
                     _, img_buf = cv2.imencode('.jpg', frame)
                     app_state.alerts[alert_id] = {
@@ -68,7 +66,6 @@ async def _live_detection_loop(app_state, camera_index):
                     }
                     update_camera_state(camera_index, {"current_alert_id": alert_id})
                     send_defect_notification(alert_id, BASE_URL, camera_index=camera_index)
-                update_camera_state(camera_index, {"detection_times": temp_detection_times})
             await asyncio.sleep(0.1)
     finally:
         cap.release()

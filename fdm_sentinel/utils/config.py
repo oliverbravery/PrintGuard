@@ -27,7 +27,8 @@ CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "0"))
 DETECTION_TIMEOUT = int(os.getenv("DETECTION_TIMEOUT", "5"))  # minutes
 BASE_URL = os.getenv("BASE_URL", "https://localhost:8000")
 DETECTION_THRESHOLD = int(os.getenv("DETECTION_THRESHOLD", "3"))
-DETECTION_WINDOW = int(os.getenv("DETECTION_WINDOW", "20"))  # seconds
+DETECTION_VOTING_WINDOW = int(os.getenv("DETECTION_VOTING_WINDOW", "20"))  # total detections in a window
+DETECTION_VOTING_THRESHOLD = int(os.getenv("DETECTION_VOTING_THRESHOLD", "5"))  # number of votes
 MAX_CAMERA_HISTORY = int(os.getenv("MAX_CAMERA_HISTORY", "10000"))
 
 ## Camera adjustment defaults

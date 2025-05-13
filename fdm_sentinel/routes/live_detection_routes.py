@@ -90,9 +90,7 @@ async def get_camera_state(request: Request, camera_index: int = Body(..., embed
     Get the state of a specific camera index.
     """
     from ..app import get_camera_state as _get_camera_state  # avoid name clash
-    # retrieve camera state (ensures default state exists)
     camera_state = _get_camera_state(camera_index)
-    # build JSON-serializable response
     response = {
         "start_time": camera_state.get("start_time"),
         "last_result": camera_state.get("last_result"),

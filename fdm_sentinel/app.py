@@ -88,7 +88,6 @@ def get_camera_state(camera_index, reset=False):
     if camera_index not in app.state.camera_states or reset:
         app.state.camera_states[camera_index] = {
             "current_alert_id": None,
-            "detection_times": deque(),
             "detection_history": deque(maxlen=MAX_CAMERA_HISTORY),
             "live_detection_running": False,
             "live_detection_task": None,
@@ -100,7 +99,9 @@ def get_camera_state(camera_index, reset=False):
             "contrast": config.CONTRAST,
             "focus": config.FOCUS,
             "countdown_time": config.COUNTDOWN_TIME,
-            "warning_intervals": ",".join(str(x) for x in config.WARNING_INTERVALS)
+            "warning_intervals": ",".join(str(x) for x in config.WARNING_INTERVALS),
+            "majority_vote_threshold": config.DETECTION_VOTING_THRESHOLD,
+            "majority_vote_window": config.DETECTION_VOTING_WINDOW, 
         }
     return app.state.camera_states[camera_index]
 
@@ -119,6 +120,18 @@ def update_camera_state(camera_index, new_states):
     else:
         print(f"Warning: Camera index '{camera_index}' not found in camera states.")
     return app.state.camera_states[camera_index]
+
+def update_camera_detection_history(camera_index, pred, time):
+    """
+    Append a detection to a camera's detection history.
+    """
+    camera_state = get_camera_state(camera_index)
+    if camera_state:
+        camera_state["detection_history"].append((time, pred))
+        return camera_state
+    else:
+        print(f"Warning: Camera index '{camera_index}' not found in camera states.")
+        return None
 
 get_camera_state(config.CAMERA_INDEX)
 get_camera_state(1)
