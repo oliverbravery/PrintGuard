@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Request, Body, WebSocket
 from fastapi.responses import StreamingResponse
 import time
 from ..utils.camera_utils import _webcam_generator, _live_detection_loop
+from ..utils.config import DETECTION_POLLING_RATE
 
 router = APIRouter()
 
@@ -138,4 +139,4 @@ async def camera_ws(websocket: WebSocket, camera_index: int):
             "error": state.get("error"),
         }
         await websocket.send_json(data)
-        import asyncio; await asyncio.sleep(2)
+        import asyncio; await asyncio.sleep(DETECTION_POLLING_RATE)
