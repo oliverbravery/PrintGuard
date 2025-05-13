@@ -1,15 +1,11 @@
 import asyncio
-import json
 import time
 import uuid
-import numpy as np
 
 import cv2
-from . import config
 from PIL import Image
-from fastapi import WebSocket, WebSocketDisconnect
 
-from .config import CAMERA_INDEX, BASE_URL
+from .config import BASE_URL
 from .model_utils import _run_inference
 
 async def _live_detection_loop(app_state, camera_index):
@@ -69,18 +65,3 @@ async def _live_detection_loop(app_state, camera_index):
             await asyncio.sleep(0.1)
     finally:
         cap.release()
-            
-def create_error_image(message, width=640, height=480):
-    """Create an image with an error message"""
-    img = np.zeros((height, width, 3), dtype=np.uint8)
-    img.fill(64)
-    
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    text_size = cv2.getTextSize(message, font, 1, 2)[0]
-    
-    x = (width - text_size[0]) // 2
-    y = (height + text_size[1]) // 2
-    
-    cv2.putText(img, message, (x, y), font, 1, (255, 255, 255), 2)
-    
-    return img
