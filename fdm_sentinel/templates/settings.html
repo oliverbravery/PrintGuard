@@ -26,11 +26,10 @@
         </section>
 
         <form action="{{ url_for('update_settings') }}" method="post" class="settings-form">
-            <label for="camera_index">Camera Index:</label>
             <input type="hidden" id="camera_index" name="camera_index" value="{{ camera_index }}">
 
             <label for="sensitivity">Sensitivity: <span id="sensitivity_val"></span></label>
-            <input type="range" id="sensitivity" name="sensitivity" min="0" max="3" step="0.01" value="-" />
+            <input type="range" id="sensitivity" name="sensitivity" min="0" max="3" step="0.05" value="-" />
 
             <label for="brightness">Brightness: <span id="brightness_val"></span></label>
             <input type="range" id="brightness" name="brightness" min="0" max="2" step="0.1" value="-" />
