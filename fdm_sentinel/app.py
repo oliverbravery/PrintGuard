@@ -98,6 +98,7 @@ def get_camera_state(camera_index, reset=False):
             "brightness": config.BRIGHTNESS,
             "contrast": config.CONTRAST,
             "focus": config.FOCUS,
+            "sensitivity": config.SENSITIVITY,
             "countdown_time": config.COUNTDOWN_TIME,
             "warning_intervals": ",".join(str(x) for x in config.WARNING_INTERVALS),
             "majority_vote_threshold": config.DETECTION_VOTING_THRESHOLD,
