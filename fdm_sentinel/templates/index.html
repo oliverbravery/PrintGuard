@@ -114,12 +114,11 @@
         }
 
         function updateTotalDetectionsCount(detection_times, doc_element) {
-            console.log('detection_times:', detection_times);
             if (!detection_times) {
                 doc_element.textContent = '-';
                 return;
             }
-            doc_element.textContent = detection_times.length;
+            doc_element.textContent = detection_times;
         }
 
         function updatePolledDetectionData(d) {
@@ -128,7 +127,7 @@
             updateElapsedTime(d.start_time, elapsedTimeDisplay);
             updateRecentDetectionResult(d.last_result, lastResultDisplay);
             updateRecentDetectionTime(d.last_time, lastTimeValue);
-            updateTotalDetectionsCount(d.detection_times, totalDetectionsDisplay);
+            updateTotalDetectionsCount(d.total_detections, totalDetectionsDisplay);
         }
 
         let camSocket;
