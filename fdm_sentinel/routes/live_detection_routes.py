@@ -100,18 +100,33 @@ async def get_camera_state(request: Request, camera_index: int = Body(..., embed
     }
     return response
 
+def _calculate_frame_rate(detection_history):
+    """
+    Calculate average frame rate from detection history.
+    detection_history: list of (timestamp, prediction) tuples
+    Returns: average frames per second (float)
+    """
+    if len(detection_history) < 2:
+        return 0.0
+    times = [t for t, _ in detection_history]
+    duration = times[-1] - times[0]
+    return (len(times) - 1) / duration if duration > 0 else 0.0
+
 @router.websocket("/ws/camera/{camera_index}")
 async def camera_ws(websocket: WebSocket, camera_index: int):
     from ..app import get_camera_state as _get_camera_state
     await websocket.accept()
     while True:
         state = _get_camera_state(camera_index)
-        total_detections = len(state.get("detection_history", []))
+        detection_history = state.get("detection_history", [])
+        total_detections = len(detection_history)
+        frame_rate = _calculate_frame_rate(detection_history)
         data = {
             "start_time": state.get("start_time"),
             "last_result": state.get("last_result"),
             "last_time": state.get("last_time"),
             "total_detections": total_detections,
+            "frame_rate": frame_rate,
             "error": state.get("error"),
         }
         await websocket.send_json(data)

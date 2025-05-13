@@ -62,7 +62,7 @@
                             <p>total detections</p>
                         </div>
                         <div class="grid-item">
-                            <p>TBC</p>
+                            <p id="averageFPSDisplay">-</p>
                             <p>detections per second</p>
                         </div>
                 </div>
@@ -87,6 +87,7 @@
         const lastResultDisplay = document.getElementById('lastResultDisplay');
         const lastTimeValue = document.getElementById('lastTimeValue');
         const totalDetectionsDisplay = document.getElementById('totalDetectionsDisplay');
+        const averageFPSDisplay = document.getElementById('averageFPSDisplay');
 
         function updateElapsedTime(start_time, doc_element) {
             if (!start_time) {
@@ -121,6 +122,14 @@
             doc_element.textContent = detection_times;
         }
 
+        function updateFrameRate(fps, doc_element) {
+            if (!fps) {
+                doc_element.textContent = '-';
+                return;
+            }
+            doc_element.textContent = fps.toFixed(2);
+        }
+
         function updatePolledDetectionData(d) {
             // Update the UI elements with the data from the server
             console.log('Polled data:', d);
@@ -128,6 +137,7 @@
             updateRecentDetectionResult(d.last_result, lastResultDisplay);
             updateRecentDetectionTime(d.last_time, lastTimeValue);
             updateTotalDetectionsCount(d.total_detections, totalDetectionsDisplay);
+            updateFrameRate(d.frame_rate, averageFPSDisplay);
         }
 
         let camSocket;
