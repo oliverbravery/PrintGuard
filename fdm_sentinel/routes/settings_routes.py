@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, Form
-from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from ..utils import config
 import cv2
 import os
@@ -67,14 +67,3 @@ def generate_frames(camera_index: int):
 @settings_router.get('/camera_feed/{camera_index}', include_in_schema=False)
 async def camera_feed(camera_index: int):
     return StreamingResponse(generate_frames(camera_index), media_type='multipart/x-mixed-replace; boundary=frame')
-
-@settings_router.post('/settings/update_video', include_in_schema=False)
-async def update_video_settings(request: Request):
-    data = await request.json()
-    if 'brightness' in data:
-        config.BRIGHTNESS = float(data['brightness'])
-    if 'contrast' in data:
-        config.CONTRAST = float(data['contrast'])
-    if 'focus' in data:
-        config.FOCUS = float(data['focus'])
-    return JSONResponse({'status': 'ok'})
