@@ -19,20 +19,21 @@ def get_unseen_alerts(known_alert_ids, app):
     return [alert for alert_id, alert in app.state.alerts.items()
             if alert_id not in known_alert_ids]
 
-def dismiss_alert(alert_id):
-    from ..app import app
+async def dismiss_alert(alert_id):
+    from ..app import app, update_camera_state
     if alert_id in app.state.alerts:
         del app.state.alerts[alert_id]
-        app.state.camera_states[alert_id]["current_alert_id"] = None
+        camera_index = int(alert_id.split('_')[0])
+        await update_camera_state(camera_index, {"current_alert_id": None})
         return True
     return False
 
-def cancel_print(alert_id):
+async def cancel_print(alert_id):
     # logic here to cancel the print job
     # associated with the printer linked to the
     # alerts camera. The printer will be 
     # stored in the camera state.
-    return dismiss_alert(alert_id)
+    return await dismiss_alert(alert_id)
 
 def alert_to_response_json(alert):
     img_bytes = alert.snapshot

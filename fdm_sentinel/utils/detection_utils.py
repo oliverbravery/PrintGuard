@@ -32,9 +32,9 @@ async def _terminate_alert_after_cooldown(alert):
             return
         match camera_state["countdown_action"]:
             case AlertAction.DISMISS:
-                dismiss_alert(alert.id)
+                await dismiss_alert(alert.id)
             case AlertAction.CANCEL_PRINT:
-                cancel_print(alert.id)
+                await cancel_print(alert.id)
 
 async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timestamp_arg):
     from .notification_utils import send_defect_notification
