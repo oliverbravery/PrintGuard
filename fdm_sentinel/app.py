@@ -161,11 +161,6 @@ async def serve_index(request: Request):
         "current_time": time.time(),
     })
 
-@app.get("/sw.js", include_in_schema=False)
-async def serve_sw():
-    sw_path = os.path.join(static_dir, "js", "sw.js")
-    return FileResponse(sw_path, media_type="application/javascript")
-
 app.include_router(notification_router, prefix="/notifications", tags=["notifications"])
 app.include_router(detection_router)
 app.include_router(live_detection_router)
