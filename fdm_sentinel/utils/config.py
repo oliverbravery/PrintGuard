@@ -1,6 +1,7 @@
 import os
 import torch
 from dotenv import load_dotenv
+from ..models import AlertAction
 
 load_dotenv()
 
@@ -39,6 +40,7 @@ FOCUS = float(os.getenv("FOCUS", "1.0"))
 ## Countdown timer and warning intervals
 COUNTDOWN_TIME = int(os.getenv("COUNTDOWN_TIME", "60"))  # seconds
 WARNING_INTERVALS = [int(x) for x in os.getenv("WARNING_INTERVALS", "30,15").split(",")]
+COUNTDOWN_ACTION = AlertAction.DISMISS
 
 ## Page constants
 DETECTION_POLLING_RATE = float(os.getenv("DETECTION_POLLING_RATE", "0.25"))  # seconds
