@@ -88,6 +88,7 @@ def get_camera_state(camera_index, reset=False):
     """
     if camera_index not in app.state.camera_states or reset:
         app.state.camera_states[camera_index] = {
+            "lock": asyncio.Lock(),
             "current_alert_id": None,
             "detection_history": [],
             "live_detection_running": False,
@@ -108,32 +109,37 @@ def get_camera_state(camera_index, reset=False):
         }
     return app.state.camera_states[camera_index]
 
-def update_camera_state(camera_index, new_states):
+async def update_camera_state(camera_index, new_states):
     """
     Update states of a specific camera index.
     new_states should be a dictionary only containing the keys to be updated.
     """
-    if camera_index in app.state.camera_states:
-        camera_state = app.state.camera_states[camera_index]
-        for key, value in new_states.items():
-            if key in camera_state:
-                camera_state[key] = value
-            else:
-                print(f"Warning: Key '{key}' not found in camera state.")
+    camera_state_ref = app.state.camera_states.get(camera_index)
+    if camera_state_ref:
+        lock = camera_state_ref["lock"]
+        async with lock:
+            for key, value in new_states.items():
+                if key in camera_state_ref:
+                    camera_state_ref[key] = value
+                else:
+                    print(f"Warning: Key '{key}' not found in camera state for index {camera_index}.")
+        return camera_state_ref
     else:
-        print(f"Warning: Camera index '{camera_index}' not found in camera states.")
-    return app.state.camera_states[camera_index]
+        print(f"Warning: Camera index '{camera_index}' not found in camera states during update.")
+        return None
 
-def update_camera_detection_history(camera_index, pred, time):
+async def update_camera_detection_history(camera_index, pred, time_val):
     """
     Append a detection to a camera's detection history.
     """
-    camera_state = get_camera_state(camera_index)
-    if camera_state:
-        camera_state["detection_history"].append((time, pred))
-        return camera_state
+    camera_state_ref = get_camera_state(camera_index)
+    if camera_state_ref:
+        lock = camera_state_ref["lock"]
+        async with lock:
+            camera_state_ref["detection_history"].append((time_val, pred))
+        return camera_state_ref
     else:
-        print(f"Warning: Camera index '{camera_index}' not found in camera states.")
+        print(f"Warning: Camera index '{camera_index}' not found when trying to update detection history.")
         return None
 
 get_camera_state(config.CAMERA_INDEX)
