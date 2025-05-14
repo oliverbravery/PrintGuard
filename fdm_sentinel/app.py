@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-from collections import deque
 from fastapi import (
     FastAPI, Request
 )
@@ -15,7 +14,7 @@ from .utils.inference_lib import (
 )
 from .utils.config import (
     MODEL_PATH, MODEL_OPTIONS_PATH, PROTOTYPES_DIR, SUCCESS_LABEL, DEVICE_TYPE,
-    VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, MAX_CAMERA_HISTORY
+    VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY
 )
 from .routes.notification_routes import router as notification_router
 from .routes.detection_routes import router as detection_router
@@ -102,6 +101,7 @@ def get_camera_state(camera_index, reset=False):
             "focus": config.FOCUS,
             "sensitivity": config.SENSITIVITY,
             "countdown_time": config.COUNTDOWN_TIME,
+            "countdown_action": config.COUNTDOWN_ACTION,
             "warning_intervals": ",".join(str(x) for x in config.WARNING_INTERVALS),
             "majority_vote_threshold": config.DETECTION_VOTING_THRESHOLD,
             "majority_vote_window": config.DETECTION_VOTING_WINDOW, 

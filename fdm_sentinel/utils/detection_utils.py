@@ -7,9 +7,9 @@ from PIL import Image
 
 from .config import BASE_URL
 from .model_utils import _run_inference
-from .alert_utils import append_new_alert
+from .alert_utils import append_new_alert, cancel_print, dismiss_alert
 
-from ..models import Alert
+from ..models import Alert, AlertAction
 
 def _passed_majority_vote(camera_state):
     detection_history = camera_state["detection_history"]
@@ -23,9 +23,22 @@ def _passed_majority_vote(camera_state):
 async def _send_alert(alert):
     await append_new_alert(alert)
 
+async def _terminate_alert_after_cooldown(alert):
+    from ..app import app, get_camera_state
+    await asyncio.sleep(alert.countdown_time)
+    if app.state.alerts.get(alert.id, None) is not None:
+        camera_state = get_camera_state(alert.camera_index)
+        if not camera_state:
+            return
+        match camera_state["countdown_action"]:
+            case AlertAction.DISMISS:
+                dismiss_alert(alert.id, app)
+            case AlertAction.CANCEL_PRINT:
+                cancel_print(alert.id, app)
+
 def _create_alert_and_notify(camera_state, camera_index, frame, time):
-    from fdm_sentinel.utils.notification_utils import send_defect_notification
-    from fdm_sentinel.app import update_camera_state
+    from utils.notification_utils import send_defect_notification
+    from ..app import update_camera_state
     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
     _, img_buf = cv2.imencode('.jpg', frame)
     alert = Alert(
@@ -37,6 +50,7 @@ def _create_alert_and_notify(camera_state, camera_index, frame, time):
         message=f"Defect detected on camera {camera_index}",
         countdown_time=camera_state["countdown_time"],
     )
+    asyncio.create_task(_terminate_alert_after_cooldown(alert))
     update_camera_state(camera_index, {"current_alert_id": alert_id})
     send_defect_notification(alert_id, BASE_URL, camera_index=camera_index)
     return alert
