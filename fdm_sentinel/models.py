@@ -1,5 +1,5 @@
 import json
-
+from enum import Enum
 class BaseModel:
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
@@ -18,3 +18,8 @@ class Alert(BaseModel):
             countdown_time=countdown_time,
             camera_index=camera_index
         )
+        
+class AlertAction(str, Enum):
+    DISMISS = "dismiss"
+    CANCEL_PRINT = "cancel_print"
+
