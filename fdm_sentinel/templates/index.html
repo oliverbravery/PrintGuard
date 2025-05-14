@@ -7,12 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='css/style-additions.css') }}">
 </head>
-<body data-start-url="{{ url_for('start_live_detection') }}"
-      data-stop-url="{{ url_for('stop_live_detection') }}"
-      data-live-status-url="/live/status"
-      data-alerts-feed-url="{{ url_for('live_alerts_feed') }}"
-      data-countdown-time="{{ countdown_time }}"
-      data-settings-url="{{ url_for('settings_page') }}">
+<body>
 
     <header class="app-header">
         <h1>Print Sentinel</h1>
@@ -208,6 +203,17 @@
                 })
                 .catch(error => console.error('Error:', error));
         });
+
+        const evtSource = new EventSource('https://localhost:8000/alert/sse');
+
+        evtSource.onmessage = (e) => {
+            alert(`New alert: ${e.data}`);
+        };
+
+        evtSource.onerror = (err) => {
+            console.error("SSE error", err);
+            evtSource.close();
+        };
 
     </script>
 </body>

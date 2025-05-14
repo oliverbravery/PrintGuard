@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import os
 import time
+import asyncio
 from .utils.inference_lib import (
     compute_prototypes, load_model, make_transform, setup_device
 )
@@ -17,10 +18,10 @@ from .utils.config import (
     VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, MAX_CAMERA_HISTORY
 )
 from .routes.notification_routes import router as notification_router
-from .routes.alert_routes import router as alert_router
 from .routes.detection_routes import router as detection_router
 from .routes.live_detection_routes import router as live_detection_router
 from .routes.settings_routes import settings_router
+from .routes.alert_routes import router as alert_router
 from .utils import config
 
 @asynccontextmanager
@@ -74,9 +75,10 @@ app.state.model = None
 app.state.transform = None
 app.state.device = None
 app.state.prototypes = None
-app.state.class_names = ['Successful', 'Defective']
+app.state.class_names = ['success', 'failure']
 app.state.defect_idx = -1
 app.state.alerts = {}
+app.state.alert_queue = asyncio.Queue()
 
 app.state.camera_states = {}
 
@@ -88,7 +90,7 @@ def get_camera_state(camera_index, reset=False):
     if camera_index not in app.state.camera_states or reset:
         app.state.camera_states[camera_index] = {
             "current_alert_id": None,
-            "detection_history": deque(maxlen=MAX_CAMERA_HISTORY),
+            "detection_history": [],
             "live_detection_running": False,
             "live_detection_task": None,
             "last_result": None,
@@ -159,9 +161,9 @@ async def serve_sw():
     return FileResponse(sw_path, media_type="application/javascript")
 
 app.include_router(notification_router, prefix="/notifications", tags=["notifications"])
-app.include_router(alert_router) 
 app.include_router(detection_router)
 app.include_router(live_detection_router)
+app.include_router(alert_router)
 app.include_router(settings_router, prefix="", tags=["settings"])
 
 def run():

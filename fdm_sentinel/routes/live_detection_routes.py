@@ -1,6 +1,5 @@
 import asyncio
-from fastapi import APIRouter, HTTPException, Request, Body, WebSocket
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Request, Body, WebSocket, BackgroundTasks
 import time
 from ..utils.camera_utils import _live_detection_loop
 from ..utils.config import DETECTION_POLLING_RATE
@@ -55,34 +54,6 @@ async def stop_live_detection(request: Request, camera_index: int = Body(..., em
                                     "live_detection_task": None})
     
     return {"message": f"Live detection stopped for camera {camera_index}"}
-
-@router.get("/live/alerts")
-async def live_alerts_feed(request: Request):
-    async def events():
-        import asyncio, json
-        last_ids = set()
-        def any_camera_running():
-            return any(
-                cam_state.get("live_detection_running", False)
-                for cam_state in request.app.state.camera_states.values()
-            )
-        
-        while any_camera_running():
-            new_ids = set(request.app.state.alerts.keys()) - last_ids
-            for alert_id in new_ids:
-                info = request.app.state.alerts[alert_id]
-                alert_data = {
-                    'alert_id': alert_id, 
-                    'timestamp': info['timestamp']
-                }
-                if 'camera_index' in info:
-                    alert_data['camera_index'] = info['camera_index']
-                
-                yield f"data: {json.dumps(alert_data)}\n\n"
-                last_ids.add(alert_id)
-                
-            await asyncio.sleep(0.5)
-    return StreamingResponse(events(), media_type="text/event-stream")
 
 @router.post("/live/camera", include_in_schema=False)
 async def get_camera_state(request: Request, camera_index: int = Body(..., embed=True)):

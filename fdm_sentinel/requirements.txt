@@ -9,3 +9,4 @@ pillow
 opencv-python
 torch
 python-multipart
+sse-starlette

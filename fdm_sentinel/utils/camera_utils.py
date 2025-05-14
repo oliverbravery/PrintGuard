@@ -7,11 +7,42 @@ from PIL import Image
 
 from .config import BASE_URL
 from .model_utils import _run_inference
+from .alert_utils import append_new_alert
+
+from ..models import Alert
+
+def _passed_majority_vote(camera_state):
+    detection_history = camera_state["detection_history"]
+    majority_vote_window = camera_state["majority_vote_window"]
+    majority_vote_threshold = camera_state["majority_vote_threshold"]
+    results_to_retreive = min(len(detection_history), majority_vote_window)
+    detection_window_results = detection_history[-results_to_retreive:]
+    failed_detections = [res for res in detection_window_results if res[1] == 'failure']
+    return len(failed_detections) >= majority_vote_threshold
+
+async def _send_alert(alert):
+    await append_new_alert(alert)
+
+def _create_alert_and_notify(camera_state, camera_index, frame, time):
+    from fdm_sentinel.utils.notification_utils import send_defect_notification
+    from fdm_sentinel.app import update_camera_state
+    alert_id = f"{camera_index}_{str(uuid.uuid4())}"
+    _, img_buf = cv2.imencode('.jpg', frame)
+    alert = Alert(
+        id=alert_id,
+        camera_index=camera_index,
+        timestamp=time,
+        snapshot=img_buf.tobytes(),
+        title=f"Defect - Camera {camera_index}",
+        message=f"Defect detected on camera {camera_index}",
+        countdown_time=camera_state["countdown_time"],
+    )
+    update_camera_state(camera_index, {"current_alert_id": alert_id})
+    send_defect_notification(alert_id, BASE_URL, camera_index=camera_index)
+    return alert
 
 async def _live_detection_loop(app_state, camera_index):
-    from fdm_sentinel.utils.notification_utils import send_defect_notification
     from fdm_sentinel.app import get_camera_state, update_camera_state, update_camera_detection_history
-    
     camera_state = get_camera_state(camera_index)
     
     try:
@@ -22,7 +53,7 @@ async def _live_detection_loop(app_state, camera_index):
             camera_state["live_detection_running"] = False
             return
         update_camera_state(camera_index, {"error": None})
-        
+
         while camera_state["live_detection_running"]:
             ret, frame = cap.read()
             if not ret:
@@ -48,20 +79,9 @@ async def _live_detection_loop(app_state, camera_index):
             update_camera_detection_history(camera_index, label, now)
             update_camera_state(camera_index, {"last_result": label, "last_time": now})
             if isinstance(numeric, int) and numeric == app_state.defect_idx:
-                detection_history = camera_state["detection_history"]
-                majority_vote_window = camera_state["majority_vote_window"]
-                majority_vote_threshold = camera_state["majority_vote_threshold"]
-                detection_window_results = detection_history[-min(len(detection_history), majority_vote_window):]
-                if len([res for res in detection_window_results if res[1] == app_state.defect_idx]) >= majority_vote_threshold:
-                    alert_id = f"{camera_index}_{str(uuid.uuid4())}"
-                    _, img_buf = cv2.imencode('.jpg', frame)
-                    app_state.alerts[alert_id] = {
-                        'timestamp': now,
-                        'snapshot': img_buf.tobytes(),
-                        'camera_index': camera_index
-                    }
-                    update_camera_state(camera_index, {"current_alert_id": alert_id})
-                    send_defect_notification(alert_id, BASE_URL, camera_index=camera_index)
+                if _passed_majority_vote(camera_state):
+                    alert = _create_alert_and_notify(camera_state, camera_index, frame, now)
+                    asyncio.create_task(_send_alert(alert))
             await asyncio.sleep(0.1)
     finally:
         cap.release()
