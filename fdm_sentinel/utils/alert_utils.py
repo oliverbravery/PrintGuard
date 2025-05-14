@@ -7,5 +7,5 @@ async def alert_generator():
 
 async def append_new_alert(alert):
     from ..app import app
-    app.state.alerts[alert["alert_id"]] = alert
+    app.state.alerts[alert.id] = alert
     await app.state.alert_queue.put(alert)
