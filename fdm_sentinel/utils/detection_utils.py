@@ -32,9 +32,9 @@ async def _terminate_alert_after_cooldown(alert):
             return
         match camera_state["countdown_action"]:
             case AlertAction.DISMISS:
-                dismiss_alert(alert.id, app)
+                dismiss_alert(alert.id)
             case AlertAction.CANCEL_PRINT:
-                cancel_print(alert.id, app)
+                cancel_print(alert.id)
 
 def _create_alert_and_notify(camera_state, camera_index, frame, time):
     from utils.notification_utils import send_defect_notification
@@ -58,7 +58,6 @@ def _create_alert_and_notify(camera_state, camera_index, frame, time):
 async def _live_detection_loop(app_state, camera_index):
     from fdm_sentinel.app import get_camera_state, update_camera_state, update_camera_detection_history
     camera_state = get_camera_state(camera_index)
-    
     try:
         cap = cv2.VideoCapture(camera_index)
         if not cap.isOpened():
@@ -92,10 +91,9 @@ async def _live_detection_loop(app_state, camera_index):
             now = time.time()
             update_camera_detection_history(camera_index, label, now)
             update_camera_state(camera_index, {"last_result": label, "last_time": now})
-            if isinstance(numeric, int) and numeric == app_state.defect_idx:
+            if isinstance(numeric, int) and numeric == app_state.defect_idx and camera_state["current_alert_id"] is None:
                 if _passed_majority_vote(camera_state):
                     alert = _create_alert_and_notify(camera_state, camera_index, frame, now)
                     asyncio.create_task(_send_alert(alert))
-            await asyncio.sleep(0.1)
     finally:
         cap.release()
