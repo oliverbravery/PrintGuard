@@ -1,7 +1,7 @@
 import asyncio
-from fastapi import APIRouter, Request, Body, WebSocket, BackgroundTasks
+from fastapi import APIRouter, Request, Body, WebSocket
 import time
-from ..utils.camera_utils import _live_detection_loop
+from ..utils.detection_utils import _live_detection_loop
 from ..utils.config import DETECTION_POLLING_RATE
 
 router = APIRouter()
@@ -19,7 +19,7 @@ async def start_live_detection(request: Request, camera_index: int = Body(..., e
         return {"message": f"Live detection already running for camera {camera_index}"}
     else:
         camera_state = get_camera_state(camera_index, reset=True)
-    update_camera_state(camera_index, {"start_time": time.time(),
+    await update_camera_state(camera_index, {"start_time": time.time(),
                                        "live_detection_running": True,
                                        "live_detection_task": asyncio.create_task(
                                            _live_detection_loop(request.app.state, camera_index)
@@ -36,7 +36,6 @@ async def stop_live_detection(request: Request, camera_index: int = Body(..., em
     if not camera_state["live_detection_running"]:
         return {"message": f"Live detection not running for camera {camera_index}"}
     live_detection_task = camera_state["live_detection_task"]
-    print(f"camera_state: {camera_state}")
     if live_detection_task:
         try:
             await asyncio.wait_for(live_detection_task, timeout=0.25)
@@ -49,10 +48,9 @@ async def stop_live_detection(request: Request, camera_index: int = Body(..., em
             print(f"Error stopping live detection task for camera {camera_index}: {e}")
         finally:
             live_detection_task = None
-    update_camera_state(camera_index, {"start_time": None,
+    await update_camera_state(camera_index, {"start_time": None,
                                     "live_detection_running": False,
                                     "live_detection_task": None})
-    
     return {"message": f"Live detection stopped for camera {camera_index}"}
 
 @router.post("/live/camera", include_in_schema=False)
