@@ -139,7 +139,6 @@
 
         function updatePolledDetectionData(d) {
             // Update the UI elements with the data from the server
-            console.log('Polled data:', d);
             updateElapsedTime(d.start_time, elapsedTimeDisplay);
             updateRecentDetectionResult(d.last_result, lastResultDisplay);
             updateRecentDetectionTime(d.last_time, lastTimeValue);
