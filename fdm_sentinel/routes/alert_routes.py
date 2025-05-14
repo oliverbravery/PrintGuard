@@ -33,9 +33,9 @@ async def alert_response(request: Request,
     response = None
     match action:
         case AlertAction.DISMISS:
-            response = dismiss_alert(alert_id)
+            response = await dismiss_alert(alert_id)
         case AlertAction.CANCEL_PRINT:
-            response = cancel_print(alert_id)
+            response = await cancel_print(alert_id)
     if not response:
         response = {"message": f"Alert {alert_id} not found."}
     return response

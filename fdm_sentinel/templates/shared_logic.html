@@ -65,14 +65,30 @@
             console.error("SSE error", err);
         };
 
+        function dismissAlert(action_type) {
+            fetch(`/alert/dismiss`, { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ alert_id: currentAlertId, action: action_type })
+            })
+                .then(response => {
+                    if (response.ok) {
+                        notificationPopup.style.display = 'none';
+                    } else {
+                        console.error('Failed to dismiss alert');
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        }
+
         dismissNotificationBtn.addEventListener('click', () => {
-            notificationPopup.style.display = 'none';
+            dismissAlert('dismiss');
         });
 
         cancelPrintBtn.addEventListener('click', () => {
-            notificationPopup.style.display = 'none';
-            console.log('Cancel Print button clicked for alert ID:', currentAlertId);
-            alert('Print cancellation logic to be implemented for alert ID: ' + currentAlertId);
+            dismissAlert('cancel_print');
         });
     </script>
 </body>
