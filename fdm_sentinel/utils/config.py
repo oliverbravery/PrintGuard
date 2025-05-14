@@ -6,7 +6,7 @@ from ..models import AlertAction
 load_dotenv()
 
 raw_subject = os.getenv("VAPID_SUBJECT", "")
-VAPID_SUBJECT = raw_subject.split('#')[0].strip()
+VAPID_SUBJECT = raw_subject.strip()
 if not VAPID_SUBJECT:
     raise RuntimeError(
         "Missing or invalid VAPID_SUBJECT in .env (e.g. mailto:you@example.com)"
