@@ -202,24 +202,7 @@
                 })
                 .catch(error => console.error('Error:', error));
         });
-
-        const evtSource = new EventSource('https://localhost:8000/alert/sse');
-
-        evtSource.onmessage = (e) => {
-            const alert_data = JSON.parse(e.data);
-            const seenAlerts = document.cookie.match(/seen_alerts=([^;]+)/)?.[1]?.split(",") || [];
-            if (!seenAlerts.includes(alert_data.id)) {
-                seenAlerts.push(alert_data.id);
-                document.cookie = `seen_alerts=${seenAlerts.join(",")}; path=/; max-age=86400`;
-            }
-            alert(`New alert: ${e.data}`);
-        };
-
-        evtSource.onerror = (err) => {
-            console.error("SSE error", err);
-            evtSource.close();
-        };
-
     </script>
+    {% include "shared_logic.html" %}
 </body>
 </html>

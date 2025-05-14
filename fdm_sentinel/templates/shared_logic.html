@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shared Logic</title>
+    <style>
+        .notification-popup {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            z-index: 1000;
+            display: none; /* Hidden by default */
+        }
+        .notification-popup p {
+            margin: 0 0 10px 0;
+        }
+        .notification-popup button {
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="notificationPopup" class="notification-popup">
+        <p id="notificationMessage"></p>
+        <button id="dismissNotificationBtn">Dismiss</button>
+        <button id="cancelPrintBtn">Cancel Print</button>
+    </div>
+
+    <script>
+        const evtSource = new EventSource('https://localhost:8000/alert/sse');
+        const notificationPopup = document.getElementById('notificationPopup');
+        const notificationMessage = document.getElementById('notificationMessage');
+        const dismissNotificationBtn = document.getElementById('dismissNotificationBtn');
+        const cancelPrintBtn = document.getElementById('cancelPrintBtn');
+
+        let currentAlertId = null;
+
+        evtSource.onmessage = (e) => {
+            try {
+                const alert_data = JSON.parse(e.data);
+                const seenAlerts = document.cookie.match(/seen_alerts=([^;]+)/)?.[1]?.split(",") || [];
+
+                if (!seenAlerts.includes(alert_data.id)) {
+                    currentAlertId = alert_data.id;
+                    notificationMessage.textContent = `New alert: ${alert_data.message || e.data}`;
+                    notificationPopup.style.display = 'block';
+                    seenAlerts.push(alert_data.id);
+                    document.cookie = `seen_alerts=${seenAlerts.join(",")}; path=/; max-age=3600`;
+                }
+            } catch (error) {
+                console.error("Error processing SSE message:", error);
+                notificationMessage.textContent = `New alert: ${e.data}`;
+                notificationPopup.style.display = 'block';
+            }
+        };
+
+        evtSource.onerror = (err) => {
+            console.error("SSE error", err);
+        };
+
+        dismissNotificationBtn.addEventListener('click', () => {
+            notificationPopup.style.display = 'none';
+        });
+
+        cancelPrintBtn.addEventListener('click', () => {
+            notificationPopup.style.display = 'none';
+            console.log('Cancel Print button clicked for alert ID:', currentAlertId);
+            alert('Print cancellation logic to be implemented for alert ID: ' + currentAlertId);
+        });
+    </script>
+</body>
+</html> 
