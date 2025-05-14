@@ -8,11 +8,7 @@
     <link rel="stylesheet" href="{{ url_for('static', path='css/style-additions.css') }}">
 </head>
 <body>
-
-    <header class="app-header">
-        <h1>Print Sentinel</h1>
-    </header>
-
+    {% include "shared_logic.html" %}
     <div class="container">
         <div class="main-layout">
             <section class="video-section">
@@ -203,6 +199,5 @@
                 .catch(error => console.error('Error:', error));
         });
     </script>
-    {% include "shared_logic.html" %}
 </body>
 </html>

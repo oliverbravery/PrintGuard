@@ -7,10 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
 </head>
 <body data-get-settings-url="{{ url_for('get_camera_state') }}">
-    <header class="app-header">
-        <h1>Print Sentinel</h1>
-    </header>
-
+    {% include "shared_logic.html" %}
     <div class="container settings-container">
         <h1>Settings</h1>
 
@@ -104,6 +101,5 @@
 
         updateSelectedCamera();
     </script>
-    {% include "shared_logic.html" %}
 </body>
 </html>
