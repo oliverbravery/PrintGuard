@@ -1,25 +1,29 @@
-import json
+from pydantic import BaseModel
 from enum import Enum
-class BaseModel:
-    def __init__(self, **kwargs):
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-    def to_json(self):
-        return json.dumps(self.__dict__)
+from typing import Optional, List
 
 class Alert(BaseModel):
-    def __init__(self, id, snapshot, title, message, timestamp, countdown_time, camera_index):
-        super().__init__(
-            id=id,
-            snapshot=snapshot,
-            title=title,
-            message=message,
-            timestamp=timestamp,
-            countdown_time=countdown_time,
-            camera_index=camera_index
-        )
-        
+    id: str
+    snapshot: bytes
+    title: str
+    message: str
+    timestamp: float
+    countdown_time: float
+    camera_index: int
+
 class AlertAction(str, Enum):
     DISMISS = "dismiss"
     CANCEL_PRINT = "cancel_print"
 
+class NotificationAction(BaseModel):
+    action: str
+    title: str
+    icon: Optional[str] = None
+
+class Notification(BaseModel):
+    title: str
+    body: str
+    image_url: Optional[str] = None
+    icon_url: Optional[str] = None
+    badge_url: Optional[str] = None
+    actions: List[NotificationAction] = []
