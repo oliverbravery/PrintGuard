@@ -29,7 +29,11 @@ pip install -e .
 
 For local HTTPS and service worker support, generate a self-signed cert:
 ```bash
-openssl req -x509 -newkey rsa:2048 -keyout .key.pem -out .cert.pem -days 365 -nodes
+# using homebrew
+brew install mkcert
+brew install nss
+mkcert -install
+mkcert -key-file .key.pem -cert-file .cert.pem localhost 127.0.0.1 ::1
 ```
 
 Generate VAPID keys:
