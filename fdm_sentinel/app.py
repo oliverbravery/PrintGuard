@@ -77,6 +77,7 @@ app.state.class_names = ['success', 'failure']
 app.state.defect_idx = -1
 app.state.alerts = {}
 app.state.alert_queue = asyncio.Queue()
+app.state.subscriptions = []
 
 app.state.camera_states = {}
 
@@ -160,11 +161,11 @@ async def serve_index(request: Request):
         "current_time": time.time(),
     })
 
-app.include_router(notification_router, prefix="/notifications", tags=["notifications"])
 app.include_router(detection_router)
 app.include_router(live_detection_router)
 app.include_router(alert_router)
 app.include_router(settings_router, prefix="", tags=["settings"])
+app.include_router(notification_router, tags=["notifications"])
 
 def run():
     import uvicorn
