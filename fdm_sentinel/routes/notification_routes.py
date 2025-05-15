@@ -1,33 +1,55 @@
-from fastapi import APIRouter, BackgroundTasks
-
-from ..utils.notification_utils import (
-    Subscription, Message, ScheduleRequest,
-    subscribe_client, unsubscribe_client, send_notification_now, schedule_notification,
-    get_public_key, get_debug_subscriptions
+import json
+from fastapi import APIRouter, Request
+from ..utils.config import (
+    VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_CLAIMS
 )
+from pywebpush import webpush, WebPushException
+from urllib.parse import urlparse
 
 router = APIRouter()
 
-@router.post("/subscribe", tags=["notifications"])
-async def route_subscribe_ep(sub: Subscription):
-    return subscribe_client(sub)
+@router.get("/notification/public_key")
+async def get_public_key():
+    return {"publicKey": VAPID_PUBLIC_KEY}
 
-@router.post("/unsubscribe/{subscription_id}", tags=["notifications"])
-async def route_unsubscribe_ep(subscription_id: str):
-    return unsubscribe_client(subscription_id)
+@router.post("/notification/subscribe")
+async def subscribe(request: Request):
+    try:
+        subscription = await request.json()
+        if not subscription.get('endpoint') or not subscription.get('keys'):
+            return {"success": False, "error": "Invalid subscription format"}
+        for existing_sub in request.app.state.subscriptions:
+            if existing_sub.get('endpoint') == subscription.get('endpoint'):
+                request.app.state.subscriptions.remove(existing_sub)
+                break
+        request.app.state.subscriptions.append(subscription)
+        print(f"New push subscription: {subscription.get('endpoint')}")
+        return {"success": True}
+    except Exception as e:
+        print(f"Subscription error: {str(e)}")
+        return {"success": False, "error": f"Server error: {str(e)}"}
 
-@router.post("/send/{subscription_id}", tags=["notifications"])
-async def route_send_now_ep(subscription_id: str, msg: Message, background_tasks: BackgroundTasks):
-    return send_notification_now(subscription_id, msg, background_tasks)
-
-@router.post("/schedule", tags=["notifications"])
-async def route_schedule_ep(request: ScheduleRequest):
-    return schedule_notification(request)
-
-@router.get("/publicKey", tags=["notifications"])
-async def route_public_key_ep():
-    return get_public_key()
-
-@router.get("/debug/subscriptions", include_in_schema=False, tags=["debug"])
-async def route_debug_subscriptions_ep():
-    return get_debug_subscriptions()
+@router.post("/notification/push")
+async def push(message: str, request: Request):
+    for sub in request.app.state.subscriptions:
+        try:
+            endpoint = sub.get('endpoint', '')
+            parsed_endpoint = urlparse(endpoint)
+            audience = f"{parsed_endpoint.scheme}://{parsed_endpoint.netloc}"
+            vapid_claims = dict(VAPID_CLAIMS)
+            vapid_claims['aud'] = audience
+            data_payload_dict = {"body": message}
+            data_payload_json_str = json.dumps(data_payload_dict)
+            webpush(
+                subscription_info=sub,
+                data=data_payload_json_str,
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims=vapid_claims
+            )
+        except WebPushException as ex:
+            if ex.response.status_code == 410:
+                request.app.state.subscriptions.remove(sub)
+                print("Subscription expired and removed:", sub)
+            else:
+                print("Push failed:", ex)
+    return {"success": True}
