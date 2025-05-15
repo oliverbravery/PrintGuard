@@ -27,10 +27,9 @@ def send_notification(notification: Notification, app):
             vapid_claims = dict(VAPID_CLAIMS)
             vapid_claims['aud'] = audience
             data_payload_dict = notification.model_dump_json()
-            data_payload_json_str = json.dumps(data_payload_dict)
             webpush(
                 subscription_info=sub,
-                data=data_payload_json_str,
+                data=data_payload_dict,
                 vapid_private_key=VAPID_PRIVATE_KEY,
                 vapid_claims=vapid_claims
             )
