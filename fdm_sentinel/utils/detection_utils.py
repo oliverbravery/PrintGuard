@@ -38,7 +38,7 @@ async def _terminate_alert_after_cooldown(alert):
 
 async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timestamp_arg):
     from .notification_utils import send_defect_notification
-    from ..app import update_camera_state
+    from ..app import update_camera_state, app
     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
     _, img_buf = cv2.imencode('.jpg', frame)
     alert = Alert(
@@ -52,7 +52,7 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
     )
     asyncio.create_task(_terminate_alert_after_cooldown(alert))
     await update_camera_state(camera_index, {"current_alert_id": alert_id})
-    send_defect_notification(alert_id, BASE_URL, camera_index=camera_index)
+    send_defect_notification(alert_id, app)
     return alert
 
 async def _live_detection_loop(app_state, camera_index):
