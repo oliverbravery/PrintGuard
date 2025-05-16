@@ -20,6 +20,7 @@ from .routes.detection_routes import router as detection_router
 from .routes.live_detection_routes import router as live_detection_router
 from .routes.settings_routes import settings_router
 from .routes.alert_routes import router as alert_router
+from .routes.sse_routes import router as sse_router
 from .utils import config
 
 @asynccontextmanager
@@ -161,11 +162,12 @@ async def serve_index(request: Request):
         "current_time": time.time(),
     })
 
-app.include_router(detection_router)
-app.include_router(live_detection_router)
-app.include_router(alert_router)
-app.include_router(settings_router, prefix="", tags=["settings"])
+app.include_router(detection_router, tags=["detection"])
+app.include_router(live_detection_router, tags=["live_detection"])
+app.include_router(alert_router, tags=["alerts"])
+app.include_router(settings_router, tags=["settings"])
 app.include_router(notification_router, tags=["notifications"])
+app.include_router(sse_router, tags=["sse"])
 
 def run():
     import uvicorn
