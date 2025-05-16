@@ -5,10 +5,9 @@ import uuid
 import cv2
 from PIL import Image
 
-from .config import BASE_URL
 from .model_utils import _run_inference
 from .alert_utils import append_new_alert, cancel_print, dismiss_alert
-
+from .sse_utils import sse_update_camera_state
 from ..models import Alert, AlertAction
 
 def _passed_majority_vote(camera_state):
@@ -94,6 +93,7 @@ async def _live_detection_loop(app_state, camera_index):
             
             await update_camera_detection_history(camera_index, label, current_timestamp)
             await update_camera_state(camera_index, {"last_result": label, "last_time": current_timestamp})
+            asyncio.create_task(sse_update_camera_state(camera_index))
             
             if isinstance(numeric, int) and numeric == app_state.defect_idx:
                 do_alert = False
