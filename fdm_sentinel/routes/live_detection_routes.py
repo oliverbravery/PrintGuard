@@ -1,8 +1,7 @@
 import asyncio
-from fastapi import APIRouter, Request, Body, WebSocket
+from fastapi import APIRouter, Request, Body
 import time
 from ..utils.detection_utils import _live_detection_loop
-from ..utils.config import DETECTION_POLLING_RATE
 
 router = APIRouter()
 
@@ -79,15 +78,3 @@ async def get_camera_state(request: Request, camera_index: int = Body(..., embed
         "sensitivity": camera_state.get("sensitivity")
     }
     return response
-
-def _calculate_frame_rate(detection_history):
-    """
-    Calculate average frame rate from detection history.
-    detection_history: list of (timestamp, prediction) tuples
-    Returns: average frames per second (float)
-    """
-    if len(detection_history) < 2:
-        return 0.0
-    times = [t for t, _ in detection_history]
-    duration = times[-1] - times[0]
-    return (len(times) - 1) / duration if duration > 0 else 0.0
