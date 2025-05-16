@@ -1,17 +1,19 @@
 from PIL import Image
 import base64
 import io
+from .sse_utils import append_new_outbound_packet
+from ..models import SSEDataType
 
-async def alert_generator():
-    from ..app import app
-    while True:
-        alert = await app.state.alert_queue.get()
-        yield alert
+async def outbound_queue_unseen_alerts(req):
+    seen_alerts = req.cookies.get("seen_alerts", "").split(",") if req.cookies.get("seen_alerts") else []
+    unseen_alerts = get_unseen_alerts(seen_alerts, req.app)
+    for alert in unseen_alerts:
+        await append_new_outbound_packet(alert_to_response_json(alert), SSEDataType.ALERT)
 
 async def append_new_alert(alert):
     from ..app import app
     app.state.alerts[alert.id] = alert
-    await app.state.alert_queue.put(alert)
+    await append_new_outbound_packet(alert_to_response_json(alert), SSEDataType.ALERT)
     
 def get_unseen_alerts(known_alert_ids, app):
     known_alert_ids = set(known_alert_ids or [])
