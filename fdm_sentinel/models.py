@@ -14,6 +14,10 @@ class Alert(BaseModel):
 class AlertAction(str, Enum):
     DISMISS = "dismiss"
     CANCEL_PRINT = "cancel_print"
+    
+class SSEDataType(str, Enum):
+    ALERT = "alert"
+    CAMERA_STATE = "camera_state"
 
 class NotificationAction(BaseModel):
     action: str
