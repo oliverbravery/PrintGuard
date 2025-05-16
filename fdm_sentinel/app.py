@@ -76,7 +76,7 @@ app.state.prototypes = None
 app.state.class_names = ['success', 'failure']
 app.state.defect_idx = -1
 app.state.alerts = {}
-app.state.alert_queue = asyncio.Queue()
+app.state.outbound_queue = asyncio.Queue()
 app.state.subscriptions = []
 
 app.state.camera_states = {}
