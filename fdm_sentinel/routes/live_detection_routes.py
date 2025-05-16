@@ -91,23 +91,3 @@ def _calculate_frame_rate(detection_history):
     times = [t for t, _ in detection_history]
     duration = times[-1] - times[0]
     return (len(times) - 1) / duration if duration > 0 else 0.0
-
-@router.websocket("/ws/camera/{camera_index}")
-async def camera_ws(websocket: WebSocket, camera_index: int):
-    from ..app import get_camera_state as _get_camera_state
-    await websocket.accept()
-    while True:
-        state = _get_camera_state(camera_index)
-        detection_history = state.get("detection_history", [])
-        total_detections = len(detection_history)
-        frame_rate = _calculate_frame_rate(detection_history)
-        data = {
-            "start_time": state.get("start_time"),
-            "last_result": state.get("last_result"),
-            "last_time": state.get("last_time"),
-            "total_detections": total_detections,
-            "frame_rate": frame_rate,
-            "error": state.get("error"),
-        }
-        await websocket.send_json(data)
-        import asyncio; await asyncio.sleep(DETECTION_POLLING_RATE)
