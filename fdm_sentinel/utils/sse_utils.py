@@ -1,4 +1,5 @@
 from ..models import SSEDataType
+import json
 
 async def outbound_packet_fetch():
     from ..app import app
@@ -6,10 +7,11 @@ async def outbound_packet_fetch():
         packet = await app.state.outbound_queue.get()
         yield packet
         
-async def append_new_outbound_packet(packet, type: SSEDataType):
+async def append_new_outbound_packet(packet, sse_data_type: SSEDataType):
     from ..app import app
-    pkt = {"type": type.value, "data": packet}
-    await app.state.outbound_queue.put(pkt)
+    pkt = {"data": {"event": sse_data_type.value, "data": packet}}
+    pkt_json = json.dumps(pkt)
+    await app.state.outbound_queue.put(pkt_json)
     
 def _calculate_frame_rate(detection_history):
     if len(detection_history) < 2:
