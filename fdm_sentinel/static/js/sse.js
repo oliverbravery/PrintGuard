@@ -8,11 +8,61 @@ const cancelPrintBtn = document.getElementById('cancelPrintBtn');
 
 let currentAlertId = null;
 
-function displayAlert(alert_data, seenAlerts) {
+document.addEventListener('DOMContentLoaded', loadPendingAlerts);
+
+function getActiveAlerts() {
+    try {
+        return JSON.parse(localStorage.getItem('activeAlerts')) || {};
+    } catch (e) {
+        console.error("Error parsing activeAlerts from localStorage:", e);
+        return {};
+    }
+}
+
+function saveActiveAlert(alert) {
+    const activeAlerts = getActiveAlerts();
+    const expirationTime = Date.now() + (alert.countdown_time || 10) * 1000;
+    activeAlerts[alert.id] = {
+        data: alert,
+        expirationTime: expirationTime
+    };
+    localStorage.setItem('activeAlerts', JSON.stringify(activeAlerts));
+}
+
+function removeActiveAlert(alertId) {
+    const activeAlerts = getActiveAlerts();
+    if (activeAlerts[alertId]) {
+        delete activeAlerts[alertId];
+        localStorage.setItem('activeAlerts', JSON.stringify(activeAlerts));
+    }
+}
+
+function loadPendingAlerts() {
+    const activeAlerts = getActiveAlerts();
+    const now = Date.now();
+    let alertsRemaining = false;
+    Object.keys(activeAlerts).forEach(alertId => {
+        if (activeAlerts[alertId].expirationTime < now) {
+            delete activeAlerts[alertId];
+        }
+    });
+    localStorage.setItem('activeAlerts', JSON.stringify(activeAlerts));
+    const alertIds = Object.keys(activeAlerts);
+    if (alertIds.length > 0) {
+        const alertId = alertIds[0];
+        const alert = activeAlerts[alertId].data;
+        alert.countdown_time = Math.max(1, Math.floor((activeAlerts[alertId].expirationTime - now) / 1000));
+        displayAlert(alert);
+        alertsRemaining = alertIds.length > 1;
+    }
+    return alertsRemaining;
+}
+
+function displayAlert(alert_data) {
     const parsedData = parseAlertData(alert_data);
     updateAlertUI(parsedData);
     startAlertCountdown(parsedData);
-    markAlertAsSeen(parsedData.id, seenAlerts);
+    saveActiveAlert(parsedData);
 }
 
 function parseAlertData(alert_data) {
@@ -37,39 +87,38 @@ function startAlertCountdown(data) {
     if (window.countdownInterval) {
         clearInterval(window.countdownInterval);
     }
-    const startTime = data.timestamp ? data.timestamp * 1000 : Date.now();
+    const startTime = Date.now();
     const countdownTime = Math.max(10, data.countdown_time || 0);
     const endTime = startTime + countdownTime * 1000;
     function updateCountdown() {
         const now = Date.now();
         let secondsLeft = Math.max(0, Math.round((endTime - now) / 1000));
         notificationCountdownTimer.textContent = `${secondsLeft}s remaining`;
-        
+        const activeAlerts = getActiveAlerts();
+        if (activeAlerts[data.id]) {
+            activeAlerts[data.id].expirationTime = endTime;
+            localStorage.setItem('activeAlerts', JSON.stringify(activeAlerts));
+        }
         if (secondsLeft <= 0) {
             clearInterval(window.countdownInterval);
             if (notificationPopup.style.display !== 'none') {
                 notificationPopup.style.display = 'none';
+                removeActiveAlert(currentAlertId);
+                loadPendingAlerts();
             }
         }
     }
-    
     updateCountdown();
     window.countdownInterval = setInterval(updateCountdown, 1000);
-}
-
-function markAlertAsSeen(alertId, seenAlerts) {
-    seenAlerts.push(alertId);
-    document.cookie = `seen_alerts=${seenAlerts.join(",")}; path=/; max-age=3600`;
 }
 
 evtSource.onmessage = (e) => {
     try {
         let packet_data = JSON.parse(e.data);
         packet_data = packet_data.data;
-        const seenAlerts = document.cookie.match(/seen_alerts=([^;]+)/)?.[1]?.split(",") || [];
         if (packet_data) {
-            if (packet_data.event == "alert" && !seenAlerts.includes(packet_data.data.id)) {
-                displayAlert(packet_data.data, seenAlerts);
+            if (packet_data.event == "alert") {
+                displayAlert(packet_data.data);
             }
             else if (packet_data.event == "camera_state" && typeof updatePolledDetectionData === "function") {
                 window.dispatchEvent(new CustomEvent('cameraStateUpdated', {
@@ -97,6 +146,8 @@ function dismissAlert(action_type) {
         .then(response => {
             if (response.ok) {
                 notificationPopup.style.display = 'none';
+                removeActiveAlert(currentAlertId);
+                loadPendingAlerts();
             } else {
                 console.error('Failed to dismiss alert');
             }
