@@ -143,12 +143,14 @@
             updateTotalDetectionsCount(d.total_detections, totalDetectionsDisplay);
             updateFrameRate(d.frame_rate, averageFPSDisplay);
         }
+
+        window.addEventListener('cameraStateUpdated', evt => {
+            updatePolledDetectionData(evt.detail);
+        });
         
         cameraSelect.addEventListener('change', () => {
             videoPreview.src = `https://localhost:8000/camera_feed/${cameraSelect.value}`;
-            connectCameraWS();
         });
-        connectCameraWS();
 
         startBtn.addEventListener('click', function() {
             const selectedCamera = cameraSelect.value;

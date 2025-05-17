@@ -22,11 +22,12 @@ evtSource.onmessage = (e) => {
         const seenAlerts = document.cookie.match(/seen_alerts=([^;]+)/)?.[1]?.split(",") || [];
         if (packet_data) {
             if (packet_data.event == "alert" && !seenAlerts.includes(packet_data.data.id)) {
-                console.log("Alert received:", packet_data.data);
                 displayAlert(packet_data.data, seenAlerts);
             }
-            else if (packet_data.event == "camera_state") {
-                updatePolledDetectionData(packet_data.data);
+            else if (packet_data.event == "camera_state" && typeof updatePolledDetectionData === "function") {
+                window.dispatchEvent(new CustomEvent('cameraStateUpdated', {
+                detail: packet_data.data
+                }));
             }
         }
     } catch (error) {
