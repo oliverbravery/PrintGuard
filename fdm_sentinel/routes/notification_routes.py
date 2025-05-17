@@ -1,4 +1,3 @@
-import json
 from fastapi import APIRouter, Request
 from ..utils.config import (
     VAPID_PUBLIC_KEY
