@@ -1,25 +1,64 @@
 const evtSource = new EventSource('https://localhost:8000/sse');
 const notificationPopup = document.getElementById('notificationPopup');
 const notificationMessage = document.getElementById('notificationMessage');
+const notificationImage = document.getElementById('notificationImage');
+const notificationCountdownTimer = document.getElementById('notificationCountdownTimer');
 const dismissNotificationBtn = document.getElementById('dismissNotificationBtn');
 const cancelPrintBtn = document.getElementById('cancelPrintBtn');
 
 let currentAlertId = null;
 
 function displayAlert(alert_data, seenAlerts) {
-    alert_data = JSON.parse(alert_data);
-    currentAlertId = alert_data.id;
-    notificationMessage.textContent = `New alert: ${alert_data.message}`;
-    const notificationImage = document.getElementById('notificationImage');
-    if (alert_data.snapshot) {
-        notificationImage.src = `data:image/jpeg;base64,${alert_data.snapshot}`;
+    const parsedData = parseAlertData(alert_data);
+    updateAlertUI(parsedData);
+    startAlertCountdown(parsedData);
+    markAlertAsSeen(parsedData.id, seenAlerts);
+}
+
+function parseAlertData(alert_data) {
+    return typeof alert_data === 'string' ? JSON.parse(alert_data) : alert_data;
+}
+
+function updateAlertUI(data) {
+    currentAlertId = data.id;
+    notificationMessage.textContent = `New alert: ${data.message}`;
+    if (data.snapshot) {
+        notificationImage.src = `data:image/jpeg;base64,${data.snapshot}`;
         notificationImage.style.display = 'block';
     } else {
         notificationImage.style.display = 'none';
         notificationImage.src = '';
     }
+    
     notificationPopup.style.display = 'block';
-    seenAlerts.push(alert_data.id);
+}
+
+function startAlertCountdown(data) {
+    if (window.countdownInterval) {
+        clearInterval(window.countdownInterval);
+    }
+    const startTime = data.timestamp ? data.timestamp * 1000 : Date.now();
+    const countdownTime = Math.max(10, data.countdown_time || 0);
+    const endTime = startTime + countdownTime * 1000;
+    function updateCountdown() {
+        const now = Date.now();
+        let secondsLeft = Math.max(0, Math.round((endTime - now) / 1000));
+        notificationCountdownTimer.textContent = `${secondsLeft}s remaining`;
+        
+        if (secondsLeft <= 0) {
+            clearInterval(window.countdownInterval);
+            if (notificationPopup.style.display !== 'none') {
+                notificationPopup.style.display = 'none';
+            }
+        }
+    }
+    
+    updateCountdown();
+    window.countdownInterval = setInterval(updateCountdown, 1000);
+}
+
+function markAlertAsSeen(alertId, seenAlerts) {
+    seenAlerts.push(alertId);
     document.cookie = `seen_alerts=${seenAlerts.join(",")}; path=/; max-age=3600`;
 }
 
