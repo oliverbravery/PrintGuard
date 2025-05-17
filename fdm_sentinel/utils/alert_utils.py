@@ -4,21 +4,10 @@ import io
 from .sse_utils import append_new_outbound_packet
 from ..models import SSEDataType
 
-async def outbound_queue_unseen_alerts(req):
-    seen_alerts = req.cookies.get("seen_alerts", "").split(",") if req.cookies.get("seen_alerts") else []
-    unseen_alerts = get_unseen_alerts(seen_alerts, req.app)
-    for alert in unseen_alerts:
-        await append_new_outbound_packet(alert_to_response_json(alert), SSEDataType.ALERT)
-
 async def append_new_alert(alert):
     from ..app import app
     app.state.alerts[alert.id] = alert
     await append_new_outbound_packet(alert_to_response_json(alert), SSEDataType.ALERT)
-    
-def get_unseen_alerts(known_alert_ids, app):
-    known_alert_ids = set(known_alert_ids or [])
-    return [alert for alert_id, alert in app.state.alerts.items()
-            if alert_id not in known_alert_ids]
 
 async def dismiss_alert(alert_id):
     from ..app import app, update_camera_state
