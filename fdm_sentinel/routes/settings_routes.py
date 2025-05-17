@@ -26,7 +26,6 @@ async def update_settings(request: Request,
                           contrast: float = Form(...),
                           focus: float = Form(...),
                           countdown_time: int = Form(...),
-                          warning_intervals: str = Form(...),
                           majority_vote_threshold: int = Form(...),
                           majority_vote_window: int = Form(...),
                           ):
@@ -39,7 +38,6 @@ async def update_settings(request: Request,
         "countdown_time": countdown_time,
         "majority_vote_threshold": majority_vote_threshold,
         "majority_vote_window": majority_vote_window,
-        "warning_intervals": [int(x) for x in warning_intervals.split(",") if x.strip().isdigit()],
     })
     return RedirectResponse("/settings", status_code=303)
 

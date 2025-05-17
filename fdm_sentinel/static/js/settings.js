@@ -19,7 +19,6 @@ function updateSelectedCameraSettings() {
             document.getElementById('countdown_time').value = settings.countdown_time;
             document.getElementById('majority_vote_threshold').value = settings.majority_vote_threshold;
             document.getElementById('majority_vote_window').value = settings.majority_vote_window;
-            document.getElementById('warning_intervals').value = settings.warning_intervals;
             document.querySelectorAll('input[type="range"]').forEach(input => {
                 document.getElementById(`${input.id}_val`).textContent = input.value;
             });

@@ -104,7 +104,6 @@ def get_camera_state(camera_index, reset=False):
             "sensitivity": config.SENSITIVITY,
             "countdown_time": config.COUNTDOWN_TIME,
             "countdown_action": config.COUNTDOWN_ACTION,
-            "warning_intervals": ",".join(str(x) for x in config.WARNING_INTERVALS),
             "majority_vote_threshold": config.DETECTION_VOTING_THRESHOLD,
             "majority_vote_window": config.DETECTION_VOTING_WINDOW, 
         }

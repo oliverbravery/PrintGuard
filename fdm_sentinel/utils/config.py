@@ -37,8 +37,7 @@ BRIGHTNESS = float(os.getenv("BRIGHTNESS", "1.0"))
 CONTRAST = float(os.getenv("CONTRAST", "1.0"))
 FOCUS = float(os.getenv("FOCUS", "1.0"))
 
-## Countdown timer and warning intervals
+## Countdown timer
 COUNTDOWN_TIME = int(os.getenv("COUNTDOWN_TIME", "60"))  # seconds
-WARNING_INTERVALS = [int(x) for x in os.getenv("WARNING_INTERVALS", "30,15").split(",")]
 COUNTDOWN_ACTION = AlertAction.DISMISS
 
