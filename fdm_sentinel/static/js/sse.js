@@ -10,6 +10,14 @@ function displayAlert(alert_data, seenAlerts) {
     alert_data = JSON.parse(alert_data);
     currentAlertId = alert_data.id;
     notificationMessage.textContent = `New alert: ${alert_data.message}`;
+    const notificationImage = document.getElementById('notificationImage');
+    if (alert_data.snapshot) {
+        notificationImage.src = `data:image/jpeg;base64,${alert_data.snapshot}`;
+        notificationImage.style.display = 'block';
+    } else {
+        notificationImage.style.display = 'none';
+        notificationImage.src = '';
+    }
     notificationPopup.style.display = 'block';
     seenAlerts.push(alert_data.id);
     document.cookie = `seen_alerts=${seenAlerts.join(",")}; path=/; max-age=3600`;

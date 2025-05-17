@@ -16,6 +16,10 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             z-index: 1000;
             display: none; /* Hidden by default */
+            width: 320px;
+            max-width: 90vw;
+            max-height: 80vh;
+            overflow-y: auto;
         }
         .notification-popup p {
             margin: 0 0 10px 0;
@@ -33,9 +37,10 @@
     </header>
     
     <div id="notificationPopup" class="notification-popup">
+        <img id="notificationImage" class="alert-image" style="display:none;width:100%;margin-bottom:10px;" />
         <p id="notificationMessage"></p>
         <button id="dismissNotificationBtn">Dismiss</button>
         <button id="cancelPrintBtn">Cancel Print</button>
     </div>
 </body>
-</html> 
+</html>
