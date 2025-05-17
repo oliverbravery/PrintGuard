@@ -66,7 +66,6 @@ async def get_camera_state(request: Request, camera_index: int = Body(..., embed
         "detection_times": list(camera_state.get("detection_times", [])),
         "error": camera_state.get("error"),
         "live_detection_running": camera_state.get("live_detection_running"),
-        "live_detection_task": camera_state.get("live_detection_task"),
         "brightness": camera_state.get("brightness"),
         "contrast": camera_state.get("contrast"),
         "focus": camera_state.get("focus"),
