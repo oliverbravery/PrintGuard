@@ -84,7 +84,8 @@ document.addEventListener('cameraStateUpdated', evt => {
 });
 
 cameraSelect.addEventListener('change', () => {
-    videoPreview.src = `https://localhost:8000/camera_feed/${cameraSelect.value}`;
+    videoPreview.src = `/camera_feed/${cameraSelect.value}`;
+    videoPreview.style.display = 'block';
 });
 
 startBtn.addEventListener('click', function() {
@@ -123,4 +124,7 @@ stopBtn.addEventListener('click', function() {
         })
         .catch(error => console.error('Error:', error));
 });
+
+videoPreview.src = `/camera_feed/${cameraSelect.value}`;
+videoPreview.style.display = 'block';
 });

@@ -29,7 +29,8 @@ function updateSelectedCameraSettings() {
 }
 
 function updateSelectedCamera() {
-    videoPreview.src = `https://localhost:8000/camera_feed/${cameraSelect.value}`;
+    videoPreview.src = `/camera_feed/${cameraSelect.value}`;
+    videoPreview.style.display = 'block';
     updateSelectedCameraSettings();
 }
 
