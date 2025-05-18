@@ -18,7 +18,17 @@ document.addEventListener('cameraStateUpdated', function(event) {
         console.warn("Camera data missing camera_index", cameraData);
     }
     updateCameraTile(cameraData);
+    if (currentCameraIndex !== null && currentCameraIndex === cameraData.camera_index) {
+        updateCameraDetailStats(cameraData);
+        startStopCameraBtn.innerHTML = `<span style="pointer-events: none;">${cameraData.live_detection_running ? 'Stop Detection' : 'Start Detection'}</span>`;
+    }
 });
+
+function formatTimeDisplay(timestamp) {
+    if (!timestamp) return 'Never';
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleTimeString();
+}
 
 function updateCameraTile(cameraData) {
     const cameraIndex = cameraData.camera_index || 0;
@@ -39,12 +49,7 @@ function updateCameraTile(cameraData) {
     const statusClass = isActive ? 'camera-status-active' : 'camera-status-inactive';
     const lastResult = cameraData.last_result || 'N/A';
     const predictionClass = lastResult === 'success' ? 'prediction-success' : (lastResult === 'failure' ? 'prediction-failure' : '');
-    let timeDisplay = 'Never';
-
-    if (cameraData.last_time) {
-        const date = new Date(cameraData.last_time * 1000);
-        timeDisplay = date.toLocaleTimeString();
-    }
+    const timeDisplay = formatTimeDisplay(cameraData.last_time);
 
     cameraTile.innerHTML = `
         <h3>
@@ -93,15 +98,11 @@ function showCameraDetail(cameraIndex) {
     currentCameraIndex = cameraIndex;
     const cameraId = `camera-${cameraIndex}`;
     const cameraData = cameraStates[cameraId];
-    
     cameraDetailTitle.textContent = `Camera ${cameraIndex} Details`;
     updateCameraDetailStats(cameraData);
-    
-    startStopCameraBtn.textContent = cameraData.live_detection_running ? 'Stop Detection' : 'Start Detection';
-    
+    startStopCameraBtn.innerHTML = `<span style="pointer-events: none;">${cameraData.live_detection_running ? 'Stop Detection' : 'Start Detection'}</span>`;
     overlay.style.display = 'block';
     cameraDetailPanel.style.display = 'block';
-
     startLiveFeed(cameraIndex);
 }
 
@@ -109,19 +110,12 @@ function updateCameraDetailStats(cameraData) {
     const isActive = cameraData.live_detection_running === true;
     const lastResult = cameraData.last_result || 'N/A';
     const predictionClass = lastResult === 'success' ? 'prediction-success' : (lastResult === 'failure' ? 'prediction-failure' : '');
-    let timeDisplay = 'Never';
-
-    if (cameraData.last_time) {
-        const date = new Date(cameraData.last_time * 1000);
-        timeDisplay = date.toLocaleTimeString();
-    }
-    
+    const timeDisplay = formatTimeDisplay(cameraData.last_time);
     let detectionTimesStats = '';
     if (cameraData.detection_times && cameraData.detection_times.length > 0) {
         const avgTime = cameraData.detection_times.reduce((a, b) => a + b, 0) / cameraData.detection_times.length;
         detectionTimesStats = `<p class="camera-stat-item">Average detection time: <span>${avgTime.toFixed(2)}s</span></p>`;
     }
-
     cameraDetailStats.innerHTML = `
         <p class="camera-stat-item">Status: <span>${isActive ? 'Active' : 'Inactive'}</span></p>
         <p class="camera-stat-item">Last prediction: <span class="${predictionClass}">${lastResult}</span></p>
@@ -133,20 +127,11 @@ function updateCameraDetailStats(cameraData) {
 function startLiveFeed(cameraIndex) {
     if (liveFeedInterval) {
         clearInterval(liveFeedInterval);
+        liveFeedInterval = null;
     }
-    fetchLiveFeedImage(cameraIndex);
-    liveFeedInterval = setInterval(() => {
-        fetchLiveFeedImage(cameraIndex);
-    }, 1000);
-}
-
-function fetchLiveFeedImage(cameraIndex) {
-    const currentNotificationImage = document.getElementById('notificationImage');
-    if (currentNotificationImage && currentNotificationImage.src && currentNotificationImage.style.display !== 'none') {
-        cameraLiveFeedImage.src = currentNotificationImage.src;
-        cameraLiveFeedImage.style.display = 'block';
-        document.getElementById('cameraLiveFeedPlaceholder').style.display = 'none';
-    }
+    cameraLiveFeedImage.src = `/camera_feed/${cameraIndex}`;
+    cameraLiveFeedImage.style.display = 'block';
+    document.getElementById('cameraLiveFeedPlaceholder').style.display = 'none';
 }
 
 function hideCameraDetail() {
@@ -176,7 +161,7 @@ function toggleCameraDetection() {
         if (response.ok) return response.json();
         throw new Error(`Failed to ${isRunning ? 'stop' : 'start'} detection`);
     })
-    .then(data => {
+    .then(responseData => {
         return fetch('/live/camera', {
             method: 'POST',
             headers: {
@@ -188,12 +173,9 @@ function toggleCameraDetection() {
     .then(response => response.json())
     .then(data => {
         data.camera_index = currentCameraIndex;
-        if (data.live_detection_running === undefined) {
-            data.live_detection_running = false;
-        }
         updateCameraTile(data);
         updateCameraDetailStats(data);
-        startStopCameraBtn.textContent = data.live_detection_running ? 'Stop Detection' : 'Start Detection';
+        startStopCameraBtn.innerHTML = `<span style="pointer-events: none;">${data.live_detection_running ? 'Stop Detection' : 'Start Detection'}</span>`;
     })
     .catch(error => {
         console.error(`Error toggling camera ${currentCameraIndex} detection:`, error);
