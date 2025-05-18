@@ -62,9 +62,6 @@ function updateCameraTile(cameraData) {
     `;
 }
 
-fetchCameraStates();
-setInterval(fetchCameraStates, 10000);
-
 function fetchCameraStates() {
     const cameraIndexes = [0, 1];
     
@@ -90,9 +87,30 @@ function fetchCameraStates() {
         })
         .catch(error => {
             console.error(`Error fetching camera ${index} state:`, error);
+            setTimeout(() => {
+                console.log(`Retrying camera ${index} state...`);
+                fetch('/live/camera', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ camera_index: index })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    data.camera_index = index;
+                    updateCameraTile(data);
+                })
+                .catch(retryError => console.error(`Retry failed for camera ${index}:`, retryError));
+            }, 500);
         });
     });
 }
+
+setTimeout(() => {
+    fetchCameraStates();
+    setInterval(fetchCameraStates, 10000);
+}, 100);
 
 function showCameraDetail(cameraIndex) {
     currentCameraIndex = cameraIndex;
@@ -129,7 +147,15 @@ function startLiveFeed(cameraIndex) {
         clearInterval(liveFeedInterval);
         liveFeedInterval = null;
     }
-    cameraLiveFeedImage.src = `/camera_feed/${cameraIndex}`;
+
+    cameraLiveFeedImage.onerror = function() {
+        console.warn(`Failed to load camera ${cameraIndex} feed, retrying...`);
+        setTimeout(() => {
+            cameraLiveFeedImage.src = `/camera_feed/${cameraIndex}?t=${Date.now()}`;
+        }, 500);
+    };
+    
+    cameraLiveFeedImage.src = `/camera_feed/${cameraIndex}?t=${Date.now()}`;
     cameraLiveFeedImage.style.display = 'block';
     document.getElementById('cameraLiveFeedPlaceholder').style.display = 'none';
 }
