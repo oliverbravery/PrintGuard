@@ -10,7 +10,7 @@ let currentAlertId = null;
 
 document.addEventListener('DOMContentLoaded', loadPendingAlerts);
 
-function getActiveAlerts() {
+function getLocalActiveAlerts() {
     try {
         return JSON.parse(localStorage.getItem('activeAlerts')) || {};
     } catch (e) {
@@ -19,8 +19,20 @@ function getActiveAlerts() {
     }
 }
 
+function getRemoteActiveAlerts() {
+    return fetch('/alert/active', {
+        method: 'GET',
+    })
+        .then(response => response.json())
+        .then(data => data.active_alerts || [])
+        .catch(error => {
+            console.error("Error fetching remote active alerts:", error);
+            return [];
+        });
+}
+
 function saveActiveAlert(alert) {
-    const activeAlerts = getActiveAlerts();
+    const activeAlerts = getLocalActiveAlerts();
     const expirationTime = Date.now() + (alert.countdown_time || 10) * 1000;
     activeAlerts[alert.id] = {
         data: alert,
@@ -30,20 +42,32 @@ function saveActiveAlert(alert) {
 }
 
 function removeActiveAlert(alertId) {
-    const activeAlerts = getActiveAlerts();
+    const activeAlerts = getLocalActiveAlerts();
     if (activeAlerts[alertId]) {
         delete activeAlerts[alertId];
         localStorage.setItem('activeAlerts', JSON.stringify(activeAlerts));
     }
 }
 
-function loadPendingAlerts() {
-    const activeAlerts = getActiveAlerts();
+async function loadPendingAlerts() {
+    const activeAlerts = getLocalActiveAlerts();
     const now = Date.now();
     let alertsRemaining = false;
+    const remoteAlerts = await getRemoteActiveAlerts();
+    const remoteAlertIds = remoteAlerts.map(alert => alert.id);
     Object.keys(activeAlerts).forEach(alertId => {
-        if (activeAlerts[alertId].expirationTime < now) {
+        if (activeAlerts[alertId].expirationTime < now || !remoteAlertIds.includes(alertId)) {
             delete activeAlerts[alertId];
+        }
+    });
+    remoteAlerts.forEach(remoteAlert => {
+        if (!activeAlerts[remoteAlert.id]) {
+            const alert_start_time = new Date(remoteAlert.timestamp);
+            const expirationTime = alert_start_time + (remoteAlert.countdown_time * 1000);
+            activeAlerts[remoteAlert.id] = {
+                data: remoteAlert,
+                expirationTime: expirationTime
+            };
         }
     });
     localStorage.setItem('activeAlerts', JSON.stringify(activeAlerts));
@@ -94,7 +118,7 @@ function startAlertCountdown(data) {
         const now = Date.now();
         let secondsLeft = Math.max(0, Math.round((endTime - now) / 1000));
         notificationCountdownTimer.textContent = `${secondsLeft}s remaining`;
-        const activeAlerts = getActiveAlerts();
+        const activeAlerts = getLocalActiveAlerts();
         if (activeAlerts[data.id]) {
             activeAlerts[data.id].expirationTime = endTime;
             localStorage.setItem('activeAlerts', JSON.stringify(activeAlerts));

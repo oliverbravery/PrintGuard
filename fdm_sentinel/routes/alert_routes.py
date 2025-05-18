@@ -20,3 +20,8 @@ async def alert_response(request: Request,
     if not response:
         response = {"message": f"Alert {alert_id} not found."}
     return response
+
+@router.get("/alert/active")
+async def get_active_alerts(request: Request):
+    active_alerts = [alert for alert in request.app.state.alerts.values()]
+    return {"active_alerts": active_alerts}
