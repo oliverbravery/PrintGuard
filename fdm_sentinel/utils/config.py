@@ -40,4 +40,3 @@ FOCUS = float(os.getenv("FOCUS", "1.0"))
 ## Countdown timer
 COUNTDOWN_TIME = int(os.getenv("COUNTDOWN_TIME", "60"))  # seconds
 COUNTDOWN_ACTION = AlertAction.DISMISS
-

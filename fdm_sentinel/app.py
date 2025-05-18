@@ -1,59 +1,61 @@
+import asyncio
+import logging
+import os
+import time
 from contextlib import asynccontextmanager
-from fastapi import (
-    FastAPI, Request
-)
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import os
-import time
-import asyncio
-from .utils.inference_lib import (
-    compute_prototypes, load_model, make_transform, setup_device
-)
-from .utils.config import (
-    MODEL_PATH, MODEL_OPTIONS_PATH, PROTOTYPES_DIR, SUCCESS_LABEL, DEVICE_TYPE,
-    VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY
-)
-from .routes.notification_routes import router as notification_router
+
+from .routes.alert_routes import router as alert_router
 from .routes.detection_routes import router as detection_router
 from .routes.live_detection_routes import router as live_detection_router
+from .routes.notification_routes import router as notification_router
 from .routes.settings_routes import settings_router
-from .routes.alert_routes import router as alert_router
 from .routes.sse_routes import router as sse_router
 from .utils import config
+from .utils.config import (DEVICE_TYPE, MODEL_OPTIONS_PATH, MODEL_PATH,
+                           PROTOTYPES_DIR, SUCCESS_LABEL, VAPID_PRIVATE_KEY,
+                           VAPID_PUBLIC_KEY)
+from .utils.inference_lib import (compute_prototypes, load_model,
+                                  make_transform, setup_device)
+
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
-    print("Setting up device...")
+    logging.debug("Setting up device...")
     app_instance.state.device = setup_device(DEVICE_TYPE)
-    print(f"Using device: {app_instance.state.device}")
+    logging.debug(f"Using device: {app_instance.state.device}")
     try:
-        print("Loading model...")
-        app_instance.state.model, _ = load_model(MODEL_PATH, MODEL_OPTIONS_PATH, app_instance.state.device)
+        logging.debug("Loading model...")
+        app_instance.state.model, _ = load_model(MODEL_PATH,
+                                                 MODEL_OPTIONS_PATH,
+                                                 app_instance.state.device)
         app_instance.state.transform = make_transform()
-        print("Model loaded successfully.")
-        print("Building prototypes...")
+        logging.debug("Model loaded successfully.")
+        logging.debug("Building prototypes...")
         try:
             prototypes, class_names, defect_idx = compute_prototypes(
-                app_instance.state.model, PROTOTYPES_DIR, app_instance.state.transform, 
+                app_instance.state.model, PROTOTYPES_DIR, app_instance.state.transform,
                 app_instance.state.device, SUCCESS_LABEL
             )
             app_instance.state.prototypes = prototypes
             app_instance.state.class_names = class_names
             app_instance.state.defect_idx = defect_idx
-            print("Prototypes built successfully.")
+            logging.debug("Prototypes built successfully.")
         except NameError:
-            print("Skipping prototype building: Potentially missing 'args' if not run as main script or if function expects it.")
+            logging.warning("Skipping prototype building: Potentially missing 'args' if not run as main script or if function expects it.")
         except ValueError as e:
-            print(f"Error building prototypes: {e}")
+            logging.error("Error building prototypes: %s", e)
 
     except RuntimeError as e:
-        print(f"Error during startup: {e}")
+        logging.error("Error during startup: %s", e)
         app_instance.state.model = None
         raise
     yield
-    print("Shutting down...")
+    logging.debug("Shutting down...")
 
 app = FastAPI(
     title="Standalone Web Push Notification API",
@@ -81,6 +83,9 @@ app.state.outbound_queue = asyncio.Queue()
 app.state.subscriptions = []
 
 app.state.camera_states = {}
+
+if app.debug:
+    logging.basicConfig(level=logging.DEBUG)
 
 def get_camera_state(camera_index, reset=False):
     """
@@ -122,11 +127,12 @@ async def update_camera_state(camera_index, new_states):
                 if key in camera_state_ref:
                     camera_state_ref[key] = value
                 else:
-                    print(f"Warning: Key '{key}' not found in camera state for index {camera_index}.")
+                    logging.warning("Key '%s' not found in camera state for index %d.",
+                                    key,
+                                    camera_index)
         return camera_state_ref
-    else:
-        print(f"Warning: Camera index '{camera_index}' not found in camera states during update.")
-        return None
+    logging.warning("Camera index '%d' not found in camera states during update.", camera_index)
+    return None
 
 async def update_camera_detection_history(camera_index, pred, time_val):
     """
@@ -139,7 +145,8 @@ async def update_camera_detection_history(camera_index, pred, time_val):
             camera_state_ref["detection_history"].append((time_val, pred))
         return camera_state_ref
     else:
-        print(f"Warning: Camera index '{camera_index}' not found when trying to update detection history.")
+        logging.warning("Camera index '%d' not found when trying to update detection history.",
+                        camera_index)
         return None
 
 get_camera_state(config.CAMERA_INDEX)
@@ -160,7 +167,7 @@ async def serve_index(request: Request):
         "camera_index": camera_index,
         "current_time": time.time(),
     })
-    
+
 @app.get("/onboarding", include_in_schema=False)
 async def serve_onboarding(request: Request):
     return templates.TemplateResponse("onboarding.html", {
@@ -177,7 +184,7 @@ app.include_router(sse_router, tags=["sse"])
 def run():
     import uvicorn
     if not all([VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY]):
-        print("Warning: VAPID keys not configured. Push notifications will fail.")
+        logging.warning("VAPID keys not configured. Push notifications will fail.")
     uvicorn.run(app, host="0.0.0.0", port=8000, ssl_certfile=".cert.pem", ssl_keyfile=".key.pem")
 
 if __name__ == "__main__":

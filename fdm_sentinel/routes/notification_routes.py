@@ -1,9 +1,10 @@
+import logging
+
 from fastapi import APIRouter, Request
-from ..utils.config import (
-    VAPID_PUBLIC_KEY
-)
-from ..utils.notification_utils import send_notification
+
 from ..models import Notification
+from ..utils.config import VAPID_PUBLIC_KEY
+from ..utils.notification_utils import send_notification
 
 router = APIRouter()
 
@@ -22,10 +23,10 @@ async def subscribe(request: Request):
                 request.app.state.subscriptions.remove(existing_sub)
                 break
         request.app.state.subscriptions.append(subscription)
-        print(f"New push subscription: {subscription.get('endpoint')}")
+        logging.debug("New push subscription: %s", subscription.get('endpoint'))
         return {"success": True}
     except Exception as e:
-        print(f"Subscription error: {str(e)}")
+        logging.error("Subscription error: %s", str(e))
         return {"success": False, "error": f"Server error: {str(e)}"}
 
 @router.post("/notification/push")

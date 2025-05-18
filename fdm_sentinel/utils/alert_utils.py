@@ -1,8 +1,11 @@
-from PIL import Image
 import base64
 import io
-from .sse_utils import append_new_outbound_packet
+
+from PIL import Image
+
 from ..models import SSEDataType
+from .sse_utils import append_new_outbound_packet
+
 
 async def append_new_alert(alert):
     from ..app import app

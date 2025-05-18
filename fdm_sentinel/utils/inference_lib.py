@@ -1,10 +1,12 @@
-import os
 import json
+import logging
+import os
+import sys
+
+import cv2
 import torch
 from PIL import Image
 from torchvision import transforms
-import cv2
-import sys
 
 try:
     import fdm_sentinel.protonets as _pn
@@ -44,9 +46,10 @@ def draw_label(frame, label, color, success_label="success"):
         text_pos = (w - text_w - 30, h - 30)
 
         cv2.rectangle(frame, rect_start, rect_end, color, -1)
-        cv2.putText(frame, text, text_pos, font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+        cv2.putText(frame, text, text_pos, font, font_scale, 
+                    (255, 255, 255), thickness, cv2.LINE_AA)
     except Exception as e:
-        print(f"Error drawing label: {e}. Frame shape: {frame.shape}, Label: {label}")
+        logging.error("Error drawing label: %s. Frame shape: %s, Label: %s", e, frame.shape, label)
     return frame
 
 
@@ -60,20 +63,21 @@ def compute_prototypes(model, support_dir, transform, device, success_label="suc
     loaded_class_names = []
     for cls in class_names:
         cls_dir = os.path.join(support_dir, cls)
-        imgs = [os.path.join(cls_dir,f) for f in os.listdir(cls_dir) if f.lower().endswith(('.png','.jpg','.jpeg'))]
+        imgs = [os.path.join(cls_dir,f) for f in os.listdir(cls_dir) if f.lower().endswith(
+            ('.png','.jpg','.jpeg'))]
         if not imgs:
-             print(f"Warning: No images found for class '{cls}' in {cls_dir}")
-             continue
+            logging.warning("No images found for class '%s' in %s", cls, cls_dir)
+            continue
         tensors = []
         for img_path in imgs:
             try:
                 img = Image.open(img_path).convert('RGB')
                 tensors.append(transform(img))
             except Exception as e:
-                print(f"Error loading support image {img_path}: {e}")
+                logging.error("Error loading support image %s: %s", img_path, e)
         if not tensors:
-             print(f"Warning: Could not load any valid images for class '{cls}'. Skipping this class.")
-             continue
+            logging.warning("Could not load any valid images for class '%s'. Skipping this class.", cls)
+            continue
         ts = torch.stack(tensors).to(device)
         with torch.no_grad():
             emb = model.encoder(ts)
@@ -81,32 +85,38 @@ def compute_prototypes(model, support_dir, transform, device, success_label="suc
         prototypes.append(prototype)
         loaded_class_names.append(cls)
     if not prototypes:
-         raise ValueError("Failed to build any prototypes from the support set.")
+        raise ValueError("Failed to build any prototypes from the support set.")
     prototypes = torch.stack(prototypes)
-    print(f"Prototypes built for classes: {loaded_class_names}")
+    logging.debug("Prototypes built for classes: %s", loaded_class_names)
 
     defect_idx = -1
     if success_label in loaded_class_names:
         try:
-            defect_candidates = [i for i, name in enumerate(loaded_class_names) if name != success_label]
+            defect_candidates = [i for i, 
+                                 name in enumerate(loaded_class_names) if name != success_label]
             if len(defect_candidates) == 1:
                 defect_idx = defect_candidates[0]
-                print(f"Identified '{loaded_class_names[defect_idx]}' as the defect class (index {defect_idx}).")
+                logging.debug("Identified '%s' as the defect class (index %d).", 
+                              loaded_class_names[defect_idx], defect_idx)
             elif len(defect_candidates) > 1:
-                 print(f"Warning: Multiple non-'{success_label}' classes found: {[loaded_class_names[i] for i in defect_candidates]}. Sensitivity adjustment requires exactly one defect class. Adjustment disabled.")
+                logging.warning("Multiple non-'%s' classes found: %s. Sensitivity adjustment requires exactly one defect class. Adjustment disabled.", 
+                                success_label, [loaded_class_names[i] for i in defect_candidates])
             else:
-                 print(f"Warning: Only found the '{success_label}' class. Cannot apply sensitivity adjustment.")
+                logging.warning("Only found the '%s' class. Cannot apply sensitivity adjustment.", 
+                                success_label)
         except IndexError:
-            print(f"Warning: Could not identify a distinct defect class, though '{success_label}' was present. Sensitivity adjustment disabled.")
+            logging.warning("Could not identify a distinct defect class, though '%s' was present. Sensitivity adjustment disabled.", 
+                            success_label)
     else:
-        print(f"Warning: '{success_label}' class not found in loaded support set {loaded_class_names}. Cannot apply sensitivity adjustment.")
+        logging.warning("'%s' class not found in loaded support set %s. Cannot apply sensitivity adjustment.", 
+                        success_label, loaded_class_names)
 
     return prototypes, loaded_class_names, defect_idx
 
 
 def predict_batch(model, batch_tensors, prototypes, defect_idx, sensitivity, device):
     if batch_tensors is None or batch_tensors.shape[0] == 0:
-        print("Warning: Received empty or invalid batch for prediction.")
+        logging.warning("Received empty or invalid batch for prediction.")
         return []
 
     model.eval()
@@ -135,8 +145,9 @@ def setup_device(requested_device):
     else:
         device = torch.device('cpu')
         if requested_device != 'cpu':
-            print(f"Warning: {requested_device} requested but not available. Falling back to CPU.")
-    print(f"Using device: {device}")
+            logging.warning("%s requested but not available. Falling back to CPU.", 
+                            requested_device)
+    logging.debug("Using device: %s", device)
     return device
 
 DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "model/best_model.pt")

@@ -1,6 +1,9 @@
 import asyncio
-from fastapi import APIRouter, Request, Body
+import logging
 import time
+
+from fastapi import APIRouter, Body, Request
+
 from ..utils.detection_utils import _live_detection_loop
 
 router = APIRouter()
@@ -38,13 +41,13 @@ async def stop_live_detection(request: Request, camera_index: int = Body(..., em
     if live_detection_task:
         try:
             await asyncio.wait_for(live_detection_task, timeout=0.25)
-            print(f"Live detection task for camera {camera_index} finished successfully.")
+            logging.debug("Live detection task for camera %d finished successfully.", camera_index)
         except asyncio.TimeoutError:
-            print(f"Live detection task for camera {camera_index} did not finish in time.")
+            logging.debug("Live detection task for camera %d did not finish in time.", camera_index)
             if live_detection_task:
                 live_detection_task.cancel()
         except Exception as e:
-            print(f"Error stopping live detection task for camera {camera_index}: {e}")
+            logging.error("Error stopping live detection task for camera %d: %s", camera_index, e)
         finally:
             live_detection_task = None
     await update_camera_state(camera_index, {"start_time": None,

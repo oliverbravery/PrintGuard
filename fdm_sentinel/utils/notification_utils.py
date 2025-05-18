@@ -1,5 +1,5 @@
 from urllib.parse import urlparse
-
+import logging
 from pywebpush import WebPushException, webpush
 
 from ..models import Notification
@@ -35,8 +35,8 @@ def send_notification(notification: Notification, app):
         except WebPushException as ex:
             if ex.response.status_code == 410:
                 app.state.subscriptions.remove(sub)
-                print("Subscription expired and removed:", sub)
+                logging.debug("Subscription expired and removed: %s", sub)
             else:
-                print("Push failed:", ex)
+                logging.error("Push failed: %s", ex)
             return False
         return True

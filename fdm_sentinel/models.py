@@ -1,6 +1,8 @@
-from pydantic import BaseModel
 from enum import Enum
-from typing import Optional, List
+from typing import List, Optional
+
+from pydantic import BaseModel
+
 
 class Alert(BaseModel):
     id: str
@@ -14,7 +16,7 @@ class Alert(BaseModel):
 class AlertAction(str, Enum):
     DISMISS = "dismiss"
     CANCEL_PRINT = "cancel_print"
-    
+
 class SSEDataType(str, Enum):
     ALERT = "alert"
     CAMERA_STATE = "camera_state"

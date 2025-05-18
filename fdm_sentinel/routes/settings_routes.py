@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Request, Form
-from fastapi.responses import RedirectResponse, StreamingResponse
-from ..utils import config
-import cv2
 import os
+
+import cv2
+from fastapi import APIRouter, Form, Request
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+
+from ..utils import config
 
 template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
 templates = Jinja2Templates(directory=template_dir)
@@ -48,7 +50,7 @@ def generate_frames(camera_index: int):
     contrast = camera_state.get("contrast", config.CONTRAST)
     brightness = camera_state.get("brightness", config.BRIGHTNESS)
     focus = camera_state.get("focus", config.FOCUS)
-    
+
     while True:
         success, frame = cap.read()
         if not success:
@@ -57,11 +59,12 @@ def generate_frames(camera_index: int):
         if focus and focus != 1.0:
             blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=focus)
             frame = cv2.addWeighted(frame, 1.0 + focus, blurred, -focus, 0)
-        ret, buffer = cv2.imencode('.jpg', frame)
+        _, buffer = cv2.imencode('.jpg', frame)
         frame_bytes = buffer.tobytes()
         yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
     cap.release()
 
 @settings_router.get('/camera_feed/{camera_index}', include_in_schema=False)
 async def camera_feed(camera_index: int):
-    return StreamingResponse(generate_frames(camera_index), media_type='multipart/x-mixed-replace; boundary=frame')
+    return StreamingResponse(generate_frames(camera_index), 
+                             media_type='multipart/x-mixed-replace; boundary=frame')
