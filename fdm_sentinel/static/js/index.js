@@ -79,7 +79,7 @@ function updatePolledDetectionData(d) {
     updateFrameRate(d.frame_rate, averageFPSDisplay);
 }
 
-window.addEventListener('cameraStateUpdated', evt => {
+document.addEventListener('cameraStateUpdated', evt => {
     updatePolledDetectionData(evt.detail);
 });
 

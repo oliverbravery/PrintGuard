@@ -144,8 +144,8 @@ evtSource.onmessage = (e) => {
             if (packet_data.event == "alert") {
                 displayAlert(packet_data.data);
             }
-            else if (packet_data.event == "camera_state" && typeof updatePolledDetectionData === "function") {
-                window.dispatchEvent(new CustomEvent('cameraStateUpdated', {
+            else if (packet_data.event == "camera_state") {
+                document.dispatchEvent(new CustomEvent('cameraStateUpdated', {
                 detail: packet_data.data
                 }));
             }
