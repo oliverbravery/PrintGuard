@@ -1,4 +1,5 @@
 import asyncio
+import cv2
 import logging
 import os
 import time
@@ -133,8 +134,24 @@ async def update_camera_detection_history(camera_index, pred, time_val):
                         camera_index)
         return None
 
-get_camera_state(config.CAMERA_INDEX)
-get_camera_state(1)
+def detect_available_cameras(max_cameras=config.MAX_CAMERAS):
+    available_cameras = []
+    for i in range(max_cameras):
+        # pylint: disable=E1101
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            available_cameras.append(i)
+            cap.release()
+    return available_cameras
+
+available_cameras = detect_available_cameras()
+if not available_cameras:
+    get_camera_state(config.CAMERA_INDEX)
+    logging.warning("No cameras detected. Using default camera index %d", config.CAMERA_INDEX)
+else:
+    for camera_index in available_cameras:
+        get_camera_state(camera_index)
+    logging.debug("Detected %d cameras: %s", len(available_cameras), available_cameras)
 
 base_dir = os.path.dirname(__file__)
 static_dir = os.path.join(base_dir, "static")

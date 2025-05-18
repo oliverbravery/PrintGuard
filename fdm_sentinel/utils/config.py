@@ -22,13 +22,14 @@ MODEL_OPTIONS_PATH = os.path.join(BASE_DIR, "model", "opt.json")
 PROTOTYPES_DIR = os.path.join(BASE_DIR, "model", "prototypes")
 
 SUCCESS_LABEL = "success"
-DEVICE_TYPE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+DEVICE_TYPE = "cuda" if (torch.cuda.is_available()) else (
+    "mps" if (torch.backends.mps.is_available()) else "cpu")
 SENSITIVITY = 1.0
 CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "0"))
 DETECTION_TIMEOUT = int(os.getenv("DETECTION_TIMEOUT", "5"))  # minutes
 BASE_URL = os.getenv("BASE_URL", "https://localhost:8000")
 DETECTION_THRESHOLD = int(os.getenv("DETECTION_THRESHOLD", "3"))
-DETECTION_VOTING_WINDOW = int(os.getenv("DETECTION_VOTING_WINDOW", "5"))  # total detections in a window
+DETECTION_VOTING_WINDOW = int(os.getenv("DETECTION_VOTING_WINDOW", "5"))  # detection window size
 DETECTION_VOTING_THRESHOLD = int(os.getenv("DETECTION_VOTING_THRESHOLD", "2"))  # number of votes
 MAX_CAMERA_HISTORY = int(os.getenv("MAX_CAMERA_HISTORY", "10000"))
 
@@ -40,3 +41,5 @@ FOCUS = float(os.getenv("FOCUS", "1.0"))
 ## Countdown timer
 COUNTDOWN_TIME = int(os.getenv("COUNTDOWN_TIME", "60"))  # seconds
 COUNTDOWN_ACTION = AlertAction.DISMISS
+
+MAX_CAMERAS = int(os.getenv("MAX_CAMERAS", "64"))  # maximum number of cameras
