@@ -62,6 +62,7 @@ async def detect_ep(request: Request, files: List[UploadFile] = File(...), strea
                             and 0 <= numeric < len(app_state.class_names)
                         ) else str(numeric)
                     result_obj["result"] = label
+                # pylint: disable=W0718
                 except Exception as e:
                     logging.error("Error during streaming inference for %s: %s",
                                   files[i].filename, e)
@@ -135,6 +136,7 @@ async def websocket_detect_ep(websocket: WebSocket):
             await websocket.send_json({"result": label})
     except WebSocketDisconnect:
         logging.debug("WebSocket disconnected")
+    # pylint: disable=W0718
     except Exception as e:
         logging.error("Error in WebSocket detection: %s", e)
         await websocket.close(code=1011, reason=f"Server error: {e}")
