@@ -1,3 +1,4 @@
+import asyncio
 from enum import Enum
 from typing import List, Optional
 
@@ -33,3 +34,29 @@ class Notification(BaseModel):
     icon_url: Optional[str] = None
     badge_url: Optional[str] = None
     actions: List[NotificationAction] = []
+
+# pylint: disable=C0413
+from .utils import config
+
+
+class CameraState(BaseModel):
+    lock: asyncio.Lock = asyncio.Lock()
+    current_alert_id: Optional[str] = None
+    detection_history: List[tuple] = []
+    live_detection_running: bool = False
+    live_detection_task: Optional[str] = None
+    last_result: Optional[str] = None
+    last_time: Optional[float] = None
+    start_time: Optional[float] = None
+    error: Optional[str] = None
+    brightness: int = config.BRIGHTNESS
+    contrast: int = config.CONTRAST
+    focus: int = config.FOCUS
+    sensitivity: int = config.SENSITIVITY
+    countdown_time: float = config.COUNTDOWN_TIME
+    countdown_action: str = config.COUNTDOWN_ACTION
+    majority_vote_threshold: int = config.DETECTION_VOTING_THRESHOLD
+    majority_vote_window: float = config.DETECTION_VOTING_WINDOW
+    model_config = {
+        "arbitrary_types_allowed": True
+    }

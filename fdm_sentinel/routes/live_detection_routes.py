@@ -15,9 +15,10 @@ async def start_live_detection(request: Request, camera_index: int = Body(..., e
     Starts live detection for the specified camera index.
     Resets the camera state before starting detection.
     """
+    # pylint: disable=C0415,W0621
     from ..app import get_camera_state, update_camera_state
     camera_state = get_camera_state(camera_index)
-    if camera_state["live_detection_running"]:
+    if camera_state.live_detection_running:
         return {"message": f"Live detection already running for camera {camera_index}"}
     else:
         camera_state = get_camera_state(camera_index, reset=True)
@@ -28,16 +29,18 @@ async def start_live_detection(request: Request, camera_index: int = Body(..., e
                                            )})
     return {"message": f"Live detection started for camera {camera_index}"}
 
+# pylint: disable=unused-argument
 @router.post("/live/stop")
 async def stop_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
     """
     Stops live detection for the specified camera index.
     """
+    # pylint: disable=C0415,W0621
     from ..app import get_camera_state, update_camera_state
     camera_state = get_camera_state(camera_index)
-    if not camera_state["live_detection_running"]:
+    if not camera_state.live_detection_running:
         return {"message": f"Live detection not running for camera {camera_index}"}
-    live_detection_task = camera_state["live_detection_task"]
+    live_detection_task = camera_state.live_detection_task
     if live_detection_task:
         try:
             await asyncio.wait_for(live_detection_task, timeout=0.25)
@@ -60,22 +63,26 @@ async def get_camera_state(request: Request, camera_index: int = Body(..., embed
     """
     Get the state of a specific camera index.
     """
+    # pylint: disable=C0415,W0621
     from ..app import get_camera_state as _get_camera_state
     camera_state = _get_camera_state(camera_index)
+    detection_times = [t for t, _ in camera_state.detection_history] if (
+        camera_state.detection_history
+        ) else []
     response = {
-        "start_time": camera_state.get("start_time"),
-        "last_result": camera_state.get("last_result"),
-        "last_time": camera_state.get("last_time"),
-        "detection_times": list(camera_state.get("detection_times", [])),
-        "error": camera_state.get("error"),
-        "live_detection_running": camera_state.get("live_detection_running"),
-        "brightness": camera_state.get("brightness"),
-        "contrast": camera_state.get("contrast"),
-        "focus": camera_state.get("focus"),
-        "countdown_time": camera_state.get("countdown_time"),
-        "majority_vote_threshold": camera_state.get("majority_vote_threshold"),
-        "majority_vote_window": camera_state.get("majority_vote_window"),
-        "current_alert_id": camera_state.get("current_alert_id"),
-        "sensitivity": camera_state.get("sensitivity")
+        "start_time": camera_state.start_time,
+        "last_result": camera_state.last_result,
+        "last_time": camera_state.last_time,
+        "detection_times": detection_times,  # Use the extracted times
+        "error": camera_state.error,
+        "live_detection_running": camera_state.live_detection_running,
+        "brightness": camera_state.brightness,
+        "contrast": camera_state.contrast,
+        "focus": camera_state.focus,
+        "countdown_time": camera_state.countdown_time,
+        "majority_vote_threshold": camera_state.majority_vote_threshold,
+        "majority_vote_window": camera_state.majority_vote_window,
+        "current_alert_id": camera_state.current_alert_id,
+        "sensitivity": camera_state.sensitivity
     }
     return response

@@ -11,9 +11,9 @@ from .sse_utils import sse_update_camera_state
 from ..models import Alert, AlertAction
 
 def _passed_majority_vote(camera_state):
-    detection_history = camera_state["detection_history"]
-    majority_vote_window = camera_state["majority_vote_window"]
-    majority_vote_threshold = camera_state["majority_vote_threshold"]
+    detection_history = camera_state.detection_history
+    majority_vote_window = camera_state.majority_vote_window
+    majority_vote_threshold = camera_state.majority_vote_threshold
     results_to_retreive = min(len(detection_history), majority_vote_window)
     detection_window_results = detection_history[-results_to_retreive:]
     failed_detections = [res for res in detection_window_results if res[1] == 'failure']
@@ -30,7 +30,7 @@ async def _terminate_alert_after_cooldown(alert):
         camera_state = get_camera_state(alert.camera_index)
         if not camera_state:
             return
-        match camera_state["countdown_action"]:
+        match camera_state.countdown_action:
             case AlertAction.DISMISS:
                 await dismiss_alert(alert.id)
             case AlertAction.CANCEL_PRINT:
@@ -50,7 +50,7 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
         snapshot=img_buf.tobytes(),
         title=f"Defect - Camera {camera_index}",
         message=f"Defect detected on camera {camera_index}",
-        countdown_time=camera_state_ref["countdown_time"],
+        countdown_time=camera_state_ref.countdown_time,
     )
     asyncio.create_task(_terminate_alert_after_cooldown(alert))
     await update_camera_state(camera_index, {"current_alert_id": alert_id})
@@ -59,11 +59,11 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
 
 async def _live_detection_loop(app_state, camera_index):
     # pylint: disable=C0415
-    from fdm_sentinel.app import (get_camera_state, 
-                                  update_camera_state, 
+    from fdm_sentinel.app import (get_camera_state,
+                                  update_camera_state,
                                   update_camera_detection_history)
     camera_state_ref = get_camera_state(camera_index)
-    camera_lock = camera_state_ref["lock"]
+    camera_lock = camera_state_ref.lock
 
     try:
         # pylint: disable=E1101
@@ -78,7 +78,7 @@ async def _live_detection_loop(app_state, camera_index):
             return
         await update_camera_state(camera_index, {"error": None})
 
-        while camera_state_ref["live_detection_running"]:
+        while camera_state_ref.live_detection_running:
             ret, frame = cap.read()
             if not ret:
                 await update_camera_state(camera_index,
@@ -88,9 +88,9 @@ async def _live_detection_loop(app_state, camera_index):
                                                 "live_detection_running": False
                                           })
                 break
-            contrast = camera_state_ref["contrast"]
-            brightness = camera_state_ref["brightness"]
-            focus = camera_state_ref["focus"]
+            contrast = camera_state_ref.contrast
+            brightness = camera_state_ref.brightness
+            focus = camera_state_ref.focus
             frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=int((brightness - 1.0) * 255))
             if focus and focus != 1.0:
                 blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=focus)
@@ -123,9 +123,9 @@ async def _live_detection_loop(app_state, camera_index):
             if isinstance(numeric, int) and numeric == app_state.defect_idx:
                 do_alert = False
                 async with camera_lock:
-                    if (camera_state_ref["current_alert_id"] is None
+                    if (camera_state_ref.current_alert_id is None
                         and _passed_majority_vote(camera_state_ref)):
-                        camera_state_ref["current_alert_id"] = True
+                        camera_state_ref.current_alert_id = True
                         do_alert = True
                 if do_alert:
                     alert = await _create_alert_and_notify(camera_state_ref,

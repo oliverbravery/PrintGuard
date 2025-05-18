@@ -25,6 +25,7 @@ async def subscribe(request: Request):
         request.app.state.subscriptions.append(subscription)
         logging.debug("New push subscription: %s", subscription.get('endpoint'))
         return {"success": True}
+    # pylint: disable=W0718
     except Exception as e:
         logging.error("Subscription error: %s", str(e))
         return {"success": False, "error": f"Server error: {str(e)}"}

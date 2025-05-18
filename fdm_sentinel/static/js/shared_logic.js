@@ -130,10 +130,6 @@ function updateCameraDetailStats(cameraData) {
     const predictionClass = lastResult === 'success' ? 'prediction-success' : (lastResult === 'failure' ? 'prediction-failure' : '');
     const timeDisplay = formatTimeDisplay(cameraData.last_time);
     let detectionTimesStats = '';
-    if (cameraData.detection_times && cameraData.detection_times.length > 0) {
-        const avgTime = cameraData.detection_times.reduce((a, b) => a + b, 0) / cameraData.detection_times.length;
-        detectionTimesStats = `<p class="camera-stat-item">Average detection time: <span>${avgTime.toFixed(2)}s</span></p>`;
-    }
     cameraDetailStats.innerHTML = `
         <p class="camera-stat-item">Status: <span>${isActive ? 'Active' : 'Inactive'}</span></p>
         <p class="camera-stat-item">Last prediction: <span class="${predictionClass}">${lastResult}</span></p>

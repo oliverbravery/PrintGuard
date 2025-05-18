@@ -22,6 +22,8 @@ from .utils.config import (DEVICE_TYPE, MODEL_OPTIONS_PATH, MODEL_PATH,
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
 
+from .models import CameraState
+
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
@@ -93,25 +95,7 @@ def get_camera_state(camera_index, reset=False):
     This function is exported for use by other modules.
     """
     if camera_index not in app.state.camera_states or reset:
-        app.state.camera_states[camera_index] = {
-            "lock": asyncio.Lock(),
-            "current_alert_id": None,
-            "detection_history": [],
-            "live_detection_running": False,
-            "live_detection_task": None,
-            "last_result": None,
-            "last_time": None,
-            "start_time": None,
-            "error": None,
-            "brightness": config.BRIGHTNESS,
-            "contrast": config.CONTRAST,
-            "focus": config.FOCUS,
-            "sensitivity": config.SENSITIVITY,
-            "countdown_time": config.COUNTDOWN_TIME,
-            "countdown_action": config.COUNTDOWN_ACTION,
-            "majority_vote_threshold": config.DETECTION_VOTING_THRESHOLD,
-            "majority_vote_window": config.DETECTION_VOTING_WINDOW, 
-        }
+        app.state.camera_states[camera_index] = CameraState()
     return app.state.camera_states[camera_index]
 
 async def update_camera_state(camera_index, new_states):
@@ -121,11 +105,11 @@ async def update_camera_state(camera_index, new_states):
     """
     camera_state_ref = app.state.camera_states.get(camera_index)
     if camera_state_ref:
-        lock = camera_state_ref["lock"]
+        lock = camera_state_ref.lock
         async with lock:
             for key, value in new_states.items():
-                if key in camera_state_ref:
-                    camera_state_ref[key] = value
+                if hasattr(camera_state_ref, key):
+                    setattr(camera_state_ref, key, value)
                 else:
                     logging.warning("Key '%s' not found in camera state for index %d.",
                                     key,
@@ -140,9 +124,9 @@ async def update_camera_detection_history(camera_index, pred, time_val):
     """
     camera_state_ref = get_camera_state(camera_index)
     if camera_state_ref:
-        lock = camera_state_ref["lock"]
+        lock = camera_state_ref.lock
         async with lock:
-            camera_state_ref["detection_history"].append((time_val, pred))
+            camera_state_ref.detection_history.append((time_val, pred))
         return camera_state_ref
     else:
         logging.warning("Camera index '%d' not found when trying to update detection history.",
@@ -184,6 +168,7 @@ app.include_router(notification_router, tags=["notifications"])
 app.include_router(sse_router, tags=["sse"])
 
 def run():
+    # pylint: disable=C0415
     import uvicorn
     if not all([VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY]):
         logging.warning("VAPID keys not configured. Push notifications will fail.")

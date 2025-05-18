@@ -21,11 +21,11 @@ router = APIRouter()
 @router.post("/detect")
 async def detect_ep(request: Request, files: List[UploadFile] = File(...), stream: bool = False):
     app_state = request.app.state
-    if (app_state.model is None or 
-        app_state.transform is None or 
-        app_state.device is None or 
+    if (app_state.model is None or
+        app_state.transform is None or
+        app_state.device is None or
         app_state.prototypes is None):
-        raise HTTPException(status_code=503, 
+        raise HTTPException(status_code=503,
                             detail="Model not loaded or not ready. Service unavailable.")
 
     if not files:

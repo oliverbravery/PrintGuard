@@ -20,6 +20,7 @@ async def settings_page(request: Request):
         "camera_index": config.CAMERA_INDEX,
     })
 
+# pylint: disable=unused-argument
 @settings_router.post("/settings", include_in_schema=False)
 async def update_settings(request: Request,
                           camera_index: int = Form(...),
@@ -31,6 +32,7 @@ async def update_settings(request: Request,
                           majority_vote_threshold: int = Form(...),
                           majority_vote_window: int = Form(...),
                           ):
+    # pylint: disable=C0415,W0621
     from ..app import update_camera_state
     await update_camera_state(camera_index, {
         "sensitivity": sensitivity,
@@ -44,12 +46,14 @@ async def update_settings(request: Request,
     return RedirectResponse("/settings", status_code=303)
 
 def generate_frames(camera_index: int):
+    # pylint: disable=C0415,W0621
     from ..app import get_camera_state
+    # pylint: disable=E1101
     cap = cv2.VideoCapture(camera_index)
     camera_state = get_camera_state(camera_index)
-    contrast = camera_state.get("contrast", config.CONTRAST)
-    brightness = camera_state.get("brightness", config.BRIGHTNESS)
-    focus = camera_state.get("focus", config.FOCUS)
+    contrast = camera_state.contrast
+    brightness = camera_state.brightness
+    focus = camera_state.focus
 
     while True:
         success, frame = cap.read()
@@ -66,5 +70,5 @@ def generate_frames(camera_index: int):
 
 @settings_router.get('/camera_feed/{camera_index}', include_in_schema=False)
 async def camera_feed(camera_index: int):
-    return StreamingResponse(generate_frames(camera_index), 
+    return StreamingResponse(generate_frames(camera_index),
                              media_type='multipart/x-mixed-replace; boundary=frame')
