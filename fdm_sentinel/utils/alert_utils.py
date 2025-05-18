@@ -1,0 +1,38 @@
+import base64
+import io
+
+from PIL import Image
+
+from ..models import SSEDataType
+from .sse_utils import append_new_outbound_packet
+
+
+async def append_new_alert(alert):
+    from ..app import app
+    app.state.alerts[alert.id] = alert
+    await append_new_outbound_packet(alert_to_response_json(alert), SSEDataType.ALERT)
+
+async def dismiss_alert(alert_id):
+    from ..app import app, update_camera_state
+    if alert_id in app.state.alerts:
+        del app.state.alerts[alert_id]
+        camera_index = int(alert_id.split('_')[0])
+        await update_camera_state(camera_index, {"current_alert_id": None})
+        return True
+    return False
+
+async def cancel_print(alert_id):
+    # logic here to cancel the print job
+    # associated with the printer linked to the
+    # alerts camera. The printer will be 
+    # stored in the camera state.
+    return await dismiss_alert(alert_id)
+
+def alert_to_response_json(alert):
+    img_bytes = alert.snapshot
+    if isinstance(img_bytes, str):
+        img_bytes = base64.b64decode(img_bytes)
+    buffer = io.BytesIO()
+    Image.open(io.BytesIO(img_bytes)).save(buffer, format="JPEG")
+    alert.snapshot = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return alert.model_dump_json()

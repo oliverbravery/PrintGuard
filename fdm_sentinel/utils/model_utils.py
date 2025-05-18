@@ -1,7 +1,7 @@
 import asyncio
 import io
 from typing import Any
-
+import logging
 import torch
 from PIL import Image
 from fastapi import HTTPException, UploadFile
@@ -16,10 +16,16 @@ async def _process_image(file: UploadFile, transform: Any, device: torch.device)
         tensor = transform(image).to(device)
         return tensor
     except Exception as e:
-        print(f"Error processing image {file.filename}: {e}")
-        raise HTTPException(status_code=400, detail=f"Error processing image {file.filename}. Invalid image format or data.") from e
+        logging.error("Error processing image %s: %s", file.filename, e)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Error processing image {file.filename}. Invalid image format or data.") from e
 
-async def _run_inference(model: torch.nn.Module, batch_tensor: torch.Tensor, prototypes: Any, defect_idx: int, device: torch.device) -> Any:
+async def _run_inference(model: torch.nn.Module,
+                         batch_tensor: torch.Tensor,
+                         prototypes: Any,
+                         defect_idx: int,
+                         device: torch.device) -> Any:
     if not hasattr(model, 'eval'):
         raise TypeError("Provided model object does not have an 'eval' method.")
     model.eval()
@@ -39,5 +45,5 @@ async def _run_inference(model: torch.nn.Module, batch_tensor: torch.Tensor, pro
             )
         return results
     except Exception as e:
-        print(f"Error during inference execution: {e}")
+        logging.error("Error during inference execution: %s", e)
         raise RuntimeError(f"Inference execution failed: {e}") from e

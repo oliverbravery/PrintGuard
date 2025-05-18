@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FDM Sentinel</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/style-additions.css') }}">
+    <script type="module" src="{{ url_for('static', path='js/onboarding.js') }}" defer></script>
+</head>
+<body>
+    <h2>Welcome to FDM Sentinel</h2>
+    <p>Get notified when your 3D print needs attention. Enable notifications to stay updated on print failures.</p>
+    <div class="modal-buttons">
+        <button id="enableNotificationsBtn">Enable Notifications</button>
+        <button id="skipNotificationsBtn">Not Now</button>
+    </div>
+    <p class="modal-footer">Note: You can always change this settings later.</p>
+</body>
+</html>

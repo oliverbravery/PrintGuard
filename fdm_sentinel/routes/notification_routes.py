@@ -1,33 +1,35 @@
-from fastapi import APIRouter, BackgroundTasks
+import logging
 
-from ..utils.notification_utils import (
-    Subscription, Message, ScheduleRequest,
-    subscribe_client, unsubscribe_client, send_notification_now, schedule_notification,
-    get_public_key, get_debug_subscriptions
-)
+from fastapi import APIRouter, Request
+
+from ..models import Notification
+from ..utils.config import VAPID_PUBLIC_KEY
+from ..utils.notification_utils import send_notification
 
 router = APIRouter()
 
-@router.post("/subscribe", tags=["notifications"])
-async def route_subscribe_ep(sub: Subscription):
-    return subscribe_client(sub)
+@router.get("/notification/public_key")
+async def get_public_key():
+    return {"publicKey": VAPID_PUBLIC_KEY}
 
-@router.post("/unsubscribe/{subscription_id}", tags=["notifications"])
-async def route_unsubscribe_ep(subscription_id: str):
-    return unsubscribe_client(subscription_id)
+@router.post("/notification/subscribe")
+async def subscribe(request: Request):
+    try:
+        subscription = await request.json()
+        if not subscription.get('endpoint') or not subscription.get('keys'):
+            return {"success": False, "error": "Invalid subscription format"}
+        for existing_sub in request.app.state.subscriptions:
+            if existing_sub.get('endpoint') == subscription.get('endpoint'):
+                request.app.state.subscriptions.remove(existing_sub)
+                break
+        request.app.state.subscriptions.append(subscription)
+        logging.debug("New push subscription: %s", subscription.get('endpoint'))
+        return {"success": True}
+    except Exception as e:
+        logging.error("Subscription error: %s", str(e))
+        return {"success": False, "error": f"Server error: {str(e)}"}
 
-@router.post("/send/{subscription_id}", tags=["notifications"])
-async def route_send_now_ep(subscription_id: str, msg: Message, background_tasks: BackgroundTasks):
-    return send_notification_now(subscription_id, msg, background_tasks)
-
-@router.post("/schedule", tags=["notifications"])
-async def route_schedule_ep(request: ScheduleRequest):
-    return schedule_notification(request)
-
-@router.get("/publicKey", tags=["notifications"])
-async def route_public_key_ep():
-    return get_public_key()
-
-@router.get("/debug/subscriptions", include_in_schema=False, tags=["debug"])
-async def route_debug_subscriptions_ep():
-    return get_debug_subscriptions()
+@router.post("/notification/push")
+async def push(notification: Notification, request: Request):
+    success = send_notification(notification, request.app)
+    return {"success": success}

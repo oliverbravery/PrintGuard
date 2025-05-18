@@ -1,50 +1,58 @@
-self.addEventListener('push', function(event) {
-  console.log('Service Worker: Push event received', event);
-  let data = {};
-  if (event.data) {
-    data = event.data.json();
-  }
-  const title = data.title || 'Notification';
-  const options = {
-    body: data.body || '',
-    data: data,
-    icon: data.icon || '', // You might want to add a default icon
-    image: data.image || ''
-  };
-  event.waitUntil(
-    (async () => {
-      await self.registration.showNotification(title, options);
-      console.log('Service Worker: Notification displayed', title, options);
-    })()
-  );
-});
-
-self.addEventListener('install', event => {
+// Service worker for FDM Sentinel Push Notifications
+self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-self.addEventListener('activate', event => {
-  event.waitUntil(clients.claim());
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
 });
 
-self.addEventListener('notificationclick', function(event) {
-  console.log('Service Worker: Notification click event', event);
-  event.notification.close();
-  const url = event.notification.data?.url || event.notification.body; // Use data.url if present, otherwise body as fallback
-  if (url) {
-    // Ensure the URL is absolute
-    const fullUrl = new URL(url, self.location.origin).href;
-    event.waitUntil(
-      clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
-        // Check if a window with this URL already exists.
-        for (const client of windowClients) {
-          if (client.url === fullUrl && 'focus' in client) {
-            return client.focus();
-          }
+self.addEventListener('push', event => {
+  let notificationTitle = 'FDM Sentinel Alert';
+  let notificationBody = 'Print detection alert!';
+  if (event.data) {
+    try {
+      const jsonData = event.data.json();
+      if (typeof jsonData === 'object' && jsonData !== null) {
+        notificationBody = jsonData.body || jsonData.message || JSON.stringify(jsonData);
+        if(jsonData.title) notificationTitle = jsonData.title;
+      } else {
+        notificationBody = jsonData;
+      }
+    } catch (e) {
+      console.warn('Failed to parse payload directly as JSON, trying as text:', e);
+      const textData = event.data.text();
+      try {
+        const parsedTextData = JSON.parse(textData);
+        if (typeof parsedTextData === 'object' && parsedTextData !== null) {
+          notificationBody = parsedTextData.body || parsedTextData.message || JSON.stringify(parsedTextData);
+          if(parsedTextData.title) notificationTitle = parsedTextData.title;
+        } else {
+          notificationBody = parsedTextData;
         }
-        // If not, open a new window.
-        return clients.openWindow(fullUrl);
-      })
-    );
+      } catch (e2) {
+        console.warn('Failed to parse text data as JSON, using text data as body:', e2);
+        notificationBody = textData;
+      }
+    }
   }
+  
+  event.waitUntil(
+    self.registration.showNotification(notificationTitle, {
+      body: notificationBody,
+      vibrate: [100, 50, 100],
+      timestamp: Date.now(),
+      requireInteraction: true
+    }).catch(err => {
+      console.error('Error showing notification:', err);
+    })
+  );
 });
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(
+    clients.openWindow('/')
+  );
+});
+
