@@ -98,7 +98,6 @@ startBtn.addEventListener('click', function() {
     })
         .then(response => {
             if (response.ok) {
-                console.log('Live detection started successfully');
                 toggleStatusArea(true);
             } else {
                 console.error('Failed to start live detection');
@@ -117,7 +116,6 @@ stopBtn.addEventListener('click', function() {
     })
         .then(response => {
             if (response.ok) {
-                console.log('Live detection stopped successfully');
                 toggleStatusArea(false);
             } else {
                 console.error('Failed to stop live detection');

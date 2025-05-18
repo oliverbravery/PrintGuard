@@ -19,7 +19,6 @@ async function registerPush() {
             const registrations = await navigator.serviceWorker.getRegistrations();
             for (let registration of registrations) {
                 await registration.unregister();
-                console.log('Unregistered old service worker:', registration);
             }
         }
         const {publicKey} = await fetch('/notification/public_key').then(r => r.json());
@@ -51,7 +50,6 @@ async function registerPush() {
             headers: {'Content-Type':'application/json'},
             body: JSON.stringify(sub)
         });
-        console.log('Push notification subscription successful!');
         alert('Notifications enabled successfully!');
     } catch (error) {
         console.error('Failed to register for push notifications:', error);
@@ -65,7 +63,6 @@ if ('serviceWorker' in navigator) {
             const registrations = await navigator.serviceWorker.getRegistrations();
             for (let registration of registrations) {
                 await registration.unregister();
-                console.log('Unregistered old service worker on page load:', registration);
             }
         } catch (error) {
             console.error('Error unregistering service workers on page load:', error);
