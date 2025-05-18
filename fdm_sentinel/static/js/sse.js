@@ -52,14 +52,15 @@ function removeActiveAlert(alertId) {
 async function loadPendingAlerts() {
     const activeAlerts = getLocalActiveAlerts();
     const now = Date.now();
-    let alertsRemaining = false;
     const remoteAlerts = await getRemoteActiveAlerts();
     const remoteAlertIds = remoteAlerts.map(alert => alert.id);
+    
     Object.keys(activeAlerts).forEach(alertId => {
         if (activeAlerts[alertId].expirationTime < now || !remoteAlertIds.includes(alertId)) {
             delete activeAlerts[alertId];
         }
     });
+    
     remoteAlerts.forEach(remoteAlert => {
         if (!activeAlerts[remoteAlert.id]) {
             const alert_start_time = new Date(remoteAlert.timestamp);
@@ -70,16 +71,17 @@ async function loadPendingAlerts() {
             };
         }
     });
+    
     localStorage.setItem('activeAlerts', JSON.stringify(activeAlerts));
     const alertIds = Object.keys(activeAlerts);
-    if (alertIds.length > 0) {
-        const alertId = alertIds[0];
+
+    alertIds.forEach(alertId => {
         const alert = activeAlerts[alertId].data;
         alert.countdown_time = Math.max(1, Math.floor((activeAlerts[alertId].expirationTime - now) / 1000));
         displayAlert(alert);
-        alertsRemaining = alertIds.length > 1;
-    }
-    return alertsRemaining;
+    });
+    
+    return alertIds.length > 0;
 }
 
 function displayAlert(alert_data) {
@@ -95,45 +97,87 @@ function parseAlertData(alert_data) {
 
 function updateAlertUI(data) {
     currentAlertId = data.id;
-    notificationMessage.textContent = `New alert: ${data.message}`;
-    if (data.snapshot) {
-        notificationImage.src = `data:image/jpeg;base64,${data.snapshot}`;
-        notificationImage.style.display = 'block';
-    } else {
-        notificationImage.style.display = 'none';
-        notificationImage.src = '';
+    const notificationsContainer = document.getElementById('notificationsContainer');
+
+    if (document.getElementById(`alert-${data.id}`)) {
+        return;
     }
+
+    const alertElement = document.createElement('div');
+    alertElement.id = `alert-${data.id}`;
+    alertElement.className = 'alert-item';
+    alertElement.style.padding = '10px';
+    alertElement.style.marginBottom = '10px';
+    alertElement.style.borderBottom = '1px solid #dee2e6';
+    let alertContent = `<p>${data.message}</p>`;
+    alertContent += `<p id="countdown-${data.id}"></p>`;
+
+    if (data.snapshot) {
+        alertContent = `<img src="data:image/jpeg;base64,${data.snapshot}" 
+                            style="width:100%;margin-bottom:10px;" />` + alertContent;
+    }
+
+    alertContent += `<div>
+        <button class="dismiss-btn" data-alert-id="${data.id}">Dismiss</button>
+        <button class="cancel-print-btn" data-alert-id="${data.id}">Cancel Print</button>
+    </div>`;
+    
+    alertElement.innerHTML = alertContent;
+    notificationsContainer.prepend(alertElement);
+
+    alertElement.querySelector('.dismiss-btn').addEventListener('click', () => {
+        dismissAlert('dismiss', data.id);
+    });
+    
+    alertElement.querySelector('.cancel-print-btn').addEventListener('click', () => {
+        dismissAlert('cancel', data.id);
+    });
     
     notificationPopup.style.display = 'block';
 }
 
 function startAlertCountdown(data) {
-    if (window.countdownInterval) {
-        clearInterval(window.countdownInterval);
+    if (!data.id) return;
+    
+    const countdownElement = document.getElementById(`countdown-${data.id}`);
+    if (!countdownElement) return;
+    
+    const countdownTimerId = `countdown-timer-${data.id}`;
+    if (window[countdownTimerId]) {
+        clearInterval(window[countdownTimerId]);
     }
+    
     const startTime = Date.now();
     const countdownTime = Math.max(10, data.countdown_time || 0);
     const endTime = startTime + countdownTime * 1000;
+    
     function updateCountdown() {
         const now = Date.now();
         let secondsLeft = Math.max(0, Math.round((endTime - now) / 1000));
-        notificationCountdownTimer.textContent = `${secondsLeft}s remaining`;
+        countdownElement.textContent = `${secondsLeft}s remaining`;
+        
         const activeAlerts = getLocalActiveAlerts();
         if (activeAlerts[data.id]) {
             activeAlerts[data.id].expirationTime = endTime;
             localStorage.setItem('activeAlerts', JSON.stringify(activeAlerts));
         }
+        
         if (secondsLeft <= 0) {
-            clearInterval(window.countdownInterval);
-            if (notificationPopup.style.display !== 'none') {
+            clearInterval(window[countdownTimerId]);
+            const alertElement = document.getElementById(`alert-${data.id}`);
+            if (alertElement) {
+                alertElement.remove();
+                removeActiveAlert(data.id);
+            }
+
+            if (notificationsContainer.children.length === 0) {
                 notificationPopup.style.display = 'none';
-                removeActiveAlert(currentAlertId);
-                loadPendingAlerts();
             }
         }
     }
+    
     updateCountdown();
-    window.countdownInterval = setInterval(updateCountdown, 1000);
+    window[countdownTimerId] = setInterval(updateCountdown, 1000);
 }
 
 evtSource.onmessage = (e) => {
@@ -166,19 +210,25 @@ evtSource.onerror = (err) => {
     console.error("SSE error", err);
 };
 
-function dismissAlert(action_type) {
+function dismissAlert(action_type, alertId) {
+    if (!alertId) alertId = currentAlertId;
+    
     fetch(`/alert/dismiss`, { 
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ alert_id: currentAlertId, action: action_type })
+        body: JSON.stringify({ alert_id: alertId, action: action_type })
     })
         .then(response => {
             if (response.ok) {
-                notificationPopup.style.display = 'none';
-                removeActiveAlert(currentAlertId);
-                loadPendingAlerts();
+                const alertElement = document.getElementById(`alert-${alertId}`);
+                if (alertElement) alertElement.remove();
+                removeActiveAlert(alertId);
+
+                if (document.getElementById('notificationsContainer').children.length === 0) {
+                    notificationPopup.style.display = 'none';
+                }
             } else {
                 console.error('Failed to dismiss alert');
             }
@@ -186,10 +236,10 @@ function dismissAlert(action_type) {
         .catch(error => console.error('Error:', error));
 }
 
-dismissNotificationBtn.addEventListener('click', () => {
-    dismissAlert('dismiss');
-});
-
-cancelPrintBtn.addEventListener('click', () => {
-    dismissAlert('cancel_print');
+document.addEventListener('DOMContentLoaded', () => {
+    const dismissBtn = document.getElementById('dismissNotificationBtn');
+    const cancelBtn = document.getElementById('cancelPrintBtn');
+    
+    if (dismissBtn) dismissBtn.remove();
+    if (cancelBtn) cancelBtn.remove();
 });
