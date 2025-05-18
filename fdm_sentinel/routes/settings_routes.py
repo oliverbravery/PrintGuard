@@ -30,7 +30,7 @@ async def update_settings(request: Request,
                           majority_vote_window: int = Form(...),
                           ):
     from ..app import update_camera_state
-    update_camera_state(camera_index, {
+    await update_camera_state(camera_index, {
         "sensitivity": sensitivity,
         "brightness": brightness,
         "contrast": contrast,
