@@ -160,6 +160,12 @@ async def serve_index(request: Request):
         "camera_index": camera_index,
         "current_time": time.time(),
     })
+    
+@app.get("/onboarding", include_in_schema=False)
+async def serve_onboarding(request: Request):
+    return templates.TemplateResponse("onboarding.html", {
+        "request": request
+    })
 
 app.include_router(detection_router, tags=["detection"])
 app.include_router(live_detection_router, tags=["live_detection"])

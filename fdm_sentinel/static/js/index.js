@@ -1,3 +1,10 @@
+document.addEventListener('DOMContentLoaded', () => {
+    const onboardingComplete = localStorage.getItem('onboardingComplete');
+    if (!onboardingComplete) {
+        window.location.href = '/onboarding';
+        return;
+    }
+
 const camStatusArea = document.getElementById('camStatusArea');
 const camStatusDisplay = document.getElementById('camStatusDisplay');
 const startBtn = document.getElementById('startBtn');
@@ -117,4 +124,5 @@ stopBtn.addEventListener('click', function() {
             }
         })
         .catch(error => console.error('Error:', error));
+});
 });

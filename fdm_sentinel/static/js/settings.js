@@ -1,5 +1,8 @@
+import { registerPush } from './notifications.js';
+
 const cameraSelect = document.getElementById('cameraSelect');
 const videoPreview = document.getElementById('videoPreview');
+const notificationsBtn = document.getElementById('notificationBtn');
 
 function updateSelectedCameraSettings() {
     fetch(`${document.body.dataset.getSettingsUrl}?`, {
@@ -38,6 +41,10 @@ document.querySelectorAll('input[type="range"]').forEach(input => {
     input.addEventListener('input', function() {
         document.getElementById(`${input.id}_val`).textContent = input.value;
     });
+});
+
+notificationsBtn.addEventListener('click', async () => {
+    await registerPush();
 });
 
 updateSelectedCamera();

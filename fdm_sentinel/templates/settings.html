@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Print Sentinel - Settings</title>
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
-    <script src="{{ url_for('static', path='js/settings.js') }}" defer></script>
+    <script type="module" src="{{ url_for('static', path='js/settings.js') }}" defer></script>
 </head>
 <body data-get-settings-url="{{ url_for('get_camera_state') }}">
     {% include "shared_logic.html" %}
@@ -49,6 +49,10 @@
 
             <button type="submit">Save Settings</button>
         </form>
+
+        <div class="notification-button-container">
+            <button id="notificationBtn">Enable Notifications</button>
+        </div>
 
         <a href="{{ url_for('serve_index') }}" class="back-link">Back to Home</a>
     </div>
