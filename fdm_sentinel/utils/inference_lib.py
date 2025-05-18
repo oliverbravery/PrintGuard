@@ -50,6 +50,7 @@ def draw_label(frame, label, color, success_label="success"):
         cv2.rectangle(frame, rect_start, rect_end, color, -1)
         cv2.putText(frame, text, text_pos, font, font_scale,
                     (255, 255, 255), thickness, cv2.LINE_AA)
+    # pylint: disable=W0718
     except Exception as e:
         logging.error("Error drawing label: %s. Frame shape: %s, Label: %s", e, frame.shape, label)
     return frame
@@ -75,6 +76,7 @@ def compute_prototypes(model, support_dir, transform, device, success_label="suc
             try:
                 img = Image.open(img_path).convert('RGB')
                 tensors.append(transform(img))
+            # pylint: disable=W0718
             except Exception as e:
                 logging.error("Error loading support image %s: %s", img_path, e)
         if not tensors:

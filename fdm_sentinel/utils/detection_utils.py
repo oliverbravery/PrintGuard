@@ -104,6 +104,7 @@ async def _live_detection_loop(app_state, camera_index):
                                                   app_state.defect_idx,
                                                   app_state.device)
                 numeric = prediction[0] if isinstance(prediction, list) else prediction
+            # pylint: disable=W0718
             except Exception as e:
                 logging.debug("Live loop inference error for camera %d: %s", camera_index, e)
                 numeric = None
