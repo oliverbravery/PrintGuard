@@ -34,10 +34,12 @@ def make_transform():
 
 def draw_label(frame, label, color, success_label="success"):
     text = "non-defective" if label == success_label else "defect"
+    # pylint: disable=E1101
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = 2
     thickness = 3
     try:
+        # pylint: disable=E1101
         text_size, _ = cv2.getTextSize(text, font, font_scale, thickness)
         text_w, text_h = text_size
         h, w, _ = frame.shape
@@ -57,7 +59,7 @@ def compute_prototypes(model, support_dir, transform, device, success_label="suc
     class_names = sorted([d for d in os.listdir(support_dir)
                           if os.path.isdir(os.path.join(support_dir, d))])
     if not class_names:
-         raise ValueError(f"No class subdirectories found in support directory: {support_dir}")
+        raise ValueError(f"No class subdirectories found in support directory: {support_dir}")
 
     prototypes = []
     loaded_class_names = []

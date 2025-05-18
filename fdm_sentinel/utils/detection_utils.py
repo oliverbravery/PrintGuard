@@ -23,6 +23,7 @@ async def _send_alert(alert):
     await append_new_alert(alert)
 
 async def _terminate_alert_after_cooldown(alert):
+    # pylint: disable=C0415
     from ..app import app, get_camera_state
     await asyncio.sleep(alert.countdown_time)
     if app.state.alerts.get(alert.id, None) is not None:
@@ -36,9 +37,11 @@ async def _terminate_alert_after_cooldown(alert):
                 await cancel_print(alert.id)
 
 async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timestamp_arg):
+    # pylint: disable=C0415
     from .notification_utils import send_defect_notification
     from ..app import update_camera_state, app
     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
+    # pylint: disable=E1101
     _, img_buf = cv2.imencode('.jpg', frame)
     alert = Alert(
         id=alert_id,
@@ -55,6 +58,7 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
     return alert
 
 async def _live_detection_loop(app_state, camera_index):
+    # pylint: disable=C0415
     from fdm_sentinel.app import (get_camera_state, 
                                   update_camera_state, 
                                   update_camera_detection_history)
@@ -62,6 +66,7 @@ async def _live_detection_loop(app_state, camera_index):
     camera_lock = camera_state_ref["lock"]
 
     try:
+        # pylint: disable=E1101
         cap = cv2.VideoCapture(camera_index)
         if not cap.isOpened():
             logging.error("Cannot open camera at index %d", camera_index)
