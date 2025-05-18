@@ -4,7 +4,13 @@ import json
 from typing import List
 import logging
 import torch
-from fastapi import APIRouter, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, Request
+from fastapi import (APIRouter,
+                     File,
+                     HTTPException,
+                     UploadFile,
+                     WebSocket,
+                     WebSocketDisconnect,
+                     Request)
 from fastapi.responses import StreamingResponse
 from PIL import Image
 
@@ -19,7 +25,8 @@ async def detect_ep(request: Request, files: List[UploadFile] = File(...), strea
         app_state.transform is None or 
         app_state.device is None or 
         app_state.prototypes is None):
-        raise HTTPException(status_code=503, detail="Model not loaded or not ready. Service unavailable.")
+        raise HTTPException(status_code=503, 
+                            detail="Model not loaded or not ready. Service unavailable.")
 
     if not files:
         raise HTTPException(status_code=400, detail="No files provided.")

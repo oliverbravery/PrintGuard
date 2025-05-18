@@ -46,7 +46,7 @@ def draw_label(frame, label, color, success_label="success"):
         text_pos = (w - text_w - 30, h - 30)
 
         cv2.rectangle(frame, rect_start, rect_end, color, -1)
-        cv2.putText(frame, text, text_pos, font, font_scale, 
+        cv2.putText(frame, text, text_pos, font, font_scale,
                     (255, 255, 255), thickness, cv2.LINE_AA)
     except Exception as e:
         logging.error("Error drawing label: %s. Frame shape: %s, Label: %s", e, frame.shape, label)
@@ -76,7 +76,8 @@ def compute_prototypes(model, support_dir, transform, device, success_label="suc
             except Exception as e:
                 logging.error("Error loading support image %s: %s", img_path, e)
         if not tensors:
-            logging.warning("Could not load any valid images for class '%s'. Skipping this class.", cls)
+            logging.warning("Could not load any valid images for class '%s'. Skipping this class.", 
+                            cls)
             continue
         ts = torch.stack(tensors).to(device)
         with torch.no_grad():
@@ -92,23 +93,23 @@ def compute_prototypes(model, support_dir, transform, device, success_label="suc
     defect_idx = -1
     if success_label in loaded_class_names:
         try:
-            defect_candidates = [i for i, 
+            defect_candidates = [i for i,
                                  name in enumerate(loaded_class_names) if name != success_label]
             if len(defect_candidates) == 1:
                 defect_idx = defect_candidates[0]
-                logging.debug("Identified '%s' as the defect class (index %d).", 
+                logging.debug("Identified '%s' as the defect class (index %d).",
                               loaded_class_names[defect_idx], defect_idx)
             elif len(defect_candidates) > 1:
-                logging.warning("Multiple non-'%s' classes found: %s. Sensitivity adjustment requires exactly one defect class. Adjustment disabled.", 
+                logging.warning("Multiple non-'%s' classes found: %s. Sensitivity adjustment requires exactly one defect class. Adjustment disabled.",
                                 success_label, [loaded_class_names[i] for i in defect_candidates])
             else:
-                logging.warning("Only found the '%s' class. Cannot apply sensitivity adjustment.", 
+                logging.warning("Only found the '%s' class. Cannot apply sensitivity adjustment.",
                                 success_label)
         except IndexError:
-            logging.warning("Could not identify a distinct defect class, though '%s' was present. Sensitivity adjustment disabled.", 
+            logging.warning("Could not identify a distinct defect class, though '%s' was present. Sensitivity adjustment disabled.",
                             success_label)
     else:
-        logging.warning("'%s' class not found in loaded support set %s. Cannot apply sensitivity adjustment.", 
+        logging.warning("'%s' class not found in loaded support set %s. Cannot apply sensitivity adjustment.",
                         success_label, loaded_class_names)
 
     return prototypes, loaded_class_names, defect_idx

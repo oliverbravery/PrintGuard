@@ -103,7 +103,10 @@ async def _live_detection_loop(app_state, camera_index):
                 logging.debug("Live loop inference error for camera %d: %s", camera_index, e)
                 numeric = None
 
-            label = app_state.class_names[numeric] if isinstance(numeric, int) and 0 <= numeric < len(app_state.class_names) else str(numeric)
+            label = app_state.class_names[numeric] if (
+                isinstance(numeric, int)
+                and 0 <= numeric < len(app_state.class_names)
+                ) else str(numeric)
             current_timestamp = time.time()
 
             await update_camera_detection_history(camera_index, label, current_timestamp)

@@ -27,7 +27,7 @@ from .utils.inference_lib import (compute_prototypes, load_model,
 async def lifespan(app_instance: FastAPI):
     logging.debug("Setting up device...")
     app_instance.state.device = setup_device(DEVICE_TYPE)
-    logging.debug(f"Using device: {app_instance.state.device}")
+    logging.debug("Using device: %s", app_instance.state.device)
     try:
         logging.debug("Loading model...")
         app_instance.state.model, _ = load_model(MODEL_PATH,
@@ -160,7 +160,9 @@ templates = Jinja2Templates(directory=templates_dir)
 
 @app.get("/", include_in_schema=False)
 async def serve_index(request: Request):
-    camera_index = list(app.state.camera_states.keys())[0] if app.state.camera_states else config.CAMERA_INDEX
+    camera_index = list(app.state.camera_states.keys())[0] if (
+        app.state.camera_states
+        ) else config.CAMERA_INDEX
     return templates.TemplateResponse("index.html", {
         "camera_states": app.state.camera_states,
         "request": request,

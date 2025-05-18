@@ -17,8 +17,9 @@ async def _process_image(file: UploadFile, transform: Any, device: torch.device)
         return tensor
     except Exception as e:
         logging.error("Error processing image %s: %s", file.filename, e)
-        raise HTTPException(status_code=400,
-                            detail=f"Error processing image {file.filename}. Invalid image format or data.") from e
+        raise HTTPException(
+            status_code=400,
+            detail=f"Error processing image {file.filename}. Invalid image format or data.") from e
 
 async def _run_inference(model: torch.nn.Module,
                          batch_tensor: torch.Tensor,
