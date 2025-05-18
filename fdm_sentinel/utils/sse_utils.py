@@ -33,6 +33,8 @@ async def _sse_update_camera_state_func(camera_index):
         "total_detections": total_detections,
         "frame_rate": frame_rate,
         "error": state.get("error"),
+        "live_detection_running": state.get("live_detection_running", False),
+        "camera_index": camera_index
     }
     await append_new_outbound_packet(data, SSEDataType.CAMERA_STATE)
 

@@ -27,13 +27,78 @@
         .notification-popup button {
             margin-right: 5px;
         }
+        
+        /* Camera Stats Tiles Styles */
+        .camera-stats-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+            padding: 5px 0;
+            overflow-x: auto;
+        }
+        
+        .camera-stats-tile {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            min-width: 200px;
+            flex-shrink: 0;
+            position: relative;
+            color: black;
+        }
+        
+        .camera-stats-tile h3 {
+            font-size: 14px;
+            margin: 0 0 5px 0;
+            display: flex;
+            align-items: center;
+        }
+        
+        .camera-status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .camera-status-active {
+            background-color: #28a745;
+        }
+        
+        .camera-status-inactive {
+            background-color: #dc3545;
+        }
+        
+        .camera-stats-detail {
+            font-size: 13px;
+            margin: 2px 0;
+        }
+        
+        .camera-stats-detail span {
+            font-weight: 500;
+            margin-left: 5px;
+        }
+        
+        .prediction-success {
+            color: #28a745;
+        }
+        
+        .prediction-failure {
+            color: #dc3545;
+        }
     </style>
     <script type="module" src="{{ url_for('static', path='js/notifications.js') }}"></script>
     <script src="{{ url_for('static', path='js/sse.js') }}" defer></script>
+    <script src="{{ url_for('static', path='js/shared_logic.js') }}" defer></script>
 </head>
 <body>
     <header class="app-header">
         <h1>Print Sentinel</h1>
+        <div class="camera-stats-container" id="cameraStatsContainer">
+        </div>
     </header>
     
     <div id="notificationPopup" class="notification-popup">
