@@ -52,13 +52,13 @@ function updateCameraTile(cameraData) {
     const timeDisplay = formatTimeDisplay(cameraData.last_time);
 
     cameraTile.innerHTML = `
-        <h3>
-            <span class="camera-status-indicator ${statusClass}"></span>
+        <h3 style="pointer-events: none;">
+            <span class="camera-status-indicator ${statusClass}" style="pointer-events: none;"></span>
             Camera ${cameraIndex}
         </h3>
-        <p class="camera-stats-detail">Status: <span>${isActive ? 'Active' : 'Inactive'}</span></p>
-        <p class="camera-stats-detail">Last prediction: <span class="${predictionClass}">${lastResult}</span></p>
-        <p class="camera-stats-detail">Last detection: <span>${timeDisplay}</span></p>
+        <p class="camera-stats-detail" style="pointer-events: none;">Status: <span style="pointer-events: none;">${isActive ? 'Active' : 'Inactive'}</span></p>
+        <p class="camera-stats-detail" style="pointer-events: none;">Last prediction: <span class="${predictionClass}" style="pointer-events: none;">${lastResult}</span></p>
+        <p class="camera-stats-detail" style="pointer-events: none;">Last detection: <span style="pointer-events: none;">${timeDisplay}</span></p>
     `;
 }
 
