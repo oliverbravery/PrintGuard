@@ -88,6 +88,74 @@
         .prediction-failure {
             color: #dc3545;
         }
+        
+        /* Camera detail panel styles */
+        .camera-detail-panel {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            z-index: 1001;
+            display: none;
+            width: 80%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .camera-detail-panel h2 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .camera-detail-panel button {
+            margin-right: 10px;
+            margin-top: 15px;
+            padding: 8px 12px;
+        }
+        
+        .camera-detail-content {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .camera-live-feed {
+            width: 100%;
+            border: 1px solid #dee2e6;
+            background-color: #e9ecef;
+            height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 15px;
+        }
+        
+        .camera-live-feed img {
+            max-width: 100%;
+            max-height: 100%;
+        }
+        
+        .camera-stat-item {
+            margin-bottom: 8px;
+        }
+        
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            display: none;
+        }
     </style>
     <script type="module" src="{{ url_for('static', path='js/notifications.js') }}"></script>
     <script src="{{ url_for('static', path='js/sse.js') }}" defer></script>
@@ -106,6 +174,22 @@
         <p id="notificationCountdownTimer"></p>
         <button id="dismissNotificationBtn">Dismiss</button>
         <button id="cancelPrintBtn">Cancel Print</button>
+    </div>
+    
+    <div id="overlay" class="overlay"></div>
+    
+    <div id="cameraDetailPanel" class="camera-detail-panel">
+        <h2 id="cameraDetailTitle">Camera Details</h2>
+        <div class="camera-detail-content">
+            <div class="camera-live-feed" id="cameraLiveFeed">
+                <div id="cameraLiveFeedPlaceholder">Loading camera feed...</div>
+                <img id="cameraLiveFeedImage" style="display:none;" />
+            </div>
+            <div id="cameraDetailStats"></div>
+        </div>
+        <button id="startStopCameraBtn">Start/Stop Detection</button>
+        <button id="cancelPrintFromDetailBtn">Cancel Print</button>
+        <button id="closeCameraDetailBtn">Close</button>
     </div>
 </body>
 </html>
