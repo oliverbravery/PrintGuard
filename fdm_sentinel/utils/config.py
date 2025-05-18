@@ -43,3 +43,5 @@ COUNTDOWN_TIME = int(os.getenv("COUNTDOWN_TIME", "60"))  # seconds
 COUNTDOWN_ACTION = AlertAction.DISMISS
 
 MAX_CAMERAS = int(os.getenv("MAX_CAMERAS", "64"))  # maximum number of cameras
+CAMERA_INDICES = [int(idx) for idx in os.getenv(
+    "CAMERA_INDICES", "").split(",") if idx != ""]

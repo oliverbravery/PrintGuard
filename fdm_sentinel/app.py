@@ -1,15 +1,16 @@
 import asyncio
-import cv2
 import logging
 import os
 import time
 from contextlib import asynccontextmanager
 
+import cv2
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .models import CameraState
 from .routes.alert_routes import router as alert_router
 from .routes.detection_routes import router as detection_router
 from .routes.live_detection_routes import router as live_detection_router
@@ -22,8 +23,6 @@ from .utils.config import (DEVICE_TYPE, MODEL_OPTIONS_PATH, MODEL_PATH,
                            VAPID_PUBLIC_KEY)
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
-
-from .models import CameraState
 
 
 @asynccontextmanager
@@ -145,6 +144,7 @@ def detect_available_cameras(max_cameras=config.MAX_CAMERAS):
     return available_cameras
 
 available_cameras = detect_available_cameras()
+available_cameras.extend(config.CAMERA_INDICES)
 if not available_cameras:
     get_camera_state(config.CAMERA_INDEX)
     logging.warning("No cameras detected. Using default camera index %d", config.CAMERA_INDEX)
