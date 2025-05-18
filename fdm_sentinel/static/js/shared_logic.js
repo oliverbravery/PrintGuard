@@ -75,46 +75,75 @@ function updateCameraTile(cameraData) {
 }
 
 function fetchCameraStates() {
-    const cameraIndexes = [0, 1];
-    
-    cameraIndexes.forEach(index => {
-        fetch('/live/camera', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ camera_index: index })
-        })
-        .then(response => {
-            if (response.ok) return response.json();
-            throw new Error('Failed to fetch camera state');
-        })
-        .then(data => {
-            data.camera_index = index;
-            if (data.live_detection_running === undefined) {
-                data.live_detection_running = false;
-            }
-            
-            updateCameraTile(data);
-        })
-        .catch(error => {
-            console.error(`Error fetching camera ${index} state:`, error);
-            setTimeout(() => {
-                console.log(`Retrying camera ${index} state...`);
-                fetch('/live/camera', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ camera_index: index })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    data.camera_index = index;
-                    updateCameraTile(data);
-                })
-                .catch(retryError => console.error(`Retry failed for camera ${index}:`, retryError));
-            }, 500);
+    fetch('/live/available_cameras', {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => {
+        if (response.ok) return response.json();
+        throw new Error('Failed to fetch available cameras');
+    })
+    .then(data => {
+        const cameraIndexes = data.camera_indices;
+        cameraIndexes.forEach(index => {
+            fetch('/live/camera', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ camera_index: index })
+            })
+            .then(response => {
+                if (response.ok) return response.json();
+                throw new Error('Failed to fetch camera state');
+            })
+            .then(data => {
+                data.camera_index = index;
+                if (data.live_detection_running === undefined) {
+                    data.live_detection_running = false;
+                }
+                
+                updateCameraTile(data);
+            })
+            .catch(error => {
+                console.error(`Error fetching camera ${index} state:`, error);
+                setTimeout(() => {
+                    console.log(`Retrying camera ${index} state...`);
+                    fetch('/live/camera', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ camera_index: index })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        data.camera_index = index;
+                        updateCameraTile(data);
+                    })
+                    .catch(retryError => console.error(`Retry failed for camera ${index}:`, retryError));
+                }, 500);
+            });
+        });
+    })
+    .catch(error => {
+        console.error('Error fetching available cameras:', error);
+        const fallbackIndexes = [0, 1];
+        fallbackIndexes.forEach(index => {
+            fetch('/live/camera', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ camera_index: index })
+            })
+            .then(response => response.ok ? response.json() : Promise.reject('Failed to fetch camera state'))
+            .then(data => {
+                data.camera_index = index;
+                if (data.live_detection_running === undefined) data.live_detection_running = false;
+                updateCameraTile(data);
+            })
+            .catch(err => console.error(`Error fetching camera ${index} state:`, err));
         });
     });
 }

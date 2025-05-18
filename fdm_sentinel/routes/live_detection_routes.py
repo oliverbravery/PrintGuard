@@ -86,3 +86,10 @@ async def get_camera_state(request: Request, camera_index: int = Body(..., embed
         "sensitivity": camera_state.sensitivity
     }
     return response
+
+@router.get("/live/available_cameras")
+async def get_available_cameras(request: Request):
+    """
+    Returns a list of all available camera indices.
+    """
+    return {"camera_indices": list(request.app.state.camera_states.keys())}

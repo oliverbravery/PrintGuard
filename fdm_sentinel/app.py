@@ -89,6 +89,7 @@ app.state.camera_states = {}
 if app.debug:
     logging.basicConfig(level=logging.DEBUG)
 
+# pylint: disable=W0621
 def get_camera_state(camera_index, reset=False):
     """
     Get or create a state object for a specific camera index.
@@ -98,6 +99,7 @@ def get_camera_state(camera_index, reset=False):
         app.state.camera_states[camera_index] = CameraState()
     return app.state.camera_states[camera_index]
 
+# pylint: disable=W0621
 async def update_camera_state(camera_index, new_states):
     """
     Update states of a specific camera index.

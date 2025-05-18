@@ -61,3 +61,18 @@
     border-radius: 10px;
     font-size: 0.9em;
 }
+
+.camera-stats-container {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+
+.camera-stats-container::-webkit-scrollbar {
+    height: 6px;
+}
+
+.camera-stats-container::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+}
