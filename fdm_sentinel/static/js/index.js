@@ -79,13 +79,62 @@ document.addEventListener('DOMContentLoaded', () => {
         updateFrameRate(d.frame_rate, averageFPSDisplay);
     }
 
+    function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
+        const cameraIdx = parseInt(cameraIndexStr, 10);
+        fetch(`/live/camera`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ camera_index: cameraIdx })
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(errData => {
+                    throw new Error(`Failed to fetch camera state for camera ${cameraIdx}: ${errData.detail || response.statusText}`);
+                }).catch(() => {
+                    throw new Error(`Failed to fetch camera state for camera ${cameraIdx}: ${response.statusText}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            const metricsData = {
+                start_time: data.start_time,
+                last_result: data.last_result,
+                last_time: data.last_time,
+                total_detections: data.detection_times ? data.detection_times.length : 0,
+                frame_rate: null,
+                live_detection_running: data.live_detection_running,
+            };
+            updatePolledDetectionData(metricsData);
+            toggleStatusArea(data.live_detection_running);
+        })
+        .catch(error => {
+            console.error(`Error fetching metrics for camera ${cameraIdx}:`, error.message);
+            const emptyMetrics = {
+                start_time: null, last_result: 'Error', last_time: null,
+                total_detections: 0, frame_rate: null, live_detection_running: false
+            };
+            updatePolledDetectionData(emptyMetrics);
+            toggleStatusArea(false);
+        });
+    }
+
     document.addEventListener('cameraStateUpdated', evt => {
-        updatePolledDetectionData(evt.detail);
+        if (evt.detail && cameraSelect.value && (evt.detail.camera_index == cameraSelect.value)) {
+            updatePolledDetectionData(evt.detail);
+            if (typeof evt.detail.live_detection_running === 'boolean') {
+                toggleStatusArea(evt.detail.live_detection_running);
+            }
+        }
     });
 
     cameraSelect.addEventListener('change', () => {
-        videoPreview.src = `/camera_feed/${cameraSelect.value}`;
-        videoPreview.style.display = 'block';
+        const selectedCamera = cameraSelect.value;
+        if (selectedCamera) {
+            videoPreview.src = `/camera_feed/${selectedCamera}?t=${Date.now()}`;
+            videoPreview.style.display = 'block';
+            fetchAndUpdateMetricsForCamera(selectedCamera);
+        }
     });
 
     startBtn.addEventListener('click', function() {
@@ -129,13 +178,27 @@ document.addEventListener('DOMContentLoaded', () => {
         videoPreview.onerror = function() {
             console.warn("Failed to load camera feed, retrying...");
             setTimeout(() => {
-                videoPreview.src = `/camera_feed/${cameraSelect.value}?t=${Date.now()}`;
+                if (cameraSelect.value) {
+                    videoPreview.src = `/camera_feed/${cameraSelect.value}?t=${Date.now()}`;
+                }
             }, 500);
         };
 
         setTimeout(() => {
-            videoPreview.src = `/camera_feed/${cameraSelect.value}?t=${Date.now()}`;
-            videoPreview.style.display = 'block';
+            if (cameraSelect.value) {
+                videoPreview.src = `/camera_feed/${cameraSelect.value}?t=${Date.now()}`;
+                videoPreview.style.display = 'block';
+                fetchAndUpdateMetricsForCamera(cameraSelect.value);
+            } else {
+                console.warn("No camera selected initially or camera select is empty.");
+                const emptyMetrics = {
+                    start_time: null, last_result: 'N/A', last_time: null,
+                    total_detections: 0, frame_rate: null, live_detection_running: false
+                };
+                updatePolledDetectionData(emptyMetrics);
+                toggleStatusArea(false);
+                videoPreview.style.display = 'none';
+            }
         }, 100);
     }
 });
