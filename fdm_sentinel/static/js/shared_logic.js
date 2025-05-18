@@ -42,7 +42,19 @@ function updateCameraTile(cameraData) {
         cameraTile.className = 'camera-stats-tile';
         cameraTile.style.cursor = 'pointer';
         cameraTile.addEventListener('click', () => showCameraDetail(cameraIndex));
-        cameraStatsContainer.appendChild(cameraTile);
+        let inserted = false;
+        const existingTiles = cameraStatsContainer.querySelectorAll('.camera-stats-tile');
+        for (const tile of existingTiles) {
+            const tileIndex = parseInt(tile.id.split('-')[1]);
+            if (cameraIndex < tileIndex) {
+                cameraStatsContainer.insertBefore(cameraTile, tile);
+                inserted = true;
+                break;
+            }
+        }
+        if (!inserted) {
+            cameraStatsContainer.appendChild(cameraTile);
+        }
     }
 
     const isActive = cameraData.live_detection_running === true;
