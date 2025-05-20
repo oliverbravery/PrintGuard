@@ -4,67 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Print Sentinel</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='css/style-additions.css') }}">
     <script src="{{ url_for('static', path='js/index.js') }}" defer></script>
 </head>
 <body>
     {% include "shared_logic.html" %}
-    <div class="container">
-        <div class="main-layout">
-            <section class="video-section">
-                <h2>Live Video Feed</h2>
-                <img id="videoPreview" src="" alt="Live Video Feed Preview" />
-                <label for="cameraSelect" class="camera-select-label">Select Camera:</label>
-                <select id="cameraSelect" name="camera">
-                {% for camera_id in camera_states %}
-                    <option value="{{ camera_id }}" {% if camera_index == camera_id %}selected{% endif %}>{{ camera_id }}</option>
-                {% endfor %}
-                </select>
-            </section>
-
-            <section class="controls-section">
-                <div class="desktop-controls-text">
-                    <h2>Controls</h2>
-                    <p>Something here for starting and stopping live detection. And live imaging throughput.</p>
-                </div>
-                 <div class="mobile-controls">
-                    <h2>Controls</h2>
-                </div>
-                <div class="start-stop-buttons">
-                    <button id="startBtn">Start</button>
-                    <button id="stopBtn" class="button-secondary">Stop</button>
-                </div>
-                <div class="camera-stats">
-                    <h2>Detection Metrics</h2>
-                    <div class="grid-container four-by-four-grid">
-                        <div class="grid-item">
-                            {% set current_cam_state = camera_states.get(camera_index) %}
-                            <p id="elapsedTimeDisplay">
-                                N/A
-                            </p>
-                        </div>
-                        <div class="grid-item">
-                            <p id="lastResultDisplay">N/A</p>
-                            <p>detected at <span id="lastTimeValue">N/A</span></p>
-                        </div>
-                        <div class="grid-item">
-                            <p id="totalDetectionsDisplay">N/A</p>
-                            <p>total detections</p>
-                        </div>
-                        <div class="grid-item">
-                            <p id="averageFPSDisplay">-</p>
-                            <p>detections per second</p>
-                        </div>
-                </div>
-                <div class="status-area" id="camStatusArea">
-                    <div class="status-inactive" id="camStatusDisplay">Detection Inactive</div>
-                </div>
-                 <div class="settings-button-container">
-                    <button id="settingsBtn" onclick="window.location.href='/settings'">Settings</button>
-                </div>
-            </section>
-        </div>
-    </div>
+    <pre id="ascii-title"></pre>
 </body>
 </html>
