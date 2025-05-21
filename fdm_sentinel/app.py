@@ -198,12 +198,12 @@ async def update_settings(request: Request,
 def generate_frames(camera_index: int):
     # pylint: disable=E1101
     cap = cv2.VideoCapture(camera_index)
-    camera_state = get_camera_state(camera_index)
-    contrast = camera_state.contrast
-    brightness = camera_state.brightness
-    focus = camera_state.focus
-
     while True:
+        camera_state = get_camera_state(camera_index)
+        contrast = camera_state.contrast
+        brightness = camera_state.brightness
+        focus = camera_state.focus
+
         success, frame = cap.read()
         if not success:
             break
