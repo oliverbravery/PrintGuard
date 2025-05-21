@@ -35,3 +35,54 @@ body, html {
     object-fit: contain;
     aspect-ratio: 16 / 9;
 }
+
+#camera-list-container.grid-item {
+    justify-content: flex-start;
+    align-items: flex-start;
+}
+
+#cameraList {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    max-height: 100%;
+    overflow-y: auto;
+}
+
+.camera-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 2px dotted #333;
+    padding: 15px;
+    margin-bottom: 10px;
+    background-color: #f9f9f9;
+    box-sizing: border-box;
+}
+
+.camera-item:last-child {
+    margin-bottom: 0;
+}
+
+.camera-text-content {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    margin-right: 10px;
+}
+
+.camera-text-content span {
+    margin-bottom: 5px;
+}
+
+.camera-text-content span:last-child {
+    margin-bottom: 0;
+}
+
+.camera-video-preview {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+    flex-shrink: 0;
+}

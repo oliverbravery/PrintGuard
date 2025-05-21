@@ -14,7 +14,29 @@
             <pre id="ascii-title"></pre>
         </div>
         <div class="grid-item"></div>
-        <div class="grid-item">3</div>
+        <div class="grid-item" id="camera-list-container">
+            <ul id="cameraList" name="camera">
+                {% for camera_id in camera_states %}
+                    <li class="camera-item">
+                        <div class="camera-text-content">
+                            <span>Camera ID: {{ camera_id }}</span>
+                            <span class="camera-prediction">-</span>
+                            <span class="camera-prediction-time">Detected at: <span id="lastTimeValue">N/A</span></span>
+                        </div>
+                        <img src="{{ url_for('static', path='images/default_icon.png') }}" alt="Camera Icon" class="camera-video-preview">
+                    </li>
+                {% endfor %}
+                {% if not camera_states %}
+                <li class="camera-item">
+                    <div class="camera-text-content">
+                        <span>No cameras available</span>
+                        <span>Check connection or settings</span>
+                    </div>
+                    <img src="{{ url_for('static', path='images/default_icon.png') }}" alt="Icon" class="camera-video-preview">
+                </li>
+                {% endif %}
+            </ul>
+        </div>
         <div class="grid-item">
             <img id="videoPreview" src="" alt="Live Video Feed Preview" />
         </div>
