@@ -16,6 +16,7 @@ body, html {
 
 .grid-item {
     display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
     padding: 10px;
@@ -79,6 +80,10 @@ body, html {
     margin-right: 10px;
 }
 
+.camera-title {
+    color: #b2b2b2;
+}
+
 .camera-text-content span {
     margin-bottom: 5px;
 }
@@ -107,16 +112,14 @@ body, html {
 .camera-header {
     display: flex;
     align-items: center;
-    margin-bottom: 18px;
 }
 
 .live-indicator {
     width: 18px;
     height: 18px;
-    background: #e53935;
+    background: #b2b2b2;
     border-radius: 50%;
     margin-right: 12px;
-    box-shadow: 0 0 6px #e53935;
 }
 
 .info-grid {

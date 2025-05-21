@@ -12,31 +12,13 @@
     <div class="grid-container">
         <div class="grid-item">
             <pre id="ascii-title"></pre>
+            <div class="camera-header">
+                <span class="live-indicator"></span>
+                <p class="camera-title" id="cameraTitle">CAMERA_1</p>
+            </div>
         </div>
         <div class="grid-item">
-            <div class="camera-display-section">
-                <div class="camera-header">
-                    <span class="live-indicator"></span>
-                    <h2 class="camera-title" id="cameraTitle">CAMERA_1</h2>
-                </div>
-                <div class="info-grid">
-                    <div class="info-item">
-                        <span class="info-value success-status" id="camPredictionDisplay">Inactive</span>
-                        <span class="info-label" id="camPredictionTimeDisplay">at -</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-value" id="camTotalDetectionsDisplay">-</span>
-                        <span class="info-label">total detections</span>
-                    </div>
-                    <div class="info-item">
-                        <button class="start-stop-btn" id="camDetectionToggleButton">Start Detection</button>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-value" id="camFrameRateDisplay">-</span>
-                        <span class="info-label">frames per second</span>
-                    </div>
-                </div>
-            </div>
+            <img id="videoPreview" src="" alt="Live Video Feed Preview" />
         </div>
         <div class="grid-item" id="camera-list-container">
             <ul id="cameraList" name="camera">
@@ -62,7 +44,25 @@
             </ul>
         </div>
         <div class="grid-item">
-            <img id="videoPreview" src="" alt="Live Video Feed Preview" />
+            <div class="camera-display-section">
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-value success-status" id="camPredictionDisplay">Inactive</span>
+                        <span class="info-label" id="camPredictionTimeDisplay">at -</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-value" id="camTotalDetectionsDisplay">-</span>
+                        <span class="info-label">total detections</span>
+                    </div>
+                    <div class="info-item">
+                        <button class="start-stop-btn" id="camDetectionToggleButton">Start Detection</button>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-value" id="camFrameRateDisplay">-</span>
+                        <span class="info-label">frames per second</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </body>
