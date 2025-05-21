@@ -86,3 +86,96 @@ body, html {
     object-fit: contain;
     flex-shrink: 0;
 }
+
+.camera-display-section {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    padding: 24px 32px;
+    min-width: 420px;
+    min-height: 320px;
+    margin: 0 auto;
+}
+
+.camera-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 18px;
+}
+
+.live-indicator {
+    width: 18px;
+    height: 18px;
+    background: #e53935;
+    border-radius: 50%;
+    margin-right: 12px;
+    box-shadow: 0 0 6px #e53935;
+}
+
+.camera-title {
+    font-size: 2rem;
+    font-family: 'Fira Mono', monospace;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 18px 18px;
+    width: 100%;
+}
+
+.info-item {
+    border: 3px dashed #222;
+    border-radius: 10px;
+    padding: 22px 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 160px;
+    min-height: 80px;
+    background: #fafafa;
+    box-sizing: border-box;
+}
+
+.info-value {
+    font-size: 2.1rem;
+    font-family: 'Fira Mono', monospace;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.success-status {
+    color: #2ecc40;
+}
+
+.info-label {
+    font-size: 1.1rem;
+    color: #aaa;
+    font-family: 'Fira Mono', monospace;
+    font-weight: 400;
+    letter-spacing: 0.5px;
+}
+
+.start-stop-btn {
+    font-size: 1.5rem;
+    font-family: 'Fira Mono', monospace;
+    font-weight: 600;
+    padding: 18px 36px;
+    border-radius: 8px;
+    border: 2px solid #222;
+    background: #fff;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.start-stop-btn:hover {
+    background: #222;
+    color: #fff;
+}

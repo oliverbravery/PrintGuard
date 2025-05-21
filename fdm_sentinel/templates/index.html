@@ -13,7 +13,31 @@
         <div class="grid-item">
             <pre id="ascii-title"></pre>
         </div>
-        <div class="grid-item"></div>
+        <div class="grid-item">
+            <div class="camera-display-section">
+                <div class="camera-header">
+                    <span class="live-indicator"></span>
+                    <h2 class="camera-title">CAMERA_1</h2>
+                </div>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-value success-status">Success</span>
+                        <span class="info-label">at 13:40</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-value">154</span>
+                        <span class="info-label">total detections</span>
+                    </div>
+                    <div class="info-item">
+                        <button class="start-stop-btn">Start/Stop btn</button>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-value">30.1</span>
+                        <span class="info-label">frames p second</span>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div class="grid-item" id="camera-list-container">
             <ul id="cameraList" name="camera">
                 {% for camera_id in camera_states %}
