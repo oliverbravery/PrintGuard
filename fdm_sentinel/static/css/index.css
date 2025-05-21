@@ -151,6 +151,24 @@ body, html {
     box-sizing: border-box;
 }
 
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 18px 18px;
+    width: 100%;
+}
+
+.settings-item {
+    padding: 22px 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 160px;
+    min-height: 80px;
+    box-sizing: border-box;
+}
+
 .info-value {
     margin-bottom: 6px;
 }

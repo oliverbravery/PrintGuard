@@ -73,37 +73,44 @@
                 </div>
             </div>
             <div class="settings-section" style="display: none;">
-                <div class="settings-grid">
-                    <form action="{{ url_for('update_settings') }}" method="post" class="settings-form">
+                <form action="{{ url_for('update_settings') }}" method="post" class="settings-form settings-grid">
+                    <div class="settings-item">
                         <input type="hidden" id="camera_index" name="camera_index" value="{{ camera_index }}">
-            
+                    </div>
+                    <div class="settings-item">
                         <label for="sensitivity">Sensitivity: <span id="sensitivity_val"></span></label>
-                        <input type="range" id="sensitivity" name="sensitivity" min="0" max="3" step="0.05" value="-" />
-            
+                        <input type="range" id="sensitivity" name="sensitivity" min="0" max="2" step="0.05" value="-" />
+                    </div>
+                    <div class="settings-item">
                         <label for="brightness">Brightness: <span id="brightness_val"></span></label>
-                        <input type="range" id="brightness" name="brightness" min="0" max="2" step="0.1" value="-" />
-            
+                        <input type="range" id="brightness" name="brightness" min="0" max="2" step="0.05" value="-" />
+                    </div>
+                    <div class="settings-item">
                         <label for="contrast">Contrast: <span id="contrast_val"></span></label>
-                        <input type="range" id="contrast" name="contrast" min="0" max="2" step="0.1" value="-" />
-            
+                        <input type="range" id="contrast" name="contrast" min="0" max="2" step="0.05" value="-" />
+                    </div>
+                    <div class="settings-item">
                         <label for="focus">Focus: <span id="focus_val"></span></label>
-                        <input type="range" id="focus" name="focus" min="0" max="5" step="0.1" value="-" />
-            
+                        <input type="range" id="focus" name="focus" min="0" max="2" step="0.05" value="-" />
+                    </div>
+                    <div class="settings-item">
                         <label for="countdown_time">Countdown Time (s): <span id="countdown_time_val"></span></label>
-                        <input type="range" id="countdown_time" name="countdown_time" min="0" max="300" step="1" value="-" />
-            
+                        <input type="range" id="countdown_time" name="countdown_time" min="0" max="300" step="5" value="-" />
+                    </div>
+                    <div class="settings-item">
                         <label for="majority_vote_threshold">Majority Vote Threshold: <span id="majority_vote_threshold_val"></span></label>
                         <input type="range" id="majority_vote_threshold" name="majority_vote_threshold" min="1" max="100" value="-">
-            
+                    </div>
+                    <div class="settings-item">
                         <label for="majority_vote_window">Majority Vote Window (frames): <span id="majority_vote_window_val"></span></label>
                         <input type="range" id="majority_vote_window" name="majority_vote_window" min="1" max="100" value="-">
-            
-                        <button type="submit">Save Settings</button>
-                    </form>
-                    <div class="notification-button-container">
-                        <button id="notificationBtn">Enable Notifications</button>
                     </div>
-                </div>
+                    <div class="settings-item">
+                        <div class="notification-button-container">
+                            <button id="notificationBtn">Enable Notifications</button>
+                        </div>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
