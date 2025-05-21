@@ -4,10 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Print Sentinel</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/index.css') }}">
     <script src="{{ url_for('static', path='js/index.js') }}" defer></script>
 </head>
 <body>
     {% include "shared_logic.html" %}
-    <pre id="ascii-title"></pre>
+    <div class="grid-container">
+        <div class="grid-item">
+            <pre id="ascii-title"></pre>
+        </div>
+        <div class="grid-item"></div>
+        <div class="grid-item"></div>
+        <div class="grid-item"></div>
+    </div>
 </body>
 </html>
