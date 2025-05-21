@@ -1,3 +1,5 @@
+import { registerPush } from './notifications.js';
+
 const asciiTitle = document.getElementById('ascii-title');
 const cameraTitle = document.getElementById('cameraTitle');
 const camPredictionDisplay = document.getElementById('camPredictionDisplay');
@@ -8,6 +10,10 @@ const camDetectionToggleButton = document.getElementById('camDetectionToggleButt
 const camDetectionLiveIndicator = document.getElementsByClassName('live-indicator');
 const camVideoPreview = document.getElementById('videoPreview');
 const cameraItems = document.querySelectorAll('.camera-item');
+const settingsButton = document.getElementById('settingsButton');
+const cameraDisplaySection = document.querySelector('.camera-display-section');
+const settingsSection = document.querySelector('.settings-section');
+const notificationsBtn = document.getElementById('notificationBtn');
 
 const stopDetectionBtnLabel = 'Stop Detection';
 const startDetectionBtnLabel = 'Start Detection';
@@ -243,4 +249,24 @@ document.addEventListener('DOMContentLoaded', function() {
     if (firstCameraItem) {
         firstCameraItem.click();
     }
+});
+
+let isSettingsVisible = false;
+
+settingsButton.addEventListener('click', function() {
+    isSettingsVisible = !isSettingsVisible;
+    
+    if (isSettingsVisible) {
+        cameraDisplaySection.style.display = 'none';
+        settingsSection.style.display = 'block';
+        render_ascii_title(asciiTitle, 'Settings');
+    } else {
+        cameraDisplaySection.style.display = 'block';
+        settingsSection.style.display = 'none';
+        render_ascii_title(asciiTitle, 'FDM Sentinel');
+    }
+});
+
+notificationsBtn.addEventListener('click', async () => {
+    await registerPush();
 });
