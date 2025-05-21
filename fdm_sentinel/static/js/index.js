@@ -97,12 +97,24 @@ function updateSelectedCameraData(d) {
 
 function updateCameraSelectionListData(d) {
     cameraItems.forEach(item => {
-        const cameraIdText = item.querySelector('.camera-text-content span:first-child').textContent;
+        const cameraTextElement = item.querySelector('.camera-text-content span:first-child');
+        if (!cameraTextElement) return;
+
+        const cameraIdText = cameraTextElement.textContent;
         const cameraId = cameraIdText.split(': ')[1];
+
         if (cameraId == d.camera_index) {
             item.querySelector('.camera-prediction').textContent = d.last_result;
             item.querySelector('#lastTimeValue').textContent = d.last_time ? new Date(d.last_time * 1000).toLocaleTimeString() : '-';
             item.querySelector('.camera-prediction').style.color = d.last_result === 'success' ? 'green' : 'red';
+            let statusDot = item.querySelector('.camera-status');
+            if (d.live_detection_running) {
+                statusDot.style.backgroundColor = 'green';
+                statusDot.setAttribute('title', 'Live');
+            } else {
+                statusDot.style.backgroundColor = 'red';
+                statusDot.setAttribute('title', 'Not Live');
+            }
         }
     });
 }

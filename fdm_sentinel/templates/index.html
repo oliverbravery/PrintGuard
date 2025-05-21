@@ -25,7 +25,10 @@
                 {% for camera_id in camera_states %}
                     <li class="camera-item">
                         <div class="camera-text-content">
-                            <span>Camera ID: {{ camera_id }}</span>
+                            <div class="camera-header">
+                                <span>Camera ID: {{ camera_id }}</span>
+                                <span class="camera-status"></span>
+                            </div>
                             <span class="camera-prediction">-</span>
                             <span class="camera-prediction-time">Detected at: <span id="lastTimeValue">-</span></span>
                         </div>

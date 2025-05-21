@@ -122,6 +122,14 @@ body, html {
     margin-right: 12px;
 }
 
+.camera-status {
+    width: 18px;
+    height: 18px;
+    background: #b2b2b2;
+    border-radius: 50%;
+    margin-right: 12px;
+}
+
 .info-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
