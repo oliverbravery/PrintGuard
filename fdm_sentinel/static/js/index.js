@@ -184,15 +184,20 @@ function sendDetectionRequest(isStart) {
         },
         body: JSON.stringify({ camera_index: cameraIndex })
     })
-        .then(response => {
-            if (response.ok) {
-                return true;
-            } else {
-                console.error('Failed to start live detection');
-            }
-        })
-        .catch(error => console.error('Error:', error));
-    return false;
+    .then(response => {
+        if (response.ok) {
+            fetchAndUpdateMetricsForCamera(cameraIndex);
+        } else {
+            response.json().then(errData => {
+                console.error(`Failed to ${isStart ? 'start' : 'stop'} live detection for camera ${cameraIndex}. Server: ${errData.detail || response.statusText}`);
+            }).catch(() => {
+                console.error(`Failed to ${isStart ? 'start' : 'stop'} live detection for camera ${cameraIndex}. Status: ${response.status} ${response.statusText}`);
+            });
+        }
+    })
+    .catch(error => {
+        console.error(`Network error or exception during ${isStart ? 'start' : 'stop'} request for camera ${cameraIndex}:`, error);
+    });
 }
 
 camDetectionToggleButton.addEventListener('click', function() {
