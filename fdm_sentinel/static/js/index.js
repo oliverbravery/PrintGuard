@@ -309,10 +309,12 @@ settingsButton.addEventListener('click', function() {
         cameraDisplaySection.style.display = 'none';
         settingsSection.style.display = 'block';
         render_ascii_title(asciiTitle, 'Settings');
+        settingsButton.textContent = 'Back';
     } else {
         cameraDisplaySection.style.display = 'block';
         settingsSection.style.display = 'none';
         render_ascii_title(asciiTitle, 'FDM Sentinel');
+        settingsButton.textContent = 'Settings';
     }
 });
 
