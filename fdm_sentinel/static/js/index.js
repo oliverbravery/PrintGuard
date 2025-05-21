@@ -15,6 +15,11 @@ function changeLiveCameraFeed(cameraIndex) {
     camVideoPreview.src = `/camera_feed/${cameraIndex}`;
 }
 
+function updateCameraTitle(cameraIndex) {
+    const cameraIdText = cameraIndex ? `Camera ID: ${cameraIndex}` : 'No camera selected';
+    cameraTitle.textContent = cameraIdText;
+}
+
 function render_ascii_title(doc_element, text) {
     figlet.defaults({ fontPath: '/static/fonts/' });
     figlet.text(text, {
@@ -155,3 +160,19 @@ camDetectionToggleButton.addEventListener('click', function() {
 });
 
 render_ascii_title(asciiTitle, 'FDM Sentinel');
+
+const cameraItems = document.querySelectorAll('.camera-item');
+
+cameraItems.forEach(item => {
+    item.addEventListener('click', function() {
+        cameraItems.forEach(i => i.classList.remove('selected'));
+        this.classList.add('selected');
+        const cameraIdText = this.querySelector('.camera-text-content span:first-child').textContent;
+        const cameraId = cameraIdText.split(': ')[1];
+        console.log(`Selected camera ID: ${cameraId}`);
+        if (cameraId && cameraId !== "No cameras available") {
+            changeLiveCameraFeed(cameraId); 
+        }
+        updateCameraTitle(cameraId);
+    });
+});

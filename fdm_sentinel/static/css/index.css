@@ -67,6 +67,11 @@ body, html {
     margin-bottom: 0;
 }
 
+.camera-item.selected {
+    border-color: #007bff;
+    background-color: #f0f8ff;
+}
+
 .camera-text-content {
     display: flex;
     flex-direction: column;
