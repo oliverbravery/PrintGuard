@@ -86,7 +86,7 @@ function updateDetectionButton(isActive) {
     }
 }
 
-function updatePolledDetectionData(d) {
+function updateSelectedCameraData(d) {
     updateRecentDetectionResult(d.last_result, camPredictionDisplay);
     updateRecentDetectionTime(d.last_time, camPredictionTimeDisplay);
     updateTotalDetectionsCount(d.total_detections, camTotalDetectionsDisplay);
@@ -95,8 +95,28 @@ function updatePolledDetectionData(d) {
     updateDetectionButton(d.live_detection_running);
 }
 
+function updateCameraSelectionListData(d) {
+    cameraItems.forEach(item => {
+        const cameraIdText = item.querySelector('.camera-text-content span:first-child').textContent;
+        const cameraId = cameraIdText.split(': ')[1];
+        if (cameraId == d.camera_index) {
+            item.querySelector('.camera-prediction').textContent = d.last_result;
+            item.querySelector('#lastTimeValue').textContent = d.last_time ? new Date(d.last_time * 1000).toLocaleTimeString() : '-';
+            item.querySelector('.camera-prediction').style.color = d.last_result === 'success' ? 'green' : 'red';
+        }
+    });
+}
+
+function updatePolledDetectionData(d) {
+    if ('camera_index' in d && d.camera_index == cameraIndex) {
+        updateSelectedCameraData(d);
+    }
+    updateCameraSelectionListData(d);
+}
+
 function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
     const cameraIdx = parseInt(cameraIndexStr, 10);
+
     fetch(`/live/camera`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -114,11 +134,12 @@ function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
     })
     .then(data => {
         const metricsData = {
+            camera_index: cameraIdx,
             start_time: data.start_time,
             last_result: data.last_result,
             last_time: data.last_time,
             total_detections: data.detection_times ? data.detection_times.length : 0,
-            frame_rate: null,
+            frame_rate: data.frame_rate,
             live_detection_running: data.live_detection_running,
         };
         updatePolledDetectionData(metricsData);
@@ -126,8 +147,13 @@ function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
     .catch(error => {
         console.error(`Error fetching metrics for camera ${cameraIdx}:`, error.message);
         const emptyMetrics = {
-            start_time: null, last_result: 'Error', last_time: null,
-            total_detections: 0, frame_rate: null, live_detection_running: false
+            camera_index: cameraIdx,
+            start_time: null,
+            last_result: '-',
+            last_time: null,
+            total_detections: 0,
+            frame_rate: null,
+            live_detection_running: false
         };
         updatePolledDetectionData(emptyMetrics);
     });
@@ -182,12 +208,15 @@ cameraItems.forEach(item => {
 });
 
 document.addEventListener('cameraStateUpdated', evt => {
-    if (evt.detail && (evt.detail.camera_index == cameraIndex)) {
+    if (evt.detail) {
         updatePolledDetectionData(evt.detail);
     }
 });
 
 document.addEventListener('DOMContentLoaded', function() {
+    cameraItems.forEach(item => {
+        item.click();
+    });
     const firstCameraItem = cameraItems[0];
     if (firstCameraItem) {
         firstCameraItem.click();
