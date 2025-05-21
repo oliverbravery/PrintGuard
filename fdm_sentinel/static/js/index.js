@@ -15,6 +15,22 @@ const cameraDisplaySection = document.querySelector('.camera-display-section');
 const settingsSection = document.querySelector('.settings-section');
 const notificationsBtn = document.getElementById('notificationBtn');
 
+const settingsCameraIndex = document.getElementById('camera_index');
+const settingsSensitivity = document.getElementById('sensitivity');
+const settingsSensitivityLabel = document.getElementById('sensitivity_val');
+const settingsBrightness = document.getElementById('brightness');
+const settingsBrightnessLabel = document.getElementById('brightness_val');
+const settingsContrast = document.getElementById('contrast');
+const settingsContrastLabel = document.getElementById('contrast_val');
+const settingsFocus = document.getElementById('focus');
+const settingsFocusLabel = document.getElementById('focus_val');
+const settingsCountdownTime = document.getElementById('countdown_time');
+const settingsCountdownTimeLabel = document.getElementById('countdown_time_val');
+const settingsMajorityVoteThreshold = document.getElementById('majority_vote_threshold');
+const settingsMajorityVoteThresholdLabel = document.getElementById('majority_vote_threshold_val');
+const settingsMajorityVoteWindow = document.getElementById('majority_vote_window');
+const settingsMajorityVoteWindowLabel = document.getElementById('majority_vote_window_val');
+
 const stopDetectionBtnLabel = 'Stop Detection';
 const startDetectionBtnLabel = 'Start Detection';
 
@@ -94,6 +110,31 @@ function updateDetectionButton(isActive) {
     }
 }
 
+function updateSelectedCameraSettings(d) {
+    settingsCameraIndex.value = d.camera_index;
+    settingsSensitivityLabel.textContent = d.sensitivity;
+    settingsSensitivity.value = d.sensitivity;
+    updateSliderFill(settingsSensitivity);
+    settingsBrightnessLabel.textContent = d.brightness;
+    settingsBrightness.value = d.brightness;
+    updateSliderFill(settingsBrightness);
+    settingsContrastLabel.textContent = d.contrast;
+    settingsContrast.value = d.contrast;
+    updateSliderFill(settingsContrast);
+    settingsFocusLabel.textContent = d.focus;
+    settingsFocus.value = d.focus;
+    updateSliderFill(settingsFocus);
+    settingsCountdownTimeLabel.textContent = d.countdown_time;
+    settingsCountdownTime.value = d.countdown_time;
+    updateSliderFill(settingsCountdownTime);
+    settingsMajorityVoteThresholdLabel.textContent = d.majority_vote_threshold;
+    settingsMajorityVoteThreshold.value = d.majority_vote_threshold;
+    updateSliderFill(settingsMajorityVoteThreshold);
+    settingsMajorityVoteWindowLabel.textContent = d.majority_vote_window;
+    settingsMajorityVoteWindow.value = d.majority_vote_window;
+    updateSliderFill(settingsMajorityVoteWindow);
+}
+
 function updateSelectedCameraData(d) {
     updateRecentDetectionResult(d.last_result, camPredictionDisplay);
     updateRecentDetectionTime(d.last_time, camPredictionTimeDisplay);
@@ -164,8 +205,16 @@ function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
             total_detections: data.detection_times ? data.detection_times.length : 0,
             frame_rate: data.frame_rate,
             live_detection_running: data.live_detection_running,
+            brightness: data.brightness,
+            contrast: data.contrast,
+            focus: data.focus,
+            sensitivity: data.sensitivity,
+            countdown_time: data.countdown_time,
+            majority_vote_threshold: data.majority_vote_threshold,
+            majority_vote_window: data.majority_vote_window
         };
         updatePolledDetectionData(metricsData);
+        updateSelectedCameraSettings(metricsData);
     })
     .catch(error => {
         console.error(`Error fetching metrics for camera ${cameraIdx}:`, error.message);
@@ -229,9 +278,9 @@ cameraItems.forEach(item => {
         if (cameraId && cameraId !== "No cameras available") {
             changeLiveCameraFeed(cameraId); 
         }
+        cameraIndex = cameraId;
         updateCameraTitle(cameraId);
         fetchAndUpdateMetricsForCamera(cameraId);
-        cameraIndex = cameraId;
     });
 });
 
@@ -283,12 +332,47 @@ function updateSliderFill(slider) {
     }
 }
 
+function saveSetting(slider) {
+    const settingsForm = slider.closest('form');
+    if (!settingsForm) return;
+    const formData = new FormData(settingsForm);
+    const setting = slider.name;
+    const value = slider.value;
+    fetch(settingsForm.action, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams(formData)
+    })
+    .then(response => {
+        if (response.ok) {
+            const valueSpan = document.getElementById(`${slider.id}_val`);
+            if (valueSpan) {
+                valueSpan.textContent = value;
+            }
+            console.log(`Setting ${setting} updated to ${value} successfully`);
+        } else {
+            console.error(`Failed to update setting ${setting}`);
+        }
+    })
+    .catch(error => {
+        console.error(`Error saving setting ${setting}:`, error);
+    });
+}
+
 document.querySelectorAll('input[type="range"]').forEach(slider => {
     updateSliderFill(slider);
     slider.addEventListener('input', () => {
         updateSliderFill(slider);
     });
-    slider.addEventListener('change', () => {
+    slider.addEventListener('change', (e) => {
+        e.preventDefault();
         updateSliderFill(slider);
+        saveSetting(slider);
     });
+});
+
+document.querySelector('.settings-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
 });
