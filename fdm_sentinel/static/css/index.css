@@ -160,7 +160,7 @@ body, html {
 }
 
 .settings-item {
-    padding: 22px 28px;
+    padding: 12 14px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -303,4 +303,91 @@ body, html {
 .settings-button:hover {
     transform: translateY(-3px);
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 25px;
+    background: transparent;
+    margin: 10px 0;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 25px;
+    cursor: pointer;
+    background: #ffffff;
+    border: 2px solid #000000;
+    border-radius: 0;
+    box-sizing: border-box;
+}
+
+input[type="range"]::-moz-range-track {
+    width: 100%;
+    height: 25px;
+    cursor: pointer;
+    background: #ffffff;
+    border: 2px solid #000000;
+    border-radius: 0;
+    box-sizing: border-box;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 21px;
+    width: 10px;
+    background: transparent;
+    cursor: pointer;
+    margin-top: 0px;
+    box-sizing: border-box;
+    position: relative;
+    z-index: 3;
+}
+
+input[type="range"]::-moz-range-thumb {
+    height: 21px;
+    width: 10px;
+    background: transparent;
+    cursor: pointer;
+    box-sizing: border-box;
+    position: relative;
+    z-index: 3;
+}
+
+#brightness::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, #FFD700 var(--value, 50%), #ffffff var(--value, 50%));
+}
+
+#brightness::-moz-range-track {
+    background: linear-gradient(to right, #FFD700 var(--value, 50%), #ffffff var(--value, 50%));
+}
+
+#contrast::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, #555555 var(--value, 50%), #ffffff var(--value, 50%));
+}
+
+#contrast::-moz-range-track {
+    background: linear-gradient(to right, #555555 var(--value, 50%), #ffffff var(--value, 50%));
+}
+
+#focus::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, #DDDDDD var(--value, 50%), #ffffff var(--value, 50%));
+}
+
+#focus::-moz-range-track {
+    background: linear-gradient(to right, #DDDDDD var(--value, 50%), #ffffff var(--value, 50%));
+}
+
+#countdown_time::-webkit-slider-runnable-track,
+#majority_vote_threshold::-webkit-slider-runnable-track,
+#majority_vote_window::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, #DDDDDD var(--value, 50%), #ffffff var(--value, 50%));
+}
+
+#countdown_time::-moz-range-track,
+#majority_vote_threshold::-moz-range-track,
+#majority_vote_window::-moz-range-track {
+    background: linear-gradient(to right, #DDDDDD var(--value, 50%), #ffffff var(--value, 50%));
 }

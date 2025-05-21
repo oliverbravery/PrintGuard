@@ -270,3 +270,25 @@ settingsButton.addEventListener('click', function() {
 notificationsBtn.addEventListener('click', async () => {
     await registerPush();
 });
+
+function updateSliderFill(slider) {
+    const min = slider.min || 0;
+    const max = slider.max || 100;
+    const value = slider.value;
+    const percentage = ((value - min) / (max - min)) * 100;
+    slider.style.setProperty('--value', `${percentage}%`);
+    const valueSpan = document.getElementById(`${slider.id}_val`);
+    if (valueSpan) {
+        valueSpan.textContent = value;
+    }
+}
+
+document.querySelectorAll('input[type="range"]').forEach(slider => {
+    updateSliderFill(slider);
+    slider.addEventListener('input', () => {
+        updateSliderFill(slider);
+    });
+    slider.addEventListener('change', () => {
+        updateSliderFill(slider);
+    });
+});
