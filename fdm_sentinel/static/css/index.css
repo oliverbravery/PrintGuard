@@ -27,6 +27,8 @@ body, html {
     text-align: center;
     margin-bottom: 0;
     flex-shrink: 0;
+    transform: scale(0.8);
+    transform-origin: center;
 }
 
 #videoPreview {
@@ -121,7 +123,6 @@ body, html {
 }
 
 .info-item {
-    border: 2px dotted #333;
     padding: 22px 28px;
     display: flex;
     flex-direction: column;
