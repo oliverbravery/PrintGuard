@@ -7,9 +7,12 @@ const camFrameRateDisplay = document.getElementById('camFrameRateDisplay');
 const camDetectionToggleButton = document.getElementById('camDetectionToggleButton');
 const camDetectionLiveIndicator = document.getElementsByClassName('live-indicator');
 const camVideoPreview = document.getElementById('videoPreview');
+const cameraItems = document.querySelectorAll('.camera-item');
 
 const stopDetectionBtnLabel = 'Stop Detection';
 const startDetectionBtnLabel = 'Start Detection';
+
+let cameraIndex = 0;
 
 function changeLiveCameraFeed(cameraIndex) {
     camVideoPreview.src = `/camera_feed/${cameraIndex}`;
@@ -136,7 +139,7 @@ function sendDetectionRequest(isStart) {
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ camera_index: selectedCamera })
+        body: JSON.stringify({ camera_index: cameraIndex })
     })
         .then(response => {
             if (response.ok) {
@@ -153,15 +156,15 @@ camDetectionToggleButton.addEventListener('click', function() {
     if (camDetectionToggleButton.textContent === startDetectionBtnLabel) {
         camDetectionToggleButton.textContent = stopDetectionBtnLabel;
         sendDetectionRequest(true);
+        toggleIsDetectingStatus(true);
     } else {
         camDetectionToggleButton.textContent = startDetectionBtnLabel;
         sendDetectionRequest(false);
+        toggleIsDetectingStatus(false);
     }
 });
 
 render_ascii_title(asciiTitle, 'FDM Sentinel');
-
-const cameraItems = document.querySelectorAll('.camera-item');
 
 cameraItems.forEach(item => {
     item.addEventListener('click', function() {
@@ -169,10 +172,24 @@ cameraItems.forEach(item => {
         this.classList.add('selected');
         const cameraIdText = this.querySelector('.camera-text-content span:first-child').textContent;
         const cameraId = cameraIdText.split(': ')[1];
-        console.log(`Selected camera ID: ${cameraId}`);
         if (cameraId && cameraId !== "No cameras available") {
             changeLiveCameraFeed(cameraId); 
         }
         updateCameraTitle(cameraId);
+        fetchAndUpdateMetricsForCamera(cameraId);
+        cameraIndex = cameraId;
     });
+});
+
+document.addEventListener('cameraStateUpdated', evt => {
+    if (evt.detail && (evt.detail.camera_index == cameraIndex)) {
+        updatePolledDetectionData(evt.detail);
+    }
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    const firstCameraItem = cameraItems[0];
+    if (firstCameraItem) {
+        firstCameraItem.click();
+    }
 });
