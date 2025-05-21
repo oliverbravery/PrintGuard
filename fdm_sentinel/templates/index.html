@@ -17,22 +17,22 @@
             <div class="camera-display-section">
                 <div class="camera-header">
                     <span class="live-indicator"></span>
-                    <h2 class="camera-title">CAMERA_1</h2>
+                    <h2 class="camera-title" id="cameraTitle">CAMERA_1</h2>
                 </div>
                 <div class="info-grid">
                     <div class="info-item">
-                        <span class="info-value success-status">Inactive</span>
-                        <span class="info-label">at -</span>
+                        <span class="info-value success-status" id="camPredictionDisplay">Inactive</span>
+                        <span class="info-label" id="camPredictionTimeDisplay">at -</span>
                     </div>
                     <div class="info-item">
-                        <span class="info-value">-</span>
+                        <span class="info-value" id="camTotalDetectionsDisplay">-</span>
                         <span class="info-label">total detections</span>
                     </div>
                     <div class="info-item">
-                        <button class="start-stop-btn">Start/Stop Detection</button>
+                        <button class="start-stop-btn" id="camDetectionToggleButton">Start Detection</button>
                     </div>
                     <div class="info-item">
-                        <span class="info-value">-</span>
+                        <span class="info-value" id="camFrameRateDisplay">-</span>
                         <span class="info-label">frames per second</span>
                     </div>
                 </div>
