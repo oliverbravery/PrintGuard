@@ -6,9 +6,14 @@ const camTotalDetectionsDisplay = document.getElementById('camTotalDetectionsDis
 const camFrameRateDisplay = document.getElementById('camFrameRateDisplay');
 const camDetectionToggleButton = document.getElementById('camDetectionToggleButton');
 const camDetectionLiveIndicator = document.getElementsByClassName('live-indicator');
+const camVideoPreview = document.getElementById('videoPreview');
 
 const stopDetectionBtnLabel = 'Stop Detection';
 const startDetectionBtnLabel = 'Start Detection';
+
+function changeLiveCameraFeed(cameraIndex) {
+    camVideoPreview.src = `/camera_feed/${cameraIndex}`;
+}
 
 function render_ascii_title(doc_element, text) {
     figlet.defaults({ fontPath: '/static/fonts/' });
