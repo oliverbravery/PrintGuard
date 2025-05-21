@@ -115,6 +115,7 @@ function updateCameraSelectionListData(d) {
                 statusDot.style.backgroundColor = 'red';
                 statusDot.setAttribute('title', 'Not Live');
             }
+            item.querySelector('#cameraPreview').src = `/camera_feed/${d.camera_index}`;
         }
     });
 }

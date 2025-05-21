@@ -32,7 +32,7 @@
                             <span class="camera-prediction">-</span>
                             <span class="camera-prediction-time">Detected at: <span id="lastTimeValue">-</span></span>
                         </div>
-                        <img src="{{ url_for('static', path='images/default_icon.png') }}" alt="Camera Icon" class="camera-video-preview">
+                        <img src="{{ url_for('static', path='images/default_icon.png') }}" alt="Camera Icon" class="camera-video-preview" id="cameraPreview">
                     </li>
                 {% endfor %}
                 {% if not camera_states %}
