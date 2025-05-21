@@ -119,19 +119,18 @@ body, html {
 }
 
 .live-indicator {
-    width: 18px;
-    height: 18px;
-    background: #b2b2b2;
-    border-radius: 50%;
+    font-size: 14px;
+    color: #b2b2b2;
     margin-right: 12px;
+    display: inline-block;
 }
 
 .camera-status {
-    width: 18px;
-    height: 18px;
-    background: #b2b2b2;
-    border-radius: 50%;
+    font-size: 14px;
+    color: #b2b2b2;
+    margin-left: 15px;
     margin-right: 12px;
+    display: inline-block;
 }
 
 .info-grid {

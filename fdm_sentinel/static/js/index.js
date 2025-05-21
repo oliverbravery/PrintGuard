@@ -19,7 +19,7 @@ function changeLiveCameraFeed(cameraIndex) {
 }
 
 function updateCameraTitle(cameraIndex) {
-    const cameraIdText = cameraIndex ? `Camera ID: ${cameraIndex}` : 'No camera selected';
+    const cameraIdText = cameraIndex ? `Camera ${cameraIndex} - ` : 'No camera selected';
     cameraTitle.textContent = cameraIdText;
 }
 
@@ -72,9 +72,11 @@ function updateFrameRate(fps, doc_element) {
 
 function toggleIsDetectingStatus(isActive) {
     if (isActive) {
-        camDetectionLiveIndicator[0].style.backgroundColor = 'green';
+        camDetectionLiveIndicator[0].textContent = `active`;
+        camDetectionLiveIndicator[0].style.color = '#2ecc40';
     } else {
-        camDetectionLiveIndicator[0].style.backgroundColor = 'red';
+        camDetectionLiveIndicator[0].textContent = `inactive`;
+        camDetectionLiveIndicator[0].style.color = '#b2b2b2';
     }
 }
 
@@ -107,13 +109,15 @@ function updateCameraSelectionListData(d) {
             item.querySelector('.camera-prediction').textContent = d.last_result;
             item.querySelector('#lastTimeValue').textContent = d.last_time ? new Date(d.last_time * 1000).toLocaleTimeString() : '-';
             item.querySelector('.camera-prediction').style.color = d.last_result === 'success' ? 'green' : 'red';
-            let statusDot = item.querySelector('.camera-status');
+            let statusIndicator = item.querySelector('.camera-status');
             if (d.live_detection_running) {
-                statusDot.style.backgroundColor = 'green';
-                statusDot.setAttribute('title', 'Live');
+                statusIndicator.textContent = `active`;
+                statusIndicator.style.color = '#2ecc40';
+                statusIndicator.style.backgroundColor = 'transparent';
             } else {
-                statusDot.style.backgroundColor = 'red';
-                statusDot.setAttribute('title', 'Not Live');
+                statusIndicator.textContent = `inactive`;
+                statusIndicator.style.color = '#b2b2b2';
+                statusIndicator.style.backgroundColor = 'transparent';
             }
             item.querySelector('#cameraPreview').src = `/camera_feed/${d.camera_index}`;
         }
