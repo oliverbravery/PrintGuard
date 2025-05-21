@@ -5,10 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Print Sentinel</title>
     <link rel="stylesheet" href="{{ url_for('static', path='css/index.css') }}">
+    <script type="module" src="{{ url_for('static', path='js/notifications.js') }}"></script>
+    <script src="{{ url_for('static', path='js/sse.js') }}" defer></script>
     <script src="{{ url_for('static', path='js/index.js') }}" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/figlet@1.8.1/lib/figlet.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic+Coding&display=swap" rel="stylesheet">
 </head>
 <body>
-    {% include "shared_logic.html" %}
+    <!-- Notification Popup for SSE Alerts -->
+    <div id="notificationPopup" class="notification-popup">
+        <div id="notificationsContainer"></div>
+    </div>
     <div class="grid-container">
         <div class="grid-item">
             <pre id="ascii-title"></pre>

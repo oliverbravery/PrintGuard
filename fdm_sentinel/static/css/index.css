@@ -3,6 +3,10 @@ body, html {
     margin: 0;
     display: flex;
     flex-direction: column;
+    font-family: "Nanum Gothic Coding", monospace;
+    font-weight: 400;
+    font-style: normal;
+    position: relative;
 }
 
 .grid-container {
@@ -172,4 +176,93 @@ body, html {
 .start-stop-btn:hover {
     background: #222;
     color: #fff;
+}
+
+/* Notification Styles */
+.notification-popup {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    max-width: 350px;
+    width: auto;
+    z-index: 1000;
+    display: none;
+    background-color: rgba(255, 255, 255, 0.95);
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    transition: all 0.3s ease-in-out;
+    animation: slideIn 0.3s forwards;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+#notificationsContainer {
+    padding: 10px;
+}
+
+.alert-item {
+    background-color: white;
+    border-radius: 6px;
+    padding: 12px !important;
+    margin-bottom: 10px !important;
+    animation: fadeIn 0.4s;
+    transition: all 0.2s ease;
+}
+
+.alert-item:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+}
+
+.alert-item p {
+    margin: 0 0 8px 0;
+    color: #333;
+    font-size: 14px;
+}
+
+.alert-item img {
+    border-radius: 4px;
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+.alert-item button {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 6px 12px;
+    margin-right: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.alert-item button:hover {
+    background-color: #e9ecef;
+}
+
+.alert-item .cancel-print-btn {
+    background-color: #dc3545;
+    color: white;
+    border-color: #dc3545;
+}
+
+.alert-item .cancel-print-btn:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
