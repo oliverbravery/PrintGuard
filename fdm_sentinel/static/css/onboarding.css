@@ -1,0 +1,86 @@
+body, html {
+    height: 100%;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    font-family: "Nanum Gothic Coding", monospace;
+    font-weight: 400;
+    font-style: normal;
+    background-color: #f4f7f6;
+    color: #333;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+#ascii-title {
+    text-align: center;
+    margin-bottom: 20px;
+    flex-shrink: 0;
+    transform: scale(0.8);
+    transform-origin: center;
+}
+
+h2 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 1.8rem;
+}
+
+p {
+    max-width: 500px;
+    margin-bottom: 25px;
+    line-height: 1.6;
+}
+
+.modal-buttons {
+    display: flex;
+    flex-direction: row;
+    gap: 15px;
+    margin-bottom: 25px;
+}
+
+button {
+    padding: 18px 36px;
+    border: 2px dotted #222;
+    cursor: pointer;
+    background: transparent;
+    transition: background 0.2s, color 0.2s;
+    font-family: inherit;
+    font-size: 1rem;
+}
+
+button:hover {
+    background: #222;
+    color: #fff;
+}
+
+#enableNotificationsBtn {
+    background-color: #fff;
+}
+
+.modal-footer {
+    font-size: 0.9rem;
+    color: #777;
+}
+
+@media (max-width: 600px) {
+    .modal-buttons {
+        flex-direction: column;
+        width: 80%;
+        max-width: 300px;
+    }
+    
+    button {
+        padding: 12px 24px;
+    }
+}

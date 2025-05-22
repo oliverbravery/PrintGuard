@@ -7,6 +7,7 @@ body, html {
     font-weight: 400;
     font-style: normal;
     position: relative;
+    background-color: #f4f7f6;
 }
 
 .grid-container {
