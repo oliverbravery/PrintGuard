@@ -4,17 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FDM Sentinel</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='css/style-additions.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/onboarding.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic+Coding&display=swap" rel="stylesheet">
+    <script type="module" src="{{ url_for('static', path='js/utils.js') }}" defer></script>
     <script type="module" src="{{ url_for('static', path='js/onboarding.js') }}" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/figlet@1.8.1/lib/figlet.min.js"></script>
 </head>
 <body>
-    <h2>Welcome to FDM Sentinel</h2>
-    <p>Get notified when your 3D print needs attention. Enable notifications to stay updated on print failures.</p>
-    <div class="modal-buttons">
-        <button id="enableNotificationsBtn">Enable Notifications</button>
-        <button id="skipNotificationsBtn">Not Now</button>
+    <div class="container">
+        <pre id="ascii-title"></pre>
+        <h2>welcome 👋</h2>
+        <p>Get notified when your 3D print needs attention. Enable notifications to stay updated on print failures.</p>
+        <div class="modal-buttons">
+            <button id="enableNotificationsBtn">Enable Notifications</button>
+            <button id="skipNotificationsBtn">Not Now</button>
+        </div>
+        <p class="modal-footer">Note: You can always change this setting later.</p>
     </div>
-    <p class="modal-footer">Note: You can always change this settings later.</p>
 </body>
 </html>

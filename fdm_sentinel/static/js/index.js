@@ -1,204 +1,425 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const onboardingComplete = localStorage.getItem('onboardingComplete');
-    if (!onboardingComplete) {
-        window.location.href = '/onboarding';
+import { registerPush, unsubscribeFromPush } from './notifications.js';
+import { render_ascii_title } from './utils.js';
+
+const asciiTitle = document.getElementById('ascii-title');
+const cameraTitle = document.getElementById('cameraTitle');
+const camPredictionDisplay = document.getElementById('camPredictionDisplay');
+const camPredictionTimeDisplay = document.getElementById('camPredictionTimeDisplay');
+const camTotalDetectionsDisplay = document.getElementById('camTotalDetectionsDisplay');
+const camFrameRateDisplay = document.getElementById('camFrameRateDisplay');
+const camDetectionToggleButton = document.getElementById('camDetectionToggleButton');
+const camDetectionLiveIndicator = document.getElementsByClassName('live-indicator');
+const camVideoPreview = document.getElementById('videoPreview');
+const cameraItems = document.querySelectorAll('.camera-item');
+const settingsButton = document.getElementById('settingsButton');
+const cameraDisplaySection = document.querySelector('.camera-display-section');
+const settingsSection = document.querySelector('.settings-section');
+const notificationsBtn = document.getElementById('notificationBtn');
+
+const settingsCameraIndex = document.getElementById('camera_index');
+const settingsSensitivity = document.getElementById('sensitivity');
+const settingsSensitivityLabel = document.getElementById('sensitivity_val');
+const settingsBrightness = document.getElementById('brightness');
+const settingsBrightnessLabel = document.getElementById('brightness_val');
+const settingsContrast = document.getElementById('contrast');
+const settingsContrastLabel = document.getElementById('contrast_val');
+const settingsFocus = document.getElementById('focus');
+const settingsFocusLabel = document.getElementById('focus_val');
+const settingsCountdownTime = document.getElementById('countdown_time');
+const settingsCountdownTimeLabel = document.getElementById('countdown_time_val');
+const settingsMajorityVoteThreshold = document.getElementById('majority_vote_threshold');
+const settingsMajorityVoteThresholdLabel = document.getElementById('majority_vote_threshold_val');
+const settingsMajorityVoteWindow = document.getElementById('majority_vote_window');
+const settingsMajorityVoteWindowLabel = document.getElementById('majority_vote_window_val');
+
+const stopDetectionBtnLabel = 'Stop Detection';
+const startDetectionBtnLabel = 'Start Detection';
+
+let cameraIndex = 0;
+
+function changeLiveCameraFeed(cameraIndex) {
+    camVideoPreview.src = `/camera_feed/${cameraIndex}`;
+}
+
+function updateCameraTitle(cameraIndex) {
+    const cameraIdText = cameraIndex ? `Camera ${cameraIndex}` : 'No camera selected';
+    cameraTitle.textContent = cameraIdText;
+}
+
+function updateRecentDetectionResult(result, doc_element) {
+    doc_element.textContent = result || '-';
+}
+
+function updateRecentDetectionTime(last_time, doc_element) {
+    try {
+        if (!last_time) {throw 'exit';}
+        const date = new Date(last_time * 1000);
+        const timeString = date.toISOString().substr(11, 8);
+        doc_element.textContent = timeString;
+        return;
+    } catch (e) {
+        doc_element.textContent = '-';
+    }
+}
+
+function updateTotalDetectionsCount(detection_times, doc_element) {
+    if (!detection_times) {
+        doc_element.textContent = '-';
         return;
     }
+    doc_element.textContent = detection_times;
+}
 
-    const camStatusArea = document.getElementById('camStatusArea');
-    const camStatusDisplay = document.getElementById('camStatusDisplay');
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const videoPreview = document.getElementById('videoPreview');
-    const cameraSelect = document.getElementById('cameraSelect');
-
-    const elapsedTimeDisplay = document.getElementById('elapsedTimeDisplay');
-    const lastResultDisplay = document.getElementById('lastResultDisplay');
-    const lastTimeValue = document.getElementById('lastTimeValue');
-    const totalDetectionsDisplay = document.getElementById('totalDetectionsDisplay');
-    const averageFPSDisplay = document.getElementById('averageFPSDisplay');
-
-    function updateElapsedTime(start_time, doc_element) {
-        if (!start_time) {
-            doc_element.textContent = '-';
-            return;
-        }
-        const elapsedTime = ((Date.now() / 1000) - start_time).toFixed(0);
-        doc_element.textContent = `${elapsedTime}s elapsed`;
+function updateFrameRate(fps, doc_element) {
+    if (!fps) {
+        doc_element.textContent = '-';
+        return;
     }
+    doc_element.textContent = fps.toFixed(2);
+}
 
-    function updateRecentDetectionResult(result, doc_element) {
-        doc_element.textContent = result || 'in-active';
+function toggleIsDetectingStatus(isActive) {
+    if (isActive) {
+        camDetectionLiveIndicator[0].textContent = `active`;
+        camDetectionLiveIndicator[0].style.color = '#2ecc40';
+    } else {
+        camDetectionLiveIndicator[0].textContent = `inactive`;
+        camDetectionLiveIndicator[0].style.color = '#b2b2b2';
     }
+}
 
-    function updateRecentDetectionTime(last_time, doc_element) {
-        try {
-            if (!last_time) {throw 'exit';}
-            const date = new Date(last_time * 1000);
-            const timeString = date.toISOString().substr(11, 8);
-            doc_element.textContent = timeString;
-            return;
-        } catch (e) {
-            doc_element.textContent = '-';
-        }
+function updateDetectionButton(isActive) {
+    if (isActive) {
+        camDetectionToggleButton.textContent = stopDetectionBtnLabel;
+    } else {
+        camDetectionToggleButton.textContent = startDetectionBtnLabel;
     }
+}
 
-    function updateTotalDetectionsCount(detection_times, doc_element) {
-        if (!detection_times) {
-            doc_element.textContent = '-';
-            return;
-        }
-        doc_element.textContent = detection_times;
-    }
+function updateSelectedCameraSettings(d) {
+    settingsCameraIndex.value = d.camera_index;
+    settingsSensitivityLabel.textContent = d.sensitivity;
+    settingsSensitivity.value = d.sensitivity;
+    updateSliderFill(settingsSensitivity);
+    settingsBrightnessLabel.textContent = d.brightness;
+    settingsBrightness.value = d.brightness;
+    updateSliderFill(settingsBrightness);
+    settingsContrastLabel.textContent = d.contrast;
+    settingsContrast.value = d.contrast;
+    updateSliderFill(settingsContrast);
+    settingsFocusLabel.textContent = d.focus;
+    settingsFocus.value = d.focus;
+    updateSliderFill(settingsFocus);
+    settingsCountdownTimeLabel.textContent = d.countdown_time;
+    settingsCountdownTime.value = d.countdown_time;
+    updateSliderFill(settingsCountdownTime);
+    settingsMajorityVoteThresholdLabel.textContent = d.majority_vote_threshold;
+    settingsMajorityVoteThreshold.value = d.majority_vote_threshold;
+    updateSliderFill(settingsMajorityVoteThreshold);
+    settingsMajorityVoteWindowLabel.textContent = d.majority_vote_window;
+    settingsMajorityVoteWindow.value = d.majority_vote_window;
+    updateSliderFill(settingsMajorityVoteWindow);
+}
 
-    function updateFrameRate(fps, doc_element) {
-        if (!fps) {
-            doc_element.textContent = '-';
-            return;
-        }
-        doc_element.textContent = fps.toFixed(2);
-    }
+function updateSelectedCameraData(d) {
+    updateRecentDetectionResult(d.last_result, camPredictionDisplay);
+    updateRecentDetectionTime(d.last_time, camPredictionTimeDisplay);
+    updateTotalDetectionsCount(d.total_detections, camTotalDetectionsDisplay);
+    updateFrameRate(d.frame_rate, camFrameRateDisplay);
+    toggleIsDetectingStatus(d.live_detection_running);
+    updateDetectionButton(d.live_detection_running);
+}
 
-    function toggleStatusArea(isActive) {
-        if (isActive) {
-            camStatusArea.classList.remove('status-inactive');
-            camStatusArea.classList.add('status-active');
-            camStatusDisplay.textContent = 'Detection Active';
-        } else {
-            camStatusArea.classList.remove('status-active');
-            camStatusArea.classList.add('status-inactive');
-            camStatusDisplay.textContent = 'Detection Inactive';
-        }
-    }
+function updateCameraSelectionListData(d) {
+    cameraItems.forEach(item => {
+        const cameraTextElement = item.querySelector('.camera-text-content span:first-child');
+        if (!cameraTextElement) return;
 
-    function updatePolledDetectionData(d) {
-        updateElapsedTime(d.start_time, elapsedTimeDisplay);
-        updateRecentDetectionResult(d.last_result, lastResultDisplay);
-        updateRecentDetectionTime(d.last_time, lastTimeValue);
-        updateTotalDetectionsCount(d.total_detections, totalDetectionsDisplay);
-        updateFrameRate(d.frame_rate, averageFPSDisplay);
-    }
+        const cameraIdText = cameraTextElement.textContent;
+        const cameraId = cameraIdText.split(': ')[1];
 
-    function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
-        const cameraIdx = parseInt(cameraIndexStr, 10);
-        fetch(`/live/camera`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ camera_index: cameraIdx })
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(errData => {
-                    throw new Error(`Failed to fetch camera state for camera ${cameraIdx}: ${errData.detail || response.statusText}`);
-                }).catch(() => {
-                    throw new Error(`Failed to fetch camera state for camera ${cameraIdx}: ${response.statusText}`);
-                });
-            }
-            return response.json();
-        })
-        .then(data => {
-            const metricsData = {
-                start_time: data.start_time,
-                last_result: data.last_result,
-                last_time: data.last_time,
-                total_detections: data.detection_times ? data.detection_times.length : 0,
-                frame_rate: null,
-                live_detection_running: data.live_detection_running,
-            };
-            updatePolledDetectionData(metricsData);
-            toggleStatusArea(data.live_detection_running);
-        })
-        .catch(error => {
-            console.error(`Error fetching metrics for camera ${cameraIdx}:`, error.message);
-            const emptyMetrics = {
-                start_time: null, last_result: 'Error', last_time: null,
-                total_detections: 0, frame_rate: null, live_detection_running: false
-            };
-            updatePolledDetectionData(emptyMetrics);
-            toggleStatusArea(false);
-        });
-    }
-
-    document.addEventListener('cameraStateUpdated', evt => {
-        if (evt.detail && cameraSelect.value && (evt.detail.camera_index == cameraSelect.value)) {
-            updatePolledDetectionData(evt.detail);
-            if (typeof evt.detail.live_detection_running === 'boolean') {
-                toggleStatusArea(evt.detail.live_detection_running);
-            }
-        }
-    });
-
-    cameraSelect.addEventListener('change', () => {
-        const selectedCamera = cameraSelect.value;
-        if (selectedCamera) {
-            videoPreview.src = `/camera_feed/${selectedCamera}?t=${Date.now()}`;
-            videoPreview.style.display = 'block';
-            fetchAndUpdateMetricsForCamera(selectedCamera);
-        }
-    });
-
-    startBtn.addEventListener('click', function() {
-        const selectedCamera = cameraSelect.value;
-        fetch(`/live/start`, { 
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ camera_index: selectedCamera })
-        })
-            .then(response => {
-                if (response.ok) {
-                    toggleStatusArea(true);
-                } else {
-                    console.error('Failed to start live detection');
-                }
-            })
-            .catch(error => console.error('Error:', error));
-    });
-
-    stopBtn.addEventListener('click', function() {
-        fetch(`/live/stop`, { 
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ camera_index: cameraSelect.value })
-        })
-            .then(response => {
-                if (response.ok) {
-                    toggleStatusArea(false);
-                } else {
-                    console.error('Failed to stop live detection');
-                }
-            })
-            .catch(error => console.error('Error:', error));
-    });
-
-    if (videoPreview && cameraSelect) {
-        videoPreview.onerror = function() {
-            console.warn("Failed to load camera feed, retrying...");
-            setTimeout(() => {
-                if (cameraSelect.value) {
-                    videoPreview.src = `/camera_feed/${cameraSelect.value}?t=${Date.now()}`;
-                }
-            }, 500);
-        };
-
-        setTimeout(() => {
-            if (cameraSelect.value) {
-                videoPreview.src = `/camera_feed/${cameraSelect.value}?t=${Date.now()}`;
-                videoPreview.style.display = 'block';
-                fetchAndUpdateMetricsForCamera(cameraSelect.value);
+        if (cameraId == d.camera_index) {
+            item.querySelector('.camera-prediction').textContent = d.last_result;
+            item.querySelector('#lastTimeValue').textContent = d.last_time ? new Date(d.last_time * 1000).toLocaleTimeString() : '-';
+            item.querySelector('.camera-prediction').style.color = d.last_result === 'success' ? 'green' : 'red';
+            let statusIndicator = item.querySelector('.camera-status');
+            if (d.live_detection_running) {
+                statusIndicator.textContent = `active`;
+                statusIndicator.style.color = '#2ecc40';
+                statusIndicator.style.backgroundColor = 'transparent';
             } else {
-                console.warn("No camera selected initially or camera select is empty.");
-                const emptyMetrics = {
-                    start_time: null, last_result: 'N/A', last_time: null,
-                    total_detections: 0, frame_rate: null, live_detection_running: false
-                };
-                updatePolledDetectionData(emptyMetrics);
-                toggleStatusArea(false);
-                videoPreview.style.display = 'none';
+                statusIndicator.textContent = `inactive`;
+                statusIndicator.style.color = '#b2b2b2';
+                statusIndicator.style.backgroundColor = 'transparent';
             }
-        }, 100);
+            item.querySelector('#cameraPreview').src = `/camera_feed/${d.camera_index}`;
+        }
+    });
+}
+
+function updatePolledDetectionData(d) {
+    if ('camera_index' in d && d.camera_index == cameraIndex) {
+        updateSelectedCameraData(d);
     }
+    updateCameraSelectionListData(d);
+}
+
+function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
+    const cameraIdx = parseInt(cameraIndexStr, 10);
+
+    fetch(`/live/camera`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera_index: cameraIdx })
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(errData => {
+                throw new Error(`Failed to fetch camera state for camera ${cameraIdx}: ${errData.detail || response.statusText}`);
+            }).catch(() => {
+                throw new Error(`Failed to fetch camera state for camera ${cameraIdx}: ${response.statusText}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        const metricsData = {
+            camera_index: cameraIdx,
+            start_time: data.start_time,
+            last_result: data.last_result,
+            last_time: data.last_time,
+            total_detections: data.detection_times ? data.detection_times.length : 0,
+            frame_rate: data.frame_rate,
+            live_detection_running: data.live_detection_running,
+            brightness: data.brightness,
+            contrast: data.contrast,
+            focus: data.focus,
+            sensitivity: data.sensitivity,
+            countdown_time: data.countdown_time,
+            majority_vote_threshold: data.majority_vote_threshold,
+            majority_vote_window: data.majority_vote_window
+        };
+        updatePolledDetectionData(metricsData);
+        updateSelectedCameraSettings(metricsData);
+    })
+    .catch(error => {
+        console.error(`Error fetching metrics for camera ${cameraIdx}:`, error.message);
+        const emptyMetrics = {
+            camera_index: cameraIdx,
+            start_time: null,
+            last_result: '-',
+            last_time: null,
+            total_detections: 0,
+            frame_rate: null,
+            live_detection_running: false
+        };
+        updatePolledDetectionData(emptyMetrics);
+    });
+}
+
+function sendDetectionRequest(isStart) {
+    fetch(`/live/${isStart ? 'start' : 'stop'}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ camera_index: cameraIndex })
+    })
+    .then(response => {
+        if (response.ok) {
+            fetchAndUpdateMetricsForCamera(cameraIndex);
+        } else {
+            response.json().then(errData => {
+                console.error(`Failed to ${isStart ? 'start' : 'stop'} live detection for camera ${cameraIndex}. Server: ${errData.detail || response.statusText}`);
+            }).catch(() => {
+                console.error(`Failed to ${isStart ? 'start' : 'stop'} live detection for camera ${cameraIndex}. Status: ${response.status} ${response.statusText}`);
+            });
+        }
+    })
+    .catch(error => {
+        console.error(`Network error or exception during ${isStart ? 'start' : 'stop'} request for camera ${cameraIndex}:`, error);
+    });
+}
+
+camDetectionToggleButton.addEventListener('click', function() {
+    if (camDetectionToggleButton.textContent === startDetectionBtnLabel) {
+        camDetectionToggleButton.textContent = stopDetectionBtnLabel;
+        sendDetectionRequest(true);
+        toggleIsDetectingStatus(true);
+    } else {
+        camDetectionToggleButton.textContent = startDetectionBtnLabel;
+        sendDetectionRequest(false);
+        toggleIsDetectingStatus(false);
+    }
+});
+
+render_ascii_title(asciiTitle, 'FDM\nsentinel');
+
+cameraItems.forEach(item => {
+    item.addEventListener('click', function() {
+        cameraItems.forEach(i => i.classList.remove('selected'));
+        this.classList.add('selected');
+        const cameraIdText = this.querySelector('.camera-text-content span:first-child').textContent;
+        const cameraId = cameraIdText.split(': ')[1];
+        if (cameraId && cameraId !== "No cameras available") {
+            changeLiveCameraFeed(cameraId); 
+        }
+        cameraIndex = cameraId;
+        updateCameraTitle(cameraId);
+        fetchAndUpdateMetricsForCamera(cameraId);
+    });
+});
+
+document.addEventListener('cameraStateUpdated', evt => {
+    if (evt.detail) {
+        updatePolledDetectionData(evt.detail);
+    }
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    cameraItems.forEach(item => {
+        item.click();
+    });
+    const firstCameraItem = cameraItems[0];
+    if (firstCameraItem) {
+        firstCameraItem.click();
+    }
+});
+
+let isSettingsVisible = false;
+
+settingsButton.addEventListener('click', function() {
+    isSettingsVisible = !isSettingsVisible;
+    
+    if (isSettingsVisible) {
+        cameraDisplaySection.style.display = 'none';
+        settingsSection.style.display = 'block';
+        render_ascii_title(asciiTitle, 'Settings');
+        settingsButton.textContent = 'Back';
+    } else {
+        cameraDisplaySection.style.display = 'block';
+        settingsSection.style.display = 'none';
+        render_ascii_title(asciiTitle, 'FDM\nsentinel');
+        settingsButton.textContent = 'Settings';
+    }
+});
+
+let notificationsEnabled = false;
+notificationsBtn.textContent = '';
+
+async function checkNotificationsEnabled() {
+    if (!('Notification' in window)) {
+        return false;
+    }
+    if (Notification.permission !== 'granted') {
+        return false;
+    }
+    if ('serviceWorker' in navigator) {
+        try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            for (const registration of registrations) {
+                const subscription = await registration.pushManager.getSubscription();
+                if (subscription) {
+                    return true;
+                }
+            }
+        } catch (error) {
+            console.error('Error checking for active subscriptions:', error);
+        }
+    }
+    
+    return false;
+}
+
+async function updateNotificationButtonState() {
+    notificationsEnabled = await checkNotificationsEnabled();
+    
+    if (notificationsEnabled) {
+        notificationsBtn.classList.remove('disabled');
+        notificationsBtn.classList.add('enabled');
+        console.debug('Notifications are enabled, button set to ON state');
+    } else {
+        notificationsBtn.classList.remove('enabled');
+        notificationsBtn.classList.add('disabled');
+        console.debug('Notifications are disabled, button set to OFF state');
+    }
+    notificationsBtn.textContent = '';
+}
+
+updateNotificationButtonState();
+
+notificationsBtn.addEventListener('click', async () => {
+    notificationsBtn.disabled = true;
+    try {
+        if (await checkNotificationsEnabled()) {
+            console.debug('Unsubscribing from notifications...');
+            await unsubscribeFromPush();
+        } else {
+            console.debug('Subscribing to notifications...');
+            await registerPush();
+        }
+        setTimeout(() => {
+            updateNotificationButtonState();
+            notificationsBtn.disabled = false;
+        }, 500);
+    } catch (error) {
+        console.error('Failed to toggle notifications:', error);
+        notificationsBtn.disabled = false;
+    }
+});
+
+function updateSliderFill(slider) {
+    const min = slider.min || 0;
+    const max = slider.max || 100;
+    const value = slider.value;
+    const percentage = ((value - min) / (max - min)) * 100;
+    slider.style.setProperty('--value', `${percentage}%`);
+    const valueSpan = document.getElementById(`${slider.id}_val`);
+    if (valueSpan) {
+        valueSpan.textContent = value;
+    }
+}
+
+function saveSetting(slider) {
+    const settingsForm = slider.closest('form');
+    if (!settingsForm) return;
+    const formData = new FormData(settingsForm);
+    const setting = slider.name;
+    const value = slider.value;
+    fetch(settingsForm.action, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams(formData)
+    })
+    .then(response => {
+        if (response.ok) {
+            const valueSpan = document.getElementById(`${slider.id}_val`);
+            if (valueSpan) {
+                valueSpan.textContent = value;
+            }
+        } else {
+            console.error(`Failed to update setting ${setting}`);
+        }
+    })
+    .catch(error => {
+        console.error(`Error saving setting ${setting}:`, error);
+    });
+}
+
+document.querySelectorAll('input[type="range"]').forEach(slider => {
+    updateSliderFill(slider);
+    slider.addEventListener('input', () => {
+        updateSliderFill(slider);
+    });
+    slider.addEventListener('change', (e) => {
+        e.preventDefault();
+        updateSliderFill(slider);
+        saveSetting(slider);
+    });
+});
+
+document.querySelector('.settings-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
 });

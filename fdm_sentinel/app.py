@@ -5,17 +5,16 @@ import time
 from contextlib import asynccontextmanager
 
 import cv2
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-
+from fastapi.responses import RedirectResponse, StreamingResponse
 from .models import CameraState
 from .routes.alert_routes import router as alert_router
 from .routes.detection_routes import router as detection_router
 from .routes.live_detection_routes import router as live_detection_router
 from .routes.notification_routes import router as notification_router
-from .routes.settings_routes import settings_router
 from .routes.sse_routes import router as sse_router
 from .utils import config
 from .utils.config import (DEVICE_TYPE, MODEL_OPTIONS_PATH, MODEL_PATH,
@@ -173,6 +172,55 @@ async def serve_index(request: Request):
         "current_time": time.time(),
     })
 
+# pylint: disable=unused-argument
+@app.post("/", include_in_schema=False)
+async def update_settings(request: Request,
+                          camera_index: int = Form(...),
+                          sensitivity: float = Form(...),
+                          brightness: float = Form(...),
+                          contrast: float = Form(...),
+                          focus: float = Form(...),
+                          countdown_time: int = Form(...),
+                          majority_vote_threshold: int = Form(...),
+                          majority_vote_window: int = Form(...),
+                          ):
+    await update_camera_state(camera_index, {
+        "sensitivity": sensitivity,
+        "brightness": brightness,
+        "contrast": contrast,
+        "focus": focus,
+        "countdown_time": countdown_time,
+        "majority_vote_threshold": majority_vote_threshold,
+        "majority_vote_window": majority_vote_window,
+    })
+    return RedirectResponse("/", status_code=303)
+
+def generate_frames(camera_index: int):
+    # pylint: disable=E1101
+    cap = cv2.VideoCapture(camera_index)
+    while True:
+        camera_state = get_camera_state(camera_index)
+        contrast = camera_state.contrast
+        brightness = camera_state.brightness
+        focus = camera_state.focus
+
+        success, frame = cap.read()
+        if not success:
+            break
+        frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=int((brightness - 1.0) * 255))
+        if focus and focus != 1.0:
+            blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=focus)
+            frame = cv2.addWeighted(frame, 1.0 + focus, blurred, -focus, 0)
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+    cap.release()
+
+@app.get('/camera_feed/{camera_index}', include_in_schema=False)
+async def camera_feed(camera_index: int):
+    return StreamingResponse(generate_frames(camera_index),
+                             media_type='multipart/x-mixed-replace; boundary=frame')
+
 @app.get("/onboarding", include_in_schema=False)
 async def serve_onboarding(request: Request):
     return templates.TemplateResponse("onboarding.html", {
@@ -182,7 +230,6 @@ async def serve_onboarding(request: Request):
 app.include_router(detection_router, tags=["detection"])
 app.include_router(live_detection_router, tags=["live_detection"])
 app.include_router(alert_router, tags=["alerts"])
-app.include_router(settings_router, tags=["settings"])
 app.include_router(notification_router, tags=["notifications"])
 app.include_router(sse_router, tags=["sse"])
 

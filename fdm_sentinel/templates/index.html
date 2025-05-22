@@ -4,67 +4,118 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Print Sentinel</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='css/style-additions.css') }}">
-    <script src="{{ url_for('static', path='js/index.js') }}" defer></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/index.css') }}">
+    <script type="module" src="{{ url_for('static', path='js/notifications.js') }}"></script>
+    <script src="{{ url_for('static', path='js/sse.js') }}" defer></script>
+    <script src="{{ url_for('static', path='js/utils.js') }}" defer></script>
+    <script type="module" src="{{ url_for('static', path='js/index.js') }}" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/figlet@1.8.1/lib/figlet.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic+Coding&display=swap" rel="stylesheet">
 </head>
 <body>
-    {% include "shared_logic.html" %}
-    <div class="container">
-        <div class="main-layout">
-            <section class="video-section">
-                <h2>Live Video Feed</h2>
-                <img id="videoPreview" src="" alt="Live Video Feed Preview" />
-                <label for="cameraSelect" class="camera-select-label">Select Camera:</label>
-                <select id="cameraSelect" name="camera">
+    <div id="notificationPopup" class="notification-popup">
+        <div id="notificationsContainer"></div>
+    </div>
+    <div class="grid-container">
+        <div class="grid-item">
+            <pre id="ascii-title"></pre>
+            <div class="camera-header">
+                <p class="camera-title" id="cameraTitle"></p>
+                <span class="live-indicator"></span>
+            </div>
+        </div>
+        <div class="grid-item">
+            <img id="videoPreview" src="" alt="Live Video Feed Preview" />
+        </div>
+        <div class="grid-item" id="camera-list-container">
+            <ul id="cameraList" name="camera">
                 {% for camera_id in camera_states %}
-                    <option value="{{ camera_id }}" {% if camera_index == camera_id %}selected{% endif %}>{{ camera_id }}</option>
+                    <li class="camera-item">
+                        <div class="camera-text-content">
+                            <div class="camera-header">
+                                <span>Camera ID: {{ camera_id }}</span>
+                                <span class="camera-status"></span>
+                            </div>
+                            <span class="camera-prediction">-</span>
+                            <span class="camera-prediction-time">Detected at: <span id="lastTimeValue">-</span></span>
+                        </div>
+                        <img src="{{ url_for('static', path='images/default_icon.png') }}" alt="Camera Icon" class="camera-video-preview" id="cameraPreview">
+                    </li>
                 {% endfor %}
-                </select>
-            </section>
-
-            <section class="controls-section">
-                <div class="desktop-controls-text">
-                    <h2>Controls</h2>
-                    <p>Something here for starting and stopping live detection. And live imaging throughput.</p>
+                {% if not camera_states %}
+                <li class="camera-item">
+                    <div class="camera-text-content">
+                        <span>No cameras available</span>
+                        <span>Check connection or settings</span>
+                    </div>
+                    <img src="{{ url_for('static', path='images/default_icon.png') }}" alt="Icon" class="camera-video-preview">
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+        <div class="grid-item">
+            <div class="camera-display-section">
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-value success-status" id="camPredictionDisplay">Inactive</span>
+                        <span class="info-label" id="camPredictionTimeDisplay">at -</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-value" id="camTotalDetectionsDisplay">-</span>
+                        <span class="info-label">total detections</span>
+                    </div>
+                    <div class="info-item">
+                        <button class="start-stop-btn" id="camDetectionToggleButton">Start Detection</button>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-value" id="camFrameRateDisplay">-</span>
+                        <span class="info-label">frames per second</span>
+                    </div>
                 </div>
-                 <div class="mobile-controls">
-                    <h2>Controls</h2>
-                </div>
-                <div class="start-stop-buttons">
-                    <button id="startBtn">Start</button>
-                    <button id="stopBtn" class="button-secondary">Stop</button>
-                </div>
-                <div class="camera-stats">
-                    <h2>Detection Metrics</h2>
-                    <div class="grid-container four-by-four-grid">
-                        <div class="grid-item">
-                            {% set current_cam_state = camera_states.get(camera_index) %}
-                            <p id="elapsedTimeDisplay">
-                                N/A
-                            </p>
+            </div>
+            <div class="settings-section" style="display: none;">
+                <form action="{{ url_for('update_settings') }}" method="post" class="settings-form settings-grid">
+                    <input type="hidden" id="camera_index" name="camera_index"  value="{{ camera_index }}">
+                    <div class="settings-item">
+                        <label for="sensitivity">Sensitivity: <span id="sensitivity_val"></span></label>
+                        <input type="range" id="sensitivity" name="sensitivity" min="0" max="2" step="0.05"  value="-" />
+                    </div>
+                    <div class="settings-item">
+                        <label for="brightness">Brightness: <span id="brightness_val"></span></label>
+                        <input type="range" id="brightness" name="brightness" min="0" max="2" step="0.05"  value="-" />
+                    </div>
+                    <div class="settings-item">
+                        <label for="contrast">Contrast: <span id="contrast_val"></span></label>
+                        <input type="range" id="contrast" name="contrast" min="0" max="2" step="0.05"  value="-" />
+                    </div>
+                    <div class="settings-item">
+                        <label for="focus">Focus: <span id="focus_val"></span></label>
+                        <input type="range" id="focus" name="focus" min="0" max="2" step="0.05"  value="-" />
+                    </div>
+                    <div class="settings-item">
+                        <label for="countdown_time">Countdown Time (s): <span id="countdown_time_val"></span></label>
+                        <input type="range" id="countdown_time" name="countdown_time" min="0" max="300" step="5"  value="-" />
+                    </div>
+                    <div class="settings-item">
+                        <label for="majority_vote_threshold">Majority Vote Threshold: <span id="majority_vote_threshold_val"></span></label>
+                        <input type="range" id="majority_vote_threshold" name="majority_vote_threshold" min="1" max="20"  value="-" />
+                    </div>
+                    <div class="settings-item">
+                        <label for="majority_vote_window">Majority Vote Window (frames): <span id="majority_vote_window_val"></span></label>
+                        <input type="range" id="majority_vote_window" name="majority_vote_window" min="1" max="100"  value="-" />
+                    </div>
+                    <div class="settings-item">
+                        <label for="notificationBtn">Notifications</label>
+                        <div class="notification-control">
+                            <button id="notificationBtn">Enable Notifications</button>
                         </div>
-                        <div class="grid-item">
-                            <p id="lastResultDisplay">N/A</p>
-                            <p>detected at <span id="lastTimeValue">N/A</span></p>
-                        </div>
-                        <div class="grid-item">
-                            <p id="totalDetectionsDisplay">N/A</p>
-                            <p>total detections</p>
-                        </div>
-                        <div class="grid-item">
-                            <p id="averageFPSDisplay">-</p>
-                            <p>detections per second</p>
-                        </div>
-                </div>
-                <div class="status-area" id="camStatusArea">
-                    <div class="status-inactive" id="camStatusDisplay">Detection Inactive</div>
-                </div>
-                 <div class="settings-button-container">
-                    <button id="settingsBtn" onclick="window.location.href='/settings'">Settings</button>
-                </div>
-            </section>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
+    <button class="settings-button" id="settingsButton">
+        Settings
+    </button>
 </body>
 </html>

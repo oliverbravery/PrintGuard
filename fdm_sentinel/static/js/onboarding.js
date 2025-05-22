@@ -1,7 +1,9 @@
 import { registerPush } from './notifications.js';
+import { render_ascii_title } from './utils.js';
 
 const enableBtn = document.getElementById('enableNotificationsBtn');
 const skipBtn = document.getElementById('skipNotificationsBtn');
+const asciiTitle = document.getElementById('ascii-title');
 
 function getIndexPage() {
     window.location.href = '/';
@@ -9,11 +11,11 @@ function getIndexPage() {
 
 enableBtn.addEventListener('click', async () => {
     await registerPush();
-    localStorage.setItem('onboardingComplete', 'true');
     getIndexPage();
 });
 
 skipBtn.addEventListener('click', () => {
-    localStorage.setItem('onboardingComplete', 'true');
     getIndexPage();
 });
+
+render_ascii_title(asciiTitle, 'FDM Sentinel');
