@@ -1,4 +1,5 @@
 import { registerPush, unsubscribeFromPush } from './notifications.js';
+import { render_ascii_title } from './utils.js';
 
 const asciiTitle = document.getElementById('ascii-title');
 const cameraTitle = document.getElementById('cameraTitle');
@@ -43,21 +44,6 @@ function changeLiveCameraFeed(cameraIndex) {
 function updateCameraTitle(cameraIndex) {
     const cameraIdText = cameraIndex ? `Camera ${cameraIndex} - ` : 'No camera selected';
     cameraTitle.textContent = cameraIdText;
-}
-
-function render_ascii_title(doc_element, text) {
-    figlet.defaults({ fontPath: '/static/fonts/' });
-    figlet.text(text, {
-        font: 'Big Money-ne',
-        horizontalLayout: 'default',
-        verticalLayout: 'default'
-    }, function(err, data) {
-        if (err) {
-            console.error(err);
-            return;
-        }
-        doc_element.textContent = data;
-    });
 }
 
 function updateRecentDetectionResult(result, doc_element) {
