@@ -267,7 +267,7 @@ camDetectionToggleButton.addEventListener('click', function() {
     }
 });
 
-render_ascii_title(asciiTitle, 'FDM Sentinel');
+render_ascii_title(asciiTitle, 'FDM\nsentinel');
 
 cameraItems.forEach(item => {
     item.addEventListener('click', function() {
@@ -313,7 +313,7 @@ settingsButton.addEventListener('click', function() {
     } else {
         cameraDisplaySection.style.display = 'block';
         settingsSection.style.display = 'none';
-        render_ascii_title(asciiTitle, 'FDM Sentinel');
+        render_ascii_title(asciiTitle, 'FDM\nsentinel');
         settingsButton.textContent = 'Settings';
     }
 });
