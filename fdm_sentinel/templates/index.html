@@ -74,9 +74,7 @@
             </div>
             <div class="settings-section" style="display: none;">
                 <form action="{{ url_for('update_settings') }}" method="post" class="settings-form settings-grid">
-                    <div class="settings-item">
-                        <input type="hidden" id="camera_index" name="camera_index"  value="{{ camera_index }}">
-                    </div>
+                    <input type="hidden" id="camera_index" name="camera_index"  value="{{ camera_index }}">
                     <div class="settings-item">
                         <label for="sensitivity">Sensitivity: <span id="sensitivity_val"></span></label>
                         <input type="range" id="sensitivity" name="sensitivity" min="0" max="2" step="0.05"  value="-" />
@@ -106,7 +104,8 @@
                         <input type="range" id="majority_vote_window" name="majority_vote_window" min="1" max="100"  value="-" />
                     </div>
                     <div class="settings-item">
-                        <div class="notification-button-container">
+                        <label for="notificationBtn">Notifications</label>
+                        <div class="notification-control">
                             <button id="notificationBtn">Enable Notifications</button>
                         </div>
                     </div>

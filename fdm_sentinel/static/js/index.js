@@ -1,4 +1,4 @@
-import { registerPush } from './notifications.js';
+import { registerPush, unsubscribeFromPush } from './notifications.js';
 
 const asciiTitle = document.getElementById('ascii-title');
 const cameraTitle = document.getElementById('cameraTitle');
@@ -318,8 +318,68 @@ settingsButton.addEventListener('click', function() {
     }
 });
 
+let notificationsEnabled = false;
+notificationsBtn.textContent = '';
+
+async function checkNotificationsEnabled() {
+    if (!('Notification' in window)) {
+        return false;
+    }
+    if (Notification.permission !== 'granted') {
+        return false;
+    }
+    if ('serviceWorker' in navigator) {
+        try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            for (const registration of registrations) {
+                const subscription = await registration.pushManager.getSubscription();
+                if (subscription) {
+                    return true;
+                }
+            }
+        } catch (error) {
+            console.error('Error checking for active subscriptions:', error);
+        }
+    }
+    
+    return false;
+}
+
+async function updateNotificationButtonState() {
+    notificationsEnabled = await checkNotificationsEnabled();
+    
+    if (notificationsEnabled) {
+        notificationsBtn.classList.remove('disabled');
+        notificationsBtn.classList.add('enabled');
+        console.debug('Notifications are enabled, button set to ON state');
+    } else {
+        notificationsBtn.classList.remove('enabled');
+        notificationsBtn.classList.add('disabled');
+        console.debug('Notifications are disabled, button set to OFF state');
+    }
+    notificationsBtn.textContent = '';
+}
+
+updateNotificationButtonState();
+
 notificationsBtn.addEventListener('click', async () => {
-    await registerPush();
+    notificationsBtn.disabled = true;
+    try {
+        if (await checkNotificationsEnabled()) {
+            console.debug('Unsubscribing from notifications...');
+            await unsubscribeFromPush();
+        } else {
+            console.debug('Subscribing to notifications...');
+            await registerPush();
+        }
+        setTimeout(() => {
+            updateNotificationButtonState();
+            notificationsBtn.disabled = false;
+        }, 500);
+    } catch (error) {
+        console.error('Failed to toggle notifications:', error);
+        notificationsBtn.disabled = false;
+    }
 });
 
 function updateSliderFill(slider) {
@@ -353,7 +413,6 @@ function saveSetting(slider) {
             if (valueSpan) {
                 valueSpan.textContent = value;
             }
-            console.log(`Setting ${setting} updated to ${value} successfully`);
         } else {
             console.error(`Failed to update setting ${setting}`);
         }
