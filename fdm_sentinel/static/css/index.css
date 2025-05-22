@@ -372,6 +372,14 @@ input[type="range"]::-moz-range-thumb {
     background: linear-gradient(to right, #555555 var(--value, 50%), #ffffff var(--value, 50%));
 }
 
+#sensitivity::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, #ADD8E6 var(--value, 50%), #ffffff var(--value, 50%));
+}
+
+#sensitivity::-moz-range-track {
+    background: linear-gradient(to right, #ADD8E6 var(--value, 50%), #ffffff var(--value, 50%));
+}
+
 .notification-control {
     width: 100%;
     margin: 10px 0;
