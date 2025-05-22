@@ -42,7 +42,7 @@ function changeLiveCameraFeed(cameraIndex) {
 }
 
 function updateCameraTitle(cameraIndex) {
-    const cameraIdText = cameraIndex ? `Camera ${cameraIndex} - ` : 'No camera selected';
+    const cameraIdText = cameraIndex ? `Camera ${cameraIndex}` : 'No camera selected';
     cameraTitle.textContent = cameraIdText;
 }
 

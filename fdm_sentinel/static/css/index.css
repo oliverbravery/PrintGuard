@@ -85,10 +85,6 @@ body, html {
     margin-right: 10px;
 }
 
-.camera-title {
-    color: #b2b2b2;
-}
-
 .camera-text-content span {
     margin-bottom: 5px;
 }
@@ -119,16 +115,8 @@ body, html {
     align-items: center;
 }
 
-.live-indicator {
-    font-size: 14px;
-    color: #b2b2b2;
-    margin-right: 12px;
-    display: inline-block;
-}
-
 .camera-status {
     font-size: 14px;
-    color: #b2b2b2;
     margin-left: 15px;
     margin-right: 12px;
     display: inline-block;
@@ -170,6 +158,10 @@ body, html {
     box-sizing: border-box;
 }
 
+.camera-prediction-time {
+    font-style: italic;
+}
+
 .info-value {
     margin-bottom: 6px;
 }
@@ -179,7 +171,7 @@ body, html {
 }
 
 .info-label {
-    color: #aaa;
+    font-style: italic;
 }
 
 .start-stop-btn {
@@ -196,7 +188,6 @@ body, html {
     color: #fff;
 }
 
-/* Notification Styles */
 .notification-popup {
     position: fixed;
     top: 20px;
