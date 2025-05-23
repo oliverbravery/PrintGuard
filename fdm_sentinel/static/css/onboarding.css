@@ -84,3 +84,9 @@ button:hover {
         padding: 12px 24px;
     }
 }
+
+@media (max-width: 874px) {
+    #ascii-title {
+        transform: scale(0.4);
+    }
+}
