@@ -36,12 +36,16 @@ body, html {
 .grid-item {
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
     padding: 10px;
     box-sizing: border-box;
     overflow: hidden;
     border-radius: 12px;
+}
+
+.grid-item:nth-child(1) {
+    justify-content: center;
 }
 
 #ascii-title {
@@ -115,14 +119,15 @@ body, html {
     flex-shrink: 0;
 }
 
-.camera-display-section {
+.camera-display-section, .settings-section {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     margin: 0 auto;
     width: 100%;
     height: 100%;
+    padding-top: 0px;
 }
 
 .camera-header {
@@ -570,6 +575,18 @@ input[type="range"]::-moz-range-thumb {
 }
 
 @media (max-width: 380px) {
+    body, html {
+        font-size: 10px;
+    }
+
+    .camera-status {
+        font-size: 10px;
+    }
+
+    .start-stop-btn {
+        font-size: 10px;
+    }
+
     .info-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -610,13 +627,13 @@ input[type="range"]::-moz-range-thumb {
     align-items: flex-end;
     justify-content: flex-start;
     padding-right: 20px;
-    padding-top: 20px;
+    padding-top: 0px;
   }
 
   .settings-section {
     align-items: flex-end;
     justify-content: flex-start;
     padding-right: 20px;
-    padding-top: 20px;
+    padding-top: 0px;
   }
 }
