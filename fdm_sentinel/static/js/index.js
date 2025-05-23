@@ -299,7 +299,7 @@ settingsButton.addEventListener('click', function() {
     } else {
         cameraDisplaySection.style.display = 'block';
         settingsSection.style.display = 'none';
-        render_ascii_title(asciiTitle, 'FDM\nsentinel');
+        updateAsciiTitle(); // Use the new function instead of hardcoding
         settingsButton.textContent = 'Settings';
     }
 });
@@ -423,3 +423,39 @@ document.querySelectorAll('input[type="range"]').forEach(slider => {
 document.querySelector('.settings-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
 });
+
+function isMobileView() {
+    return window.innerWidth <= 768;
+}
+
+function isSmallMobileView() {
+    return window.innerWidth <= 380;
+}
+
+function updateAsciiTitle() {
+    if (isSettingsVisible) {
+        render_ascii_title(asciiTitle, 'Settings');
+    } else {
+        const title = isMobileView() ? 'FDM Sentinel' : 'FDM\nsentinel';
+        render_ascii_title(asciiTitle, title);
+
+        if (isMobileView()) {
+            asciiTitle.style.marginTop = '80px';
+            asciiTitle.style.transformOrigin = 'center center';
+            asciiTitle.style.transform = 'scale(0.35)';
+        } else if (isSmallMobileView()) {
+            asciiTitle.style.marginTop = '60px';
+            asciiTitle.style.transformOrigin = 'center';
+            asciiTitle.style.transform = 'scale(0.3)';
+        }
+        else {
+            asciiTitle.style.marginTop = '';
+            asciiTitle.style.transformOrigin = 'center';
+            asciiTitle.style.transform = 'scale(0.8)';
+        }
+    }
+}
+
+updateAsciiTitle();
+
+window.addEventListener('resize', updateAsciiTitle);
