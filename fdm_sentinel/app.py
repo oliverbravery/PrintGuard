@@ -19,7 +19,8 @@ from .routes.sse_routes import router as sse_router
 from .routes.setup_routes import router as setup_router
 from .utils import config
 from .utils.config import (DEVICE_TYPE, MODEL_OPTIONS_PATH, MODEL_PATH,
-                           PROTOTYPES_DIR, SUCCESS_LABEL)
+                           PROTOTYPES_DIR, SUCCESS_LABEL, SSL_CERT_FILE,
+                           SSL_KEY_FILE)
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
 from .utils.setup_utils import verify_setup_complete, is_setup_complete
@@ -250,16 +251,15 @@ app.include_router(setup_router, tags=["setup"])
 def run():
     # pylint: disable=C0415
     import uvicorn
-    from .utils.setup_utils import is_setup_complete, has_ssl_certificates
+    from .utils.setup_utils import is_setup_complete
     setup_complete = is_setup_complete()
-    ssl_available = has_ssl_certificates()
     if not setup_complete:
-        logging.info("Setup not complete. Starting server in HTTP mode on port 8000.")
-        logging.info("Please visit http://localhost:8000/setup to complete setup.")
+        logging.warning("Setup not complete. Starting server in HTTP mode on port 8000.")
+        logging.debug("Please visit http://localhost:8000/setup to complete setup.")
         uvicorn.run(app, host="0.0.0.0", port=8000)
-    elif setup_complete and ssl_available:
-        logging.info("Setup complete and SSL certificates found. Starting server in HTTPS mode on port 8000.")
-        uvicorn.run(app, host="0.0.0.0", port=8000, ssl_certfile=".cert.pem", ssl_keyfile=".key.pem")
+    elif setup_complete:
+        logging.warning("Setup complete and SSL certificates found. Starting server in HTTPS mode on port 8000.")
+        uvicorn.run(app, host="0.0.0.0", port=8000, ssl_certfile=SSL_CERT_FILE, ssl_keyfile=SSL_KEY_FILE)
     else:
         raise RuntimeError(
             "Setup is complete but SSL certificates are not available. "
