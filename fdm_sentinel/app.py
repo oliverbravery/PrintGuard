@@ -16,46 +16,51 @@ from .routes.detection_routes import router as detection_router
 from .routes.live_detection_routes import router as live_detection_router
 from .routes.notification_routes import router as notification_router
 from .routes.sse_routes import router as sse_router
+from .routes.setup_routes import router as setup_router
 from .utils import config
 from .utils.config import (DEVICE_TYPE, MODEL_OPTIONS_PATH, MODEL_PATH,
-                           PROTOTYPES_DIR, SUCCESS_LABEL, VAPID_PRIVATE_KEY,
-                           VAPID_PUBLIC_KEY)
+                           PROTOTYPES_DIR, SUCCESS_LABEL)
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
+from .utils.setup_utils import verify_setup_complete, is_setup_complete
 
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
-    logging.debug("Setting up device...")
-    app_instance.state.device = setup_device(DEVICE_TYPE)
-    logging.debug("Using device: %s", app_instance.state.device)
-    try:
-        logging.debug("Loading model...")
-        app_instance.state.model, _ = load_model(MODEL_PATH,
-                                                 MODEL_OPTIONS_PATH,
-                                                 app_instance.state.device)
-        app_instance.state.transform = make_transform()
-        logging.debug("Model loaded successfully.")
-        logging.debug("Building prototypes...")
+    if is_setup_complete():
+        logging.debug("Setting up device...")
+        app_instance.state.device = setup_device(DEVICE_TYPE)
+        logging.debug("Using device: %s", app_instance.state.device)
         try:
-            prototypes, class_names, defect_idx = compute_prototypes(
-                app_instance.state.model, PROTOTYPES_DIR, app_instance.state.transform,
-                app_instance.state.device, SUCCESS_LABEL
-            )
-            app_instance.state.prototypes = prototypes
-            app_instance.state.class_names = class_names
-            app_instance.state.defect_idx = defect_idx
-            logging.debug("Prototypes built successfully.")
-        except NameError:
-            logging.warning("Skipping prototype building: Potentially missing 'args' if not run as main script or if function expects it.")
-        except ValueError as e:
-            logging.error("Error building prototypes: %s", e)
+            logging.debug("Loading model...")
+            app_instance.state.model, _ = load_model(MODEL_PATH,
+                                                   MODEL_OPTIONS_PATH,
+                                                   app_instance.state.device)
+            app_instance.state.transform = make_transform()
+            logging.debug("Model loaded successfully.")
+            logging.debug("Building prototypes...")
+            try:
+                prototypes, class_names, defect_idx = compute_prototypes(
+                    app_instance.state.model, PROTOTYPES_DIR, app_instance.state.transform,
+                    app_instance.state.device, SUCCESS_LABEL
+                )
+                app_instance.state.prototypes = prototypes
+                app_instance.state.class_names = class_names
+                app_instance.state.defect_idx = defect_idx
+                logging.debug("Prototypes built successfully.")
+            except NameError:
+                logging.warning("Skipping prototype building: Potentially missing 'args' if not run as main script or if function expects it.")
+            except ValueError as e:
+                logging.error("Error building prototypes: %s", e)
 
-    except RuntimeError as e:
-        logging.error("Error during startup: %s", e)
-        app_instance.state.model = None
-        raise
+        except RuntimeError as e:
+            logging.error("Error during startup: %s", e)
+            app_instance.state.model = None
+            raise
+    else:
+        logging.info("Setup not complete. Limited functionality available until setup is complete.")
     yield
+
     logging.debug("Shutting down...")
 
 app = FastAPI(
@@ -72,6 +77,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def check_setup_status(request: Request, call_next):
+    redirect = await verify_setup_complete(request)
+    if redirect:
+        return redirect
+    response = await call_next(request)
+    return response
 
 app.state.model = None
 app.state.transform = None
@@ -232,13 +245,26 @@ app.include_router(live_detection_router, tags=["live_detection"])
 app.include_router(alert_router, tags=["alerts"])
 app.include_router(notification_router, tags=["notifications"])
 app.include_router(sse_router, tags=["sse"])
+app.include_router(setup_router, tags=["setup"])
 
 def run():
     # pylint: disable=C0415
     import uvicorn
-    if not all([VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY]):
-        logging.warning("VAPID keys not configured. Push notifications will fail.")
-    uvicorn.run(app, host="0.0.0.0", port=8000, ssl_certfile=".cert.pem", ssl_keyfile=".key.pem")
+    from .utils.setup_utils import is_setup_complete, has_ssl_certificates
+    setup_complete = is_setup_complete()
+    ssl_available = has_ssl_certificates()
+    if not setup_complete:
+        logging.info("Setup not complete. Starting server in HTTP mode on port 8000.")
+        logging.info("Please visit http://localhost:8000/setup to complete setup.")
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    elif setup_complete and ssl_available:
+        logging.info("Setup complete and SSL certificates found. Starting server in HTTPS mode on port 8000.")
+        uvicorn.run(app, host="0.0.0.0", port=8000, ssl_certfile=".cert.pem", ssl_keyfile=".key.pem")
+    else:
+        raise RuntimeError(
+            "Setup is complete but SSL certificates are not available. "
+            "Please generate or upload SSL certificates to continue."
+        )
 
 if __name__ == "__main__":
     run()
