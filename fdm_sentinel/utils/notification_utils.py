@@ -3,7 +3,7 @@ import logging
 from pywebpush import WebPushException, webpush
 
 from ..models import Notification
-from ..utils.config import VAPID_CLAIMS, VAPID_PRIVATE_KEY
+from ..utils.config import VAPID_CLAIMS, get_vapid_private_key
 
 
 def send_defect_notification(alert_id, app):
@@ -29,7 +29,7 @@ def send_notification(notification: Notification, app):
             webpush(
                 subscription_info=sub,
                 data=data_payload_dict,
-                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_private_key=get_vapid_private_key(),
                 vapid_claims=vapid_claims
             )
         except WebPushException as ex:

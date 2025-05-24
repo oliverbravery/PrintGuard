@@ -1,0 +1,155 @@
+#setup-progress {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 40px;
+    width: 100%;
+    max-width: 600px;
+}
+
+.progress-step {
+    flex: 1;
+    text-align: center;
+    padding: 10px;
+    border-bottom: 2px solid #ddd;
+    color: #888;
+    transition: all 0.3s ease;
+}
+
+.progress-step.active {
+    border-bottom-color: #222;
+    color: #222;
+    font-weight: bold;
+}
+
+.progress-step.completed {
+    border-bottom-color: #2ecc40;
+    color: #2ecc40;
+}
+
+.setup-section {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: 500px;
+}
+
+.setup-section.active {
+    display: flex;
+}
+
+.option-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    width: 100%;
+    margin: 20px 0;
+}
+
+.form-section {
+    width: 100%;
+    margin-top: 20px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+    width: 100%;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 10px;
+    border: 2px dotted #222;
+    background: transparent;
+    font-family: inherit;
+    font-size: 1rem;
+}
+
+.button-group {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+.setup-btn {
+    padding: 15px 30px;
+    border: 2px dotted #222;
+    cursor: pointer;
+    background: transparent;
+    transition: background 0.2s, color 0.2s;
+    font-family: inherit;
+    font-size: 1rem;
+    width: 100%;
+}
+
+.setup-btn:hover {
+    background: #222;
+    color: #fff;
+}
+
+.setup-btn.primary {
+    background: #222;
+    color: #fff;
+}
+
+.setup-btn.primary:hover {
+    background: #444;
+}
+
+.setup-summary {
+    width: 100%;
+    border: 2px dotted #222;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.summary-item {
+    margin-bottom: 10px;
+}
+
+.status-configured {
+    color: #2ecc40;
+}
+
+.input-with-prefix {
+    display: flex;
+    border: 2px dotted #222;
+    overflow: hidden;
+}
+
+.input-prefix {
+    background: #f0f0f0;
+    padding: 10px;
+    border-right: 1px solid #222;
+    font-family: inherit;
+    font-size: 1rem;
+    color: #666;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.input-with-prefix input {
+    border: none;
+    flex: 1;
+    padding: 10px;
+    background: transparent;
+    font-family: inherit;
+    font-size: 1rem;
+    outline: none;
+}
+
+@media (max-width: 600px) {
+    .option-buttons {
+        width: 80%;
+    }
+    
+    .form-section {
+        width: 80%;
+    }
+}

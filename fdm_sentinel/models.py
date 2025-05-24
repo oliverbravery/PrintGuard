@@ -60,3 +60,9 @@ class CameraState(BaseModel):
     model_config = {
         "arbitrary_types_allowed": True
     }
+
+class VapidSettings(BaseModel):
+    public_key: str
+    private_key: str
+    subject: str
+    base_url: str

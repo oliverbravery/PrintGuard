@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FDM Sentinel Setup</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/onboarding.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/setup.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic+Coding&display=swap" rel="stylesheet">
+    <script type="module" src="{{ url_for('static', path='js/utils.js') }}" defer></script>
+    <script type="module" src="{{ url_for('static', path='js/setup.js') }}" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/figlet@1.8.1/lib/figlet.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <pre id="ascii-title"></pre>
+        <h2>First-time Setup</h2>
+        <p>Complete the following setup to start using FDM Sentinel.</p>
+        
+        <div id="setup-progress">
+            <div class="progress-step active" data-step="vapid">1. VAPID Keys</div>
+            <div class="progress-step" data-step="ssl">2. SSL Certificate</div>
+            <div class="progress-step" data-step="finish">3. Finish</div>
+        </div>
+        
+        <div id="setup-content">
+            <div class="setup-section active" id="vapid-section">
+                <h3>VAPID Keys Setup</h3>
+                <p>VAPID keys are required for push notifications.</p>
+                
+                <div class="option-buttons">
+                    <button id="generate-vapid-keys-btn" class="setup-btn">Generate New VAPID Keys</button>
+                    <button id="import-vapid-keys-btn" class="setup-btn">Import Existing Keys</button>
+                </div>
+                
+                <div class="form-section" id="vapid-form" style="display:none;">
+                    <div class="form-group">
+                        <label for="vapid-public-key">VAPID Public Key</label>
+                        <input type="text" id="vapid-public-key" name="vapid-public-key" placeholder="Public Key">
+                    </div>
+                    <div class="form-group">
+                        <label for="vapid-private-key">VAPID Private Key</label>
+                        <input type="text" id="vapid-private-key" name="vapid-private-key" placeholder="Private Key">
+                    </div>
+                    <div class="form-group">
+                        <label for="vapid-subject">VAPID Subject (email)</label>
+                        <div class="input-with-prefix">
+                            <span class="input-prefix">mailto:</span>
+                            <input type="email" id="vapid-subject" name="vapid-subject" placeholder="your@email.com">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="base-url">Base URL</label>
+                        <div class="input-with-prefix">
+                            <span class="input-prefix">https://</span>
+                            <input type="text" id="base-url" name="base-url" placeholder="your-domain.com">
+                        </div>
+                    </div>
+                    <div class="button-group">
+                        <button id="save-vapid-settings" class="setup-btn primary">Save & Continue</button>
+                    </div>
+                </div>
+            </div>
+            <div class="setup-section" id="ssl-section">
+                <h3>SSL Certificate Setup</h3>
+                <p>SSL certificates are required for secure HTTPS connections.</p>
+                
+                <div class="option-buttons">
+                    <button id="generate-ssl-cert-btn" class="setup-btn">Generate Self-Signed Certificate</button>
+                    <button id="import-ssl-cert-btn" class="setup-btn">Import Existing Certificate</button>
+                </div>
+                
+                <div class="form-section" id="ssl-import-form" style="display:none;">
+                    <div class="form-group">
+                        <label for="ssl-cert-file">SSL Certificate File</label>
+                        <input type="file" id="ssl-cert-file" name="ssl-cert-file">
+                    </div>
+                    <div class="form-group">
+                        <label for="ssl-key-file">SSL Key File</label>
+                        <input type="file" id="ssl-key-file" name="ssl-key-file">
+                    </div>
+                    <div class="button-group">
+                        <button id="save-ssl-settings" class="setup-btn primary">Save & Continue</button>
+                    </div>
+                </div>
+            </div>
+            <div class="setup-section" id="finish-section">
+                <h3>Setup Complete!</h3>
+                <p>Your FDM Sentinel is now configured and ready to use.</p>
+                <div class="setup-summary">
+                    <div class="summary-item">
+                        <strong>VAPID Keys:</strong> <span id="summary-vapid-status">Not Configured</span>
+                    </div>
+                    <div class="summary-item">
+                        <strong>SSL Certificate:</strong> <span id="summary-ssl-status">Not Configured</span>
+                    </div>
+                </div>
+                <button id="finish-setup-btn" class="setup-btn primary">Start FDM Sentinel</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
