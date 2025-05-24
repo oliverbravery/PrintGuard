@@ -49,7 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await response.json();
                 document.getElementById('vapid-public-key').value = data.public_key;
                 document.getElementById('vapid-private-key').value = data.private_key;
-                document.getElementById('vapid-subject').value = data.subject || '';
+                document.getElementById('vapid-subject').value = data.subject ? data.subject.replace('mailto:', '') : '';
                 document.getElementById('vapid-form').style.display = 'block';
             } else {
                 alert('Failed to generate VAPID keys');
@@ -67,16 +67,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('save-vapid-settings').addEventListener('click', async () => {
         const publicKey = document.getElementById('vapid-public-key').value.trim();
         const privateKey = document.getElementById('vapid-private-key').value.trim();
-        const subject = document.getElementById('vapid-subject').value.trim();
-        const baseUrl = document.getElementById('base-url').value.trim();
+        const subjectInput = document.getElementById('vapid-subject').value.trim();
+        const subject = 'mailto:' + subjectInput;
+        const baseUrlInput = document.getElementById('base-url').value.trim();
+        const baseUrl = 'https://' + baseUrlInput;
         
-        if (!publicKey || !privateKey || !subject || !baseUrl) {
+        if (!publicKey || !privateKey || !subjectInput || !baseUrlInput) {
             alert('All fields are required');
-            return;
-        }
-        
-        if (!subject.startsWith('mailto:')) {
-            alert('VAPID Subject must start with "mailto:"');
             return;
         }
         

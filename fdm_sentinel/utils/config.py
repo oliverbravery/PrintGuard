@@ -4,6 +4,7 @@ import torch
 from platformdirs import user_data_dir
 from ..models import AlertAction
 import keyring
+import tempfile, os, ssl
 
 APP_DATA_DIR = user_data_dir("fdm-sentinel", "fdm-sentinel")
 KEYRING_SERVICE_NAME = "fdm-sentinel"
@@ -29,6 +30,18 @@ def store_ssl_private_key(private_key):
 
 def get_ssl_private_key():
     return keyring.get_password(KEYRING_SERVICE_NAME, "SSL_PRIVATE_KEY")
+
+def get_ssl_private_key_temporary_path():
+    private_key = get_ssl_private_key()
+    if private_key:
+        temp_file = tempfile.NamedTemporaryFile("w+",
+                                                delete=False,
+                                                suffix=".pem")
+        temp_file.write(private_key)
+        temp_file.flush()
+        os.chmod(temp_file.name, 0o600)
+        return temp_file.name
+    return None
 
 def load_config():
     global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL

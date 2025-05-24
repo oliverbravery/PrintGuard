@@ -45,11 +45,17 @@
                     </div>
                     <div class="form-group">
                         <label for="vapid-subject">VAPID Subject (email)</label>
-                        <input type="email" id="vapid-subject" name="vapid-subject" placeholder="mailto:your@email.com">
+                        <div class="input-with-prefix">
+                            <span class="input-prefix">mailto:</span>
+                            <input type="email" id="vapid-subject" name="vapid-subject" placeholder="your@email.com">
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="base-url">Base URL</label>
-                        <input type="text" id="base-url" name="base-url" placeholder="https://your-domain.com">
+                        <div class="input-with-prefix">
+                            <span class="input-prefix">https://</span>
+                            <input type="text" id="base-url" name="base-url" placeholder="your-domain.com">
+                        </div>
                     </div>
                     <div class="button-group">
                         <button id="save-vapid-settings" class="setup-btn primary">Save & Continue</button>
