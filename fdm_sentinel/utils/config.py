@@ -3,30 +3,41 @@ import json
 import torch
 from platformdirs import user_data_dir
 from ..models import AlertAction
+import keyring
 
 APP_DATA_DIR = user_data_dir("fdm-sentinel", "fdm-sentinel")
+KEYRING_SERVICE_NAME = "fdm-sentinel"
 os.makedirs(APP_DATA_DIR, exist_ok=True)
 
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.json")
 SSL_CERT_FILE = os.path.join(APP_DATA_DIR, "cert.pem")
-SSL_KEY_FILE = os.path.join(APP_DATA_DIR, "key.pem")
 SSL_CA_FILE = os.path.join(APP_DATA_DIR, "ca.pem")
 
 VAPID_SUBJECT = ""
 VAPID_PUBLIC_KEY = ""
-VAPID_PRIVATE_KEY = ""
 VAPID_CLAIMS = {}
 BASE_URL = ""
 
+def store_vapid_private_key(private_key):
+    keyring.set_password(KEYRING_SERVICE_NAME, "VAPID_PRIVATE_KEY", private_key)
+
+def get_vapid_private_key():
+    return keyring.get_password(KEYRING_SERVICE_NAME, "VAPID_PRIVATE_KEY")
+
+def store_ssl_private_key(private_key):
+    keyring.set_password(KEYRING_SERVICE_NAME, "SSL_PRIVATE_KEY", private_key)
+
+def get_ssl_private_key():
+    return keyring.get_password(KEYRING_SERVICE_NAME, "SSL_PRIVATE_KEY")
+
 def load_config():
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_CLAIMS, BASE_URL
+    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r') as f:
                 config_data = json.load(f)
                 VAPID_SUBJECT = config_data.get("VAPID_SUBJECT", "")
                 VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", "")
-                VAPID_PRIVATE_KEY = config_data.get("VAPID_PRIVATE_KEY", "")
                 BASE_URL = config_data.get("BASE_URL", "")
 
                 if VAPID_SUBJECT:
@@ -38,10 +49,9 @@ def load_config():
         VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
 
 def save_config(config_data):
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_CLAIMS, BASE_URL
+    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL
     VAPID_SUBJECT = config_data.get("VAPID_SUBJECT", VAPID_SUBJECT)
     VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", VAPID_PUBLIC_KEY)
-    VAPID_PRIVATE_KEY = config_data.get("VAPID_PRIVATE_KEY", VAPID_PRIVATE_KEY)
     BASE_URL = config_data.get("BASE_URL", BASE_URL)
     if VAPID_SUBJECT:
         VAPID_CLAIMS = {"sub": VAPID_SUBJECT}

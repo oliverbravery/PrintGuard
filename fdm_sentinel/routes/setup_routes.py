@@ -3,7 +3,10 @@ from fastapi.exceptions import HTTPException
 from py_vapid import Vapid
 import logging
 from ..models import VapidSettings
-from ..utils.config import save_config
+from ..utils.config import (
+    save_config, BASE_URL, SSL_CERT_FILE, SSL_CA_FILE,
+    store_vapid_private_key, store_ssl_private_key
+)
 import trustme
 from cryptography.hazmat.primitives import serialization
 import base64
@@ -33,7 +36,6 @@ async def generate_vapid_keys():
             encryption_algorithm=serialization.NoEncryption()
         )
         private_key = base64.urlsafe_b64encode(private_key_raw).decode('utf-8')
-        
         return {
             "public_key": public_key,
             "private_key": private_key,
@@ -51,10 +53,10 @@ async def save_vapid_settings(settings: VapidSettings):
     try:
         config_data = {
             "VAPID_PUBLIC_KEY": settings.public_key,
-            "VAPID_PRIVATE_KEY": settings.private_key,
             "VAPID_SUBJECT": settings.subject,
             "BASE_URL": settings.base_url
         }
+        store_vapid_private_key(settings.private_key)
         save_config(config_data)
         return {"success": True}
     except Exception as e:
@@ -68,18 +70,19 @@ async def save_vapid_settings(settings: VapidSettings):
 async def generate_ssl_cert():
     try:
         ca = trustme.CA()
-        server_cert = ca.issue_cert("localhost")
-        cert_path = ".cert.pem"
-        key_path = ".key.pem"
-        with open(key_path, "wb") as f:
-            f.write(server_cert.private_key_pem.bytes())
-        with open(cert_path, "wb") as f:
+        domain = BASE_URL
+        if domain.startswith(('http://', 'https://')):
+            domain = domain.split('://')[1]
+        if domain.endswith('/'):
+            domain = domain[:-1]
+        server_cert = ca.issue_cert(domain)
+        with open(SSL_CERT_FILE, "wb") as f:
             f.write(server_cert.cert_chain_pems[0].bytes())
-        ca_cert_path = ".ca.pem"
-        with open(ca_cert_path, "wb") as f:
+        with open(SSL_CA_FILE, "wb") as f:
             f.write(ca.cert_pem.bytes())
-        logging.info("SSL certificate and key generated: %s, %s", cert_path, key_path)
-        return {"success": True, "message": f"SSL certificate and key saved to {cert_path} and {key_path}"}
+        store_ssl_private_key(server_cert.private_key_pem.bytes().decode('utf-8'))
+        logging.debug("SSL certificate and key generated successfully.")
+        return {"success": True, "message": "SSL certificate and key saved."}
     except Exception as e:
         logging.error("Error generating SSL certificate: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to generate SSL certificate: {str(e)}")

@@ -1,13 +1,19 @@
 import os
 from fastapi import Request
 from fastapi.responses import RedirectResponse
-from .config import load_config, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, BASE_URL, SSL_CERT_FILE, SSL_KEY_FILE
+from .config import (load_config,
+                     VAPID_PUBLIC_KEY,
+                     VAPID_SUBJECT,
+                     BASE_URL,
+                     SSL_CERT_FILE,
+                     get_vapid_private_key,
+                     get_ssl_private_key)
 
 def has_ssl_certificates():
-    return os.path.exists(SSL_CERT_FILE) and os.path.exists(SSL_KEY_FILE)
+    return os.path.exists(SSL_CERT_FILE) and bool(get_ssl_private_key())
 
 def has_vapid_keys():
-    return bool(VAPID_SUBJECT) and bool(VAPID_PUBLIC_KEY) and bool(VAPID_PRIVATE_KEY)
+    return bool(VAPID_SUBJECT) and bool(VAPID_PUBLIC_KEY) and bool(get_vapid_private_key())
 
 def is_setup_complete():
     load_config()

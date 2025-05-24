@@ -12,3 +12,4 @@ python-multipart
 sse-starlette
 trustme
 platformdirs
+keyring
