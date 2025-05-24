@@ -17,14 +17,44 @@
         <h2>First-time Setup</h2>
         <p>Complete the following setup to start using FDM Sentinel.</p>
         
-        <div id="setup-progress">
+        <div id="setup-progress" style="display:none;">
+            <div class="progress-step active" data-step="vapid">1. VAPID Keys</div>
+            <div class="progress-step" data-step="ssl">2. SSL Certificate</div>
+            <div class="progress-step" data-step="finish">3. Finish</div>
+        </div>
+        
+        <div id="setup-progress-external" style="display:none;">
             <div class="progress-step active" data-step="vapid">1. VAPID Keys</div>
             <div class="progress-step" data-step="ssl">2. SSL Certificate</div>
             <div class="progress-step" data-step="finish">3. Finish</div>
         </div>
         
         <div id="setup-content">
-            <div class="setup-section active" id="vapid-section">
+            <div class="setup-section active" id="network-section">
+                <h3>Network Configuration</h3>
+                <p>Choose how you want to set up your FDM Sentinel service.</p>
+                
+                <div class="option-buttons">
+                    <button id="local-network-btn" class="setup-btn network-option">
+                        <div class="option-title">Local Network Only</div>
+                        <div class="option-description">
+                            Set up the service for use within your local network only. 
+                            Note: You will not be able to receive notifications or view cameras from outside your local network.
+                        </div>
+                    </button>
+                    <button id="external-network-btn" class="setup-btn network-option">
+                        <div class="option-title">External Network Access</div>
+                        <div class="option-description">
+                            Configure the service to be accessible from outside your network.
+                            Ideal for remote monitoring and access from anywhere.
+                        </div>
+                    </button>
+                </div>
+                <div class="button-group" id="external-continue-group" style="display:none;">
+                    <button id="save-network-config" class="setup-btn primary">Continue</button>
+                </div>
+            </div>
+            <div class="setup-section" id="vapid-section">
                 <h3>VAPID Keys Setup</h3>
                 <p>VAPID keys are required for push notifications.</p>
                 
@@ -88,6 +118,9 @@
                 <h3>Setup Complete!</h3>
                 <p>Your FDM Sentinel is now configured and ready to use.</p>
                 <div class="setup-summary">
+                    <div class="summary-item">
+                        <strong>Network Configuration:</strong> <span id="summary-network-status">Not Configured</span>
+                    </div>
                     <div class="summary-item">
                         <strong>VAPID Keys:</strong> <span id="summary-vapid-status">Not Configured</span>
                     </div>

@@ -144,6 +144,41 @@
     outline: none;
 }
 
+.network-option {
+    text-align: left;
+    padding: 20px;
+    height: auto;
+    border: 2px dotted #ccc;
+    transition: all 0.3s ease;
+}
+
+.network-option:hover {
+    border-color: #222;
+    background: #f9f9f9;
+}
+
+.network-option.selected {
+    border-color: #222;
+    background: #222;
+    color: #fff;
+}
+
+.option-title {
+    font-weight: bold;
+    font-size: 1.1rem;
+    margin-bottom: 8px;
+}
+
+.option-description {
+    font-size: 0.9rem;
+    line-height: 1.4;
+    opacity: 0.8;
+}
+
+.network-option.selected .option-description {
+    opacity: 0.9;
+}
+
 @media (max-width: 600px) {
     .option-buttons {
         width: 80%;

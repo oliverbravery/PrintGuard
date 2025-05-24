@@ -5,8 +5,10 @@ document.addEventListener('DOMContentLoaded', () => {
     render_ascii_title(asciiTitle, 'FDM\nSetup');
 
     const setupState = {
+        networkConfigured: false,
         vapidConfigured: false,
         sslConfigured: false,
+        networkData: {},
         vapidData: {},
         sslData: {}
     };
@@ -16,7 +18,12 @@ document.addEventListener('DOMContentLoaded', () => {
             section.classList.remove('active');
         });
         document.getElementById(`${sectionId}-section`).classList.add('active');
-        document.querySelectorAll('.progress-step').forEach(step => {
+        
+        const progressContainer = selectedNetworkOption === 'external' ? 
+            document.getElementById('setup-progress-external') : 
+            document.getElementById('setup-progress');
+            
+        progressContainer.querySelectorAll('.progress-step').forEach(step => {
             step.classList.remove('active');
             const stepId = step.dataset.step;
             if (stepId === sectionId) {
@@ -30,6 +37,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (sectionId === 'finish') {
+            document.getElementById('summary-network-status').textContent = 
+                setupState.networkConfigured ? 'Configured ✓' : 'Not Configured';
+            document.getElementById('summary-network-status').className = 
+                setupState.networkConfigured ? 'status-configured' : '';
+                
             document.getElementById('summary-vapid-status').textContent = 
                 setupState.vapidConfigured ? 'Configured ✓' : 'Not Configured';
             document.getElementById('summary-vapid-status').className = 
@@ -41,6 +53,55 @@ document.addEventListener('DOMContentLoaded', () => {
                 setupState.sslConfigured ? 'status-configured' : '';
         }
     }
+
+    let selectedNetworkOption = null;
+
+    document.getElementById('local-network-btn').addEventListener('click', () => {
+        selectedNetworkOption = 'local';
+        document.querySelectorAll('.network-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('local-network-btn').classList.add('selected');
+        document.getElementById('setup-progress').style.display = 'flex';
+        document.getElementById('network-section').style.display = 'none';
+        setupState.networkConfigured = true;
+        setupState.networkData = { type: selectedNetworkOption };
+        showSection('vapid');
+    });
+
+    document.getElementById('external-network-btn').addEventListener('click', () => {
+        selectedNetworkOption = 'external';
+        document.querySelectorAll('.network-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('external-network-btn').classList.add('selected');
+        document.getElementById('external-continue-group').style.display = 'block';
+        document.getElementById('setup-progress-external').style.display = 'flex';
+    });
+
+    document.getElementById('save-network-config').addEventListener('click', async () => {
+        if (!selectedNetworkOption) {
+            alert('Please select a network configuration option');
+            return;
+        }
+
+        try {
+            const response = await fetch('/setup/save-network-config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ network_type: selectedNetworkOption })
+            });
+            
+            if (response.ok) {
+                setupState.networkConfigured = true;
+                setupState.networkData = { type: selectedNetworkOption };
+                document.getElementById('network-section').style.display = 'none';
+                showSection('vapid');
+            } else {
+                const error = await response.json();
+                alert(`Failed to save network configuration: ${error.detail}`);
+            }
+        } catch (error) {
+            console.error('Error saving network configuration:', error);
+            alert('Error saving network configuration');
+        }
+    });
 
     document.getElementById('generate-vapid-keys-btn').addEventListener('click', async () => {
         try {
