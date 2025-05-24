@@ -1,14 +1,17 @@
 import os
 from fastapi import Request
 from fastapi.responses import RedirectResponse
-from .config import load_config, SETUP_COMPLETE, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY
+from .config import load_config, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, BASE_URL, SSL_CERT_FILE, SSL_KEY_FILE
+
+def has_ssl_certificates():
+    return os.path.exists(SSL_CERT_FILE) and os.path.exists(SSL_KEY_FILE)
+
+def has_vapid_keys():
+    return bool(VAPID_SUBJECT) and bool(VAPID_PUBLIC_KEY) and bool(VAPID_PRIVATE_KEY)
 
 def is_setup_complete():
     load_config()
-    return SETUP_COMPLETE and bool(VAPID_PUBLIC_KEY) and bool(VAPID_PRIVATE_KEY)
-
-def has_ssl_certificates():
-    return os.path.exists(".cert.pem") and os.path.exists(".key.pem")
+    return has_ssl_certificates() and has_vapid_keys() and bool(BASE_URL)
 
 async def verify_setup_complete(request: Request):
     setup_routes = ['/setup', '/setup/', '/static/']
