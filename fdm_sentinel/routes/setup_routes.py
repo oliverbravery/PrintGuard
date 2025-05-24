@@ -86,3 +86,22 @@ async def generate_ssl_cert():
     except Exception as e:
         logging.error("Error generating SSL certificate: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to generate SSL certificate: {str(e)}")
+
+@router.post("/setup/upload-ssl-cert", include_in_schema=False)
+async def upload_ssl_cert(request: Request):
+    form = await request.form()
+    cert_file = form.get("cert_file")
+    key_file = form.get("key_file")
+    if not cert_file or not key_file:
+        raise HTTPException(status_code=400, detail="Both certificate and key files are required")
+    try:
+        cert_content = await cert_file.read()
+        with open(SSL_CERT_FILE, "wb") as f:
+            f.write(cert_content)
+        key_content = await key_file.read()
+        store_ssl_private_key(key_content.decode('utf-8'))
+        logging.debug("SSL certificate and key uploaded successfully.")
+        return {"success": True, "message": "SSL certificate and key uploaded successfully."}
+    except Exception as e:
+        logging.error("Error uploading SSL certificate: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to upload SSL certificate: {str(e)}")
