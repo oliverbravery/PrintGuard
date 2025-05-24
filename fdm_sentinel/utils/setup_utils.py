@@ -6,6 +6,9 @@ from .config import (load_config,
                      VAPID_SUBJECT,
                      BASE_URL,
                      SSL_CERT_FILE,
+                     TUNNEL_PROVIDER,
+                     TUNNEL_DOMAIN,
+                     get_tunnel_api_key,
                      get_vapid_private_key,
                      get_ssl_private_key)
 
@@ -17,15 +20,35 @@ def has_vapid_keys():
 
 def is_setup_complete():
     load_config()
-    return has_ssl_certificates() and has_vapid_keys() and bool(BASE_URL)
+    if TUNNEL_PROVIDER:
+        return has_vapid_keys() and bool(BASE_URL) and bool(get_tunnel_api_key())
+    else:
+        return has_ssl_certificates() and has_vapid_keys() and bool(BASE_URL)
 
 async def verify_setup_complete(request: Request):
     setup_routes = ['/setup', '/setup/', '/static/']
     setup_api_routes = ['/setup/generate-vapid-keys', '/setup/save-vapid-settings', 
-                       '/setup/generate-ssl-cert', '/setup/upload-ssl-cert', '/setup/complete']
+                       '/setup/generate-ssl-cert', '/setup/upload-ssl-cert', '/setup/complete',
+                       '/setup/save-tunnel-settings', '/setup/initialize-tunnel-provider']
     if (any(request.url.path.startswith(route) for route in setup_routes) or
         request.url.path in setup_api_routes):
         return None
     if not is_setup_complete():
         return RedirectResponse('/setup', status_code=303)
     return None
+
+def setup_ngrok_tunnel():
+    tunnel_auth_key = get_tunnel_api_key()
+    tunnel_domain = TUNNEL_DOMAIN
+    if not tunnel_auth_key and not tunnel_domain:
+        return False
+    try:
+        import ngrok
+        listener = ngrok.forward(8000, authtoken=tunnel_auth_key, domain=tunnel_domain)
+        if listener:
+            ngrok.disconnect()
+            return True
+        else:
+            return False
+    except Exception as e:
+        return False

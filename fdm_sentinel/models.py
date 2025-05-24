@@ -2,7 +2,7 @@ import asyncio
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class Alert(BaseModel):
@@ -74,3 +74,11 @@ class TunnelProvider(str, Enum):
 class TunnelSettings(BaseModel):
     provider: TunnelProvider
     token: str
+    domain: str = ""
+    
+    @field_validator('domain')
+    @classmethod
+    def validate_domain_for_ngrok(cls, v, info):
+        if info.data.get('provider') == TunnelProvider.NGROK and not v:
+            raise ValueError('Domain is required for ngrok provider')
+        return v

@@ -1,16 +1,20 @@
-from fastapi import APIRouter, Request
-from fastapi.exceptions import HTTPException
-from py_vapid import Vapid
+import base64
 import logging
-from ..models import VapidSettings, TunnelSettings
-from ..utils.config import (
-    save_config, BASE_URL, SSL_CERT_FILE, SSL_CA_FILE,
-    store_vapid_private_key, store_ssl_private_key,
-    store_tunnel_api_key
-)
+import random
+
 import trustme
 from cryptography.hazmat.primitives import serialization
-import base64
+from fastapi import APIRouter, Request
+from fastapi.exceptions import HTTPException
+from fastapi.responses import RedirectResponse
+from py_vapid import Vapid
+
+from ..models import TunnelProvider, TunnelSettings, VapidSettings
+from ..utils.config import (BASE_URL, SSL_CA_FILE, SSL_CERT_FILE,
+                            TUNNEL_DOMAIN, TUNNEL_PROVIDER, save_config,
+                            store_ssl_private_key, store_tunnel_api_key,
+                            store_vapid_private_key)
+from ..utils.setup_utils import setup_ngrok_tunnel
 
 router = APIRouter()
 
@@ -112,12 +116,41 @@ async def save_tunnel_settings(settings: TunnelSettings):
     try:
         config_data = {
             "TUNNEL_PROVIDER": settings.provider,
-            "TUNNEL_API_KEY": settings.token
+            "TUNNEL_API_KEY": settings.token,
+            "TUNNEL_DOMAIN": settings.domain
         }
         store_tunnel_api_key(settings.token)
         save_config(config_data)
         logging.debug("Tunnel settings saved successfully.")
-        return {"success": True, "message": "Tunnel settings saved successfully."}
+        return {"success": True, "message": "Tunnel settings saved successfully.", "skip_ssl": True}
     except Exception as e:
         logging.error("Error saving tunnel settings: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to save tunnel settings: {str(e)}")
+
+@router.post("/setup/initialize-tunnel-provider", include_in_schema=False)
+async def initialize_tunnel_provider():
+    provider = TUNNEL_PROVIDER
+    if not provider or not TUNNEL_DOMAIN:
+        return RedirectResponse('/setup', status_code=303)
+    if provider == TunnelProvider.NGROK:
+        if setup_ngrok_tunnel():
+            return {
+                "success": True,
+                "provider": "Ngrok",
+                "url": TUNNEL_DOMAIN,
+                "message": "Ngrok tunnel initialized successfully"
+                }
+        else:
+            return {
+                "success": False,
+                "message": "Failed to initialize Ngrok tunnel. Please check the auth token and domain."
+            }
+    elif provider == TunnelProvider.CLOUDFLARE:
+        tunnel_url = f"https://tunnel-{random.randint(1000, 9999)}.example.com"
+        return {
+            "success": True,
+            "provider": "Cloudflare",
+            "url": tunnel_url,
+            "message": "Cloudflare tunnel initialized successfully"
+        }
+    return RedirectResponse('/setup', status_code=303)

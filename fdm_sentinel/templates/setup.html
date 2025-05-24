@@ -25,7 +25,9 @@
         
         <div id="setup-progress-external" style="display:none;">
             <div class="progress-step active" data-step="tunnel">1. Tunnel Provider</div>
-            <div class="progress-step" data-step="finish">2. Finish</div>
+            <div class="progress-step" data-step="initialize">2. Initialize Provider</div>
+            <div class="progress-step" data-step="vapid">3. VAPID Keys</div>
+            <div class="progress-step" data-step="finish">4. Finish</div>
         </div>
         
         <div id="setup-content">
@@ -74,8 +76,14 @@
                 <div class="form-section" id="tunnel-form" style="display:none;">
                     <div class="form-group" id="ngrok-config" style="display:none;">
                         <label for="ngrok-auth-token">Ngrok Auth Token</label>
-                        <input type="text" id="ngrok-auth-token" name="ngrok-auth-token" placeholder="Your Ngrok auth token">
+                        <input type="text" id="ngrok-auth-token" name="ngrok-auth-token" placeholder="Your Ngrok auth token" required>
                         <small>Get your auth token from <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank">Ngrok Dashboard</a></small>
+                        
+                        <div style="margin-top: 20px;">
+                            <label for="ngrok-domain">Ngrok Static Domain</label>
+                            <input type="text" id="ngrok-domain" name="ngrok-domain" placeholder="your-domain.ngrok-free.app" required>
+                            <small>Create a free static domain by clicking 'Create Domain' on <a href="https://dashboard.ngrok.com/domains" target="_blank">Ngrok Domains</a></small>
+                        </div>
                     </div>
                     <div class="form-group" id="cloudflare-config" style="display:none;">
                         <label for="cloudflare-token">Cloudflare Tunnel Token</label>
@@ -83,7 +91,37 @@
                         <small>Create a tunnel in <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank">Cloudflare Zero Trust</a></small>
                     </div>
                     <div class="button-group">
-                        <button id="save-tunnel-settings" class="setup-btn primary">Save & Continue</button>
+                        <button id="save-tunnel-settings" class="setup-btn primary">Continue to Initialize</button>
+                    </div>
+                </div>
+            </div>
+            <div class="setup-section" id="initialize-section">
+                <h3>Initializing Tunnel Provider</h3>
+                <div id="initialization-content">
+                    <div id="initialization-loading" class="loading-container">
+                        <div class="spinner"></div>
+                        <p>Please wait while we initialize your tunnel provider...</p>
+                        <small>This may take a few moments to complete.</small>
+                    </div>
+                    <div id="initialization-success" class="success-container" style="display:none;">
+                        <div class="success-icon">✓</div>
+                        <p>Tunnel provider initialized successfully!</p>
+                        <div id="tunnel-info" class="tunnel-info">
+                            <p><strong>Provider:</strong> <span id="provider-name"></span></p>
+                            <p><strong>URL:</strong> <span id="provider-url"></span></p>
+                        </div>
+                        <div class="button-group">
+                            <button id="continue-to-finish" class="setup-btn primary">Continue to VAPID Setup</button>
+                        </div>
+                    </div>
+                    <div id="initialization-error" class="error-container" style="display:none;">
+                        <div class="error-icon">✗</div>
+                        <p>Failed to initialize tunnel provider</p>
+                        <div id="error-message" class="error-details"></div>
+                        <div class="button-group">
+                            <button id="retry-initialization" class="setup-btn secondary">Retry</button>
+                            <button id="back-to-tunnel-config" class="setup-btn">Back to Configuration</button>
+                        </div>
                     </div>
                 </div>
             </div>

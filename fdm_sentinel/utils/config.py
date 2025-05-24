@@ -4,7 +4,7 @@ import torch
 from platformdirs import user_data_dir
 from ..models import AlertAction
 import keyring
-import tempfile, os, ssl
+import tempfile, os
 
 APP_DATA_DIR = user_data_dir("fdm-sentinel", "fdm-sentinel")
 KEYRING_SERVICE_NAME = "fdm-sentinel"
@@ -18,6 +18,7 @@ VAPID_SUBJECT = ""
 VAPID_PUBLIC_KEY = ""
 VAPID_CLAIMS = {}
 BASE_URL = ""
+TUNNEL_DOMAIN = None
 
 TUNNEL_PROVIDER = None
 
@@ -52,7 +53,7 @@ def get_ssl_private_key_temporary_path():
     return None
 
 def load_config():
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL, TUNNEL_PROVIDER
+    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL, TUNNEL_PROVIDER, TUNNEL_DOMAIN
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r') as f:
@@ -61,7 +62,7 @@ def load_config():
                 VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", "")
                 BASE_URL = config_data.get("BASE_URL", "")
                 TUNNEL_PROVIDER = config_data.get("TUNNEL_PROVIDER", None)
-
+                TUNNEL_DOMAIN = config_data.get("TUNNEL_DOMAIN", None)
                 if VAPID_SUBJECT:
                     VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
                 return
@@ -71,11 +72,12 @@ def load_config():
         VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
 
 def save_config(config_data):
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL, TUNNEL_PROVIDER
+    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL, TUNNEL_PROVIDER, TUNNEL_DOMAIN
     VAPID_SUBJECT = config_data.get("VAPID_SUBJECT", VAPID_SUBJECT)
     VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", VAPID_PUBLIC_KEY)
     BASE_URL = config_data.get("BASE_URL", BASE_URL)
     TUNNEL_PROVIDER = config_data.get("TUNNEL_PROVIDER", TUNNEL_PROVIDER)
+    TUNNEL_DOMAIN = config_data.get("TUNNEL_DOMAIN", TUNNEL_DOMAIN)
     if VAPID_SUBJECT:
         VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
     with open(CONFIG_FILE, 'w') as f:
