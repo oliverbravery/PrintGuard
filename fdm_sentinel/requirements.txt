@@ -10,3 +10,4 @@ opencv-python
 torch
 python-multipart
 sse-starlette
+trustme
