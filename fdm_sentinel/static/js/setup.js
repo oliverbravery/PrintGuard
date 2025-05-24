@@ -8,9 +8,11 @@ document.addEventListener('DOMContentLoaded', () => {
         networkConfigured: false,
         vapidConfigured: false,
         sslConfigured: false,
+        tunnelConfigured: false,
         networkData: {},
         vapidData: {},
-        sslData: {}
+        sslData: {},
+        tunnelData: {}
     };
 
     function showSection(sectionId) {
@@ -30,7 +32,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 step.classList.add('active');
             } else if (
                 (stepId === 'vapid' && setupState.vapidConfigured) ||
-                (stepId === 'ssl' && setupState.sslConfigured)
+                (stepId === 'ssl' && setupState.sslConfigured) ||
+                (stepId === 'tunnel' && setupState.tunnelConfigured)
             ) {
                 step.classList.add('completed');
             }
@@ -41,16 +44,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 setupState.networkConfigured ? 'Configured ✓' : 'Not Configured';
             document.getElementById('summary-network-status').className = 
                 setupState.networkConfigured ? 'status-configured' : '';
-                
-            document.getElementById('summary-vapid-status').textContent = 
-                setupState.vapidConfigured ? 'Configured ✓' : 'Not Configured';
-            document.getElementById('summary-vapid-status').className = 
-                setupState.vapidConfigured ? 'status-configured' : '';
             
-            document.getElementById('summary-ssl-status').textContent = 
-                setupState.sslConfigured ? 'Configured ✓' : 'Not Configured';
-            document.getElementById('summary-ssl-status').className = 
-                setupState.sslConfigured ? 'status-configured' : '';
+            if (selectedNetworkOption === 'external') {
+                document.getElementById('tunnel-summary-item').style.display = 'block';
+                document.getElementById('summary-tunnel-status').textContent = 
+                    setupState.tunnelConfigured ? 'Configured ✓' : 'Not Configured';
+                document.getElementById('summary-tunnel-status').className = 
+                    setupState.tunnelConfigured ? 'status-configured' : '';
+                document.getElementById('vapid-summary-item').style.display = 'none';
+                document.getElementById('ssl-summary-item').style.display = 'none';
+            } else {
+                document.getElementById('tunnel-summary-item').style.display = 'none';
+                document.getElementById('vapid-summary-item').style.display = 'block';
+                document.getElementById('ssl-summary-item').style.display = 'block';
+                document.getElementById('summary-vapid-status').textContent = 
+                    setupState.vapidConfigured ? 'Configured ✓' : 'Not Configured';
+                document.getElementById('summary-vapid-status').className = 
+                    setupState.vapidConfigured ? 'status-configured' : '';
+                document.getElementById('summary-ssl-status').textContent = 
+                    setupState.sslConfigured ? 'Configured ✓' : 'Not Configured';
+                document.getElementById('summary-ssl-status').className = 
+                    setupState.sslConfigured ? 'status-configured' : '';
+            }
         }
     }
 
@@ -71,35 +86,72 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedNetworkOption = 'external';
         document.querySelectorAll('.network-option').forEach(btn => btn.classList.remove('selected'));
         document.getElementById('external-network-btn').classList.add('selected');
-        document.getElementById('external-continue-group').style.display = 'block';
         document.getElementById('setup-progress-external').style.display = 'flex';
+        document.getElementById('network-section').style.display = 'none';
+        setupState.networkConfigured = true;
+        setupState.networkData = { type: selectedNetworkOption };
+        showSection('tunnel');
     });
 
-    document.getElementById('save-network-config').addEventListener('click', async () => {
-        if (!selectedNetworkOption) {
-            alert('Please select a network configuration option');
+    let selectedTunnelProvider = null;
+
+    document.getElementById('ngrok-btn').addEventListener('click', () => {
+        selectedTunnelProvider = 'ngrok';
+        document.querySelectorAll('.tunnel-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('ngrok-btn').classList.add('selected');
+        document.getElementById('tunnel-form').style.display = 'block';
+        document.getElementById('ngrok-config').style.display = 'block';
+        document.getElementById('cloudflare-config').style.display = 'none';
+    });
+
+    document.getElementById('cloudflare-btn').addEventListener('click', () => {
+        selectedTunnelProvider = 'cloudflare';
+        document.querySelectorAll('.tunnel-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('cloudflare-btn').classList.add('selected');
+        document.getElementById('tunnel-form').style.display = 'block';
+        document.getElementById('cloudflare-config').style.display = 'block';
+        document.getElementById('ngrok-config').style.display = 'none';
+    });
+
+    document.getElementById('save-tunnel-settings').addEventListener('click', async () => {
+        if (!selectedTunnelProvider) {
+            alert('Please select a tunnel provider');
+            return;
+        }
+
+        let token = '';
+        if (selectedTunnelProvider === 'ngrok') {
+            token = document.getElementById('ngrok-auth-token').value.trim();
+        } else if (selectedTunnelProvider === 'cloudflare') {
+            token = document.getElementById('cloudflare-token').value.trim();
+        }
+
+        if (!token) {
+            alert('Please enter the required token');
             return;
         }
 
         try {
-            const response = await fetch('/setup/save-network-config', {
+            const response = await fetch('/setup/save-tunnel-settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ network_type: selectedNetworkOption })
+                body: JSON.stringify({ 
+                    provider: selectedTunnelProvider,
+                    token: token 
+                })
             });
             
             if (response.ok) {
-                setupState.networkConfigured = true;
-                setupState.networkData = { type: selectedNetworkOption };
-                document.getElementById('network-section').style.display = 'none';
-                showSection('vapid');
+                setupState.tunnelConfigured = true;
+                setupState.tunnelData = { provider: selectedTunnelProvider, token };
+                showSection('finish');
             } else {
                 const error = await response.json();
-                alert(`Failed to save network configuration: ${error.detail}`);
+                alert(`Failed to save tunnel settings: ${error.detail}`);
             }
         } catch (error) {
-            console.error('Error saving network configuration:', error);
-            alert('Error saving network configuration');
+            console.error('Error saving tunnel settings:', error);
+            alert('Error saving tunnel settings');
         }
     });
 

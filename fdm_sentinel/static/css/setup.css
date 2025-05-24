@@ -179,6 +179,41 @@
     opacity: 0.9;
 }
 
+.tunnel-option {
+    text-align: left;
+    padding: 20px;
+    height: auto;
+    border: 2px dotted #ccc;
+    transition: all 0.3s ease;
+}
+
+.tunnel-option:hover {
+    border-color: #222;
+    background: #f9f9f9;
+}
+
+.tunnel-option.selected {
+    border-color: #222;
+    background: #222;
+    color: #fff;
+}
+
+.tunnel-option.selected .option-description {
+    opacity: 0.9;
+}
+
+.form-section small {
+    display: block;
+    margin-top: 5px;
+    font-size: 0.8rem;
+    color: #666;
+}
+
+.form-section small a {
+    color: #222;
+    text-decoration: underline;
+}
+
 @media (max-width: 600px) {
     .option-buttons {
         width: 80%;

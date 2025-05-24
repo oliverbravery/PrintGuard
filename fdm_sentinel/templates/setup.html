@@ -24,9 +24,8 @@
         </div>
         
         <div id="setup-progress-external" style="display:none;">
-            <div class="progress-step active" data-step="vapid">1. VAPID Keys</div>
-            <div class="progress-step" data-step="ssl">2. SSL Certificate</div>
-            <div class="progress-step" data-step="finish">3. Finish</div>
+            <div class="progress-step active" data-step="tunnel">1. Tunnel Provider</div>
+            <div class="progress-step" data-step="finish">2. Finish</div>
         </div>
         
         <div id="setup-content">
@@ -50,8 +49,42 @@
                         </div>
                     </button>
                 </div>
-                <div class="button-group" id="external-continue-group" style="display:none;">
-                    <button id="save-network-config" class="setup-btn primary">Continue</button>
+            </div>
+            <div class="setup-section" id="tunnel-section">
+                <h3>Tunnel Provider Setup</h3>
+                <p>Choose a tunnel provider to enable external access to your FDM Sentinel service.</p>
+                
+                <div class="option-buttons">
+                    <button id="ngrok-btn" class="setup-btn tunnel-option">
+                        <div class="option-title">Ngrok</div>
+                        <div class="option-description">
+                            Free tunnel service with dynamic URLs. Easy to set up and get started quickly.
+                            The URL changes every time you start the service.
+                        </div>
+                    </button>
+                    <button id="cloudflare-btn" class="setup-btn tunnel-option">
+                        <div class="option-title">Cloudflare Tunnel</div>
+                        <div class="option-description">
+                            Free tunnel service with the ability to link to a static custom domain.
+                            Ideal for permanent setups and professional use.
+                        </div>
+                    </button>
+                </div>
+                
+                <div class="form-section" id="tunnel-form" style="display:none;">
+                    <div class="form-group" id="ngrok-config" style="display:none;">
+                        <label for="ngrok-auth-token">Ngrok Auth Token</label>
+                        <input type="text" id="ngrok-auth-token" name="ngrok-auth-token" placeholder="Your Ngrok auth token">
+                        <small>Get your auth token from <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank">Ngrok Dashboard</a></small>
+                    </div>
+                    <div class="form-group" id="cloudflare-config" style="display:none;">
+                        <label for="cloudflare-token">Cloudflare Tunnel Token</label>
+                        <input type="text" id="cloudflare-token" name="cloudflare-token" placeholder="Your Cloudflare tunnel token">
+                        <small>Create a tunnel in <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank">Cloudflare Zero Trust</a></small>
+                    </div>
+                    <div class="button-group">
+                        <button id="save-tunnel-settings" class="setup-btn primary">Save & Continue</button>
+                    </div>
                 </div>
             </div>
             <div class="setup-section" id="vapid-section">
@@ -121,10 +154,13 @@
                     <div class="summary-item">
                         <strong>Network Configuration:</strong> <span id="summary-network-status">Not Configured</span>
                     </div>
-                    <div class="summary-item">
+                    <div class="summary-item" id="tunnel-summary-item" style="display:none;">
+                        <strong>Tunnel Provider:</strong> <span id="summary-tunnel-status">Not Configured</span>
+                    </div>
+                    <div class="summary-item" id="vapid-summary-item">
                         <strong>VAPID Keys:</strong> <span id="summary-vapid-status">Not Configured</span>
                     </div>
-                    <div class="summary-item">
+                    <div class="summary-item" id="ssl-summary-item">
                         <strong>SSL Certificate:</strong> <span id="summary-ssl-status">Not Configured</span>
                     </div>
                 </div>
