@@ -19,6 +19,8 @@ VAPID_PUBLIC_KEY = ""
 VAPID_CLAIMS = {}
 BASE_URL = ""
 
+TUNNEL_PROVIDER = None
+
 def store_vapid_private_key(private_key):
     keyring.set_password(KEYRING_SERVICE_NAME, "VAPID_PRIVATE_KEY", private_key)
 
@@ -30,6 +32,12 @@ def store_ssl_private_key(private_key):
 
 def get_ssl_private_key():
     return keyring.get_password(KEYRING_SERVICE_NAME, "SSL_PRIVATE_KEY")
+
+def store_tunnel_api_key(api_key):
+    keyring.set_password(KEYRING_SERVICE_NAME, "TUNNEL_API_KEY", api_key)
+
+def get_tunnel_api_key():
+    return keyring.get_password(KEYRING_SERVICE_NAME, "TUNNEL_API_KEY")
 
 def get_ssl_private_key_temporary_path():
     private_key = get_ssl_private_key()
@@ -44,7 +52,7 @@ def get_ssl_private_key_temporary_path():
     return None
 
 def load_config():
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL
+    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL, TUNNEL_PROVIDER
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r') as f:
@@ -52,6 +60,7 @@ def load_config():
                 VAPID_SUBJECT = config_data.get("VAPID_SUBJECT", "")
                 VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", "")
                 BASE_URL = config_data.get("BASE_URL", "")
+                TUNNEL_PROVIDER = config_data.get("TUNNEL_PROVIDER", None)
 
                 if VAPID_SUBJECT:
                     VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
@@ -62,10 +71,11 @@ def load_config():
         VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
 
 def save_config(config_data):
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL
+    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL, TUNNEL_PROVIDER
     VAPID_SUBJECT = config_data.get("VAPID_SUBJECT", VAPID_SUBJECT)
     VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", VAPID_PUBLIC_KEY)
     BASE_URL = config_data.get("BASE_URL", BASE_URL)
+    TUNNEL_PROVIDER = config_data.get("TUNNEL_PROVIDER", TUNNEL_PROVIDER)
     if VAPID_SUBJECT:
         VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
     with open(CONFIG_FILE, 'w') as f:

@@ -66,3 +66,11 @@ class VapidSettings(BaseModel):
     private_key: str
     subject: str
     base_url: str
+
+class TunnelProvider(str, Enum):
+    NGROK = "ngrok"
+    CLOUDFLARE = "cloudflare"
+
+class TunnelSettings(BaseModel):
+    provider: TunnelProvider
+    token: str

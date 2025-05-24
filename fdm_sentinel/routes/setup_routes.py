@@ -2,10 +2,11 @@ from fastapi import APIRouter, Request
 from fastapi.exceptions import HTTPException
 from py_vapid import Vapid
 import logging
-from ..models import VapidSettings
+from ..models import VapidSettings, TunnelSettings
 from ..utils.config import (
     save_config, BASE_URL, SSL_CERT_FILE, SSL_CA_FILE,
-    store_vapid_private_key, store_ssl_private_key
+    store_vapid_private_key, store_ssl_private_key,
+    store_tunnel_api_key
 )
 import trustme
 from cryptography.hazmat.primitives import serialization
@@ -105,3 +106,18 @@ async def upload_ssl_cert(request: Request):
     except Exception as e:
         logging.error("Error uploading SSL certificate: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to upload SSL certificate: {str(e)}")
+
+@router.post("/setup/save-tunnel-settings", include_in_schema=False)
+async def save_tunnel_settings(settings: TunnelSettings):
+    try:
+        config_data = {
+            "TUNNEL_PROVIDER": settings.provider,
+            "TUNNEL_API_KEY": settings.token
+        }
+        store_tunnel_api_key(settings.token)
+        save_config(config_data)
+        logging.debug("Tunnel settings saved successfully.")
+        return {"success": True, "message": "Tunnel settings saved successfully."}
+    except Exception as e:
+        logging.error("Error saving tunnel settings: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to save tunnel settings: {str(e)}")
