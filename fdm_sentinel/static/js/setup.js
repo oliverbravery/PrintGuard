@@ -153,6 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('finish-setup-btn').addEventListener('click', async () => {
+        alert('Setup complete! To finalize, please restart the server. Redirecting to the home page...');
         window.location.href = '/';
     });
 });
