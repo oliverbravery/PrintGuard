@@ -9,11 +9,10 @@ from fastapi.exceptions import HTTPException
 from fastapi.responses import RedirectResponse
 from py_vapid import Vapid
 
-from ..models import (TunnelProvider, TunnelSettings,
+from ..models import (TunnelProvider, TunnelSettings, SavedConfig,
                       VapidSettings, SavedKey, SetupCompletion)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
-                            TUNNEL_PROVIDER, save_config,
-                            SITE_DOMAIN, store_key)
+                            store_key, get_config, update_config)
 from ..utils.setup_utils import setup_ngrok_tunnel
 
 router = APIRouter()
@@ -57,12 +56,12 @@ async def generate_vapid_keys():
 async def save_vapid_settings(settings: VapidSettings):
     try:
         config_data = {
-            "VAPID_PUBLIC_KEY": settings.public_key,
-            "VAPID_SUBJECT": settings.subject,
-            "SITE_DOMAIN": settings.base_url
+            SavedConfig.VAPID_PUBLIC_KEY: settings.public_key,
+            SavedConfig.VAPID_SUBJECT: settings.subject,
+            SavedConfig.SITE_DOMAIN: settings.base_url
         }
         store_key(SavedKey.VAPID_PRIVATE_KEY, settings.private_key)
-        save_config(config_data)
+        update_config(config_data)
         return {"success": True}
     except Exception as e:
         logging.error("Error saving VAPID settings: %s", e)
@@ -73,9 +72,13 @@ async def save_vapid_settings(settings: VapidSettings):
 
 @router.post("/setup/generate-ssl-cert", include_in_schema=False)
 async def generate_ssl_cert():
+    config = get_config()
     try:
         ca = trustme.CA()
-        domain = SITE_DOMAIN
+        domain = config.get(SavedConfig.SITE_DOMAIN, None)
+        if not domain:
+            raise HTTPException(status_code=400, 
+                                detail="Site domain is not set in the configuration.")
         if domain.startswith(('http://', 'https://')):
             domain = domain.split('://')[1]
         if domain.endswith('/'):
@@ -115,29 +118,30 @@ async def upload_ssl_cert(request: Request):
 async def save_tunnel_settings(settings: TunnelSettings):
     try:
         config_data = {
-            "TUNNEL_PROVIDER": settings.provider,
-            "TUNNEL_API_KEY": settings.token,
-            "SITE_DOMAIN": settings.domain
+            SavedConfig.TUNNEL_PROVIDER: settings.provider,
+            SavedConfig.SITE_DOMAIN: settings.domain
         }
         store_key(SavedKey.TUNNEL_API_KEY, settings.token)
-        save_config(config_data)
+        update_config(config_data)
         logging.debug("Tunnel settings saved successfully.")
-        return {"success": True, "message": "Tunnel settings saved successfully.", "skip_ssl": True}
+        return {"success": True, "message": "Tunnel settings saved successfully."}
     except Exception as e:
         logging.error("Error saving tunnel settings: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to save tunnel settings: {str(e)}")
 
 @router.post("/setup/initialize-tunnel-provider", include_in_schema=False)
 async def initialize_tunnel_provider():
-    provider = TUNNEL_PROVIDER
-    if not provider or not SITE_DOMAIN:
+    config = get_config()
+    provider = config.get(SavedConfig.TUNNEL_PROVIDER, None)
+    site_domain = config.get(SavedConfig.SITE_DOMAIN, None)
+    if not provider or not site_domain:
         return RedirectResponse('/setup', status_code=303)
     if provider == TunnelProvider.NGROK:
         if setup_ngrok_tunnel(close=True):
             return {
                 "success": True,
                 "provider": "Ngrok",
-                "url": SITE_DOMAIN,
+                "url": site_domain,
                 "message": "Ngrok tunnel initialized successfully"
                 }
         else:
@@ -146,6 +150,7 @@ async def initialize_tunnel_provider():
                 "message": "Failed to initialize Ngrok tunnel. Please check the auth token and domain."
             }
     elif provider == TunnelProvider.CLOUDFLARE:
+        # Simulating Cloudflare tunnel initialization
         tunnel_url = f"https://tunnel-{random.randint(1000, 9999)}.example.com"
         return {
             "success": True,
@@ -159,13 +164,12 @@ async def initialize_tunnel_provider():
 async def complete_setup(completion: SetupCompletion):
     try:
         config_data = {
-            "STARTUP_MODE": completion.startup_mode
+            SavedConfig.STARTUP_MODE: completion.startup_mode
         }
         if completion.tunnel_provider:
-            config_data["TUNNEL_PROVIDER"] = completion.tunnel_provider
-        
-        save_config(config_data)
-        logging.info("Setup completed successfully with startup mode: %s", completion.startup_mode)
+            config_data[SavedConfig.TUNNEL_PROVIDER] = completion.tunnel_provider
+        update_config(config_data)
+        logging.debug("Setup completed successfully with startup mode: %s", completion.startup_mode)
         return {"success": True, "message": "Setup completed successfully"}
     except Exception as e:
         logging.error("Error completing setup: %s", e)

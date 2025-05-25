@@ -10,18 +10,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse, StreamingResponse
-from .models import CameraState, SiteStartupMode, TunnelProvider
+from .models import CameraState, SiteStartupMode, TunnelProvider, SavedConfig
 from .routes.alert_routes import router as alert_router
 from .routes.detection_routes import router as detection_router
 from .routes.live_detection_routes import router as live_detection_router
 from .routes.notification_routes import router as notification_router
 from .routes.sse_routes import router as sse_router
 from .routes.setup_routes import router as setup_router
-from .utils.config import (DEVICE_TYPE, MODEL_OPTIONS_PATH, MODEL_PATH,
-                           PROTOTYPES_DIR, SUCCESS_LABEL, SSL_CERT_FILE,
-                           get_ssl_private_key_temporary_path, save_config,
-                           STARTUP_MODE, MAX_CAMERAS, CAMERA_INDICES,
-                           CAMERA_INDEX, TUNNEL_PROVIDER, SITE_DOMAIN)
+from .utils.config import (get_ssl_private_key_temporary_path,
+                           SSL_CERT_FILE, PROTOTYPES_DIR,
+                           MODEL_PATH, MODEL_OPTIONS_PATH,
+                           DEVICE_TYPE, SUCCESS_LABEL,
+                           CAMERA_INDICES, MAX_CAMERAS,
+                           CAMERA_INDEX, get_config,
+                           update_config)
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
 
@@ -240,12 +242,15 @@ def run():
     from .utils.setup_utils import (startup_mode_requirements_met,
                                     setup_ngrok_tunnel)
     startup_mode = startup_mode_requirements_met()
+    config = get_config()
+    site_domain = config.get(SavedConfig.SITE_DOMAIN, "")
+    tunnel_provider = config.get(SavedConfig.TUNNEL_PROVIDER, None)
     match startup_mode:
         case SiteStartupMode.SETUP:
             logging.warning("Starting in setup mode. Available at http://localhost:8000/setup")
             uvicorn.run(app, host="0.0.0.0", port=8000)
         case SiteStartupMode.LOCAL:
-            logging.warning("Starting in local mode. Available at %s", SITE_DOMAIN)
+            logging.warning("Starting in local mode. Available at %s", site_domain)
             ssl_private_key_path = get_ssl_private_key_temporary_path()
             uvicorn.run(app,
                         host="0.0.0.0",
@@ -253,19 +258,19 @@ def run():
                         ssl_certfile=SSL_CERT_FILE,
                         ssl_keyfile=ssl_private_key_path)
         case SiteStartupMode.TUNNEL:
-            match TUNNEL_PROVIDER:
+            match tunnel_provider:
                 case TunnelProvider.NGROK:
-                    logging.warning("Starting in tunnel mode with ngrok. Available at %s", SITE_DOMAIN)
+                    logging.warning("Starting in tunnel mode with ngrok. Available at %s", site_domain)
                     tunnel_setup = setup_ngrok_tunnel(close=False)
                     if not tunnel_setup:
                         logging.error("Failed to establish ngrok tunnel. Starting in SETUP mode.")
-                        save_config({"STARTUP_MODE": SiteStartupMode.SETUP})
+                        update_config({SavedConfig.STARTUP_MODE: SiteStartupMode.SETUP})
                         run()
                     else:
                         uvicorn.run(app, host="0.0.0.0", port=8000)
                 case TunnelProvider.CLOUDFLARE:
                     logging.error("Cloudflare tunnel support is not implemented yet. Starting in SETUP mode.")
-                    save_config({"STARTUP_MODE": SiteStartupMode.SETUP})
+                    update_config({SavedConfig.STARTUP_MODE: SiteStartupMode.SETUP})
                     run()
 
 if __name__ == "__main__":

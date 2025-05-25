@@ -2,15 +2,20 @@ import logging
 
 from fastapi import APIRouter, Request
 
-from ..models import Notification
-from ..utils.config import VAPID_PUBLIC_KEY
+from ..models import Notification, SavedConfig
+from ..utils.config import get_config
 from ..utils.notification_utils import send_notification
 
 router = APIRouter()
 
 @router.get("/notification/public_key")
 async def get_public_key():
-    return {"publicKey": VAPID_PUBLIC_KEY}
+    config = get_config()
+    vapid_public_key = config.get(SavedConfig.VAPID_PUBLIC_KEY, None)
+    if not vapid_public_key:
+        logging.error("VAPID public key is not set in the configuration.")
+        return {"error": "VAPID public key not configured"}
+    return {"publicKey": vapid_public_key}
 
 @router.post("/notification/subscribe")
 async def subscribe(request: Request):

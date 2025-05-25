@@ -1,8 +1,6 @@
-from ..models import SavedKey, SiteStartupMode
-from .config import (SITE_DOMAIN, get_key,
-                     STARTUP_MODE, SSL_CERT_FILE,
-                     VAPID_PUBLIC_KEY, VAPID_CLAIMS,
-                     TUNNEL_PROVIDER)
+from ..models import SavedKey, SiteStartupMode, SavedConfig
+from .config import (SSL_CERT_FILE, get_key,
+                     get_config)
 
 def setup_ngrok_tunnel(close: bool = False) -> bool:
     """
@@ -17,8 +15,9 @@ def setup_ngrok_tunnel(close: bool = False) -> bool:
     Returns:
         bool: True if the tunnel was successfully started, False otherwise.
     """
+    config = get_config()
     tunnel_auth_key = get_key(SavedKey.TUNNEL_API_KEY)
-    tunnel_domain = SITE_DOMAIN
+    tunnel_domain = config.get(SavedConfig.SITE_DOMAIN, None)
     if not tunnel_auth_key and not tunnel_domain:
         return False
     try:
@@ -47,9 +46,11 @@ def check_ssl_certificates_exist() -> bool:
     Returns:
         bool: True if SSL requirements exist, False otherwise.
     """
+    config = get_config()
+    site_domain = config.get(SavedConfig.SITE_DOMAIN, None)
     return True if (
         get_key(SavedKey.SSL_PRIVATE_KEY)
-        and SITE_DOMAIN
+        and site_domain
         and SSL_CERT_FILE
         ) else False
 
@@ -65,10 +66,13 @@ def check_vapid_keys_exist() -> bool:
     Returns:
         bool: True if VAPID requirements exist, False otherwise.
     """
+    config = get_config()
+    vapid_public_key = config.get(SavedConfig.VAPID_PUBLIC_KEY, None)
+    vapid_subject = config.get(SavedConfig.VAPID_SUBJECT, None)
     return True if (
         get_key(SavedKey.VAPID_PRIVATE_KEY)
-        and VAPID_CLAIMS
-        and VAPID_PUBLIC_KEY
+        and vapid_subject
+        and vapid_public_key
         ) else False
 
 def check_tunnel_requirements_met() -> bool:
@@ -82,8 +86,10 @@ def check_tunnel_requirements_met() -> bool:
     Returns:
         bool: True if tunnel requirements are met, False otherwise.
     """
+    config = get_config()
+    tunnel_provider = config.get(SavedConfig.TUNNEL_PROVIDER, None)
     return True if (
-        TUNNEL_PROVIDER
+        tunnel_provider
         and get_key(SavedKey.TUNNEL_API_KEY)
         ) else False
 
@@ -94,7 +100,8 @@ def startup_mode_requirements_met() -> SiteStartupMode:
     Returns:
         SiteStartupMode: The site startup mode if requirements are met, SETUP otherwise.
     """
-    match STARTUP_MODE:
+    startup_mode = get_config().get(SavedConfig.STARTUP_MODE, None)
+    match startup_mode:
         case SiteStartupMode.SETUP:
             return SiteStartupMode.SETUP
         case SiteStartupMode.LOCAL:

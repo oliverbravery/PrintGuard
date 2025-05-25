@@ -2,8 +2,8 @@ from urllib.parse import urlparse
 import logging
 from pywebpush import WebPushException, webpush
 
-from ..models import Notification, SavedKey
-from ..utils.config import VAPID_CLAIMS, get_key
+from ..models import Notification, SavedKey, SavedConfig
+from ..utils.config import get_key, get_config
 
 
 def send_defect_notification(alert_id, app):
@@ -18,19 +18,28 @@ def send_defect_notification(alert_id, app):
         send_notification(notification, app)
 
 def send_notification(notification: Notification, app):
+    config = get_config()
+    vapid_subject = config.get(SavedConfig.VAPID_SUBJECT, None)
+    if not vapid_subject:
+        logging.error("VAPID subject is not set in the configuration.")
+        return False
+    vapid_claims = {
+        "sub": vapid_subject,
+        "aud": None,
+    }
     for sub in app.state.subscriptions:
         try:
             endpoint = sub.get('endpoint', '')
             parsed_endpoint = urlparse(endpoint)
             audience = f"{parsed_endpoint.scheme}://{parsed_endpoint.netloc}"
-            vapid_claims = dict(VAPID_CLAIMS)
-            vapid_claims['aud'] = audience
+            aud_vapid_claims = dict(vapid_claims)
+            aud_vapid_claims['aud'] = audience
             data_payload_dict = notification.model_dump_json()
             webpush(
                 subscription_info=sub,
                 data=data_payload_dict,
                 vapid_private_key=get_key(SavedKey.VAPID_PRIVATE_KEY),
-                vapid_claims=vapid_claims
+                vapid_claims=aud_vapid_claims
             )
         except WebPushException as ex:
             if ex.response.status_code == 410:
