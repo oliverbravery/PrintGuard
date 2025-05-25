@@ -66,6 +66,11 @@ class VapidSettings(BaseModel):
     private_key: str
     subject: str
     base_url: str
+    
+class SiteStartupMode(str, Enum):
+    SETUP = "setup"
+    LOCAL = "local"
+    TUNNEL = "tunnel"
 
 class TunnelProvider(str, Enum):
     NGROK = "ngrok"
