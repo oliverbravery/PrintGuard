@@ -2,9 +2,8 @@ import logging
 
 from fastapi import APIRouter, Request
 
-from ..models import Notification, SavedConfig
+from ..models import SavedConfig
 from ..utils.config import get_config
-from ..utils.notification_utils import send_notification
 
 router = APIRouter()
 
@@ -35,7 +34,3 @@ async def subscribe(request: Request):
         logging.error("Subscription error: %s", str(e))
         return {"success": False, "error": f"Server error: {str(e)}"}
 
-@router.post("/notification/push")
-async def push(notification: Notification, request: Request):
-    success = send_notification(notification, request.app)
-    return {"success": success}
