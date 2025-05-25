@@ -1,10 +1,13 @@
-import os
 import json
+import logging
+import os
+import tempfile
+
+import keyring
 import torch
 from platformdirs import user_data_dir
-from ..models import AlertAction, SiteStartupMode, SavedKey
-import keyring
-import tempfile, os
+
+from ..models import AlertAction, SavedKey, SavedConfig
 
 APP_DATA_DIR = user_data_dir("fdm-sentinel", "fdm-sentinel")
 KEYRING_SERVICE_NAME = "fdm-sentinel"
@@ -14,13 +17,36 @@ CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.json")
 SSL_CERT_FILE = os.path.join(APP_DATA_DIR, "cert.pem")
 SSL_CA_FILE = os.path.join(APP_DATA_DIR, "ca.pem")
 
-VAPID_SUBJECT = ""
-VAPID_PUBLIC_KEY = ""
-VAPID_CLAIMS = {}
-SITE_DOMAIN = None
+def get_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+                return config_data
+        except Exception as e:
+            logging.error("Error loading config file: %s", e)
 
-STARTUP_MODE = SiteStartupMode.SETUP
-TUNNEL_PROVIDER = None
+def update_config(updates: dict):
+    config = get_config()
+    if config is not None:
+        for key, value in updates.items():
+            if key in config:
+                config[key] = value
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2)
+
+def init_config():
+    if not os.path.exists(CONFIG_FILE):
+        default_config = {
+            SavedConfig.VAPID_PUBLIC_KEY: None,
+            SavedConfig.VAPID_SUBJECT: None,
+            SavedConfig.STARTUP_MODE: None,
+            SavedConfig.SITE_DOMAIN: None,
+            SavedConfig.TUNNEL_PROVIDER: None,
+        }
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(default_config, f, indent=2)
+        logging.debug("Default config file created at %s", CONFIG_FILE)
 
 def store_key(key: SavedKey, value: str):
     keyring.set_password(KEYRING_SERVICE_NAME, key.value, value)
@@ -40,38 +66,7 @@ def get_ssl_private_key_temporary_path():
         return temp_file.name
     return None
 
-def load_config():
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, TUNNEL_PROVIDER, SITE_DOMAIN, STARTUP_MODE
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r') as f:
-                config_data = json.load(f)
-                VAPID_SUBJECT = config_data.get("VAPID_SUBJECT", "")
-                VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", "")
-                STARTUP_MODE = config_data.get("STARTUP_MODE", SiteStartupMode.SETUP)
-                SITE_DOMAIN = config_data.get("SITE_DOMAIN", None)
-                TUNNEL_PROVIDER = config_data.get("TUNNEL_PROVIDER", None)
-                if VAPID_SUBJECT:
-                    VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
-                return
-        except Exception as e:
-            print(f"Error loading config file: {e}")
-    if VAPID_SUBJECT:
-        VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
-
-def save_config(config_data):
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, TUNNEL_PROVIDER, SITE_DOMAIN, STARTUP_MODE
-    VAPID_SUBJECT = config_data.get("VAPID_SUBJECT", VAPID_SUBJECT)
-    VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", VAPID_PUBLIC_KEY)
-    STARTUP_MODE = config_data.get("STARTUP_MODE", STARTUP_MODE)
-    SITE_DOMAIN = config_data.get("SITE_DOMAIN", SITE_DOMAIN)
-    TUNNEL_PROVIDER = config_data.get("TUNNEL_PROVIDER", TUNNEL_PROVIDER)
-    if VAPID_SUBJECT:
-        VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config_data, f, indent=2)
-
-load_config()
+init_config()
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "model", "best_model.pt")
