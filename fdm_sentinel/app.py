@@ -25,12 +25,58 @@ from .utils.config import (DEVICE_TYPE, MODEL_OPTIONS_PATH, MODEL_PATH,
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
 
+# pylint: disable=W0621
+def get_camera_state(camera_index, reset=False):
+    if camera_index not in app.state.camera_states or reset:
+        app.state.camera_states[camera_index] = CameraState()
+    return app.state.camera_states[camera_index]
+
+# pylint: disable=W0621
+async def update_camera_state(camera_index, new_states):
+    camera_state_ref = app.state.camera_states.get(camera_index)
+    if camera_state_ref:
+        lock = camera_state_ref.lock
+        async with lock:
+            for key, value in new_states.items():
+                if hasattr(camera_state_ref, key):
+                    setattr(camera_state_ref, key, value)
+                else:
+                    logging.warning("Key '%s' not found in camera state for index %d.",
+                                    key,
+                                    camera_index)
+        return camera_state_ref
+    logging.warning("Camera index '%d' not found in camera states during update.", camera_index)
+    return None
+
+def detect_available_cameras(max_cameras=MAX_CAMERAS):
+    available_cameras = []
+    for i in range(max_cameras):
+        # pylint: disable=E1101
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            available_cameras.append(i)
+            cap.release()
+    return available_cameras
+
+def setup_camera_indices():
+    available_cameras = detect_available_cameras()
+    available_cameras.extend(CAMERA_INDICES)
+    if not available_cameras:
+        get_camera_state(CAMERA_INDEX)
+        logging.warning("No cameras detected. Using default camera index %d", CAMERA_INDEX)
+    else:
+        for camera_index in available_cameras:
+            get_camera_state(camera_index)
+        logging.debug("Detected %d cameras: %s", len(available_cameras), available_cameras)
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
-    if STARTUP_MODE is SiteStartupMode.SETUP:
+    from .utils.setup_utils import startup_mode_requirements_met
+    startup_mode = startup_mode_requirements_met()
+    if startup_mode is SiteStartupMode.SETUP:
         logging.warning("Starting in setup mode. Detection model and device will not be initialized.")
         yield
+        return
     logging.debug("Setting up device...")
     app_instance.state.device = setup_device(DEVICE_TYPE)
     logging.debug("Using device: %s", app_instance.state.device)
@@ -52,15 +98,16 @@ async def lifespan(app_instance: FastAPI):
             app_instance.state.defect_idx = defect_idx
             logging.debug("Prototypes built successfully.")
         except NameError:
-            logging.warning("Skipping prototype building: Potentially missing 'args' if not run as main script or if function expects it.")
+            logging.warning("Skipping prototype building.")
         except ValueError as e:
             logging.error("Error building prototypes: %s", e)
-
     except RuntimeError as e:
         logging.error("Error during startup: %s", e)
         app_instance.state.model = None
         raise
-    logging.debug("Shutting down...")
+    logging.debug("Setting up camera indices...")
+    setup_camera_indices()
+    logging.debug("Camera indices set up successfully.")
     yield
 
 app = FastAPI(
@@ -93,37 +140,6 @@ app.state.camera_states = {}
 if app.debug:
     logging.basicConfig(level=logging.DEBUG)
 
-# pylint: disable=W0621
-def get_camera_state(camera_index, reset=False):
-    """
-    Get or create a state object for a specific camera index.
-    This function is exported for use by other modules.
-    """
-    if camera_index not in app.state.camera_states or reset:
-        app.state.camera_states[camera_index] = CameraState()
-    return app.state.camera_states[camera_index]
-
-# pylint: disable=W0621
-async def update_camera_state(camera_index, new_states):
-    """
-    Update states of a specific camera index.
-    new_states should be a dictionary only containing the keys to be updated.
-    """
-    camera_state_ref = app.state.camera_states.get(camera_index)
-    if camera_state_ref:
-        lock = camera_state_ref.lock
-        async with lock:
-            for key, value in new_states.items():
-                if hasattr(camera_state_ref, key):
-                    setattr(camera_state_ref, key, value)
-                else:
-                    logging.warning("Key '%s' not found in camera state for index %d.",
-                                    key,
-                                    camera_index)
-        return camera_state_ref
-    logging.warning("Camera index '%d' not found in camera states during update.", camera_index)
-    return None
-
 async def update_camera_detection_history(camera_index, pred, time_val):
     """
     Append a detection to a camera's detection history.
@@ -137,26 +153,6 @@ async def update_camera_detection_history(camera_index, pred, time_val):
     logging.warning("Camera index '%d' not found when trying to update detection history.",
                     camera_index)
     return None
-
-def detect_available_cameras(max_cameras=MAX_CAMERAS):
-    available_cameras = []
-    for i in range(max_cameras):
-        # pylint: disable=E1101
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            available_cameras.append(i)
-            cap.release()
-    return available_cameras
-
-available_cameras = detect_available_cameras()
-available_cameras.extend(CAMERA_INDICES)
-if not available_cameras:
-    get_camera_state(CAMERA_INDEX)
-    logging.warning("No cameras detected. Using default camera index %d", CAMERA_INDEX)
-else:
-    for camera_index in available_cameras:
-        get_camera_state(camera_index)
-    logging.debug("Detected %d cameras: %s", len(available_cameras), available_cameras)
 
 base_dir = os.path.dirname(__file__)
 static_dir = os.path.join(base_dir, "static")
