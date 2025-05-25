@@ -128,3 +128,10 @@ class SavedKey(str, Enum):
     VAPID_PRIVATE_KEY = "vapid_private_key"
     SSL_PRIVATE_KEY = "ssl_private_key"
     TUNNEL_API_KEY = "tunnel_api_key"
+
+class SavedConfig(str, Enum):
+    VAPID_SUBJECT = "vapid_subject"
+    VAPID_PUBLIC_KEY = "vapid_public_key"
+    STARTUP_MODE = "startup_mode"
+    SITE_DOMAIN = "site_domain"
+    TUNNEL_PROVIDER = "tunnel_provider"
