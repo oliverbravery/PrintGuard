@@ -1,9 +1,8 @@
 import asyncio
 from enum import Enum
 from typing import List, Optional
-
 from pydantic import BaseModel, field_validator
-
+from .utils import config
 
 class Alert(BaseModel):
     id: str
@@ -34,10 +33,6 @@ class Notification(BaseModel):
     icon_url: Optional[str] = None
     badge_url: Optional[str] = None
     actions: List[NotificationAction] = []
-
-# pylint: disable=C0413
-from .utils import config
-
 
 class CameraState(BaseModel):
     lock: asyncio.Lock = asyncio.Lock()
