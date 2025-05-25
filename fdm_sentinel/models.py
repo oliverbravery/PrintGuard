@@ -87,3 +87,8 @@ class TunnelSettings(BaseModel):
         if info.data.get('provider') == TunnelProvider.NGROK and not v:
             raise ValueError('Domain is required for ngrok provider')
         return v
+
+class SavedKey(str, Enum):
+    VAPID_PRIVATE_KEY = "vapid_private_key"
+    SSL_PRIVATE_KEY = "ssl_private_key"
+    TUNNEL_API_KEY = "tunnel_api_key"

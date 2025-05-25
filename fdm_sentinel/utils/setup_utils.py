@@ -1,26 +1,25 @@
 import os
 from fastapi import Request
 from fastapi.responses import RedirectResponse
+from ..models import SavedKey
 from .config import (load_config,
                      VAPID_PUBLIC_KEY,
                      VAPID_SUBJECT,
                      SSL_CERT_FILE,
                      TUNNEL_PROVIDER,
                      SITE_DOMAIN,
-                     get_tunnel_api_key,
-                     get_vapid_private_key,
-                     get_ssl_private_key)
+                     get_key)
 
 def has_ssl_certificates():
-    return os.path.exists(SSL_CERT_FILE) and bool(get_ssl_private_key())
+    return os.path.exists(SSL_CERT_FILE) and bool(get_key(SavedKey.SSL_PRIVATE_KEY))
 
 def has_vapid_keys():
-    return bool(VAPID_SUBJECT) and bool(VAPID_PUBLIC_KEY) and bool(get_vapid_private_key())
+    return bool(VAPID_SUBJECT) and bool(VAPID_PUBLIC_KEY) and bool(get_key(SavedKey.VAPID_PRIVATE_KEY))
 
 def is_setup_complete():
     load_config()
     if TUNNEL_PROVIDER:
-        return has_vapid_keys() and bool(SITE_DOMAIN) and bool(get_tunnel_api_key())
+        return has_vapid_keys() and bool(SITE_DOMAIN) and bool(get_key(SavedKey.TUNNEL_API_KEY))
     else:
         return has_ssl_certificates() and has_vapid_keys() and bool(SITE_DOMAIN)
 
@@ -37,7 +36,7 @@ async def verify_setup_complete(request: Request):
     return None
 
 def setup_ngrok_tunnel():
-    tunnel_auth_key = get_tunnel_api_key()
+    tunnel_auth_key = get_key(SavedKey.TUNNEL_API_KEY)
     tunnel_domain = SITE_DOMAIN
     if not tunnel_auth_key and not tunnel_domain:
         return False

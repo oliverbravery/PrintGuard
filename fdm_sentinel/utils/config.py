@@ -2,7 +2,7 @@ import os
 import json
 import torch
 from platformdirs import user_data_dir
-from ..models import AlertAction, SiteStartupMode
+from ..models import AlertAction, SiteStartupMode, SavedKey
 import keyring
 import tempfile, os
 
@@ -22,26 +22,14 @@ SITE_DOMAIN = None
 STARTUP_MODE = SiteStartupMode.SETUP
 TUNNEL_PROVIDER = None
 
-def store_vapid_private_key(private_key):
-    keyring.set_password(KEYRING_SERVICE_NAME, "VAPID_PRIVATE_KEY", private_key)
+def store_key(key: SavedKey, value: str):
+    keyring.set_password(KEYRING_SERVICE_NAME, key.value, value)
 
-def get_vapid_private_key():
-    return keyring.get_password(KEYRING_SERVICE_NAME, "VAPID_PRIVATE_KEY")
-
-def store_ssl_private_key(private_key):
-    keyring.set_password(KEYRING_SERVICE_NAME, "SSL_PRIVATE_KEY", private_key)
-
-def get_ssl_private_key():
-    return keyring.get_password(KEYRING_SERVICE_NAME, "SSL_PRIVATE_KEY")
-
-def store_tunnel_api_key(api_key):
-    keyring.set_password(KEYRING_SERVICE_NAME, "TUNNEL_API_KEY", api_key)
-
-def get_tunnel_api_key():
-    return keyring.get_password(KEYRING_SERVICE_NAME, "TUNNEL_API_KEY")
+def get_key(key: SavedKey):
+    return keyring.get_password(KEYRING_SERVICE_NAME, key.value)
 
 def get_ssl_private_key_temporary_path():
-    private_key = get_ssl_private_key()
+    private_key = get_key(SavedKey.SSL_PRIVATE_KEY)
     if private_key:
         temp_file = tempfile.NamedTemporaryFile("w+",
                                                 delete=False,

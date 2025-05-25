@@ -9,11 +9,11 @@ from fastapi.exceptions import HTTPException
 from fastapi.responses import RedirectResponse
 from py_vapid import Vapid
 
-from ..models import TunnelProvider, TunnelSettings, VapidSettings
+from ..models import (TunnelProvider, TunnelSettings,
+                      VapidSettings, SavedKey)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
                             TUNNEL_PROVIDER, save_config,
-                            store_ssl_private_key, store_tunnel_api_key,
-                            store_vapid_private_key, SITE_DOMAIN)
+                            SITE_DOMAIN, store_key)
 from ..utils.setup_utils import setup_ngrok_tunnel
 
 router = APIRouter()
@@ -61,7 +61,7 @@ async def save_vapid_settings(settings: VapidSettings):
             "VAPID_SUBJECT": settings.subject,
             "SITE_DOMAIN": settings.base_url
         }
-        store_vapid_private_key(settings.private_key)
+        store_key(SavedKey.VAPID_PRIVATE_KEY, settings.private_key)
         save_config(config_data)
         return {"success": True}
     except Exception as e:
@@ -85,7 +85,7 @@ async def generate_ssl_cert():
             f.write(server_cert.cert_chain_pems[0].bytes())
         with open(SSL_CA_FILE, "wb") as f:
             f.write(ca.cert_pem.bytes())
-        store_ssl_private_key(server_cert.private_key_pem.bytes().decode('utf-8'))
+        store_key(SavedKey.SSL_PRIVATE_KEY, server_cert.private_key_pem.bytes().decode('utf-8'))
         logging.debug("SSL certificate and key generated successfully.")
         return {"success": True, "message": "SSL certificate and key saved."}
     except Exception as e:
@@ -104,7 +104,7 @@ async def upload_ssl_cert(request: Request):
         with open(SSL_CERT_FILE, "wb") as f:
             f.write(cert_content)
         key_content = await key_file.read()
-        store_ssl_private_key(key_content.decode('utf-8'))
+        store_key(SavedKey.SSL_PRIVATE_KEY, key_content.decode('utf-8'))
         logging.debug("SSL certificate and key uploaded successfully.")
         return {"success": True, "message": "SSL certificate and key uploaded successfully."}
     except Exception as e:
@@ -119,7 +119,7 @@ async def save_tunnel_settings(settings: TunnelSettings):
             "TUNNEL_API_KEY": settings.token,
             "SITE_DOMAIN": settings.domain
         }
-        store_tunnel_api_key(settings.token)
+        store_key(SavedKey.TUNNEL_API_KEY, settings.token)
         save_config(config_data)
         logging.debug("Tunnel settings saved successfully.")
         return {"success": True, "message": "Tunnel settings saved successfully.", "skip_ssl": True}
