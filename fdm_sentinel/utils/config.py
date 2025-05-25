@@ -4,6 +4,7 @@ import os
 import tempfile
 
 import keyring
+import keyring.errors
 import torch
 from platformdirs import user_data_dir
 
@@ -65,7 +66,34 @@ def get_ssl_private_key_temporary_path():
         return temp_file.name
     return None
 
-init_config()
+def reset_all_keys():
+    for key in SavedKey:
+        try:
+            keyring.delete_password(KEYRING_SERVICE_NAME, key.value)
+        except keyring.errors.PasswordDeleteError:
+            pass
+
+def reset_config():
+    default_config = {
+        SavedConfig.VAPID_PUBLIC_KEY: None,
+        SavedConfig.VAPID_SUBJECT: None,
+        SavedConfig.STARTUP_MODE: None,
+        SavedConfig.SITE_DOMAIN: None,
+        SavedConfig.TUNNEL_PROVIDER: None,
+    }
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(default_config, f, indent=2)
+
+def reset_ssl_files():
+    for ssl_file in [SSL_CERT_FILE, SSL_CA_FILE]:
+        if os.path.exists(ssl_file):
+            os.remove(ssl_file)
+
+def reset_all():
+    reset_all_keys()
+    reset_config()
+    reset_ssl_files()
+    logging.debug("All saved keys, config, and SSL files have been reset")
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "model", "best_model.pt")
