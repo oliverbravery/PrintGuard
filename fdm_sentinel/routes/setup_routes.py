@@ -133,7 +133,7 @@ async def initialize_tunnel_provider():
     if not provider or not SITE_DOMAIN:
         return RedirectResponse('/setup', status_code=303)
     if provider == TunnelProvider.NGROK:
-        if setup_ngrok_tunnel():
+        if setup_ngrok_tunnel(close=True):
             return {
                 "success": True,
                 "provider": "Ngrok",
