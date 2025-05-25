@@ -2,7 +2,6 @@ import asyncio
 from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, field_validator
-from .utils import config
 
 class Alert(BaseModel):
     id: str
@@ -34,6 +33,25 @@ class Notification(BaseModel):
     badge_url: Optional[str] = None
     actions: List[NotificationAction] = []
 
+def _get_config_value(key: str):
+    # pylint: disable=import-outside-toplevel
+    from .utils.config import (BRIGHTNESS, CONTRAST,
+                              FOCUS, SENSITIVITY,
+                              COUNTDOWN_TIME, COUNTDOWN_ACTION,
+                              DETECTION_VOTING_THRESHOLD,
+                              DETECTION_VOTING_WINDOW)
+    config_map = {
+        'BRIGHTNESS': BRIGHTNESS,
+        'CONTRAST': CONTRAST,
+        'FOCUS': FOCUS,
+        'SENSITIVITY': SENSITIVITY,
+        'COUNTDOWN_TIME': COUNTDOWN_TIME,
+        'COUNTDOWN_ACTION': COUNTDOWN_ACTION,
+        'DETECTION_VOTING_THRESHOLD': DETECTION_VOTING_THRESHOLD,
+        'DETECTION_VOTING_WINDOW': DETECTION_VOTING_WINDOW,
+    }
+    return config_map[key]
+
 class CameraState(BaseModel):
     lock: asyncio.Lock = asyncio.Lock()
     current_alert_id: Optional[str] = None
@@ -44,14 +62,33 @@ class CameraState(BaseModel):
     last_time: Optional[float] = None
     start_time: Optional[float] = None
     error: Optional[str] = None
-    brightness: int = config.BRIGHTNESS
-    contrast: int = config.CONTRAST
-    focus: int = config.FOCUS
-    sensitivity: int = config.SENSITIVITY
-    countdown_time: float = config.COUNTDOWN_TIME
-    countdown_action: str = config.COUNTDOWN_ACTION
-    majority_vote_threshold: int = config.DETECTION_VOTING_THRESHOLD
-    majority_vote_window: float = config.DETECTION_VOTING_WINDOW
+    brightness: int = None
+    contrast: int = None
+    focus: int = None
+    sensitivity: int = None
+    countdown_time: float = None
+    countdown_action: str = None
+    majority_vote_threshold: int = None
+    majority_vote_window: float = None
+
+    def __init__(self, **data):
+        if 'brightness' not in data:
+            data['brightness'] = _get_config_value('BRIGHTNESS')
+        if 'contrast' not in data:
+            data['contrast'] = _get_config_value('CONTRAST')
+        if 'focus' not in data:
+            data['focus'] = _get_config_value('FOCUS')
+        if 'sensitivity' not in data:
+            data['sensitivity'] = _get_config_value('SENSITIVITY')
+        if 'countdown_time' not in data:
+            data['countdown_time'] = _get_config_value('COUNTDOWN_TIME')
+        if 'countdown_action' not in data:
+            data['countdown_action'] = _get_config_value('COUNTDOWN_ACTION')
+        if 'majority_vote_threshold' not in data:
+            data['majority_vote_threshold'] = _get_config_value('DETECTION_VOTING_THRESHOLD')
+        if 'majority_vote_window' not in data:
+            data['majority_vote_window'] = _get_config_value('DETECTION_VOTING_WINDOW')
+        super().__init__(**data)
     model_config = {
         "arbitrary_types_allowed": True
     }
@@ -82,6 +119,10 @@ class TunnelSettings(BaseModel):
         if info.data.get('provider') == TunnelProvider.NGROK and not v:
             raise ValueError('Domain is required for ngrok provider')
         return v
+
+class SetupCompletion(BaseModel):
+    startup_mode: SiteStartupMode
+    tunnel_provider: Optional[TunnelProvider] = None
 
 class SavedKey(str, Enum):
     VAPID_PRIVATE_KEY = "vapid_private_key"
