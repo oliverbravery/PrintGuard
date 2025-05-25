@@ -30,8 +30,7 @@ def update_config(updates: dict):
     config = get_config()
     if config is not None:
         for key, value in updates.items():
-            if key in config:
-                config[key] = value
+            config[key] = value
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2)
 
