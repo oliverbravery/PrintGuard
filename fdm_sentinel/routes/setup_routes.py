@@ -10,10 +10,10 @@ from fastapi.responses import RedirectResponse
 from py_vapid import Vapid
 
 from ..models import TunnelProvider, TunnelSettings, VapidSettings
-from ..utils.config import (BASE_URL, SSL_CA_FILE, SSL_CERT_FILE,
-                            TUNNEL_DOMAIN, TUNNEL_PROVIDER, save_config,
+from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
+                            TUNNEL_PROVIDER, save_config,
                             store_ssl_private_key, store_tunnel_api_key,
-                            store_vapid_private_key)
+                            store_vapid_private_key, SITE_DOMAIN)
 from ..utils.setup_utils import setup_ngrok_tunnel
 
 router = APIRouter()
@@ -59,7 +59,7 @@ async def save_vapid_settings(settings: VapidSettings):
         config_data = {
             "VAPID_PUBLIC_KEY": settings.public_key,
             "VAPID_SUBJECT": settings.subject,
-            "BASE_URL": settings.base_url
+            "SITE_DOMAIN": settings.base_url
         }
         store_vapid_private_key(settings.private_key)
         save_config(config_data)
@@ -75,7 +75,7 @@ async def save_vapid_settings(settings: VapidSettings):
 async def generate_ssl_cert():
     try:
         ca = trustme.CA()
-        domain = BASE_URL
+        domain = SITE_DOMAIN
         if domain.startswith(('http://', 'https://')):
             domain = domain.split('://')[1]
         if domain.endswith('/'):
@@ -117,7 +117,7 @@ async def save_tunnel_settings(settings: TunnelSettings):
         config_data = {
             "TUNNEL_PROVIDER": settings.provider,
             "TUNNEL_API_KEY": settings.token,
-            "TUNNEL_DOMAIN": settings.domain
+            "SITE_DOMAIN": settings.domain
         }
         store_tunnel_api_key(settings.token)
         save_config(config_data)
@@ -130,14 +130,14 @@ async def save_tunnel_settings(settings: TunnelSettings):
 @router.post("/setup/initialize-tunnel-provider", include_in_schema=False)
 async def initialize_tunnel_provider():
     provider = TUNNEL_PROVIDER
-    if not provider or not TUNNEL_DOMAIN:
+    if not provider or not SITE_DOMAIN:
         return RedirectResponse('/setup', status_code=303)
     if provider == TunnelProvider.NGROK:
         if setup_ngrok_tunnel():
             return {
                 "success": True,
                 "provider": "Ngrok",
-                "url": TUNNEL_DOMAIN,
+                "url": SITE_DOMAIN,
                 "message": "Ngrok tunnel initialized successfully"
                 }
         else:

@@ -17,8 +17,7 @@ SSL_CA_FILE = os.path.join(APP_DATA_DIR, "ca.pem")
 VAPID_SUBJECT = ""
 VAPID_PUBLIC_KEY = ""
 VAPID_CLAIMS = {}
-BASE_URL = ""
-TUNNEL_DOMAIN = None
+SITE_DOMAIN = None
 
 TUNNEL_PROVIDER = None
 
@@ -53,16 +52,15 @@ def get_ssl_private_key_temporary_path():
     return None
 
 def load_config():
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL, TUNNEL_PROVIDER, TUNNEL_DOMAIN
+    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, TUNNEL_PROVIDER, SITE_DOMAIN
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r') as f:
                 config_data = json.load(f)
                 VAPID_SUBJECT = config_data.get("VAPID_SUBJECT", "")
                 VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", "")
-                BASE_URL = config_data.get("BASE_URL", "")
+                SITE_DOMAIN = config_data.get("SITE_DOMAIN", None)
                 TUNNEL_PROVIDER = config_data.get("TUNNEL_PROVIDER", None)
-                TUNNEL_DOMAIN = config_data.get("TUNNEL_DOMAIN", None)
                 if VAPID_SUBJECT:
                     VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
                 return
@@ -72,12 +70,11 @@ def load_config():
         VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
 
 def save_config(config_data):
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, BASE_URL, TUNNEL_PROVIDER, TUNNEL_DOMAIN
+    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, TUNNEL_PROVIDER, SITE_DOMAIN
     VAPID_SUBJECT = config_data.get("VAPID_SUBJECT", VAPID_SUBJECT)
     VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", VAPID_PUBLIC_KEY)
-    BASE_URL = config_data.get("BASE_URL", BASE_URL)
+    SITE_DOMAIN = config_data.get("SITE_DOMAIN", SITE_DOMAIN)
     TUNNEL_PROVIDER = config_data.get("TUNNEL_PROVIDER", TUNNEL_PROVIDER)
-    TUNNEL_DOMAIN = config_data.get("TUNNEL_DOMAIN", TUNNEL_DOMAIN)
     if VAPID_SUBJECT:
         VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
     with open(CONFIG_FILE, 'w') as f:

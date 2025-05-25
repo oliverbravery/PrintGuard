@@ -4,10 +4,9 @@ from fastapi.responses import RedirectResponse
 from .config import (load_config,
                      VAPID_PUBLIC_KEY,
                      VAPID_SUBJECT,
-                     BASE_URL,
                      SSL_CERT_FILE,
                      TUNNEL_PROVIDER,
-                     TUNNEL_DOMAIN,
+                     SITE_DOMAIN,
                      get_tunnel_api_key,
                      get_vapid_private_key,
                      get_ssl_private_key)
@@ -21,9 +20,9 @@ def has_vapid_keys():
 def is_setup_complete():
     load_config()
     if TUNNEL_PROVIDER:
-        return has_vapid_keys() and bool(BASE_URL) and bool(get_tunnel_api_key())
+        return has_vapid_keys() and bool(SITE_DOMAIN) and bool(get_tunnel_api_key())
     else:
-        return has_ssl_certificates() and has_vapid_keys() and bool(BASE_URL)
+        return has_ssl_certificates() and has_vapid_keys() and bool(SITE_DOMAIN)
 
 async def verify_setup_complete(request: Request):
     setup_routes = ['/setup', '/setup/', '/static/']
@@ -39,13 +38,16 @@ async def verify_setup_complete(request: Request):
 
 def setup_ngrok_tunnel():
     tunnel_auth_key = get_tunnel_api_key()
-    tunnel_domain = TUNNEL_DOMAIN
+    tunnel_domain = SITE_DOMAIN
     if not tunnel_auth_key and not tunnel_domain:
         return False
     try:
+        # pylint: disable=import-outside-toplevel
         import ngrok
+        # pylint: disable=E1101
         listener = ngrok.forward(8000, authtoken=tunnel_auth_key, domain=tunnel_domain)
         if listener:
+            # pylint: disable=E1101
             ngrok.disconnect()
             return True
         else:
