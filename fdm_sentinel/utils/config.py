@@ -2,7 +2,7 @@ import os
 import json
 import torch
 from platformdirs import user_data_dir
-from ..models import AlertAction
+from ..models import AlertAction, SiteStartupMode
 import keyring
 import tempfile, os
 
@@ -19,6 +19,7 @@ VAPID_PUBLIC_KEY = ""
 VAPID_CLAIMS = {}
 SITE_DOMAIN = None
 
+STARTUP_MODE = SiteStartupMode.SETUP
 TUNNEL_PROVIDER = None
 
 def store_vapid_private_key(private_key):
@@ -52,13 +53,14 @@ def get_ssl_private_key_temporary_path():
     return None
 
 def load_config():
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, TUNNEL_PROVIDER, SITE_DOMAIN
+    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, TUNNEL_PROVIDER, SITE_DOMAIN, STARTUP_MODE
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r') as f:
                 config_data = json.load(f)
                 VAPID_SUBJECT = config_data.get("VAPID_SUBJECT", "")
                 VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", "")
+                STARTUP_MODE = config_data.get("STARTUP_MODE", SiteStartupMode.SETUP)
                 SITE_DOMAIN = config_data.get("SITE_DOMAIN", None)
                 TUNNEL_PROVIDER = config_data.get("TUNNEL_PROVIDER", None)
                 if VAPID_SUBJECT:
@@ -70,9 +72,10 @@ def load_config():
         VAPID_CLAIMS = {"sub": VAPID_SUBJECT}
 
 def save_config(config_data):
-    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, TUNNEL_PROVIDER, SITE_DOMAIN
+    global VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_CLAIMS, TUNNEL_PROVIDER, SITE_DOMAIN, STARTUP_MODE
     VAPID_SUBJECT = config_data.get("VAPID_SUBJECT", VAPID_SUBJECT)
     VAPID_PUBLIC_KEY = config_data.get("VAPID_PUBLIC_KEY", VAPID_PUBLIC_KEY)
+    STARTUP_MODE = config_data.get("STARTUP_MODE", STARTUP_MODE)
     SITE_DOMAIN = config_data.get("SITE_DOMAIN", SITE_DOMAIN)
     TUNNEL_PROVIDER = config_data.get("TUNNEL_PROVIDER", TUNNEL_PROVIDER)
     if VAPID_SUBJECT:
