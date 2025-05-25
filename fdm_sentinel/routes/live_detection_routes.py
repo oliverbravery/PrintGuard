@@ -73,7 +73,7 @@ async def get_camera_state(request: Request, camera_index: int = Body(..., embed
         "start_time": camera_state.start_time,
         "last_result": camera_state.last_result,
         "last_time": camera_state.last_time,
-        "detection_times": detection_times,  # Use the extracted times
+        "detection_times": detection_times,
         "error": camera_state.error,
         "live_detection_running": camera_state.live_detection_running,
         "brightness": camera_state.brightness,
