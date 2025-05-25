@@ -1,41 +1,22 @@
-import os
-from fastapi import Request
-from fastapi.responses import RedirectResponse
-from ..models import SavedKey
-from .config import (load_config,
-                     VAPID_PUBLIC_KEY,
-                     VAPID_SUBJECT,
-                     SSL_CERT_FILE,
-                     TUNNEL_PROVIDER,
-                     SITE_DOMAIN,
-                     get_key)
+from ..models import SavedKey, SiteStartupMode
+from .config import (SITE_DOMAIN, get_key,
+                     STARTUP_MODE, SSL_CERT_FILE,
+                     VAPID_PUBLIC_KEY, VAPID_CLAIMS,
+                     TUNNEL_PROVIDER)
 
-def has_ssl_certificates():
-    return os.path.exists(SSL_CERT_FILE) and bool(get_key(SavedKey.SSL_PRIVATE_KEY))
+def setup_ngrok_tunnel(close: bool = False) -> bool:
+    """
+    Start a ngrok tunnel at port 8000 using the provided auth key and domain.
+    Requirements:
+        - TUNNEL_API_KEY must be set.
+        - SITE_DOMAIN must be set.
 
-def has_vapid_keys():
-    return bool(VAPID_SUBJECT) and bool(VAPID_PUBLIC_KEY) and bool(get_key(SavedKey.VAPID_PRIVATE_KEY))
+    Args:
+        close (bool | optional): If True, disconnect the tunnel after starting. Defaults to False.
 
-def is_setup_complete():
-    load_config()
-    if TUNNEL_PROVIDER:
-        return has_vapid_keys() and bool(SITE_DOMAIN) and bool(get_key(SavedKey.TUNNEL_API_KEY))
-    else:
-        return has_ssl_certificates() and has_vapid_keys() and bool(SITE_DOMAIN)
-
-async def verify_setup_complete(request: Request):
-    setup_routes = ['/setup', '/setup/', '/static/']
-    setup_api_routes = ['/setup/generate-vapid-keys', '/setup/save-vapid-settings', 
-                       '/setup/generate-ssl-cert', '/setup/upload-ssl-cert', '/setup/complete',
-                       '/setup/save-tunnel-settings', '/setup/initialize-tunnel-provider']
-    if (any(request.url.path.startswith(route) for route in setup_routes) or
-        request.url.path in setup_api_routes):
-        return None
-    if not is_setup_complete():
-        return RedirectResponse('/setup', status_code=303)
-    return None
-
-def setup_ngrok_tunnel():
+    Returns:
+        bool: True if the tunnel was successfully started, False otherwise.
+    """
     tunnel_auth_key = get_key(SavedKey.TUNNEL_API_KEY)
     tunnel_domain = SITE_DOMAIN
     if not tunnel_auth_key and not tunnel_domain:
@@ -46,10 +27,80 @@ def setup_ngrok_tunnel():
         # pylint: disable=E1101
         listener = ngrok.forward(8000, authtoken=tunnel_auth_key, domain=tunnel_domain)
         if listener:
-            # pylint: disable=E1101
-            ngrok.disconnect()
+            if close:
+                ngrok.disconnect()
             return True
         else:
             return False
-    except Exception as e:
+    except Exception as _:
         return False
+
+def check_ssl_certificates_exist() -> bool:
+    """
+    Check if SSL certificates exist.
+    
+    Requirements:
+        - SSL private key must exist.
+        - SITE_DOMAIN must be set.
+        - SSL_CERT_FILE must be set.
+    
+    Returns:
+        bool: True if SSL requirements exist, False otherwise.
+    """
+    return True if (
+        get_key(SavedKey.SSL_PRIVATE_KEY)
+        and SITE_DOMAIN
+        and SSL_CERT_FILE
+        ) else False
+
+def check_vapid_keys_exist() -> bool:
+    """
+    Check if VAPID keys exist.
+
+    Requirements:
+        - VAPID private key must exist.
+        - VAPID public key must exist.
+        - VAPID claims must be set.
+
+    Returns:
+        bool: True if VAPID requirements exist, False otherwise.
+    """
+    return True if (
+        get_key(SavedKey.VAPID_PRIVATE_KEY)
+        and VAPID_CLAIMS
+        and VAPID_PUBLIC_KEY
+        ) else False
+
+def check_tunnel_requirements_met() -> bool:
+    """
+    Check if the requirements for the tunnel are met.
+    
+    Requirements:
+        - TUNNEL_PROVIDER must be set.
+        - Tunnel API keys must exist.
+    
+    Returns:
+        bool: True if tunnel requirements are met, False otherwise.
+    """
+    return True if (
+        TUNNEL_PROVIDER
+        and get_key(SavedKey.TUNNEL_API_KEY)
+        ) else False
+
+def startup_mode_requirements_met() -> SiteStartupMode:
+    """
+    Check if the requirements for the current startup mode are met.
+    
+    Returns:
+        SiteStartupMode: The site startup mode if requirements are met, SETUP otherwise.
+    """
+    match STARTUP_MODE:
+        case SiteStartupMode.SETUP:
+            return SiteStartupMode.SETUP
+        case SiteStartupMode.LOCAL:
+            if check_ssl_certificates_exist() and check_vapid_keys_exist():
+                return SiteStartupMode.LOCAL
+        case SiteStartupMode.TUNNEL:
+            if check_vapid_keys_exist() and check_tunnel_requirements_met():
+                return SiteStartupMode.TUNNEL
+    return SiteStartupMode.SETUP
