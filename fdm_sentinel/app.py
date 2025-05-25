@@ -10,59 +10,58 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse, StreamingResponse
-from .models import CameraState
+from .models import CameraState, SiteStartupMode, TunnelProvider
 from .routes.alert_routes import router as alert_router
 from .routes.detection_routes import router as detection_router
 from .routes.live_detection_routes import router as live_detection_router
 from .routes.notification_routes import router as notification_router
 from .routes.sse_routes import router as sse_router
 from .routes.setup_routes import router as setup_router
-from .utils import config
 from .utils.config import (DEVICE_TYPE, MODEL_OPTIONS_PATH, MODEL_PATH,
                            PROTOTYPES_DIR, SUCCESS_LABEL, SSL_CERT_FILE,
-                           get_ssl_private_key_temporary_path)
+                           get_ssl_private_key_temporary_path, save_config,
+                           STARTUP_MODE, MAX_CAMERAS, CAMERA_INDICES,
+                           CAMERA_INDEX, TUNNEL_PROVIDER, SITE_DOMAIN)
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
-from .utils.setup_utils import verify_setup_complete, is_setup_complete
 
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
-    if is_setup_complete():
-        logging.debug("Setting up device...")
-        app_instance.state.device = setup_device(DEVICE_TYPE)
-        logging.debug("Using device: %s", app_instance.state.device)
+    if STARTUP_MODE is SiteStartupMode.SETUP:
+        logging.warning("Starting in setup mode. Detection model and device will not be initialized.")
+        yield
+    logging.debug("Setting up device...")
+    app_instance.state.device = setup_device(DEVICE_TYPE)
+    logging.debug("Using device: %s", app_instance.state.device)
+    try:
+        logging.debug("Loading model...")
+        app_instance.state.model, _ = load_model(MODEL_PATH,
+                                                MODEL_OPTIONS_PATH,
+                                                app_instance.state.device)
+        app_instance.state.transform = make_transform()
+        logging.debug("Model loaded successfully.")
+        logging.debug("Building prototypes...")
         try:
-            logging.debug("Loading model...")
-            app_instance.state.model, _ = load_model(MODEL_PATH,
-                                                   MODEL_OPTIONS_PATH,
-                                                   app_instance.state.device)
-            app_instance.state.transform = make_transform()
-            logging.debug("Model loaded successfully.")
-            logging.debug("Building prototypes...")
-            try:
-                prototypes, class_names, defect_idx = compute_prototypes(
-                    app_instance.state.model, PROTOTYPES_DIR, app_instance.state.transform,
-                    app_instance.state.device, SUCCESS_LABEL
-                )
-                app_instance.state.prototypes = prototypes
-                app_instance.state.class_names = class_names
-                app_instance.state.defect_idx = defect_idx
-                logging.debug("Prototypes built successfully.")
-            except NameError:
-                logging.warning("Skipping prototype building: Potentially missing 'args' if not run as main script or if function expects it.")
-            except ValueError as e:
-                logging.error("Error building prototypes: %s", e)
+            prototypes, class_names, defect_idx = compute_prototypes(
+                app_instance.state.model, PROTOTYPES_DIR, app_instance.state.transform,
+                app_instance.state.device, SUCCESS_LABEL
+            )
+            app_instance.state.prototypes = prototypes
+            app_instance.state.class_names = class_names
+            app_instance.state.defect_idx = defect_idx
+            logging.debug("Prototypes built successfully.")
+        except NameError:
+            logging.warning("Skipping prototype building: Potentially missing 'args' if not run as main script or if function expects it.")
+        except ValueError as e:
+            logging.error("Error building prototypes: %s", e)
 
-        except RuntimeError as e:
-            logging.error("Error during startup: %s", e)
-            app_instance.state.model = None
-            raise
-    else:
-        logging.info("Setup not complete. Limited functionality available until setup is complete.")
-    yield
-
+    except RuntimeError as e:
+        logging.error("Error during startup: %s", e)
+        app_instance.state.model = None
+        raise
     logging.debug("Shutting down...")
+    yield
 
 app = FastAPI(
     title="Standalone Web Push Notification API",
@@ -78,14 +77,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.middleware("http")
-async def check_setup_status(request: Request, call_next):
-    redirect = await verify_setup_complete(request)
-    if redirect:
-        return redirect
-    response = await call_next(request)
-    return response
 
 app.state.model = None
 app.state.transform = None
@@ -143,12 +134,11 @@ async def update_camera_detection_history(camera_index, pred, time_val):
         async with lock:
             camera_state_ref.detection_history.append((time_val, pred))
         return camera_state_ref
-    else:
-        logging.warning("Camera index '%d' not found when trying to update detection history.",
-                        camera_index)
-        return None
+    logging.warning("Camera index '%d' not found when trying to update detection history.",
+                    camera_index)
+    return None
 
-def detect_available_cameras(max_cameras=config.MAX_CAMERAS):
+def detect_available_cameras(max_cameras=MAX_CAMERAS):
     available_cameras = []
     for i in range(max_cameras):
         # pylint: disable=E1101
@@ -159,10 +149,10 @@ def detect_available_cameras(max_cameras=config.MAX_CAMERAS):
     return available_cameras
 
 available_cameras = detect_available_cameras()
-available_cameras.extend(config.CAMERA_INDICES)
+available_cameras.extend(CAMERA_INDICES)
 if not available_cameras:
-    get_camera_state(config.CAMERA_INDEX)
-    logging.warning("No cameras detected. Using default camera index %d", config.CAMERA_INDEX)
+    get_camera_state(CAMERA_INDEX)
+    logging.warning("No cameras detected. Using default camera index %d", CAMERA_INDEX)
 else:
     for camera_index in available_cameras:
         get_camera_state(camera_index)
@@ -178,7 +168,7 @@ templates = Jinja2Templates(directory=templates_dir)
 async def serve_index(request: Request):
     camera_index = list(app.state.camera_states.keys())[0] if (
         app.state.camera_states
-        ) else config.CAMERA_INDEX
+        ) else CAMERA_INDEX
     return templates.TemplateResponse("index.html", {
         "camera_states": app.state.camera_states,
         "request": request,
@@ -251,20 +241,36 @@ app.include_router(setup_router, tags=["setup"])
 def run():
     # pylint: disable=C0415
     import uvicorn
-    from .utils.setup_utils import is_setup_complete
-    setup_complete = is_setup_complete()
-    if not setup_complete:
-        logging.warning("Setup not complete. Starting server in HTTP mode on port 8000.")
-        logging.debug("Please visit http://localhost:8000/setup to complete setup.")
-        uvicorn.run(app, host="0.0.0.0", port=8000)
-    elif setup_complete:
-        logging.warning("Setup complete and SSL certificates found. Starting server in HTTPS mode on port 8000.")
-        private_key_file = get_ssl_private_key_temporary_path()
-        if private_key_file:
-            uvicorn.run(app, host="0.0.0.0", port=8000, ssl_certfile=SSL_CERT_FILE, ssl_keyfile=private_key_file)
-    raise RuntimeError(
-        "Failed to start server. Ensure that the SSL certificate and private key are correctly configured."
-    )
+    from .utils.setup_utils import (startup_mode_requirements_met,
+                                    setup_ngrok_tunnel)
+    startup_mode = startup_mode_requirements_met()
+    match startup_mode:
+        case SiteStartupMode.SETUP:
+            logging.warning("Starting in setup mode. Available at http://localhost:8000/setup")
+            uvicorn.run(app, host="0.0.0.0", port=8000)
+        case SiteStartupMode.LOCAL:
+            logging.warning("Starting in local mode. Available at %s", SITE_DOMAIN)
+            ssl_private_key_path = get_ssl_private_key_temporary_path()
+            uvicorn.run(app,
+                        host="0.0.0.0",
+                        port=8000,
+                        ssl_certfile=SSL_CERT_FILE,
+                        ssl_keyfile=ssl_private_key_path)
+        case SiteStartupMode.TUNNEL:
+            match TUNNEL_PROVIDER:
+                case TunnelProvider.NGROK:
+                    logging.warning("Starting in tunnel mode with ngrok. Available at %s", SITE_DOMAIN)
+                    tunnel_setup = setup_ngrok_tunnel(close=False)
+                    if not tunnel_setup:
+                        logging.error("Failed to establish ngrok tunnel. Starting in SETUP mode.")
+                        save_config({"STARTUP_MODE": SiteStartupMode.SETUP})
+                        run()
+                    else:
+                        uvicorn.run(app, host="0.0.0.0", port=8000)
+                case TunnelProvider.CLOUDFLARE:
+                    logging.error("Cloudflare tunnel support is not implemented yet. Starting in SETUP mode.")
+                    save_config({"STARTUP_MODE": SiteStartupMode.SETUP})
+                    run()
 
 if __name__ == "__main__":
     run()
