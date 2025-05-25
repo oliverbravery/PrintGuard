@@ -17,6 +17,7 @@ from .routes.live_detection_routes import router as live_detection_router
 from .routes.notification_routes import router as notification_router
 from .routes.sse_routes import router as sse_router
 from .routes.setup_routes import router as setup_router
+from .routes.debug_routes import router as debug_router
 from .utils.config import (get_ssl_private_key_temporary_path,
                            SSL_CERT_FILE, PROTOTYPES_DIR,
                            MODEL_PATH, MODEL_OPTIONS_PATH,
@@ -235,6 +236,7 @@ app.include_router(alert_router, tags=["alerts"])
 app.include_router(notification_router, tags=["notifications"])
 app.include_router(sse_router, tags=["sse"])
 app.include_router(setup_router, tags=["setup"])
+app.include_router(debug_router, tags=["debug"])
 
 def run():
     # pylint: disable=C0415
