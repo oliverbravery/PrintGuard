@@ -290,8 +290,30 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('finish-setup-btn').addEventListener('click', async () => {
-        alert('Setup complete! To finalize, please restart the server. Redirecting to the home page...');
-        window.location.href = '/';
+        try {
+            const startupMode = selectedNetworkOption === 'external' ? 'tunnel' : 'local';
+            const completionData = {
+                startup_mode: startupMode
+            };
+            if (selectedNetworkOption === 'external' && selectedTunnelProvider) {
+                completionData.tunnel_provider = selectedTunnelProvider;
+            }
+            const response = await fetch('/setup/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(completionData)
+            });
+            if (response.ok) {
+                alert('Setup complete! To finalize, please restart the server. Redirecting to setup page...');
+                window.location.href = '/setup';
+            } else {
+                const error = await response.json();
+                alert(`Failed to complete setup: ${error.detail}`);
+            }
+        } catch (error) {
+            console.error('Error completing setup:', error);
+            alert('Error completing setup');
+        }
     });
 
     document.getElementById('continue-to-finish').addEventListener('click', () => {

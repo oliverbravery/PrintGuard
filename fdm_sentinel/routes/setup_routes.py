@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from py_vapid import Vapid
 
 from ..models import (TunnelProvider, TunnelSettings,
-                      VapidSettings, SavedKey)
+                      VapidSettings, SavedKey, SetupCompletion)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
                             TUNNEL_PROVIDER, save_config,
                             SITE_DOMAIN, store_key)
@@ -154,3 +154,19 @@ async def initialize_tunnel_provider():
             "message": "Cloudflare tunnel initialized successfully"
         }
     return RedirectResponse('/setup', status_code=303)
+
+@router.post("/setup/complete", include_in_schema=False)
+async def complete_setup(completion: SetupCompletion):
+    try:
+        config_data = {
+            "STARTUP_MODE": completion.startup_mode
+        }
+        if completion.tunnel_provider:
+            config_data["TUNNEL_PROVIDER"] = completion.tunnel_provider
+        
+        save_config(config_data)
+        logging.info("Setup completed successfully with startup mode: %s", completion.startup_mode)
+        return {"success": True, "message": "Setup completed successfully"}
+    except Exception as e:
+        logging.error("Error completing setup: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to complete setup: {str(e)}")
