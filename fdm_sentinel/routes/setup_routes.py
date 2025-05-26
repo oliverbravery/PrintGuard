@@ -55,10 +55,16 @@ async def generate_vapid_keys():
 @router.post("/setup/save-vapid-settings", include_in_schema=False)
 async def save_vapid_settings(settings: VapidSettings):
     try:
+        domain = settings.base_url
+        if domain.startswith(('http://', 'https://')):
+            domain = domain.split('://')[1]
+        if domain.endswith('/'):
+            domain = domain[:-1]
+
         config_data = {
             SavedConfig.VAPID_PUBLIC_KEY: settings.public_key,
             SavedConfig.VAPID_SUBJECT: settings.subject,
-            SavedConfig.SITE_DOMAIN: settings.base_url
+            SavedConfig.SITE_DOMAIN: domain
         }
         store_key(SavedKey.VAPID_PRIVATE_KEY, settings.private_key)
         update_config(config_data)
