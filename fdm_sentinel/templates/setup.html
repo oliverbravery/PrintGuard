@@ -81,7 +81,10 @@
                         
                         <div style="margin-top: 20px;">
                             <label for="ngrok-domain">Ngrok Static Domain</label>
-                            <input type="text" id="ngrok-domain" name="ngrok-domain" placeholder="your-domain.ngrok-free.app" required>
+                            <div class="input-with-prefix">
+                                <span class="input-prefix">https://</span>
+                                <input type="text" id="ngrok-domain" name="ngrok-domain" placeholder="your-domain.ngrok-free.app" required>
+                            </div>
                             <small>Create a free static domain by clicking 'Create Domain' on <a href="https://dashboard.ngrok.com/domains" target="_blank">Ngrok Domains</a></small>
                         </div>
                     </div>
