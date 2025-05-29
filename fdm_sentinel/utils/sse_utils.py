@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 
 from ..models import SSEDataType
 
@@ -44,4 +46,9 @@ async def _sse_update_camera_state_func(camera_index):
     await append_new_outbound_packet(data, SSEDataType.CAMERA_STATE)
 
 async def sse_update_camera_state(camera_index):
-    await _sse_update_camera_state_func(camera_index)
+    try:
+        await asyncio.wait_for(_sse_update_camera_state_func(camera_index), timeout=5.0)
+    except asyncio.TimeoutError:
+        logging.warning("SSE camera state update timed out for camera %d", camera_index)
+    except Exception as e:
+        logging.error("Error in SSE camera state update for camera %d: %s", camera_index, e)

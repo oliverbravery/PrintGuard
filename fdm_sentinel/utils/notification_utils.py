@@ -27,7 +27,8 @@ def send_notification(notification: Notification, app):
         "sub": vapid_subject,
         "aud": None,
     }
-    for sub in app.state.subscriptions:
+    success_count = 0
+    for sub in app.state.subscriptions.copy():
         try:
             endpoint = sub.get('endpoint', '')
             parsed_endpoint = urlparse(endpoint)
@@ -41,11 +42,13 @@ def send_notification(notification: Notification, app):
                 vapid_private_key=get_key(SavedKey.VAPID_PRIVATE_KEY),
                 vapid_claims=aud_vapid_claims
             )
+            success_count += 1
         except WebPushException as ex:
             if ex.response.status_code == 410:
                 app.state.subscriptions.remove(sub)
                 logging.debug("Subscription expired and removed: %s", sub)
             else:
                 logging.error("Push failed: %s", ex)
-            return False
-        return True
+        except Exception as e:
+            logging.error("Unexpected error sending notification: %s", e)
+    return success_count > 0

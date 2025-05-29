@@ -69,7 +69,7 @@ class CameraState(BaseModel):
     countdown_time: float = None
     countdown_action: str = None
     majority_vote_threshold: int = None
-    majority_vote_window: float = None
+    majority_vote_window: int = None
 
     def __init__(self, **data):
         if 'brightness' not in data:
