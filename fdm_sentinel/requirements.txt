@@ -13,3 +13,4 @@ sse-starlette
 trustme
 platformdirs
 keyring
+ngrok

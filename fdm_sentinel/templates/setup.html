@@ -17,14 +17,118 @@
         <h2>First-time Setup</h2>
         <p>Complete the following setup to start using FDM Sentinel.</p>
         
-        <div id="setup-progress">
+        <div id="setup-progress" style="display:none;">
             <div class="progress-step active" data-step="vapid">1. VAPID Keys</div>
             <div class="progress-step" data-step="ssl">2. SSL Certificate</div>
             <div class="progress-step" data-step="finish">3. Finish</div>
         </div>
         
+        <div id="setup-progress-external" style="display:none;">
+            <div class="progress-step active" data-step="tunnel">1. Tunnel Provider</div>
+            <div class="progress-step" data-step="initialize">2. Initialize Provider</div>
+            <div class="progress-step" data-step="vapid">3. VAPID Keys</div>
+            <div class="progress-step" data-step="finish">4. Finish</div>
+        </div>
+        
         <div id="setup-content">
-            <div class="setup-section active" id="vapid-section">
+            <div class="setup-section active" id="network-section">
+                <h3>Network Configuration</h3>
+                <p>Choose how you want to set up your FDM Sentinel service.</p>
+                
+                <div class="option-buttons">
+                    <button id="local-network-btn" class="setup-btn network-option">
+                        <div class="option-title">Local Network Only</div>
+                        <div class="option-description">
+                            Set up the service for use within your local network only. 
+                            Note: You will not be able to receive notifications or view cameras from outside your local network.
+                        </div>
+                    </button>
+                    <button id="external-network-btn" class="setup-btn network-option">
+                        <div class="option-title">External Network Access</div>
+                        <div class="option-description">
+                            Configure the service to be accessible from outside your network.
+                            Ideal for remote monitoring and access from anywhere.
+                        </div>
+                    </button>
+                </div>
+            </div>
+            <div class="setup-section" id="tunnel-section">
+                <h3>Tunnel Provider Setup</h3>
+                <p>Choose a tunnel provider to enable external access to your FDM Sentinel service.</p>
+                
+                <div class="option-buttons">
+                    <button id="ngrok-btn" class="setup-btn tunnel-option">
+                        <div class="option-title">Ngrok</div>
+                        <div class="option-description">
+                            Free tunnel service with dynamic URLs. Easy to set up and get started quickly.
+                            The URL changes every time you start the service.
+                        </div>
+                    </button>
+                    <button id="cloudflare-btn" class="setup-btn tunnel-option">
+                        <div class="option-title">Cloudflare Tunnel</div>
+                        <div class="option-description">
+                            Free tunnel service with the ability to link to a static custom domain.
+                            Ideal for permanent setups and professional use.
+                        </div>
+                    </button>
+                </div>
+                
+                <div class="form-section" id="tunnel-form" style="display:none;">
+                    <div class="form-group" id="ngrok-config" style="display:none;">
+                        <label for="ngrok-auth-token">Ngrok Auth Token</label>
+                        <input type="text" id="ngrok-auth-token" name="ngrok-auth-token" placeholder="Your Ngrok auth token" required>
+                        <small>Get your auth token from <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank">Ngrok Dashboard</a></small>
+                        
+                        <div style="margin-top: 20px;">
+                            <label for="ngrok-domain">Ngrok Static Domain</label>
+                            <div class="input-with-prefix">
+                                <span class="input-prefix">https://</span>
+                                <input type="text" id="ngrok-domain" name="ngrok-domain" placeholder="your-domain.ngrok-free.app" required>
+                            </div>
+                            <small>Create a free static domain by clicking 'Create Domain' on <a href="https://dashboard.ngrok.com/domains" target="_blank">Ngrok Domains</a></small>
+                        </div>
+                    </div>
+                    <div class="form-group" id="cloudflare-config" style="display:none;">
+                        <label for="cloudflare-token">Cloudflare Tunnel Token</label>
+                        <input type="text" id="cloudflare-token" name="cloudflare-token" placeholder="Your Cloudflare tunnel token">
+                        <small>Create a tunnel in <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank">Cloudflare Zero Trust</a></small>
+                    </div>
+                    <div class="button-group">
+                        <button id="save-tunnel-settings" class="setup-btn primary">Continue to Initialize</button>
+                    </div>
+                </div>
+            </div>
+            <div class="setup-section" id="initialize-section">
+                <h3>Initializing Tunnel Provider</h3>
+                <div id="initialization-content">
+                    <div id="initialization-loading" class="loading-container">
+                        <div class="spinner"></div>
+                        <p>Please wait while we initialize your tunnel provider...</p>
+                        <small>This may take a few moments to complete.</small>
+                    </div>
+                    <div id="initialization-success" class="success-container" style="display:none;">
+                        <div class="success-icon">✓</div>
+                        <p>Tunnel provider initialized successfully!</p>
+                        <div id="tunnel-info" class="tunnel-info">
+                            <p><strong>Provider:</strong> <span id="provider-name"></span></p>
+                            <p><strong>URL:</strong> <span id="provider-url"></span></p>
+                        </div>
+                        <div class="button-group">
+                            <button id="continue-to-finish" class="setup-btn primary">Continue to VAPID Setup</button>
+                        </div>
+                    </div>
+                    <div id="initialization-error" class="error-container" style="display:none;">
+                        <div class="error-icon">✗</div>
+                        <p>Failed to initialize tunnel provider</p>
+                        <div id="error-message" class="error-details"></div>
+                        <div class="button-group">
+                            <button id="retry-initialization" class="setup-btn secondary">Retry</button>
+                            <button id="back-to-tunnel-config" class="setup-btn">Back to Configuration</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="setup-section" id="vapid-section">
                 <h3>VAPID Keys Setup</h3>
                 <p>VAPID keys are required for push notifications.</p>
                 
@@ -53,7 +157,7 @@
                         <label for="base-url">Base URL</label>
                         <div class="input-with-prefix">
                             <span class="input-prefix">https://</span>
-                            <input type="text" id="base-url" name="base-url" placeholder="your-domain.com">
+                            <input type="text" id="base-url" name="base-url" placeholder="your-domain.com" value="localhost">
                         </div>
                     </div>
                     <div class="button-group">
@@ -89,9 +193,15 @@
                 <p>Your FDM Sentinel is now configured and ready to use.</p>
                 <div class="setup-summary">
                     <div class="summary-item">
+                        <strong>Network Configuration:</strong> <span id="summary-network-status">Not Configured</span>
+                    </div>
+                    <div class="summary-item" id="tunnel-summary-item" style="display:none;">
+                        <strong>Tunnel Provider:</strong> <span id="summary-tunnel-status">Not Configured</span>
+                    </div>
+                    <div class="summary-item" id="vapid-summary-item">
                         <strong>VAPID Keys:</strong> <span id="summary-vapid-status">Not Configured</span>
                     </div>
-                    <div class="summary-item">
+                    <div class="summary-item" id="ssl-summary-item">
                         <strong>SSL Certificate:</strong> <span id="summary-ssl-status">Not Configured</span>
                     </div>
                 </div>

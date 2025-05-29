@@ -1,4 +1,4 @@
-const evtSource = new EventSource('https://localhost:8000/sse');
+const evtSource = new EventSource('/sse');
 const notificationPopup = document.getElementById('notificationPopup');
 const notificationMessage = document.getElementById('notificationMessage');
 const notificationImage = document.getElementById('notificationImage');

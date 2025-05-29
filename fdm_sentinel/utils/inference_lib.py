@@ -155,6 +155,3 @@ def setup_device(requested_device):
     logging.debug("Using device: %s", device)
     return device
 
-DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "model/best_model.pt")
-DEFAULT_MODEL_OPTIONS_PATH = os.path.join(os.path.dirname(__file__), "model/opt.json")
-DEFAULT_SUPPORT_DIR = os.path.join(os.path.dirname(__file__), "model/prototypes")

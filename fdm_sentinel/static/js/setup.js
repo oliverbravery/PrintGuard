@@ -5,10 +5,15 @@ document.addEventListener('DOMContentLoaded', () => {
     render_ascii_title(asciiTitle, 'FDM\nSetup');
 
     const setupState = {
+        networkConfigured: false,
         vapidConfigured: false,
         sslConfigured: false,
+        tunnelConfigured: false,
+        tunnelInitialized: false,
+        networkData: {},
         vapidData: {},
-        sslData: {}
+        sslData: {},
+        tunnelData: {}
     };
 
     function showSection(sectionId) {
@@ -16,31 +21,158 @@ document.addEventListener('DOMContentLoaded', () => {
             section.classList.remove('active');
         });
         document.getElementById(`${sectionId}-section`).classList.add('active');
-        document.querySelectorAll('.progress-step').forEach(step => {
+        if (sectionId === 'vapid' && selectedNetworkOption === 'external' && setupState.tunnelInitialized) {
+            const tunnelUrl = setupState.tunnelData.url;
+            if (tunnelUrl) {
+                const domain = tunnelUrl.replace(/^https?:\/\//, '');
+                document.getElementById('base-url').value = domain;
+            }
+        }
+        const progressContainer = selectedNetworkOption === 'external' ? 
+            document.getElementById('setup-progress-external') : 
+            document.getElementById('setup-progress');
+            
+        progressContainer.querySelectorAll('.progress-step').forEach(step => {
             step.classList.remove('active');
             const stepId = step.dataset.step;
             if (stepId === sectionId) {
                 step.classList.add('active');
             } else if (
                 (stepId === 'vapid' && setupState.vapidConfigured) ||
-                (stepId === 'ssl' && setupState.sslConfigured)
+                (stepId === 'ssl' && setupState.sslConfigured) ||
+                (stepId === 'tunnel' && setupState.tunnelConfigured) ||
+                (stepId === 'initialize' && setupState.tunnelInitialized)
             ) {
                 step.classList.add('completed');
             }
         });
 
         if (sectionId === 'finish') {
-            document.getElementById('summary-vapid-status').textContent = 
-                setupState.vapidConfigured ? 'Configured ✓' : 'Not Configured';
-            document.getElementById('summary-vapid-status').className = 
-                setupState.vapidConfigured ? 'status-configured' : '';
+            document.getElementById('summary-network-status').textContent = 
+                setupState.networkConfigured ? 'Configured ✓' : 'Not Configured';
+            document.getElementById('summary-network-status').className = 
+                setupState.networkConfigured ? 'status-configured' : '';
             
-            document.getElementById('summary-ssl-status').textContent = 
-                setupState.sslConfigured ? 'Configured ✓' : 'Not Configured';
-            document.getElementById('summary-ssl-status').className = 
-                setupState.sslConfigured ? 'status-configured' : '';
+            if (selectedNetworkOption === 'external') {
+                document.getElementById('tunnel-summary-item').style.display = 'block';
+                const tunnelStatus = setupState.tunnelInitialized ? 'Initialized ✓' : 
+                                   setupState.tunnelConfigured ? 'Configured (Not Initialized)' : 'Not Configured';
+                document.getElementById('summary-tunnel-status').textContent = tunnelStatus;
+                document.getElementById('summary-tunnel-status').className = 
+                    setupState.tunnelInitialized ? 'status-configured' : '';
+                document.getElementById('vapid-summary-item').style.display = 'block';
+                document.getElementById('summary-vapid-status').textContent = 
+                    setupState.vapidConfigured ? 'Configured ✓' : 'Not Configured';
+                document.getElementById('summary-vapid-status').className = 
+                    setupState.vapidConfigured ? 'status-configured' : '';
+                document.getElementById('ssl-summary-item').style.display = 'none';
+            } else {
+                document.getElementById('tunnel-summary-item').style.display = 'none';
+                document.getElementById('vapid-summary-item').style.display = 'block';
+                document.getElementById('ssl-summary-item').style.display = 'block';
+                document.getElementById('summary-vapid-status').textContent = 
+                    setupState.vapidConfigured ? 'Configured ✓' : 'Not Configured';
+                document.getElementById('summary-vapid-status').className = 
+                    setupState.vapidConfigured ? 'status-configured' : '';
+                document.getElementById('summary-ssl-status').textContent = 
+                    setupState.sslConfigured ? 'Configured ✓' : 'Not Configured';
+                document.getElementById('summary-ssl-status').className = 
+                    setupState.sslConfigured ? 'status-configured' : '';
+            }
         }
     }
+
+    let selectedNetworkOption = null;
+
+    document.getElementById('local-network-btn').addEventListener('click', () => {
+        selectedNetworkOption = 'local';
+        document.querySelectorAll('.network-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('local-network-btn').classList.add('selected');
+        document.getElementById('setup-progress').style.display = 'flex';
+        document.getElementById('network-section').style.display = 'none';
+        setupState.networkConfigured = true;
+        setupState.networkData = { type: selectedNetworkOption };
+        showSection('vapid');
+    });
+
+    document.getElementById('external-network-btn').addEventListener('click', () => {
+        selectedNetworkOption = 'external';
+        document.querySelectorAll('.network-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('external-network-btn').classList.add('selected');
+        document.getElementById('setup-progress-external').style.display = 'flex';
+        document.getElementById('network-section').style.display = 'none';
+        setupState.networkConfigured = true;
+        setupState.networkData = { type: selectedNetworkOption };
+        showSection('tunnel');
+    });
+
+    let selectedTunnelProvider = null;
+
+    document.getElementById('ngrok-btn').addEventListener('click', () => {
+        selectedTunnelProvider = 'ngrok';
+        document.querySelectorAll('.tunnel-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('ngrok-btn').classList.add('selected');
+        document.getElementById('tunnel-form').style.display = 'block';
+        document.getElementById('ngrok-config').style.display = 'block';
+        document.getElementById('cloudflare-config').style.display = 'none';
+    });
+
+    document.getElementById('cloudflare-btn').addEventListener('click', () => {
+        selectedTunnelProvider = 'cloudflare';
+        document.querySelectorAll('.tunnel-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('cloudflare-btn').classList.add('selected');
+        document.getElementById('tunnel-form').style.display = 'block';
+        document.getElementById('cloudflare-config').style.display = 'block';
+        document.getElementById('ngrok-config').style.display = 'none';
+    });
+
+    document.getElementById('save-tunnel-settings').addEventListener('click', async () => {
+        if (!selectedTunnelProvider) {
+            alert('Please select a tunnel provider');
+            return;
+        }
+        let token = '';
+        let domain = '';
+        if (selectedTunnelProvider === 'ngrok') {
+            token = document.getElementById('ngrok-auth-token').value.trim();
+            domain = document.getElementById('ngrok-domain').value.trim();
+        } else if (selectedTunnelProvider === 'cloudflare') {
+            token = document.getElementById('cloudflare-token').value.trim();
+        }
+        if (!token) {
+            alert('Please enter the required token');
+            return;
+        }
+        if (selectedTunnelProvider === 'ngrok' && !domain) {
+            alert('Please enter the required ngrok static domain');
+            return;
+        }
+        try {
+            const response = await fetch('/setup/save-tunnel-settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    provider: selectedTunnelProvider,
+                    token: token,
+                    domain: domain
+                })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                setupState.tunnelConfigured = true;
+                setupState.tunnelData = { provider: selectedTunnelProvider, token, domain };
+                showSection('initialize');
+                initializeTunnelProvider();
+            } else {
+                const error = await response.json();
+                alert(`Failed to save tunnel settings: ${error.detail}`);
+            }
+        } catch (error) {
+            console.error('Error saving tunnel settings:', error);
+            alert('Error saving tunnel settings');
+        }
+    });
 
     document.getElementById('generate-vapid-keys-btn').addEventListener('click', async () => {
         try {
@@ -87,7 +219,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response.ok) {
                 setupState.vapidConfigured = true;
                 setupState.vapidData = { publicKey, privateKey, subject, baseUrl };
-                showSection('ssl');
+                // For external setup, go directly to finish after VAPID
+                if (selectedNetworkOption === 'external') {
+                    showSection('finish');
+                } else {
+                    showSection('ssl');
+                }
             } else {
                 const error = await response.json();
                 alert(`Failed to save VAPID settings: ${error.detail}`);
@@ -153,7 +290,78 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('finish-setup-btn').addEventListener('click', async () => {
-        alert('Setup complete! To finalize, please restart the server. Redirecting to the home page...');
-        window.location.href = '/';
+        try {
+            const startupMode = selectedNetworkOption === 'external' ? 'tunnel' : 'local';
+            const completionData = {
+                startup_mode: startupMode
+            };
+            if (selectedNetworkOption === 'external' && selectedTunnelProvider) {
+                completionData.tunnel_provider = selectedTunnelProvider;
+            }
+            const response = await fetch('/setup/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(completionData)
+            });
+            if (response.ok) {
+                alert('Setup complete! To finalize, please restart the server. Redirecting to setup page...');
+                window.location.href = '/setup';
+            } else {
+                const error = await response.json();
+                alert(`Failed to complete setup: ${error.detail}`);
+            }
+        } catch (error) {
+            console.error('Error completing setup:', error);
+            alert('Error completing setup');
+        }
     });
+
+    document.getElementById('continue-to-finish').addEventListener('click', () => {
+        if (selectedNetworkOption === 'external') {
+            showSection('vapid');
+        } else {
+            showSection('finish');
+        }
+    });
+
+    document.getElementById('retry-initialization').addEventListener('click', () => {
+        initializeTunnelProvider();
+    });
+
+    document.getElementById('back-to-tunnel-config').addEventListener('click', () => {
+        showSection('tunnel');
+    });
+
+    async function initializeTunnelProvider() {
+        document.getElementById('initialization-loading').style.display = 'block';
+        document.getElementById('initialization-success').style.display = 'none';
+        document.getElementById('initialization-error').style.display = 'none';
+        try {
+            const response = await fetch('/setup/initialize-tunnel-provider', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            const result = await response.json();
+            if (response.ok && result.success) {
+                document.getElementById('initialization-loading').style.display = 'none';
+                document.getElementById('initialization-success').style.display = 'block';
+                document.getElementById('provider-name').textContent = result.provider || selectedTunnelProvider;
+                document.getElementById('provider-url').textContent = result.url || 'N/A';
+                setupState.tunnelInitialized = true;
+                setupState.tunnelData = { ...setupState.tunnelData, ...result };
+            } else {
+                document.getElementById('initialization-loading').style.display = 'none';
+                document.getElementById('initialization-error').style.display = 'block';
+                document.getElementById('error-message').textContent = result.message || 'Unknown error occurred';
+            }
+        } catch (error) {
+            console.error('Error initializing tunnel provider:', error);
+            document.getElementById('initialization-loading').style.display = 'none';
+            document.getElementById('initialization-error').style.display = 'block';
+            document.getElementById('error-message').textContent = 'Network error: Unable to connect to server';
+        } finally {
+            document.getElementById('initialization-loading').style.display = 'none';
+        }
+    }
 });

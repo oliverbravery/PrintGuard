@@ -8,11 +8,13 @@ from .sse_utils import append_new_outbound_packet
 
 
 async def append_new_alert(alert):
+    # pylint: disable=import-outside-toplevel
     from ..app import app
     app.state.alerts[alert.id] = alert
     await append_new_outbound_packet(alert_to_response_json(alert), SSEDataType.ALERT)
 
 async def dismiss_alert(alert_id):
+    # pylint: disable=import-outside-toplevel
     from ..app import app, update_camera_state
     if alert_id in app.state.alerts:
         del app.state.alerts[alert_id]

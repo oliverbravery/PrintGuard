@@ -299,7 +299,7 @@ settingsButton.addEventListener('click', function() {
     } else {
         cameraDisplaySection.style.display = 'block';
         settingsSection.style.display = 'none';
-        updateAsciiTitle(); // Use the new function instead of hardcoding
+        updateAsciiTitle();
         settingsButton.textContent = 'Settings';
     }
 });
