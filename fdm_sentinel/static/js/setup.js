@@ -202,7 +202,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     showSection('initialize');
                     initializeTunnelProvider();
                 } else if (selectedTunnelProvider === 'cloudflare') {
-                    showSection('vapid');
+                    showSection('tunnel-config');
+                    fetchCloudflareAccountsZones();
                 }
             } else {
                 const error = await response.json();
@@ -404,4 +405,111 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('initialization-loading').style.display = 'none';
         }
     }
+
+    async function fetchCloudflareAccountsZones() {
+        document.getElementById('cloudflare-selection-loading').style.display = 'block';
+        document.getElementById('cloudflare-selection-content').style.display = 'none';
+        document.getElementById('cloudflare-selection-error').style.display = 'none';
+        
+        try {
+            const response = await fetch('/setup/cloudflare/accounts-zones');
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                populateAccountsAndZones(result.accounts, result.zones);
+                document.getElementById('cloudflare-selection-loading').style.display = 'none';
+                document.getElementById('cloudflare-selection-content').style.display = 'block';
+            } else {
+                document.getElementById('cloudflare-selection-loading').style.display = 'none';
+                document.getElementById('cloudflare-selection-error').style.display = 'block';
+                document.getElementById('cloudflare-error-message').textContent = result.detail || 'Unknown error occurred';
+            }
+        } catch (error) {
+            console.error('Error fetching Cloudflare accounts and zones:', error);
+            document.getElementById('cloudflare-selection-loading').style.display = 'none';
+            document.getElementById('cloudflare-selection-error').style.display = 'block';
+            document.getElementById('cloudflare-error-message').textContent = 'Network error: Unable to connect to server';
+        }
+    }
+
+    function populateAccountsAndZones(accounts, zones) {
+        const accountSelect = document.getElementById('cloudflare-account-select');
+        const zoneSelect = document.getElementById('cloudflare-zone-select');
+        accountSelect.innerHTML = '<option value="">Choose an account...</option>';
+        zoneSelect.innerHTML = '<option value="">Choose a domain...</option>';
+        accounts.forEach(account => {
+            const option = document.createElement('option');
+            option.value = account.id;
+            option.textContent = account.name;
+            accountSelect.appendChild(option);
+        });
+        zones.forEach(zone => {
+            const option = document.createElement('option');
+            option.value = zone.id;
+            option.textContent = zone.name;
+            option.setAttribute('data-name', zone.name);
+            zoneSelect.appendChild(option);
+        });
+    }
+
+    document.getElementById('cloudflare-zone-select').addEventListener('change', (e) => {
+        const selectedOption = e.target.selectedOptions[0];
+        const domainSuffix = document.getElementById('domain-suffix');
+        if (selectedOption && selectedOption.value) {
+            const domainName = selectedOption.getAttribute('data-name');
+            domainSuffix.textContent = '.' + domainName;
+        } else {
+            domainSuffix.textContent = '.example.com';
+        }
+    });
+
+    document.getElementById('configure-cloudflare-tunnel').addEventListener('click', async () => {
+        const accountId = document.getElementById('cloudflare-account-select').value;
+        const zoneId = document.getElementById('cloudflare-zone-select').value;
+        const subdomain = document.getElementById('cloudflare-subdomain').value.trim();
+        if (!accountId) {
+            alert('Please select a Cloudflare account');
+            return;
+        }
+        if (!zoneId) {
+            alert('Please select a domain');
+            return;
+        }
+        if (!subdomain) {
+            alert('Please enter a subdomain');
+            return;
+        }
+        try {
+            const response = await fetch('/setup/cloudflare/create-tunnel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    account_id: accountId,
+                    zone_id: zoneId,
+                    subdomain: subdomain
+                })
+            });
+            if (response.ok) {
+                const result = await response.json();
+                setupState.tunnelInitialized = true;
+                setupState.tunnelData = { ...setupState.tunnelData, ...result };
+                showSection('vapid');
+            }
+            else {
+                const error = await response.json();
+                alert(`Failed to create Cloudflare tunnel: ${error.detail}`);
+            }
+        } catch (error) {
+            console.error('Error creating Cloudflare tunnel:', error);
+            alert('Error creating Cloudflare tunnel');
+        }
+    });
+
+    document.getElementById('retry-cloudflare-fetch').addEventListener('click', () => {
+        fetchCloudflareAccountsZones();
+    });
+
+    document.getElementById('back-to-tunnel-settings').addEventListener('click', () => {
+        showSection('tunnel');
+    });
 });
