@@ -12,8 +12,9 @@ from py_vapid import Vapid
 from ..models import (TunnelProvider, TunnelSettings, SavedConfig,
                       VapidSettings, SavedKey, SetupCompletion)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
-                            store_key, get_config, update_config)
+                            store_key, get_config, update_config, get_key)
 from ..utils.setup_utils import setup_ngrok_tunnel
+from ..utils.cloudflare_utils import CloudflareAPI
 
 router = APIRouter()
 
@@ -182,3 +183,33 @@ async def complete_setup(completion: SetupCompletion):
     except Exception as e:
         logging.error("Error completing setup: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to complete setup: {str(e)}")
+
+@router.get("/setup/cloudflare/accounts-zones", include_in_schema=False)
+async def get_cloudflare_accounts_zones():
+    try:
+        config = get_config()
+        api_token = get_key(SavedKey.TUNNEL_API_KEY)
+        email = config.get(SavedConfig.CLOUDFLARE_EMAIL)
+        if not api_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Cloudflare API token not found. Please configure tunnel settings first."
+            )
+        cf = CloudflareAPI(api_token, email)
+        accounts_response = cf.get_accounts()
+        accounts = accounts_response.get("result", [])
+        zones_response = cf.get_zones()
+        zones = zones_response.get("result", [])
+        return {
+            "success": True,
+            "accounts": accounts,
+            "zones": zones
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("Error fetching Cloudflare accounts and zones: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch Cloudflare accounts and zones: {str(e)}"
+        )
