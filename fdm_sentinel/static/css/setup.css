@@ -71,6 +71,59 @@
     font-size: 1rem;
 }
 
+.form-group select {
+    width: 100%;
+    padding: 10px;
+    border: 2px dotted #222;
+    background: transparent;
+    font-family: inherit;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.form-group select:focus {
+    outline: none;
+    border-color: #444;
+}
+
+.input-with-prefix {
+    display: flex;
+    border: 2px dotted #222;
+    overflow: hidden;
+}
+
+.input-prefix {
+    background: #f0f0f0;
+    padding: 10px;
+    border-right: 1px solid #222;
+    font-family: inherit;
+    font-size: 1rem;
+    color: #666;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.input-suffix {
+    background: #f0f0f0;
+    padding: 10px;
+    border-left: 1px solid #222;
+    font-family: inherit;
+    font-size: 1rem;
+    color: #666;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.input-with-prefix input {
+    border: none;
+    flex: 1;
+    padding: 10px;
+    background: transparent;
+    font-family: inherit;
+    font-size: 1rem;
+    outline: none;
+}
+
 .button-group {
     display: flex;
     justify-content: flex-end;
@@ -115,33 +168,6 @@
 
 .status-configured {
     color: #2ecc40;
-}
-
-.input-with-prefix {
-    display: flex;
-    border: 2px dotted #222;
-    overflow: hidden;
-}
-
-.input-prefix {
-    background: #f0f0f0;
-    padding: 10px;
-    border-right: 1px solid #222;
-    font-family: inherit;
-    font-size: 1rem;
-    color: #666;
-    user-select: none;
-    white-space: nowrap;
-}
-
-.input-with-prefix input {
-    border: none;
-    flex: 1;
-    padding: 10px;
-    background: transparent;
-    font-family: inherit;
-    font-size: 1rem;
-    outline: none;
 }
 
 .network-option {
