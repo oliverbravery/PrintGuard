@@ -28,9 +28,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('base-url').value = domain;
             }
         }
-        const progressContainer = selectedNetworkOption === 'external' ? 
-            document.getElementById('setup-progress-external') : 
-            document.getElementById('setup-progress');
+        let progressContainer;
+        if (selectedNetworkOption === 'external') {
+            if (selectedTunnelProvider === 'ngrok') {
+                progressContainer = document.getElementById('setup-progress-ngrok');
+            } else if (selectedTunnelProvider === 'cloudflare') {
+                progressContainer = document.getElementById('setup-progress-cloudflare');
+            } else {
+                progressContainer = document.getElementById('setup-progress-external');
+            }
+        } else {
+            progressContainer = document.getElementById('setup-progress');
+        }
             
         progressContainer.querySelectorAll('.progress-step').forEach(step => {
             step.classList.remove('active');
@@ -41,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 (stepId === 'vapid' && setupState.vapidConfigured) ||
                 (stepId === 'ssl' && setupState.sslConfigured) ||
                 (stepId === 'tunnel' && setupState.tunnelConfigured) ||
+                (stepId === 'tunnel-config' && setupState.tunnelConfigured) ||
                 (stepId === 'initialize' && setupState.tunnelInitialized)
             ) {
                 step.classList.add('completed');
@@ -115,6 +125,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('tunnel-form').style.display = 'block';
         document.getElementById('ngrok-config').style.display = 'block';
         document.getElementById('cloudflare-config').style.display = 'none';
+        document.getElementById('setup-progress-external').style.display = 'none';
+        document.getElementById('setup-progress-cloudflare').style.display = 'none';
+        document.getElementById('setup-progress-ngrok').style.display = 'flex';
     });
 
     document.getElementById('cloudflare-btn').addEventListener('click', () => {
@@ -124,6 +137,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('tunnel-form').style.display = 'block';
         document.getElementById('cloudflare-config').style.display = 'block';
         document.getElementById('ngrok-config').style.display = 'none';
+        document.getElementById('setup-progress-external').style.display = 'none';
+        document.getElementById('setup-progress-ngrok').style.display = 'none';
+        document.getElementById('setup-progress-cloudflare').style.display = 'flex';
     });
 
     document.getElementById('cloudflare-global-key').addEventListener('change', (e) => {
@@ -182,8 +198,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await response.json();
                 setupState.tunnelConfigured = true;
                 setupState.tunnelData = { provider: selectedTunnelProvider, token, domain };
-                showSection('initialize');
-                initializeTunnelProvider();
+                if (selectedTunnelProvider === 'ngrok') {
+                    showSection('initialize');
+                    initializeTunnelProvider();
+                } else if (selectedTunnelProvider === 'cloudflare') {
+                    showSection('vapid');
+                }
             } else {
                 const error = await response.json();
                 alert(`Failed to save tunnel settings: ${error.detail}`);
