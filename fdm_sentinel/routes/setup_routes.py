@@ -127,6 +127,8 @@ async def save_tunnel_settings(settings: TunnelSettings):
             SavedConfig.TUNNEL_PROVIDER: settings.provider,
             SavedConfig.SITE_DOMAIN: settings.domain
         }
+        if settings.email:
+            config_data[SavedConfig.CLOUDFLARE_EMAIL] = settings.email
         store_key(SavedKey.TUNNEL_API_KEY, settings.token)
         update_config(config_data)
         logging.debug("Tunnel settings saved successfully.")

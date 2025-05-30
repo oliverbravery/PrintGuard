@@ -136,3 +136,4 @@ class SavedConfig(str, Enum):
     STARTUP_MODE = "startup_mode"
     SITE_DOMAIN = "site_domain"
     TUNNEL_PROVIDER = "tunnel_provider"
+    CLOUDFLARE_EMAIL = "cloudflare_email"

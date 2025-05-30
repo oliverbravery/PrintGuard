@@ -126,6 +126,16 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('ngrok-config').style.display = 'none';
     });
 
+    document.getElementById('cloudflare-global-key').addEventListener('change', (e) => {
+        const emailGroup = document.getElementById('cloudflare-email-group');
+        if (e.target.checked) {
+            emailGroup.style.display = 'block';
+        } else {
+            emailGroup.style.display = 'none';
+            document.getElementById('cloudflare-email').value = '';
+        }
+    });
+
     document.getElementById('save-tunnel-settings').addEventListener('click', async () => {
         if (!selectedTunnelProvider) {
             alert('Please select a tunnel provider');
@@ -133,14 +143,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         let token = '';
         let domain = '';
+        let email = '';
         if (selectedTunnelProvider === 'ngrok') {
             token = document.getElementById('ngrok-auth-token').value.trim();
             domain = document.getElementById('ngrok-domain').value.trim();
         } else if (selectedTunnelProvider === 'cloudflare') {
-            token = document.getElementById('cloudflare-token').value.trim();
+            token = document.getElementById('cloudflare-api-key').value.trim();
+            const isGlobalKey = document.getElementById('cloudflare-global-key').checked;
+            if (isGlobalKey) {
+                email = document.getElementById('cloudflare-email').value.trim();
+                if (!email) {
+                    alert('Please enter your account email for Global API Key');
+                    return;
+                }
+            }
         }
         if (!token) {
-            alert('Please enter the required token');
+            alert('Please enter the required API key');
             return;
         }
         if (selectedTunnelProvider === 'ngrok' && !domain) {
@@ -154,7 +173,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ 
                     provider: selectedTunnelProvider,
                     token: token,
-                    domain: domain
+                    domain: domain,
+                    email: email
                 })
             });
             
