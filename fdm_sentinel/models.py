@@ -137,3 +137,8 @@ class SavedConfig(str, Enum):
     SITE_DOMAIN = "site_domain"
     TUNNEL_PROVIDER = "tunnel_provider"
     CLOUDFLARE_EMAIL = "cloudflare_email"
+
+class CloudflareTunnelConfig(BaseModel):
+    account_id: str
+    zone_id: str
+    subdomain: str

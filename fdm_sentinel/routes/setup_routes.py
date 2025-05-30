@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from py_vapid import Vapid
 
 from ..models import (TunnelProvider, TunnelSettings, SavedConfig,
-                      VapidSettings, SavedKey, SetupCompletion)
+                      VapidSettings, SavedKey, SetupCompletion, CloudflareTunnelConfig)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
                             store_key, get_config, update_config, get_key)
 from ..utils.setup_utils import setup_ngrok_tunnel
@@ -212,4 +212,34 @@ async def get_cloudflare_accounts_zones():
         raise HTTPException(
             status_code=500,
             detail=f"Failed to fetch Cloudflare accounts and zones: {str(e)}"
+        )
+
+@router.post("/setup/cloudflare/create-tunnel", include_in_schema=False)
+async def create_cloudflare_tunnel(config: CloudflareTunnelConfig):
+    try:
+        api_token = get_key(SavedKey.TUNNEL_API_KEY)
+        cf_config = get_config()
+        email = cf_config.get(SavedConfig.CLOUDFLARE_EMAIL)
+        if not api_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Cloudflare API token not found"
+            )
+        cf = CloudflareAPI(api_token, email)
+        tunnel_name = config.subdomain
+        tunnel_response = cf.create_tunnel(config.account_id, tunnel_name)
+        tunnel_id = tunnel_response["result"]["id"]
+        tunnel_token = tunnel_response["result"]["token"]
+        dns_response = cf.create_dns_record(config.zone_id, tunnel_id, config.subdomain)
+        return {
+            "success": True,
+            "tunnel_id": tunnel_id,
+            "tunnel_token": tunnel_token,
+            "dns_record": dns_response["result"]
+        }
+    except Exception as e:
+        logging.error("Error creating Cloudflare tunnel: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create Cloudflare tunnel: {str(e)}"
         )
