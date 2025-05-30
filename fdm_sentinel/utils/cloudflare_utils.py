@@ -4,13 +4,21 @@ import requests
 
 
 class CloudflareAPI:
-    def __init__(self, api_token: str):
+    def __init__(self, api_token: str, email: Optional[str] = None):
         self.api_token = api_token
+        self.email = email
         self.base_url = "https://api.cloudflare.com/client/v4"
-        self.headers = {
-            "Authorization": f"Bearer {api_token}",
-            "Content-Type": "application/json"
-        }
+        if email:
+            self.headers = {
+                "X-Auth-Email": email,
+                "X-Auth-Key": api_token,
+                "Content-Type": "application/json"
+            }
+        else:
+            self.headers = {
+                "Authorization": f"Bearer {api_token}",
+                "Content-Type": "application/json"
+            }
 
     def _request(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Dict[str, Any]:
         url = f"{self.base_url}{endpoint}"
@@ -70,8 +78,8 @@ class CloudflareAPI:
         }
         return self._request("POST", f"/accounts/{account_id}/access/apps/{app_id}/policies", data)
 
-def setup_tunnel(api_token: str, account_id: str, zone_id: str, tunnel_name: str, domain_name: str) -> Dict[str, Any]:
-    cf = CloudflareAPI(api_token)
+def setup_tunnel(api_token: str, account_id: str, zone_id: str, tunnel_name: str, domain_name: str, email: Optional[str] = None) -> Dict[str, Any]:
+    cf = CloudflareAPI(api_token, email)
     tunnel_response = cf.create_tunnel(account_id, tunnel_name)
     tunnel_id = tunnel_response["result"]["id"]
     tunnel_token = tunnel_response["result"]["token"]
@@ -84,8 +92,9 @@ def setup_tunnel(api_token: str, account_id: str, zone_id: str, tunnel_name: str
 
 
 def setup_warp_access(api_token: str, account_id: str, app_name: str,
-                      domain: str, device_ids: List[str]) -> Dict[str, Any]:
-    cf = CloudflareAPI(api_token)
+                      domain: str, device_ids: List[str],
+                      email: Optional[str] = None) -> Dict[str, Any]:
+    cf = CloudflareAPI(api_token, email)
     list_response = cf.create_device_list(account_id, f"{app_name} Devices")
     list_id = list_response["result"]["id"]
     cf.add_devices_to_list(account_id, list_id, device_ids)
