@@ -89,9 +89,22 @@
                         </div>
                     </div>
                     <div class="form-group" id="cloudflare-config" style="display:none;">
-                        <label for="cloudflare-token">Cloudflare Tunnel Token</label>
-                        <input type="text" id="cloudflare-token" name="cloudflare-token" placeholder="Your Cloudflare tunnel token">
-                        <small>Create a tunnel in <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank">Cloudflare Zero Trust</a></small>
+                        <label for="cloudflare-api-key">Cloudflare API Key</label>
+                        <input type="text" id="cloudflare-api-key" name="cloudflare-api-key" placeholder="Your Cloudflare API key" required>
+                        <small>Get your API key from <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank">Cloudflare Dashboard</a></small>
+                        <small>Use Global API Key for quick setup, or create a custom token with permissions for 'Zone → DNS: Edit' and 'Account → Cloudflare Tunnel: Edit'</small>
+                        <div style="margin-top: 15px;">
+                            <label class="checkbox-container">
+                                <input type="checkbox" id="cloudflare-global-key">
+                                <span class="checkmark"></span>
+                                This is a Global API Key
+                            </label>
+                        </div>
+                        <div id="cloudflare-email-group" style="display:none; margin-top: 15px;">
+                            <label for="cloudflare-email">Account Email</label>
+                            <input type="email" id="cloudflare-email" name="cloudflare-email" placeholder="your-email@example.com">
+                            <small>Required when using Global API Key</small>
+                        </div>
                     </div>
                     <div class="button-group">
                         <button id="save-tunnel-settings" class="setup-btn primary">Continue to Initialize</button>
