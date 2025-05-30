@@ -479,6 +479,8 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Please enter a subdomain');
             return;
         }
+        document.getElementById('cloudflare-selection-content').style.display = 'none';
+        document.getElementById('cloudflare-tunnel-loading').style.display = 'block';
         try {
             const response = await fetch('/setup/cloudflare/create-tunnel', {
                 method: 'POST',
@@ -494,12 +496,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 setupState.tunnelInitialized = true;
                 setupState.tunnelData = { ...setupState.tunnelData, ...result };
                 showSection('vapid');
+                if (result.url) {
+                    document.getElementById('base-url').value = result.url;
+                }
             }
             else {
+                document.getElementById('cloudflare-tunnel-loading').style.display = 'none';
+                document.getElementById('cloudflare-selection-content').style.display = 'block';
                 const error = await response.json();
                 alert(`Failed to create Cloudflare tunnel: ${error.detail}`);
             }
         } catch (error) {
+            document.getElementById('cloudflare-tunnel-loading').style.display = 'none';
+            document.getElementById('cloudflare-selection-content').style.display = 'block';
             console.error('Error creating Cloudflare tunnel:', error);
             alert('Error creating Cloudflare tunnel');
         }

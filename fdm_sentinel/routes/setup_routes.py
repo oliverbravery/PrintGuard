@@ -229,9 +229,14 @@ async def create_cloudflare_tunnel(config: CloudflareTunnelConfig):
         tunnel_name = config.subdomain
         tunnel_response = cf.create_tunnel(config.account_id, tunnel_name)
         tunnel_id = tunnel_response["result"]["id"]
-        dns_response = cf.create_dns_record(config.zone_id, tunnel_id, config.subdomain)
+        _ = cf.create_dns_record(config.zone_id, tunnel_id, config.subdomain)
+        zones_response = cf.get_zones()
+        zone_name = next((z["name"] for z in zones_response["result"] if (
+            z["id"] == config.zone_id)), "")
+        tunnel_url = f"{config.subdomain}.{zone_name}"
         return {
-            "success": True
+            "success": True,
+            "url": tunnel_url
         }
     except Exception as e:
         logging.error("Error creating Cloudflare tunnel: %s", e)
