@@ -112,7 +112,8 @@ class TunnelSettings(BaseModel):
     provider: TunnelProvider
     token: str
     domain: str = ""
-    
+    email: Optional[str] = None
+
     @field_validator('domain')
     @classmethod
     def validate_domain_for_ngrok(cls, v, info):
