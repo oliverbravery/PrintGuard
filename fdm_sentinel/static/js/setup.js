@@ -10,10 +10,12 @@ document.addEventListener('DOMContentLoaded', () => {
         sslConfigured: false,
         tunnelConfigured: false,
         tunnelInitialized: false,
+        cloudflareDownloadConfigured: false,
         networkData: {},
         vapidData: {},
         sslData: {},
-        tunnelData: {}
+        tunnelData: {},
+        tunnelToken: null
     };
 
     function showSection(sectionId) {
@@ -46,12 +48,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const stepId = step.dataset.step;
             if (stepId === sectionId) {
                 step.classList.add('active');
-            } else if (
+            } else            if (
                 (stepId === 'vapid' && setupState.vapidConfigured) ||
                 (stepId === 'ssl' && setupState.sslConfigured) ||
                 (stepId === 'tunnel' && setupState.tunnelConfigured) ||
                 (stepId === 'tunnel-config' && setupState.tunnelConfigured) ||
-                (stepId === 'initialize' && setupState.tunnelInitialized)
+                (stepId === 'initialize' && setupState.tunnelInitialized) ||
+                (stepId === 'cloudflare-download' && setupState.cloudflareDownloadConfigured)
             ) {
                 step.classList.add('completed');
             }
@@ -260,8 +263,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response.ok) {
                 setupState.vapidConfigured = true;
                 setupState.vapidData = { publicKey, privateKey, subject, baseUrl };
-                // For external setup, go directly to finish after VAPID
-                if (selectedNetworkOption === 'external') {
+                if (selectedNetworkOption === 'external' && selectedTunnelProvider === 'cloudflare') {
+                    showSection('cloudflare-download');
+                } else if (selectedNetworkOption === 'external') {
                     showSection('finish');
                 } else {
                     showSection('ssl');
@@ -521,4 +525,95 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('back-to-tunnel-settings').addEventListener('click', () => {
         showSection('tunnel');
     });
+
+    let selectedOperatingSystem = null;
+
+    document.getElementById('macos-btn').addEventListener('click', () => {
+        selectedOperatingSystem = 'macos';
+        document.querySelectorAll('.os-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('macos-btn').classList.add('selected');
+        saveOperatingSystemSelection();
+    });
+
+    document.getElementById('windows-btn').addEventListener('click', () => {
+        selectedOperatingSystem = 'windows';
+        document.querySelectorAll('.os-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('windows-btn').classList.add('selected');
+        saveOperatingSystemSelection();
+    });
+
+    document.getElementById('linux-btn').addEventListener('click', () => {
+        selectedOperatingSystem = 'linux';
+        document.querySelectorAll('.os-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('linux-btn').classList.add('selected');
+        saveOperatingSystemSelection();
+    });
+
+    async function saveOperatingSystemSelection() {
+        try {
+            const response = await fetch('/setup/cloudflare/save-os', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operating_system: selectedOperatingSystem })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                document.getElementById('tunnel-token-section').style.display = 'block';
+                const commandsContainer = document.getElementById('setup-commands-container');
+                commandsContainer.innerHTML = '';
+                
+                if (result.setup_commands && result.setup_commands.length > 0) {
+                    result.setup_commands.forEach((command, index) => {
+                        const commandDiv = document.createElement('div');
+                        commandDiv.className = 'command-display';
+                        commandDiv.innerHTML = `
+                            <label>Step ${index + 1}:</label>
+                            <div class="command-value">${command}</div>
+                            <button class="copy-btn" title="Copy to clipboard" onclick="copyToClipboard('${command.replace(/'/g, "\\'")}', this)">📋</button>
+                        `;
+                        commandsContainer.appendChild(commandDiv);
+                    });
+                }
+                
+                setupState.cloudflareDownloadConfigured = true;
+                setupState.tunnelToken = result.tunnel_token;
+            } else {
+                const error = await response.json();
+                console.error('Failed to save OS selection:', error);
+                alert(`Failed to save operating system selection: ${error.detail}`);
+            }
+        } catch (error) {
+            console.error('Error saving operating system selection:', error);
+            alert('Error saving operating system selection');
+        }
+    }
+    document.getElementById('continue-to-finish-from-cloudflare').addEventListener('click', () => {
+        showSection('finish');
+    });
+
+    window.copyToClipboard = function(text, button) {
+        navigator.clipboard.writeText(text).then(() => {
+            const originalText = button.textContent;
+            button.textContent = '✓';
+            setTimeout(() => {
+                button.textContent = originalText;
+            }, 2000);
+        }).catch((error) => {
+            console.error('Clipboard API failed, using fallback:', error);
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            
+            const originalText = button.textContent;
+            button.textContent = '✓';
+            setTimeout(() => {
+                button.textContent = originalText;
+            }, 2000);
+        });
+    };
+
 });

@@ -365,3 +365,132 @@
     border-width: 0 2px 2px 0;
     transform: rotate(45deg);
 }
+
+.info-section {
+    width: 100%;
+    margin: 20px 0;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background-color: #f9f9f9;
+}
+
+.info-section h4 {
+    margin: 0 0 10px 0;
+    color: #333;
+    font-size: 1.1em;
+}
+
+.external-link {
+    display: inline-block;
+    padding: 10px 20px;
+    background-color: #0066cc;
+    color: white;
+    text-decoration: none;
+    border-radius: 5px;
+    margin: 10px 0;
+    transition: background-color 0.3s ease;
+}
+
+.external-link:hover {
+    background-color: #0052a3;
+}
+
+.os-option {
+    background-color: #f5f5f5;
+    border: 2px solid #ddd;
+    transition: all 0.3s ease;
+}
+
+.os-option:hover {
+    border-color: #0066cc;
+    background-color: #f0f7ff;
+}
+
+.os-option.selected {
+    border-color: #0066cc;
+    background-color: #e6f3ff;
+}
+
+.token-display {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 15px 0;
+    padding: 15px;
+    background-color: #f0f0f0;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+}
+
+.token-display label {
+    font-weight: bold;
+    color: #333;
+    min-width: 100px;
+}
+
+.token-value {
+    flex: 1;
+    font-family: monospace;
+    background-color: white;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    word-break: break-all;
+    font-size: 0.9em;
+}
+
+.copy-btn {
+    background: none;
+    border: 1px solid #ddd;
+    padding: 8px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+.copy-btn:hover {
+    background-color: #f0f0f0;
+}
+
+.command-display {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 15px 0;
+    padding: 15px;
+    background-color: #f0f0f0;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+}
+
+.command-display label {
+    font-weight: bold;
+    color: #333;
+    min-width: 60px;
+}
+
+.command-value {
+    flex: 1;
+    font-family: monospace;
+    background-color: white;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    word-break: break-all;
+    font-size: 0.9em;
+}
+
+.copy-btn:hover {
+    background-color: #f0f0f0;
+}
+
+.note {
+    font-style: italic;
+    color: #666;
+    margin-top: 15px;
+    padding: 10px;
+    background-color: #fff9e6;
+    border-left: 4px solid #ffa500;
+    border-radius: 3px;
+}

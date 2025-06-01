@@ -41,7 +41,8 @@
             <div class="progress-step active" data-step="tunnel">1. Tunnel Provider</div>
             <div class="progress-step" data-step="tunnel-config">2. Tunnel Configuration</div>
             <div class="progress-step" data-step="vapid">3. VAPID Keys</div>
-            <div class="progress-step" data-step="finish">4. Finish</div>
+            <div class="progress-step" data-step="cloudflare-download">4. Download Cloudflare</div>
+            <div class="progress-step" data-step="finish">5. Finish</div>
         </div>
         
         <div id="setup-content">
@@ -268,6 +269,48 @@
                     </div>
                     <div class="button-group">
                         <button id="save-ssl-settings" class="setup-btn primary">Save & Continue</button>
+                    </div>
+                </div>
+            </div>
+            <div class="setup-section" id="cloudflare-download-section">
+                <h3>Download Cloudflare</h3>
+                <p>To complete your Cloudflare tunnel setup, you need to download and install Cloudflare on your system.</p>
+                
+                <div class="info-section">
+                    <h4>Step 1: Download Cloudflare</h4>
+                    <p>Visit the Cloudflare downloads page and download the appropriate version for your operating system from the 'latest release' section:</p>
+                    <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank" class="external-link">
+                        Cloudflare Downloads Page
+                    </a>
+                </div>
+                
+                <div class="info-section">
+                    <h4>Step 2: Select Your Operating System</h4>
+                    <p>Choose your operating system to get the specific setup instructions:</p>
+                    
+                    <div class="option-buttons">
+                        <button id="macos-btn" class="setup-btn os-option">
+                            <div class="option-title">macOS</div>
+                            <div class="option-description">Download for macOS systems</div>
+                        </button>
+                        <button id="windows-btn" class="setup-btn os-option">
+                            <div class="option-title">Windows</div>
+                            <div class="option-description">Download for Windows systems</div>
+                        </button>
+                        <button id="linux-btn" class="setup-btn os-option">
+                            <div class="option-title">Linux</div>
+                            <div class="option-description">Download for Linux systems</div>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="info-section" id="tunnel-token-section" style="display:none;">
+                    <h4>Step 3: Setup Commands</h4>
+                    <p>Run the following commands in order to set up your Cloudflare service:</p>
+                    <div id="setup-commands-container">
+                    </div>
+                    <div class="button-group">
+                        <button id="continue-to-finish-from-cloudflare" class="setup-btn primary">Continue to Finish</button>
                     </div>
                 </div>
             </div>
