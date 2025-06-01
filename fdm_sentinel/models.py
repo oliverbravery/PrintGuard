@@ -108,6 +108,11 @@ class TunnelProvider(str, Enum):
     NGROK = "ngrok"
     CLOUDFLARE = "cloudflare"
 
+class OperatingSystem(str, Enum):
+    MACOS = "macos"
+    WINDOWS = "windows"
+    LINUX = "linux"
+
 class TunnelSettings(BaseModel):
     provider: TunnelProvider
     token: str
@@ -129,6 +134,7 @@ class SavedKey(str, Enum):
     VAPID_PRIVATE_KEY = "vapid_private_key"
     SSL_PRIVATE_KEY = "ssl_private_key"
     TUNNEL_API_KEY = "tunnel_api_key"
+    TUNNEL_TOKEN = "tunnel_token"
 
 class SavedConfig(str, Enum):
     VAPID_SUBJECT = "vapid_subject"
@@ -137,8 +143,21 @@ class SavedConfig(str, Enum):
     SITE_DOMAIN = "site_domain"
     TUNNEL_PROVIDER = "tunnel_provider"
     CLOUDFLARE_EMAIL = "cloudflare_email"
+    USER_OPERATING_SYSTEM = "user_operating_system"
 
 class CloudflareTunnelConfig(BaseModel):
     account_id: str
     zone_id: str
     subdomain: str
+
+class CloudflareDownloadConfig(BaseModel):
+    operating_system: OperatingSystem
+
+class CloudflareCommandSet(BaseModel):
+    operating_system: OperatingSystem
+    install_command: str
+    enable_command: str = ""
+    start_command: str
+    stop_command: str
+    restart_command: str = ""
+    setup_sequence: List[str]

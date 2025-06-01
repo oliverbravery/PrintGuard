@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 
 import requests
+from ..models import OperatingSystem
 
 
 class CloudflareAPI:
@@ -109,3 +110,92 @@ def setup_warp_access(api_token: str, account_id: str, app_name: str,
         "list_id": list_id,
         "policy_id": policy_response["result"]["id"]
     }
+
+class CloudflareOSCommands:
+    @staticmethod
+    def get_install_command(os: OperatingSystem, token: str) -> str:
+        commands = {
+            OperatingSystem.LINUX: f"sudo cloudflared service install {token}",
+            OperatingSystem.MACOS: f"cloudflared service install {token}",
+            OperatingSystem.WINDOWS: f"C:\\Cloudflared\\bin\\cloudflared.exe service install {token}"
+        }
+        return commands[os]
+
+    @staticmethod
+    def get_enable_command(os: OperatingSystem) -> str:
+        commands = {
+            OperatingSystem.LINUX: "sudo systemctl enable cloudflared",
+            OperatingSystem.MACOS: "",
+            OperatingSystem.WINDOWS: ""
+        }
+        commands = {
+            OperatingSystem.LINUX: "sudo systemctl enable cloudflared",
+            OperatingSystem.MACOS: "",
+            OperatingSystem.WINDOWS: ""
+        }
+        return commands[os]
+
+    @staticmethod
+    def get_start_command(os: OperatingSystem) -> str:
+        commands = {
+            OperatingSystem.LINUX: "sudo systemctl start cloudflared",
+            OperatingSystem.MACOS: "sudo launchctl start com.cloudflare.cloudflared",
+            OperatingSystem.WINDOWS: "sc start cloudflared"
+        }
+        return commands[os]
+
+    @staticmethod
+    def get_stop_command(os: OperatingSystem) -> str:
+        commands = {
+            OperatingSystem.LINUX: "sudo systemctl stop cloudflared",
+            OperatingSystem.MACOS: "sudo launchctl stop com.cloudflare.cloudflared",
+            OperatingSystem.WINDOWS: "sc stop cloudflared"
+        }
+        return commands[os]
+
+    @staticmethod
+    def get_restart_command(os: OperatingSystem) -> str:
+        commands = {
+            OperatingSystem.LINUX: "sudo systemctl restart cloudflared",
+            OperatingSystem.MACOS: "",
+            OperatingSystem.WINDOWS: ""
+        }
+        return commands[os]
+
+    @staticmethod
+    def get_all_commands(os: OperatingSystem, token: str) -> Dict[str, str]:
+        return {
+            "install": CloudflareOSCommands.get_install_command(os, token),
+            "enable": CloudflareOSCommands.get_enable_command(os),
+            "start": CloudflareOSCommands.get_start_command(os),
+            "stop": CloudflareOSCommands.get_stop_command(os),
+            "restart": CloudflareOSCommands.get_restart_command(os)
+        }
+    
+    @staticmethod
+    def get_setup_sequence(os: OperatingSystem, token: str) -> List[str]:
+        if os == OperatingSystem.LINUX:
+            return [
+                CloudflareOSCommands.get_install_command(os, token),
+                CloudflareOSCommands.get_enable_command(os),
+                CloudflareOSCommands.get_start_command(os)
+            ]
+        elif os == OperatingSystem.MACOS:
+            return [
+                CloudflareOSCommands.get_install_command(os, token),
+                CloudflareOSCommands.get_start_command(os)
+            ]
+        elif os == OperatingSystem.WINDOWS:
+            return [
+                CloudflareOSCommands.get_install_command(os, token),
+                CloudflareOSCommands.get_start_command(os)
+            ]
+        return []
+
+
+def get_cloudflare_commands(os: OperatingSystem, token: str) -> Dict[str, str]:
+    return CloudflareOSCommands.get_all_commands(os, token)
+
+
+def get_cloudflare_setup_sequence(os: OperatingSystem, token: str) -> List[str]:
+    return CloudflareOSCommands.get_setup_sequence(os, token)
