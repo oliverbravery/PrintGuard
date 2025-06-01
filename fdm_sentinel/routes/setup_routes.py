@@ -10,16 +10,18 @@ from fastapi.responses import RedirectResponse
 from py_vapid import Vapid
 
 from ..models import (TunnelProvider, TunnelSettings, SavedConfig,
-                      VapidSettings, SavedKey, SetupCompletion, CloudflareTunnelConfig)
+                      VapidSettings, SavedKey, SetupCompletion,
+                      CloudflareTunnelConfig, CloudflareDownloadConfig)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
                             store_key, get_config, update_config, get_key)
 from ..utils.setup_utils import setup_ngrok_tunnel
-from ..utils.cloudflare_utils import CloudflareAPI
+from ..utils.cloudflare_utils import CloudflareAPI, get_cloudflare_setup_sequence
 
 router = APIRouter()
 
 @router.get("/setup", include_in_schema=False)
 async def serve_setup(request: Request):
+    # pylint:disable=import-outside-toplevel
     from ..app import templates
     return templates.TemplateResponse("setup.html", {
         "request": request
@@ -229,18 +231,40 @@ async def create_cloudflare_tunnel(config: CloudflareTunnelConfig):
         tunnel_name = config.subdomain
         tunnel_response = cf.create_tunnel(config.account_id, tunnel_name)
         tunnel_id = tunnel_response["result"]["id"]
+        tunnel_token = tunnel_response["result"]["token"]
         _ = cf.create_dns_record(config.zone_id, tunnel_id, config.subdomain)
         zones_response = cf.get_zones()
         zone_name = next((z["name"] for z in zones_response["result"] if (
             z["id"] == config.zone_id)), "")
         tunnel_url = f"{config.subdomain}.{zone_name}"
+        store_key(SavedKey.TUNNEL_TOKEN, tunnel_token)
         return {
             "success": True,
-            "url": tunnel_url
+            "url": tunnel_url,
+            "tunnel_token": tunnel_token
         }
     except Exception as e:
         logging.error("Error creating Cloudflare tunnel: %s", e)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create Cloudflare tunnel: {str(e)}"
+        )
+
+@router.post("/setup/cloudflare/save-os", include_in_schema=False)
+async def save_cloudflare_os(config: CloudflareDownloadConfig):
+    try:
+        update_config({SavedConfig.USER_OPERATING_SYSTEM: config.operating_system})
+        tunnel_token = get_key(SavedKey.TUNNEL_TOKEN)
+        setup_commands = get_cloudflare_setup_sequence(config.operating_system, tunnel_token)
+        return {
+            "success": True,
+            "tunnel_token": tunnel_token,
+            "operating_system": config.operating_system,
+            "setup_commands": setup_commands
+        }
+    except Exception as e:
+        logging.error("Error saving operating system selection: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save operating system selection: {str(e)}"
         )
