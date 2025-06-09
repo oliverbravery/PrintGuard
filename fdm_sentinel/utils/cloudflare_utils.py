@@ -182,26 +182,17 @@ class CloudflareOSCommands:
         }
 
     @staticmethod
-    def get_setup_sequence(os: OperatingSystem, tunnel_name: str,
-                           token: str, hostname: str, manual_flow: bool = False,
-                           local_port: int = 8000) -> List[str]:
+    def get_setup_sequence(os: OperatingSystem, token: str, local_port: int = 8000) -> List[str]:
         seq = [
             CloudflareOSCommands.get_install_command(os, token),
             CloudflareOSCommands.get_authenticate_command(os),
         ]
-        if manual_flow:
-            seq.extend([
-                CloudflareOSCommands.get_create_tunnel_command(os, tunnel_name),
-                CloudflareOSCommands.get_route_dns_command(os, tunnel_name, hostname),
-            ])
         seq.append(CloudflareOSCommands.get_start_command(os, "", token, local_port))
         return seq
 
 def get_cloudflare_commands(os: OperatingSystem, tunnel_name: str, token: str, local_port: int = 8000) -> Dict[str, str]:
     return CloudflareOSCommands.get_all_commands(os, tunnel_name, token, local_port)
 
-def get_cloudflare_setup_sequence(os: OperatingSystem, tunnel_name: str, token: str,
-                                  hostname: str, manual_flow: bool = False,
+def get_cloudflare_setup_sequence(os: OperatingSystem, token: str,
                                   local_port: int = 8000) -> List[str]:
-    return CloudflareOSCommands.get_setup_sequence(os, tunnel_name, token, hostname,
-                                                   manual_flow, local_port)
+    return CloudflareOSCommands.get_setup_sequence(os, token, local_port=local_port)

@@ -157,7 +157,6 @@ class CloudflareTunnelConfig(BaseModel):
 
 class CloudflareDownloadConfig(BaseModel):
     operating_system: OperatingSystem
-    manual_flow: Optional[bool] = False
 
 class CloudflareCommandSet(BaseModel):
     operating_system: OperatingSystem
