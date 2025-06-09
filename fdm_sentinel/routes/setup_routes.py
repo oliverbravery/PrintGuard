@@ -254,11 +254,42 @@ async def create_cloudflare_tunnel(config: CloudflareTunnelConfig):
 async def save_cloudflare_os(config: CloudflareDownloadConfig):
     try:
         update_config({SavedConfig.USER_OPERATING_SYSTEM: config.operating_system})
-        tunnel_token = get_key(SavedKey.TUNNEL_TOKEN)
-        setup_commands = get_cloudflare_setup_sequence(config.operating_system, tunnel_token)
+        cf_config = get_config()
+        site_domain = cf_config.get(SavedConfig.SITE_DOMAIN)
+        tunnel_token_from_store = get_key(SavedKey.TUNNEL_TOKEN)
+        processed_tunnel_token = ""
+        if not config.manual_flow:
+            if not site_domain:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Site domain not found. Please complete tunnel setup first for automatic flow."
+                )
+            if not tunnel_token_from_store or not tunnel_token_from_store.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Tunnel token not found or is invalid. Please complete tunnel setup first for automatic flow."
+                )
+            processed_tunnel_token = tunnel_token_from_store.strip()
+        tunnel_name = "your-tunnel-name"
+        hostname = "your.hostname.com"
+        if not config.manual_flow and site_domain: # Automatic flow with site_domain
+            tunnel_name = site_domain.split('.')[0]
+            hostname = site_domain
+        elif config.manual_flow:
+            pass
+
+        setup_commands = get_cloudflare_setup_sequence(
+            config.operating_system,
+            tunnel_name,
+            processed_tunnel_token,
+            hostname,
+            config.manual_flow,
+            8000
+        )
         return {
             "success": True,
-            "tunnel_token": tunnel_token,
+            "tunnel_token": processed_tunnel_token if (
+                not config.manual_flow) else tunnel_token_from_store,
             "operating_system": config.operating_system,
             "setup_commands": setup_commands
         }

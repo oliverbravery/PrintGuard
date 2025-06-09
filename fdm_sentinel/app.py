@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import subprocess
 import time
 from contextlib import asynccontextmanager
 
@@ -10,7 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse, StreamingResponse
-from .models import CameraState, SiteStartupMode, TunnelProvider, SavedConfig
+from .models import (CameraState, SiteStartupMode,
+                     TunnelProvider, SavedConfig,
+                     OperatingSystem, SavedKey)
 from .routes.alert_routes import router as alert_router
 from .routes.detection_routes import router as detection_router
 from .routes.live_detection_routes import router as live_detection_router
@@ -24,9 +27,73 @@ from .utils.config import (get_ssl_private_key_temporary_path,
                            DEVICE_TYPE, SUCCESS_LABEL,
                            CAMERA_INDICES, MAX_CAMERAS,
                            CAMERA_INDEX, get_config,
-                           update_config)
+                           update_config, get_key)
+from .utils.cloudflare_utils import CloudflareOSCommands
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
+
+def get_current_os() -> OperatingSystem:
+    config = get_config()
+    stored_os = config.get(SavedConfig.USER_OPERATING_SYSTEM)
+    if stored_os:
+        return OperatingSystem(stored_os)
+
+def start_cloudflare_tunnel() -> bool:
+    try:
+        current_os = get_current_os()
+        if not current_os:
+            raise ValueError("Current OS not set in config.")
+        tunnel_token = get_key(SavedKey.TUNNEL_TOKEN)
+        if not tunnel_token:
+            raise ValueError("Tunnel token not found. Please complete tunnel setup first.")
+        start_command = CloudflareOSCommands.get_start_command(current_os, "", tunnel_token, 8000)
+        logging.debug("Starting Cloudflare tunnel with command: %s", start_command)
+        result = subprocess.run(start_command, shell=True,
+                             capture_output=True, text=True,
+                             timeout=30, check=False)
+        if result.returncode == 0:
+            logging.debug("Cloudflare tunnel started successfully")
+            return True
+        else:
+            logging.warning("Non-privileged start failed: %s", result.stderr)
+            logging.info("User may need to manually run command with elevated privileges")
+            return True
+    except subprocess.TimeoutExpired:
+        logging.error("Timeout starting Cloudflare tunnel")
+        return False
+    except (OSError, ValueError) as e:
+        logging.error("Error starting Cloudflare tunnel: %s", e)
+        return False
+    except Exception as e:
+        logging.error("Unexpected error starting Cloudflare tunnel: %s", e)
+        return False
+
+def stop_cloudflare_tunnel() -> bool:
+    try:
+        current_os = get_current_os()
+        if not current_os:
+            raise ValueError("Current OS not set in config.")
+        stop_command = CloudflareOSCommands.get_stop_command(current_os)
+        logging.debug("Stopping Cloudflare tunnel with command: %s", stop_command)
+        result = subprocess.run(stop_command, shell=True,
+                             capture_output=True, text=True,
+                             timeout=30, check=False)
+        if result.returncode == 0:
+            logging.debug("Cloudflare tunnel stopped successfully")
+            return True
+        else:
+            logging.warning("Non-privileged stop failed: %s", result.stderr)
+            logging.info("User may need to manually run command with elevated privileges")
+            return True
+    except subprocess.TimeoutExpired:
+        logging.error("Timeout stopping Cloudflare tunnel")
+        return False
+    except (OSError, ValueError) as e:
+        logging.error("Error stopping Cloudflare tunnel: %s", e)
+        return False
+    except Exception as e:
+        logging.error("Unexpected error stopping Cloudflare tunnel: %s", e)
+        return False
 
 # pylint: disable=W0621
 def get_camera_state(camera_index, reset=False):
@@ -74,6 +141,7 @@ def setup_camera_indices():
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
+    # pylint: disable=C0415
     from .utils.setup_utils import startup_mode_requirements_met
     startup_mode = startup_mode_requirements_met()
     if startup_mode is SiteStartupMode.SETUP:
@@ -247,6 +315,7 @@ def run():
     config = get_config()
     site_domain = config.get(SavedConfig.SITE_DOMAIN, "")
     tunnel_provider = config.get(SavedConfig.TUNNEL_PROVIDER, None)
+    stop_cloudflare_tunnel()
     match startup_mode:
         case SiteStartupMode.SETUP:
             logging.warning("Starting in setup mode. Available at http://localhost:8000/setup")
@@ -271,9 +340,14 @@ def run():
                     else:
                         uvicorn.run(app, host="0.0.0.0", port=8000)
                 case TunnelProvider.CLOUDFLARE:
-                    logging.error("Cloudflare tunnel support is not implemented yet. Starting in SETUP mode.")
-                    update_config({SavedConfig.STARTUP_MODE: SiteStartupMode.SETUP})
-                    run()
+                    logging.warning("Starting in tunnel mode with Cloudflare.")
+                    if start_cloudflare_tunnel():
+                        logging.warning("Cloudflare tunnel started. Available at %s", site_domain)
+                        uvicorn.run(app, host="0.0.0.0", port=8000)
+                    else:
+                        logging.error("Failed to start Cloudflare tunnel. Starting in SETUP mode.")
+                        update_config({SavedConfig.STARTUP_MODE: SiteStartupMode.SETUP})
+                        run()
 
 if __name__ == "__main__":
     run()

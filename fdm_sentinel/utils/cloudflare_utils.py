@@ -113,89 +113,95 @@ def setup_warp_access(api_token: str, account_id: str, app_name: str,
 
 class CloudflareOSCommands:
     @staticmethod
-    def get_install_command(os: OperatingSystem, token: str) -> str:
+    def get_install_command(os: OperatingSystem, token: str = "") -> str:
         commands = {
-            OperatingSystem.LINUX: f"sudo cloudflared service install {token}",
-            OperatingSystem.MACOS: f"cloudflared service install {token}",
-            OperatingSystem.WINDOWS: f"C:\\Cloudflared\\bin\\cloudflared.exe service install {token}"
+            OperatingSystem.LINUX: (
+                "curl -L https://github.com/cloudflare/cloudflared/releases/latest/"
+                "download/cloudflared-linux-amd64 -o ~/bin/cloudflared && \ "
+                "chmod +x ~/bin/cloudflared"
+            ),
+            OperatingSystem.MACOS: "brew install cloudflared",
+            OperatingSystem.WINDOWS: "winget install --id Cloudflare.cloudflared"
         }
         return commands[os]
 
     @staticmethod
-    def get_enable_command(os: OperatingSystem) -> str:
-        commands = {
-            OperatingSystem.LINUX: "sudo systemctl enable cloudflared",
-            OperatingSystem.MACOS: "",
-            OperatingSystem.WINDOWS: ""
-        }
-        commands = {
-            OperatingSystem.LINUX: "sudo systemctl enable cloudflared",
-            OperatingSystem.MACOS: "",
-            OperatingSystem.WINDOWS: ""
-        }
-        return commands[os]
+    def get_authenticate_command(os: OperatingSystem) -> str:
+        return "cloudflared tunnel login"
 
     @staticmethod
-    def get_start_command(os: OperatingSystem) -> str:
-        commands = {
-            OperatingSystem.LINUX: "sudo systemctl start cloudflared",
-            OperatingSystem.MACOS: "sudo launchctl start com.cloudflare.cloudflared",
-            OperatingSystem.WINDOWS: "sc start cloudflared"
-        }
-        return commands[os]
+    def get_create_tunnel_command(os: OperatingSystem, tunnel_name: str) -> str:
+        return f"cloudflared tunnel create {tunnel_name}"
+
+    @staticmethod
+    def get_route_dns_command(os: OperatingSystem, tunnel_name: str, hostname: str) -> str:
+        return f"cloudflared tunnel route dns {tunnel_name} {hostname}"
+
+    @staticmethod
+    def get_start_command(os: OperatingSystem, tunnel_name: str = "", 
+                          token: str = "", local_port: int = 8000) -> str:
+        base = (
+            f"cloudflared tunnel run {tunnel_name}"
+            if tunnel_name else
+            f"cloudflared tunnel run --token {token} --url http://localhost:{local_port}"
+        )
+        if os == OperatingSystem.WINDOWS:
+            parts = base.split(" ", 1)
+            executable = parts[0]
+            arguments = parts[1] if len(parts) > 1 else ""
+            return f"Start-Process -FilePath '{executable}' -ArgumentList '{arguments}' -NoNewWindow"
+        elif os in (OperatingSystem.LINUX, OperatingSystem.MACOS):
+            return f"nohup {base} > /tmp/cloudflared_tunnel.log 2>&1 &"
+        return f"echo 'Error: Unsupported operating system for start command {os}'"
 
     @staticmethod
     def get_stop_command(os: OperatingSystem) -> str:
-        commands = {
-            OperatingSystem.LINUX: "sudo systemctl stop cloudflared",
-            OperatingSystem.MACOS: "sudo launchctl stop com.cloudflare.cloudflared",
-            OperatingSystem.WINDOWS: "sc stop cloudflared"
-        }
-        return commands[os]
+        if os in (OperatingSystem.LINUX, OperatingSystem.MACOS):
+            return "pkill cloudflared"
+        return "Stop-Process -Name cloudflared"
 
     @staticmethod
-    def get_restart_command(os: OperatingSystem) -> str:
-        commands = {
-            OperatingSystem.LINUX: "sudo systemctl restart cloudflared",
-            OperatingSystem.MACOS: "",
-            OperatingSystem.WINDOWS: ""
-        }
-        return commands[os]
+    def get_restart_command(os: OperatingSystem, tunnel_name: str = "",
+                            token: str = "", local_port: int = 8000) -> str:
+        stop = CloudflareOSCommands.get_stop_command(os)
+        start = CloudflareOSCommands.get_start_command(os, tunnel_name, token, local_port)
+        return f"{stop} && {start}" if (
+            os in (OperatingSystem.LINUX, OperatingSystem.MACOS)) else f"{stop}; {start}"
 
     @staticmethod
-    def get_all_commands(os: OperatingSystem, token: str) -> Dict[str, str]:
+    def get_all_commands(os: OperatingSystem, tunnel_name: str,
+                         token: str, local_port: int = 8000) -> Dict[str, str]:
         return {
             "install": CloudflareOSCommands.get_install_command(os, token),
-            "enable": CloudflareOSCommands.get_enable_command(os),
-            "start": CloudflareOSCommands.get_start_command(os),
+            "authenticate": CloudflareOSCommands.get_authenticate_command(os),
+            "create": CloudflareOSCommands.get_create_tunnel_command(os, tunnel_name),
+            "route_dns": CloudflareOSCommands.get_route_dns_command(os, tunnel_name, "example.com"),
+            "start": CloudflareOSCommands.get_start_command(os, tunnel_name, token, local_port),
             "stop": CloudflareOSCommands.get_stop_command(os),
-            "restart": CloudflareOSCommands.get_restart_command(os)
+            "restart": CloudflareOSCommands.get_restart_command(os, tunnel_name, token, local_port)
         }
-    
+
     @staticmethod
-    def get_setup_sequence(os: OperatingSystem, token: str) -> List[str]:
-        if os == OperatingSystem.LINUX:
-            return [
-                CloudflareOSCommands.get_install_command(os, token),
-                CloudflareOSCommands.get_enable_command(os),
-                CloudflareOSCommands.get_start_command(os)
-            ]
-        elif os == OperatingSystem.MACOS:
-            return [
-                CloudflareOSCommands.get_install_command(os, token),
-                CloudflareOSCommands.get_start_command(os)
-            ]
-        elif os == OperatingSystem.WINDOWS:
-            return [
-                CloudflareOSCommands.get_install_command(os, token),
-                CloudflareOSCommands.get_start_command(os)
-            ]
-        return []
+    def get_setup_sequence(os: OperatingSystem, tunnel_name: str,
+                           token: str, hostname: str, manual_flow: bool = False,
+                           local_port: int = 8000) -> List[str]:
+        seq = [
+            CloudflareOSCommands.get_install_command(os, token),
+            CloudflareOSCommands.get_authenticate_command(os),
+        ]
+        if manual_flow:
+            seq.extend([
+                CloudflareOSCommands.get_create_tunnel_command(os, tunnel_name),
+                CloudflareOSCommands.get_route_dns_command(os, tunnel_name, hostname),
+            ])
+        seq.append(CloudflareOSCommands.get_start_command(os, "", token, local_port))
+        return seq
 
+def get_cloudflare_commands(os: OperatingSystem, tunnel_name: str, token: str, local_port: int = 8000) -> Dict[str, str]:
+    return CloudflareOSCommands.get_all_commands(os, tunnel_name, token, local_port)
 
-def get_cloudflare_commands(os: OperatingSystem, token: str) -> Dict[str, str]:
-    return CloudflareOSCommands.get_all_commands(os, token)
-
-
-def get_cloudflare_setup_sequence(os: OperatingSystem, token: str) -> List[str]:
-    return CloudflareOSCommands.get_setup_sequence(os, token)
+def get_cloudflare_setup_sequence(os: OperatingSystem, tunnel_name: str, token: str,
+                                  hostname: str, manual_flow: bool = False,
+                                  local_port: int = 8000) -> List[str]:
+    return CloudflareOSCommands.get_setup_sequence(os, tunnel_name, token, hostname,
+                                                   manual_flow, local_port)
