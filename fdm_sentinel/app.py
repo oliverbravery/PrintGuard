@@ -267,25 +267,32 @@ async def update_settings(request: Request,
     return RedirectResponse("/", status_code=303)
 
 def generate_frames(camera_index: int):
-    # pylint: disable=E1101
-    cap = cv2.VideoCapture(camera_index)
-    while True:
-        camera_state = get_camera_state(camera_index)
-        contrast = camera_state.contrast
-        brightness = camera_state.brightness
-        focus = camera_state.focus
-
-        success, frame = cap.read()
-        if not success:
-            break
-        frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=int((brightness - 1.0) * 255))
-        if focus and focus != 1.0:
-            blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=focus)
-            frame = cv2.addWeighted(frame, 1.0 + focus, blurred, -focus, 0)
-        _, buffer = cv2.imencode('.jpg', frame)
-        frame_bytes = buffer.tobytes()
-        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-    cap.release()
+    from .utils.stream_utils import create_optimized_frame_generator
+    try:
+        for frame_data in create_optimized_frame_generator(camera_index, get_camera_state):
+            yield frame_data
+    except Exception as e:
+        logging.error("Error in optimized frame generation for camera %d: %s", camera_index, e)
+        # pylint: disable=E1101
+        cap = cv2.VideoCapture(camera_index)
+        try:
+            while True:
+                camera_state = get_camera_state(camera_index)
+                contrast = camera_state.contrast
+                brightness = camera_state.brightness
+                focus = camera_state.focus
+                success, frame = cap.read()
+                if not success:
+                    break
+                frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=int((brightness - 1.0) * 255))
+                if focus and focus != 1.0:
+                    blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=focus)
+                    frame = cv2.addWeighted(frame, 1.0 + focus, blurred, -focus, 0)
+                _, buffer = cv2.imencode('.jpg', frame)
+                frame_bytes = buffer.tobytes()
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        finally:
+            cap.release()
 
 @app.get('/camera_feed/{camera_index}', include_in_schema=False)
 async def camera_feed(camera_index: int):

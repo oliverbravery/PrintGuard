@@ -144,6 +144,11 @@ class SavedConfig(str, Enum):
     TUNNEL_PROVIDER = "tunnel_provider"
     CLOUDFLARE_EMAIL = "cloudflare_email"
     USER_OPERATING_SYSTEM = "user_operating_system"
+    STREAM_OPTIMIZE_FOR_TUNNEL = "stream_optimize_for_tunnel"
+    STREAM_MAX_FPS = "stream_max_fps"
+    STREAM_JPEG_QUALITY = "stream_jpeg_quality"
+    STREAM_MAX_WIDTH = "stream_max_width"
+    DETECTION_INTERVAL_MS = "detection_interval_ms"
 
 class CloudflareTunnelConfig(BaseModel):
     account_id: str
