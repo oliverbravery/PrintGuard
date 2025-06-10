@@ -457,11 +457,13 @@ input[type="range"]::-moz-range-thumb {
 }
 
 #notificationBtn.enabled {
-    background: linear-gradient(to right, var(--color-success) 50%, var(--color-white) 50%);
+    background: var(--color-success);
+    border-color: var(--color-success);
 }
 
 #notificationBtn.disabled {
-    background: var(--color-white);
+    background: var(--color-danger);
+    border-color: var(--color-danger);
 }
 
 #notificationBtn::before {
@@ -470,7 +472,7 @@ input[type="range"]::-moz-range-thumb {
     left: var(--spacing-sm);
     top: 2px;
     font-size: var(--font-size-sm);
-    color: var(--text-secondary);
+    color: var(--color-white);
     z-index: 2;
 }
 
@@ -480,7 +482,7 @@ input[type="range"]::-moz-range-thumb {
     right: var(--spacing-sm);
     top: 2px;
     font-size: var(--font-size-sm);
-    color: var(--text-secondary);
+    color: var(--color-white);
     z-index: 2;
 }
 

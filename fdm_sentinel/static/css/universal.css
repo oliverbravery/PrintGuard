@@ -14,6 +14,11 @@
     --text-muted: #888;
     --text-inverted: #fff;
     
+    --color-white: #ffffff;
+    --color-danger: #ff4136;
+    --color-danger-dark: #dc3545;
+    --color-success: #2ecc40;
+    
     --success-color: #2ecc40;
     --error-color: #ff4136;
     --warning-color: #ffa500;
