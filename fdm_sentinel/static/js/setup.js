@@ -575,7 +575,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         commandsContainer.appendChild(commandDiv);
                     });
                 }
-                
                 setupState.cloudflareDownloadConfigured = true;
                 setupState.tunnelToken = result.tunnel_token;
             } else {
@@ -615,5 +614,4 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 2000);
         });
     };
-
 });
