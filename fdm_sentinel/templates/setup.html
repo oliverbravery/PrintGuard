@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FDM Sentinel Setup</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/universal.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='css/onboarding.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='css/setup.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic+Coding&display=swap" rel="stylesheet">
@@ -308,6 +309,17 @@
                     <h4>Step 3: Setup Commands</h4>
                     <p>Run the following commands in order to set up your Cloudflare service:</p>
                     <div id="setup-commands-container">
+                    </div>
+                    
+                    <div class="universal-section info-badge" style="border: 2px solid var(--info-color); background: var(--info-bg); margin-top: var(--spacing-xl);">
+                        <h4 style="color: var(--info-color); margin-bottom: var(--spacing-sm);">🔒 WARP Device Management</h4>
+                        <p style="margin-bottom: var(--spacing-md);">To add devices to your Cloudflare WARP whitelist:</p>
+                        <a href="http://localhost:8000/setup/warp/add-device" target="_blank" class="btn info hover-lift" style="display: inline-block; margin: var(--spacing-md) 0;">
+                            📱 Open Device Enrollment Page
+                        </a>
+                        <p style="font-size: var(--font-size-sm); color: var(--text-secondary);">
+                            <strong>Note:</strong> Device enrollment is only accessible from your local network for security.
+                        </p>
                     </div>
                     <div class="button-group">
                         <button id="continue-to-finish-from-cloudflare" class="setup-btn primary">Continue to Finish</button>
