@@ -459,3 +459,32 @@ function updateAsciiTitle() {
 updateAsciiTitle();
 
 window.addEventListener('resize', updateAsciiTitle);
+
+const configureSetupBtn = document.getElementById('configureSetupBtn');
+const setupModalOverlay = document.getElementById('setupModalOverlay');
+const setupModalClose = document.getElementById('setupModalClose');
+
+configureSetupBtn?.addEventListener('click', function(e) {
+    e.preventDefault();
+    setupModalOverlay.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+});
+
+setupModalClose?.addEventListener('click', function() {
+    setupModalOverlay.style.display = 'none';
+    document.body.style.overflow = '';
+});
+
+setupModalOverlay?.addEventListener('click', function(e) {
+    if (e.target === setupModalOverlay) {
+        setupModalOverlay.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+});
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && setupModalOverlay.style.display === 'flex') {
+        setupModalOverlay.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+});
