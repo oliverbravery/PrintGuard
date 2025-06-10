@@ -143,6 +143,7 @@ class SavedConfig(str, Enum):
     SITE_DOMAIN = "site_domain"
     TUNNEL_PROVIDER = "tunnel_provider"
     CLOUDFLARE_EMAIL = "cloudflare_email"
+    CLOUDFLARE_TEAM_NAME = "cloudflare_team_name"
     USER_OPERATING_SYSTEM = "user_operating_system"
     STREAM_OPTIMIZE_FOR_TUNNEL = "stream_optimize_for_tunnel"
     STREAM_MAX_FPS = "stream_max_fps"
@@ -158,6 +159,10 @@ class CloudflareTunnelConfig(BaseModel):
 class CloudflareDownloadConfig(BaseModel):
     operating_system: OperatingSystem
 
+class WarpDeviceConfig(BaseModel):
+    device_id: Optional[str] = None
+    user_email: Optional[str] = None
+
 class CloudflareCommandSet(BaseModel):
     operating_system: OperatingSystem
     install_command: str
@@ -166,3 +171,9 @@ class CloudflareCommandSet(BaseModel):
     stop_command: str
     restart_command: str = ""
     setup_sequence: List[str]
+
+class WarpDeviceEnrollmentRule(BaseModel):
+    name: str
+    precedence: int = 0
+    require: List[str] = []
+    include: List[str] = []
