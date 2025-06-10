@@ -488,3 +488,8 @@ document.addEventListener('keydown', function(e) {
         document.body.style.overflow = '';
     }
 });
+
+const goToSetupBtn = document.getElementById('goToSetupBtn');
+goToSetupBtn?.addEventListener('click', function() {
+    window.location.href = '/setup';
+});
