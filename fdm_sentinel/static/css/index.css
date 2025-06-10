@@ -731,3 +731,87 @@ input[type="range"]::-moz-range-thumb {
     margin-bottom: var(--spacing-md);
     line-height: 1.6;
 }
+
+.setup-section {
+    margin-bottom: var(--spacing-xl);
+}
+
+.setup-section:last-child {
+    margin-bottom: 0;
+}
+
+.setup-section-title {
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: var(--text-primary);
+    margin: 0 0 var(--spacing-md) 0;
+    border-bottom: 1px solid var(--border-light);
+    padding-bottom: var(--spacing-xs);
+}
+
+.feed-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--spacing-lg);
+    margin-top: var(--spacing-md);
+}
+
+.feed-setting-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: var(--spacing-md);
+    background-color: var(--color-white);
+    border-radius: var(--radius-small);
+    box-shadow: var(--shadow-soft);
+    border: 1px solid var(--border-light);
+    transition: var(--transition-medium);
+    min-height: 80px;
+    box-sizing: border-box;
+}
+
+.feed-setting-item:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-medium);
+}
+
+.feed-setting-item label {
+    font-size: var(--font-size-sm);
+    margin-bottom: var(--spacing-sm);
+    text-align: center;
+    font-weight: 500;
+}
+
+.feed-setting-item input[type="range"] {
+    width: 100%;
+}
+
+#streamMaxFps::-webkit-slider-runnable-track,
+#streamTunnelFps::-webkit-slider-runnable-track,
+#streamJpegQuality::-webkit-slider-runnable-track,
+#streamMaxWidth::-webkit-slider-runnable-track,
+#detectionsPerSecond::-webkit-slider-runnable-track,
+#detectionInterval::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, #ADD8E6 var(--value, 50%), #ffffff var(--value, 50%));
+}
+
+#streamMaxFps::-moz-range-track,
+#streamTunnelFps::-moz-range-track,
+#streamJpegQuality::-moz-range-track,
+#streamMaxWidth::-moz-range-track,
+#detectionsPerSecond::-moz-range-track,
+#detectionInterval::-moz-range-track {
+    background: linear-gradient(to right, #ADD8E6 var(--value, 50%), #ffffff var(--value, 50%));
+}
+
+@media (max-width: 600px) {
+    .feed-settings-grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-md);
+    }
+    
+    .setup-modal {
+        padding: var(--spacing-lg);
+        max-height: 90vh;
+    }
+}

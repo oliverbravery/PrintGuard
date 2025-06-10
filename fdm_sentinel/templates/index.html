@@ -128,9 +128,45 @@
                 <button class="setup-modal-close" id="setupModalClose">×</button>
             </div>
             <div class="setup-modal-content">
-                <p>Access the initial setup page to reconfigure your 3D printer settings, camera parameters, and notification preferences.</p>
-                <p>This will take you through the complete setup process again, allowing you to modify all system configurations.</p>
-                <button class="start-stop-btn" id="goToSetupBtn">Go to Initial Setup</button>
+                <div class="setup-section">
+                    <h3 class="setup-section-title">Initial Setup</h3>
+                    <p>Access the initial setup page to reconfigure your 3D printer settings, camera parameters, and notification preferences.</p>
+                    <p>This will take you through the complete setup process again, allowing you to modify all system configurations.</p>
+                    <button class="start-stop-btn" id="goToSetupBtn">Go to Initial Setup</button>
+                </div>
+                
+                <div class="setup-section">
+                    <h3 class="setup-section-title">Feed Settings</h3>
+                    <p>Adjust stream quality and detection parameters for optimal performance.</p>
+                    <form class="feed-settings-form">
+                        <div class="feed-settings-grid">
+                            <div class="feed-setting-item">
+                                <label for="streamMaxFps">Max FPS: <span id="streamMaxFps_val">30</span></label>
+                                <input type="range" id="streamMaxFps" name="streamMaxFps" min="1" max="60" step="1" value="30" />
+                            </div>
+                            <div class="feed-setting-item">
+                                <label for="streamTunnelFps">Tunnel FPS: <span id="streamTunnelFps_val">10</span></label>
+                                <input type="range" id="streamTunnelFps" name="streamTunnelFps" min="1" max="30" step="1" value="10" />
+                            </div>
+                            <div class="feed-setting-item">
+                                <label for="streamJpegQuality">JPEG Quality: <span id="streamJpegQuality_val">85</span></label>
+                                <input type="range" id="streamJpegQuality" name="streamJpegQuality" min="10" max="100" step="5" value="85" />
+                            </div>
+                            <div class="feed-setting-item">
+                                <label for="streamMaxWidth">Max Width: <span id="streamMaxWidth_val">1280</span></label>
+                                <input type="range" id="streamMaxWidth" name="streamMaxWidth" min="320" max="1920" step="80" value="1280" />
+                            </div>
+                            <div class="feed-setting-item">
+                                <label for="detectionsPerSecond">Detections/Sec: <span id="detectionsPerSecond_val">15</span></label>
+                                <input type="range" id="detectionsPerSecond" name="detectionsPerSecond" min="1" max="30" step="1" value="15" />
+                            </div>
+                            <div class="feed-setting-item">
+                                <label for="detectionInterval">Detection Interval (ms): <span id="detectionInterval_val">67</span></label>
+                                <input type="range" id="detectionInterval" name="detectionInterval" min="33" max="1000" step="17" value="67" />
+                            </div>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
     </div>
