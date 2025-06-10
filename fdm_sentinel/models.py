@@ -147,6 +147,7 @@ class SavedConfig(str, Enum):
     USER_OPERATING_SYSTEM = "user_operating_system"
     STREAM_OPTIMIZE_FOR_TUNNEL = "stream_optimize_for_tunnel"
     STREAM_MAX_FPS = "stream_max_fps"
+    STREAM_TUNNEL_FPS = "stream_tunnel_fps"
     STREAM_JPEG_QUALITY = "stream_jpeg_quality"
     STREAM_MAX_WIDTH = "stream_max_width"
     DETECTION_INTERVAL_MS = "detection_interval_ms"
@@ -177,3 +178,11 @@ class WarpDeviceEnrollmentRule(BaseModel):
     precedence: int = 0
     require: List[str] = []
     include: List[str] = []
+
+class FeedSettings(BaseModel):
+    stream_max_fps: int
+    stream_tunnel_fps: int
+    stream_jpeg_quality: int
+    stream_max_width: int
+    detections_per_second: int
+    detection_interval_ms: int
