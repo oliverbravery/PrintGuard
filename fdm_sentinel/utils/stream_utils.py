@@ -19,6 +19,10 @@ class StreamOptimizer:
         self._last_config_check = 0
         self._config_check_interval = 30.0
 
+    def invalidate_cache(self):
+        self._last_config_check = 0
+        self._config_cache.clear()
+
     def _get_current_settings(self) -> Dict:
         current_time = time.time()
         if (current_time - self._last_config_check) > self._config_check_interval:
@@ -31,17 +35,17 @@ class StreamOptimizer:
             else:
                 is_tunnel_mode = optimize_for_tunnel
             if is_tunnel_mode:
-                default_fps = STREAM_TUNNEL_FPS
+                default_fps = config.get(SavedConfig.STREAM_TUNNEL_FPS, STREAM_TUNNEL_FPS)
                 default_quality = STREAM_TUNNEL_JPEG_QUALITY
                 default_width = STREAM_TUNNEL_MAX_WIDTH
                 default_detection_interval = DETECTION_TUNNEL_INTERVAL_MS
             else:
-                default_fps = STREAM_MAX_FPS
+                default_fps = config.get(SavedConfig.STREAM_MAX_FPS, STREAM_MAX_FPS)
                 default_quality = STREAM_JPEG_QUALITY
                 default_width = STREAM_MAX_WIDTH
                 default_detection_interval = DETECTION_INTERVAL_MS
             self._config_cache = {
-                'max_fps': config.get(SavedConfig.STREAM_MAX_FPS, default_fps),
+                'max_fps': default_fps,
                 'jpeg_quality': config.get(SavedConfig.STREAM_JPEG_QUALITY, default_quality),
                 'max_width': config.get(SavedConfig.STREAM_MAX_WIDTH, default_width),
                 'detection_interval_ms': config.get(SavedConfig.DETECTION_INTERVAL_MS,
