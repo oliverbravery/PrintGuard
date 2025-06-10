@@ -232,11 +232,25 @@ async def create_cloudflare_tunnel(config: CloudflareTunnelConfig):
         tunnel_response = cf.create_tunnel(config.account_id, tunnel_name)
         tunnel_id = tunnel_response["result"]["id"]
         tunnel_token = tunnel_response["result"]["token"]
-        _ = cf.create_dns_record(config.zone_id, tunnel_id, config.subdomain)
         zones_response = cf.get_zones()
         zone_name = next((z["name"] for z in zones_response["result"] if (
             z["id"] == config.zone_id)), "")
         tunnel_url = f"{config.subdomain}.{zone_name}"
+        tunnel_config = {
+            "config": {
+                "ingress": [
+                    {
+                        "hostname": tunnel_url,
+                        "service": "http://localhost:8000"
+                    },
+                    {
+                        "service": "http_status:404"
+                    }
+                ]
+            }
+        }
+        cf.update_tunnel_config(config.account_id, tunnel_id, tunnel_config)
+        _ = cf.create_dns_record(config.zone_id, tunnel_id, config.subdomain)
         store_key(SavedKey.TUNNEL_TOKEN, tunnel_token)
         return {
             "success": True,
@@ -286,3 +300,85 @@ async def save_cloudflare_os(config: CloudflareDownloadConfig):
             status_code=500,
             detail=f"Failed to save operating system selection: {str(e)}"
         )
+
+@router.get("/setup/warp/add-device", include_in_schema=False)
+async def serve_warp_device_enrollment(request: Request):
+    client_host = request.client.host if request.client else "unknown"
+    if client_host not in ["127.0.0.1", "localhost", "::1"]:
+        raise HTTPException(
+            status_code=403,
+            detail="This endpoint is only accessible from localhost"
+        )
+    try:
+        # pylint:disable=import-outside-toplevel
+        from ..app import templates
+        config = get_config()
+        site_domain = config.get(SavedConfig.SITE_DOMAIN, "")
+        return templates.TemplateResponse("warp_device_enrollment.html", {
+            "request": request,
+            "site_domain": site_domain
+        })
+    except Exception as e:
+        logging.error("Error serving WARP device enrollment page: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to serve WARP device enrollment page: {str(e)}"
+        )
+
+@router.get("/setup/warp/team-name", include_in_schema=False)
+async def get_cloudflare_team_name(request: Request):
+    client_host = request.client.host if request.client else "unknown"
+    if client_host not in ["127.0.0.1", "localhost", "::1"]:
+        raise HTTPException(
+            status_code=403,
+            detail="This endpoint is only accessible from localhost"
+        )
+    try:
+        config = get_config()
+        api_token = get_key(SavedKey.TUNNEL_API_KEY)
+        email = config.get(SavedConfig.CLOUDFLARE_EMAIL)
+        site_domain = config.get(SavedConfig.SITE_DOMAIN, "")
+        if not api_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Cloudflare API token not found. Please complete tunnel setup first."
+            )
+        cf = CloudflareAPI(api_token, email)
+        accounts_response = cf.get_accounts()
+        accounts = accounts_response.get("result", [])
+        if not accounts:
+            raise HTTPException(
+                status_code=400,
+                detail="No Cloudflare accounts found"
+            )
+        account_id = accounts[0]["id"]
+        try:
+            org_response = cf.get_organization(account_id)
+            org_result = org_response.get("result")
+            if org_result:
+                team_name = org_result.get("name", "your-organization")
+                return {
+                    "success": True,
+                    "team_name": team_name,
+                    "site_domain": site_domain
+                }
+            else:
+                return {
+                    "success": False,
+                    "team_name": "your-organization",
+                    "site_domain": site_domain
+                }
+        except Exception as api_error:
+            logging.warning("Could not fetch team name from Cloudflare API: %s", api_error)
+            return {
+                "success": False,
+                "team_name": "your-organization",
+                "site_domain": site_domain
+            }
+    except Exception as e:
+        logging.error("Error fetching Cloudflare team name: %s", e)
+        return {
+            "success": False,
+            "team_name": "your-organization",
+            "site_domain": ""
+        }
