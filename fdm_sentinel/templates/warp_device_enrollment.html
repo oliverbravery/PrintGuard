@@ -30,10 +30,13 @@
                         <li>First setup a zero trust account and team name by going <a href="https://dash.cloudflare.com" target="_blank">dash.cloudflare.com</a> and clicking zero trust. Note that zero trust free plan is all you need.</li>
                         <li>Next, in zero trust (<a href="https://one.dash.cloudflare.com" target="_blank">one.dash.cloudflare.com</a>) go settings → authentication and under login methods, click add new and select one-time PIN - if instructions change, use this link <a href="https://developers.cloudflare.com/cloudflare-one/identity/one-time-pin/" target="_blank">https://developers.cloudflare.com/cloudflare-one/identity/one-time-pin/</a></li>
                         <li>Next define enrollment permissions. Go to the zero trust again, then settings → warp client. in device enrollment section click the manage button for device enrollment permissions.</li>
-                        <li>Create new policy, then in the add policy page, in basic information section enter a policy name like WARP-login, action Allow and session duration same as application session timeout. In the add rules section, for the 'include' rule choose selector as emails and add the allowed emails to login (trusted emails) in the value field. Save.</li>
+                        <li>Create new policy, then in the add policy page, in basic information section enter a policy name like WARP-login, action Allow and session duration same as application session timeout. In the add rules section, for the 'include' rule choose selector as emails and add the allowed emails to login (trusted emails) in the value field. <i><b>Note:</b> If you wish for your application to require users to be authenticated via the WARP client, add a 'require' rule to the policy with the 'Warp' selector.</i> Save.</li>
                         <li>Back on the device enrollment permissions page, press select existing policies and choose the one you just created. Then, in the login methods tab (still in device enrollment permissions page), under login methods, make sure 'Accept all available identity providers' is toggled off, One time PIN is ticked and 'Instant Auth' is toggled on. Click save.</li>
+                        <li>Finally, from the <a href="https://one.dash.cloudflare.com" target="_blank">zero trust dashboard</a> visit access → Applications → Add an application. Give it an appropriate application name like 'fdm-sentinel' and session duration of 1 week. Set the public hostname to the same as your cloudflare tunnel domain then, in the policies section, add your existing WARP-login policy that was created earlier.</li>
                     </ol>
                 </div>
+                <h3>Download and Connect WARP Client</h3>
+                <p>If in the initial setup instructions you chose to require the WARP client to access fdm-sentinel for added security, you will need to follow these steps for each device you wish to enroll. If your policy did not require WARP, you can skip this section.</p>
                 <div class="warp-step">
                     <h4>Step 1: Download WARP Client</h4>
                     <p>First, download and install the Cloudflare WARP client for your device.</p>
@@ -69,13 +72,13 @@
                 <div class="warp-step">
                     <h4>Step 3: Access the Site</h4>
                     <p>Once connected to your organization's WARP network, you should be able to access the FDM Sentinel site automatically through your Cloudflare domain.</p>
-                    <p><strong>No verification needed!</strong> If you have everything set up correctly, simply navigate to your Cloudflare domain while connected to WARP/Zero Trust.</p>
                 </div>
             </div>
             <div class="message info">
                 <h4>✅ Setup Complete!</h4>
                 <p>If you've followed the setup steps correctly and are connected to your organization's Zero Trust, you should be able to access the FDM Sentinel application directly through your Cloudflare domain.</p>
                 <p><strong>Your Cloudflare domain:</strong> <span id="site-domain">Loading...</span></p>
+                <p>If your setup requires the WARP client, you will need to download and login to the WARP client on each device you wish to visit the site from. Otherwise, you can access the site directly through your Cloudflare domain and by logging in with one of your allowed email addresses.</p>
             </div>
             <div class="universal-section warp-share-section">
                 <h3>📱 Share Enrollment Link</h3>
