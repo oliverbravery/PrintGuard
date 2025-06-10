@@ -1,13 +1,9 @@
 import asyncio
-import time
 import uuid
 import logging
 import cv2
-from PIL import Image
 
-from .model_utils import _run_inference
 from .alert_utils import append_new_alert, cancel_print, dismiss_alert
-from .sse_utils import sse_update_camera_state
 from ..models import Alert, AlertAction
 
 def _passed_majority_vote(camera_state):
@@ -62,77 +58,22 @@ async def _live_detection_loop(app_state, camera_index):
     from fdm_sentinel.app import (get_camera_state,
                                   update_camera_state,
                                   update_camera_detection_history)
+    from .stream_utils import create_optimized_detection_loop
+    update_functions = {
+        'update_camera_state': update_camera_state,
+        'update_camera_detection_history': update_camera_detection_history,
+    }
     camera_state_ref = get_camera_state(camera_index)
-    camera_lock = camera_state_ref.lock
-
     try:
-        # pylint: disable=E1101
-        cap = cv2.VideoCapture(camera_index)
-        if not cap.isOpened():
-            logging.error("Cannot open camera at index %d", camera_index)
-            await update_camera_state(camera_index,
-                                      {
-                                          "error": f"Cannot open camera {camera_index}",
-                                                "live_detection_running": False
-                                      })
-            return
-        await update_camera_state(camera_index, {"error": None})
-
-        while camera_state_ref.live_detection_running:
-            ret, frame = cap.read()
-            if not ret:
-                await update_camera_state(camera_index,
-                                          {
-                                              "error":
-                                                "Failed to read frame", 
-                                                "live_detection_running": False
-                                          })
-                break
-            contrast = camera_state_ref.contrast
-            brightness = camera_state_ref.brightness
-            focus = camera_state_ref.focus
-            frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=int((brightness - 1.0) * 255))
-            if focus and focus != 1.0:
-                blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=focus)
-                frame = cv2.addWeighted(frame, 1.0 + focus, blurred, -focus, 0)
-            image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            tensor = app_state.transform(image).unsqueeze(0).to(app_state.device)
-            try:
-                prediction = await _run_inference(app_state.model,
-                                                  tensor,
-                                                  app_state.prototypes,
-                                                  app_state.defect_idx,
-                                                  app_state.device)
-                numeric = prediction[0] if isinstance(prediction, list) else prediction
-            # pylint: disable=W0718
-            except Exception as e:
-                logging.debug("Live loop inference error for camera %d: %s", camera_index, e)
-                numeric = None
-
-            label = app_state.class_names[numeric] if (
-                isinstance(numeric, int)
-                and 0 <= numeric < len(app_state.class_names)
-                ) else str(numeric)
-            current_timestamp = time.time()
-
-            await update_camera_detection_history(camera_index, label, current_timestamp)
-            await update_camera_state(camera_index,
-                                      {"last_result": label, "last_time": current_timestamp})
-            asyncio.create_task(sse_update_camera_state(camera_index))
-
-            if isinstance(numeric, int) and numeric == app_state.defect_idx:
-                do_alert = False
-                async with camera_lock:
-                    if (camera_state_ref.current_alert_id is None
-                        and _passed_majority_vote(camera_state_ref)):
-                        camera_state_ref.current_alert_id = True
-                        do_alert = True
-                if do_alert:
-                    alert = await _create_alert_and_notify(camera_state_ref,
-                                                           camera_index,
-                                                           frame,
-                                                           current_timestamp)
-                    asyncio.create_task(_send_alert(alert))
-    finally:
-        if 'cap' in locals() and cap.isOpened():
-            cap.release()
+        await create_optimized_detection_loop(
+            app_state,
+            camera_index,
+            get_camera_state,
+            update_functions
+        )
+    except Exception as e:
+        logging.error("Error in optimized detection loop for camera %d: %s", camera_index, e)
+        await update_camera_state(camera_index, {
+            "error": f"Detection loop error: {str(e)}", 
+            "live_detection_running": False
+        })

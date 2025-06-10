@@ -408,7 +408,7 @@ function saveSetting(slider) {
     });
 }
 
-document.querySelectorAll('input[type="range"]').forEach(slider => {
+document.querySelectorAll('.settings-form input[type="range"]').forEach(slider => {
     updateSliderFill(slider);
     slider.addEventListener('input', () => {
         updateSliderFill(slider);
@@ -459,3 +459,170 @@ function updateAsciiTitle() {
 updateAsciiTitle();
 
 window.addEventListener('resize', updateAsciiTitle);
+
+const configureSetupBtn = document.getElementById('configureSetupBtn');
+const setupModalOverlay = document.getElementById('setupModalOverlay');
+const setupModalClose = document.getElementById('setupModalClose');
+
+configureSetupBtn?.addEventListener('click', function(e) {
+    e.preventDefault();
+    setupModalOverlay.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => {
+        initializeFeedSettings();
+    }, 100);
+});
+
+const goToSetupBtn = document.getElementById('goToSetupBtn');
+goToSetupBtn?.addEventListener('click', function() {
+    window.location.href = '/setup';
+});
+
+function updateFeedSliderFill(slider) {
+    const min = slider.min || 0;
+    const max = slider.max || 100;
+    const value = slider.value;
+    const percentage = ((value - min) / (max - min)) * 100;
+    slider.style.setProperty('--value', `${percentage}%`);
+    const valueSpan = document.getElementById(`${slider.id}_val`);
+    if (valueSpan) {
+        valueSpan.textContent = value;
+    }
+}
+
+function saveFeedSetting(slider) {
+    const setting = slider.name;
+    const value = parseInt(slider.value);
+    const valueSpan = document.getElementById(`${slider.id}_val`);
+    if (valueSpan) {
+        valueSpan.textContent = value;
+    }
+    if (setting === 'detectionInterval') {
+        const detectionsPerSecond = Math.round(1000 / value);
+        const dpsSlider = document.getElementById('detectionsPerSecond');
+        const dpsSpan = document.getElementById('detectionsPerSecond_val');
+        if (dpsSlider && dpsSpan) {
+            dpsSlider.value = detectionsPerSecond;
+            dpsSpan.textContent = detectionsPerSecond;
+            updateFeedSliderFill(dpsSlider);
+        }
+    } else if (setting === 'detectionsPerSecond') {
+        const detectionInterval = Math.round(1000 / value);
+        const diSlider = document.getElementById('detectionInterval');
+        const diSpan = document.getElementById('detectionInterval_val');
+        if (diSlider && diSpan) {
+            diSlider.value = detectionInterval;
+            diSpan.textContent = detectionInterval;
+            updateFeedSliderFill(diSlider);
+        }
+    }
+    saveFeedSettings();
+}
+
+function saveFeedSettings() {
+    const settings = {
+        stream_max_fps: parseInt(document.getElementById('streamMaxFps').value),
+        stream_tunnel_fps: parseInt(document.getElementById('streamTunnelFps').value),
+        stream_jpeg_quality: parseInt(document.getElementById('streamJpegQuality').value),
+        stream_max_width: parseInt(document.getElementById('streamMaxWidth').value),
+        detections_per_second: parseInt(document.getElementById('detectionsPerSecond').value),
+        detection_interval_ms: parseInt(document.getElementById('detectionInterval').value)
+    };
+    fetch('/setup/save-feed-settings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(settings)
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(errData => {
+                throw new Error(errData.detail || 'Failed to save feed settings');
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Feed settings saved successfully:', data);
+    })
+    .catch(error => {
+        console.error('Error saving feed settings:', error);
+    });
+}
+
+function initializeFeedSettings() {
+    loadFeedSettings().then(() => {
+        document.querySelectorAll('.feed-setting-item input[type="range"]').forEach(slider => {
+            updateFeedSliderFill(slider);
+            slider.addEventListener('input', () => {
+                updateFeedSliderFill(slider);
+            });
+            slider.addEventListener('change', (e) => {
+                e.preventDefault();
+                updateFeedSliderFill(slider);
+                saveFeedSetting(slider);
+            });
+        });
+    });
+}
+
+function loadFeedSettings() {
+    return fetch('/setup/get-feed-settings', {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(errData => {
+                throw new Error(errData.detail || 'Failed to load feed settings');
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success && data.settings) {
+            const settings = data.settings;
+            updateSliderValue('streamMaxFps', settings.stream_max_fps);
+            updateSliderValue('streamTunnelFps', settings.stream_tunnel_fps);
+            updateSliderValue('streamJpegQuality', settings.stream_jpeg_quality);
+            updateSliderValue('streamMaxWidth', settings.stream_max_width);
+            updateSliderValue('detectionsPerSecond', settings.detections_per_second);
+            updateSliderValue('detectionInterval', settings.detection_interval_ms);
+        }
+    })
+    .catch(error => {
+        console.error('Error loading feed settings:', error);
+    });
+}
+
+function updateSliderValue(sliderId, value) {
+    const slider = document.getElementById(sliderId);
+    const valueSpan = document.getElementById(`${sliderId}_val`);
+    if (slider && valueSpan) {
+        slider.value = value;
+        valueSpan.textContent = value;
+        updateFeedSliderFill(slider);
+    }
+}
+
+setupModalClose?.addEventListener('click', function() {
+    setupModalOverlay.style.display = 'none';
+    document.body.style.overflow = '';
+});
+
+setupModalOverlay?.addEventListener('click', function(e) {
+    if (e.target === setupModalOverlay) {
+        setupModalOverlay.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+});
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && setupModalOverlay.style.display === 'flex') {
+        setupModalOverlay.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+});

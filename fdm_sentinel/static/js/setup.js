@@ -10,10 +10,12 @@ document.addEventListener('DOMContentLoaded', () => {
         sslConfigured: false,
         tunnelConfigured: false,
         tunnelInitialized: false,
+        cloudflareDownloadConfigured: false,
         networkData: {},
         vapidData: {},
         sslData: {},
-        tunnelData: {}
+        tunnelData: {},
+        tunnelToken: null
     };
 
     function showSection(sectionId) {
@@ -28,20 +30,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('base-url').value = domain;
             }
         }
-        const progressContainer = selectedNetworkOption === 'external' ? 
-            document.getElementById('setup-progress-external') : 
-            document.getElementById('setup-progress');
+        let progressContainer;
+        if (selectedNetworkOption === 'external') {
+            if (selectedTunnelProvider === 'ngrok') {
+                progressContainer = document.getElementById('setup-progress-ngrok');
+            } else if (selectedTunnelProvider === 'cloudflare') {
+                progressContainer = document.getElementById('setup-progress-cloudflare');
+            } else {
+                progressContainer = document.getElementById('setup-progress-external');
+            }
+        } else {
+            progressContainer = document.getElementById('setup-progress');
+        }
             
         progressContainer.querySelectorAll('.progress-step').forEach(step => {
             step.classList.remove('active');
             const stepId = step.dataset.step;
             if (stepId === sectionId) {
                 step.classList.add('active');
-            } else if (
+            } else            if (
                 (stepId === 'vapid' && setupState.vapidConfigured) ||
                 (stepId === 'ssl' && setupState.sslConfigured) ||
                 (stepId === 'tunnel' && setupState.tunnelConfigured) ||
-                (stepId === 'initialize' && setupState.tunnelInitialized)
+                (stepId === 'tunnel-config' && setupState.tunnelConfigured) ||
+                (stepId === 'initialize' && setupState.tunnelInitialized) ||
+                (stepId === 'cloudflare-download' && setupState.cloudflareDownloadConfigured)
             ) {
                 step.classList.add('completed');
             }
@@ -115,6 +128,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('tunnel-form').style.display = 'block';
         document.getElementById('ngrok-config').style.display = 'block';
         document.getElementById('cloudflare-config').style.display = 'none';
+        document.getElementById('setup-progress-external').style.display = 'none';
+        document.getElementById('setup-progress-cloudflare').style.display = 'none';
+        document.getElementById('setup-progress-ngrok').style.display = 'flex';
     });
 
     document.getElementById('cloudflare-btn').addEventListener('click', () => {
@@ -124,6 +140,19 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('tunnel-form').style.display = 'block';
         document.getElementById('cloudflare-config').style.display = 'block';
         document.getElementById('ngrok-config').style.display = 'none';
+        document.getElementById('setup-progress-external').style.display = 'none';
+        document.getElementById('setup-progress-ngrok').style.display = 'none';
+        document.getElementById('setup-progress-cloudflare').style.display = 'flex';
+    });
+
+    document.getElementById('cloudflare-global-key').addEventListener('change', (e) => {
+        const emailGroup = document.getElementById('cloudflare-email-group');
+        if (e.target.checked) {
+            emailGroup.style.display = 'block';
+        } else {
+            emailGroup.style.display = 'none';
+            document.getElementById('cloudflare-email').value = '';
+        }
     });
 
     document.getElementById('save-tunnel-settings').addEventListener('click', async () => {
@@ -133,14 +162,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         let token = '';
         let domain = '';
+        let email = '';
         if (selectedTunnelProvider === 'ngrok') {
             token = document.getElementById('ngrok-auth-token').value.trim();
             domain = document.getElementById('ngrok-domain').value.trim();
         } else if (selectedTunnelProvider === 'cloudflare') {
-            token = document.getElementById('cloudflare-token').value.trim();
+            token = document.getElementById('cloudflare-api-key').value.trim();
+            const isGlobalKey = document.getElementById('cloudflare-global-key').checked;
+            if (isGlobalKey) {
+                email = document.getElementById('cloudflare-email').value.trim();
+                if (!email) {
+                    alert('Please enter your account email for Global API Key');
+                    return;
+                }
+            }
         }
         if (!token) {
-            alert('Please enter the required token');
+            alert('Please enter the required API key');
             return;
         }
         if (selectedTunnelProvider === 'ngrok' && !domain) {
@@ -154,7 +192,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ 
                     provider: selectedTunnelProvider,
                     token: token,
-                    domain: domain
+                    domain: domain,
+                    email: email
                 })
             });
             
@@ -162,8 +201,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await response.json();
                 setupState.tunnelConfigured = true;
                 setupState.tunnelData = { provider: selectedTunnelProvider, token, domain };
-                showSection('initialize');
-                initializeTunnelProvider();
+                if (selectedTunnelProvider === 'ngrok') {
+                    showSection('initialize');
+                    initializeTunnelProvider();
+                } else if (selectedTunnelProvider === 'cloudflare') {
+                    showSection('tunnel-config');
+                    fetchCloudflareAccountsZones();
+                }
             } else {
                 const error = await response.json();
                 alert(`Failed to save tunnel settings: ${error.detail}`);
@@ -219,8 +263,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response.ok) {
                 setupState.vapidConfigured = true;
                 setupState.vapidData = { publicKey, privateKey, subject, baseUrl };
-                // For external setup, go directly to finish after VAPID
-                if (selectedNetworkOption === 'external') {
+                if (selectedNetworkOption === 'external' && selectedTunnelProvider === 'cloudflare') {
+                    showSection('cloudflare-download');
+                } else if (selectedNetworkOption === 'external') {
                     showSection('finish');
                 } else {
                     showSection('ssl');
@@ -364,4 +409,209 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('initialization-loading').style.display = 'none';
         }
     }
+
+    async function fetchCloudflareAccountsZones() {
+        document.getElementById('cloudflare-selection-loading').style.display = 'block';
+        document.getElementById('cloudflare-selection-content').style.display = 'none';
+        document.getElementById('cloudflare-selection-error').style.display = 'none';
+        
+        try {
+            const response = await fetch('/setup/cloudflare/accounts-zones');
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                populateAccountsAndZones(result.accounts, result.zones);
+                document.getElementById('cloudflare-selection-loading').style.display = 'none';
+                document.getElementById('cloudflare-selection-content').style.display = 'block';
+            } else {
+                document.getElementById('cloudflare-selection-loading').style.display = 'none';
+                document.getElementById('cloudflare-selection-error').style.display = 'block';
+                document.getElementById('cloudflare-error-message').textContent = result.detail || 'Unknown error occurred';
+            }
+        } catch (error) {
+            console.error('Error fetching Cloudflare accounts and zones:', error);
+            document.getElementById('cloudflare-selection-loading').style.display = 'none';
+            document.getElementById('cloudflare-selection-error').style.display = 'block';
+            document.getElementById('cloudflare-error-message').textContent = 'Network error: Unable to connect to server';
+        }
+    }
+
+    function populateAccountsAndZones(accounts, zones) {
+        const accountSelect = document.getElementById('cloudflare-account-select');
+        const zoneSelect = document.getElementById('cloudflare-zone-select');
+        accountSelect.innerHTML = '<option value="">Choose an account...</option>';
+        zoneSelect.innerHTML = '<option value="">Choose a domain...</option>';
+        accounts.forEach(account => {
+            const option = document.createElement('option');
+            option.value = account.id;
+            option.textContent = account.name;
+            accountSelect.appendChild(option);
+        });
+        zones.forEach(zone => {
+            const option = document.createElement('option');
+            option.value = zone.id;
+            option.textContent = zone.name;
+            option.setAttribute('data-name', zone.name);
+            zoneSelect.appendChild(option);
+        });
+    }
+
+    document.getElementById('cloudflare-zone-select').addEventListener('change', (e) => {
+        const selectedOption = e.target.selectedOptions[0];
+        const domainSuffix = document.getElementById('domain-suffix');
+        if (selectedOption && selectedOption.value) {
+            const domainName = selectedOption.getAttribute('data-name');
+            domainSuffix.textContent = '.' + domainName;
+        } else {
+            domainSuffix.textContent = '.example.com';
+        }
+    });
+
+    document.getElementById('configure-cloudflare-tunnel').addEventListener('click', async () => {
+        const accountId = document.getElementById('cloudflare-account-select').value;
+        const zoneId = document.getElementById('cloudflare-zone-select').value;
+        const subdomain = document.getElementById('cloudflare-subdomain').value.trim();
+        if (!accountId) {
+            alert('Please select a Cloudflare account');
+            return;
+        }
+        if (!zoneId) {
+            alert('Please select a domain');
+            return;
+        }
+        if (!subdomain) {
+            alert('Please enter a subdomain');
+            return;
+        }
+        document.getElementById('cloudflare-selection-content').style.display = 'none';
+        document.getElementById('cloudflare-tunnel-loading').style.display = 'block';
+        try {
+            const response = await fetch('/setup/cloudflare/create-tunnel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    account_id: accountId,
+                    zone_id: zoneId,
+                    subdomain: subdomain
+                })
+            });
+            if (response.ok) {
+                const result = await response.json();
+                setupState.tunnelInitialized = true;
+                setupState.tunnelData = { ...setupState.tunnelData, ...result };
+                showSection('vapid');
+                if (result.url) {
+                    document.getElementById('base-url').value = result.url;
+                }
+            }
+            else {
+                document.getElementById('cloudflare-tunnel-loading').style.display = 'none';
+                document.getElementById('cloudflare-selection-content').style.display = 'block';
+                const error = await response.json();
+                alert(`Failed to create Cloudflare tunnel: ${error.detail}`);
+            }
+        } catch (error) {
+            document.getElementById('cloudflare-tunnel-loading').style.display = 'none';
+            document.getElementById('cloudflare-selection-content').style.display = 'block';
+            console.error('Error creating Cloudflare tunnel:', error);
+            alert('Error creating Cloudflare tunnel');
+        }
+    });
+
+    document.getElementById('retry-cloudflare-fetch').addEventListener('click', () => {
+        fetchCloudflareAccountsZones();
+    });
+
+    document.getElementById('back-to-tunnel-settings').addEventListener('click', () => {
+        showSection('tunnel');
+    });
+
+    let selectedOperatingSystem = null;
+
+    document.getElementById('macos-btn').addEventListener('click', () => {
+        selectedOperatingSystem = 'macos';
+        document.querySelectorAll('.os-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('macos-btn').classList.add('selected');
+        saveOperatingSystemSelection();
+    });
+
+    document.getElementById('windows-btn').addEventListener('click', () => {
+        selectedOperatingSystem = 'windows';
+        document.querySelectorAll('.os-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('windows-btn').classList.add('selected');
+        saveOperatingSystemSelection();
+    });
+
+    document.getElementById('linux-btn').addEventListener('click', () => {
+        selectedOperatingSystem = 'linux';
+        document.querySelectorAll('.os-option').forEach(btn => btn.classList.remove('selected'));
+        document.getElementById('linux-btn').classList.add('selected');
+        saveOperatingSystemSelection();
+    });
+
+    async function saveOperatingSystemSelection() {
+        try {
+            const response = await fetch('/setup/cloudflare/save-os', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operating_system: selectedOperatingSystem })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                document.getElementById('tunnel-token-section').style.display = 'block';
+                const commandsContainer = document.getElementById('setup-commands-container');
+                commandsContainer.innerHTML = '';
+                
+                if (result.setup_commands && result.setup_commands.length > 0) {
+                    result.setup_commands.forEach((command, index) => {
+                        const commandDiv = document.createElement('div');
+                        commandDiv.className = 'command-display';
+                        commandDiv.innerHTML = `
+                            <label>Step ${index + 1}:</label>
+                            <div class="command-value">${command}</div>
+                            <button class="copy-btn" title="Copy to clipboard" onclick="copyToClipboard('${command.replace(/'/g, "\\'")}', this)">📋</button>
+                        `;
+                        commandsContainer.appendChild(commandDiv);
+                    });
+                }
+                setupState.cloudflareDownloadConfigured = true;
+                setupState.tunnelToken = result.tunnel_token;
+            } else {
+                const error = await response.json();
+                console.error('Failed to save OS selection:', error);
+                alert(`Failed to save operating system selection: ${error.detail}`);
+            }
+        } catch (error) {
+            console.error('Error saving operating system selection:', error);
+            alert('Error saving operating system selection');
+        }
+    }
+    document.getElementById('continue-to-finish-from-cloudflare').addEventListener('click', () => {
+        showSection('finish');
+    });
+
+    window.copyToClipboard = function(text, button) {
+        navigator.clipboard.writeText(text).then(() => {
+            const originalText = button.textContent;
+            button.textContent = '✓';
+            setTimeout(() => {
+                button.textContent = originalText;
+            }, 2000);
+        }).catch((error) => {
+            console.error('Clipboard API failed, using fallback:', error);
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            
+            const originalText = button.textContent;
+            button.textContent = '✓';
+            setTimeout(() => {
+                button.textContent = originalText;
+            }, 2000);
+        });
+    };
 });

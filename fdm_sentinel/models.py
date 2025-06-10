@@ -108,11 +108,17 @@ class TunnelProvider(str, Enum):
     NGROK = "ngrok"
     CLOUDFLARE = "cloudflare"
 
+class OperatingSystem(str, Enum):
+    MACOS = "macos"
+    WINDOWS = "windows"
+    LINUX = "linux"
+
 class TunnelSettings(BaseModel):
     provider: TunnelProvider
     token: str
     domain: str = ""
-    
+    email: Optional[str] = None
+
     @field_validator('domain')
     @classmethod
     def validate_domain_for_ngrok(cls, v, info):
@@ -128,6 +134,7 @@ class SavedKey(str, Enum):
     VAPID_PRIVATE_KEY = "vapid_private_key"
     SSL_PRIVATE_KEY = "ssl_private_key"
     TUNNEL_API_KEY = "tunnel_api_key"
+    TUNNEL_TOKEN = "tunnel_token"
 
 class SavedConfig(str, Enum):
     VAPID_SUBJECT = "vapid_subject"
@@ -135,3 +142,47 @@ class SavedConfig(str, Enum):
     STARTUP_MODE = "startup_mode"
     SITE_DOMAIN = "site_domain"
     TUNNEL_PROVIDER = "tunnel_provider"
+    CLOUDFLARE_EMAIL = "cloudflare_email"
+    CLOUDFLARE_TEAM_NAME = "cloudflare_team_name"
+    USER_OPERATING_SYSTEM = "user_operating_system"
+    STREAM_OPTIMIZE_FOR_TUNNEL = "stream_optimize_for_tunnel"
+    STREAM_MAX_FPS = "stream_max_fps"
+    STREAM_TUNNEL_FPS = "stream_tunnel_fps"
+    STREAM_JPEG_QUALITY = "stream_jpeg_quality"
+    STREAM_MAX_WIDTH = "stream_max_width"
+    DETECTION_INTERVAL_MS = "detection_interval_ms"
+
+class CloudflareTunnelConfig(BaseModel):
+    account_id: str
+    zone_id: str
+    subdomain: str
+
+class CloudflareDownloadConfig(BaseModel):
+    operating_system: OperatingSystem
+
+class WarpDeviceConfig(BaseModel):
+    device_id: Optional[str] = None
+    user_email: Optional[str] = None
+
+class CloudflareCommandSet(BaseModel):
+    operating_system: OperatingSystem
+    install_command: str
+    enable_command: str = ""
+    start_command: str
+    stop_command: str
+    restart_command: str = ""
+    setup_sequence: List[str]
+
+class WarpDeviceEnrollmentRule(BaseModel):
+    name: str
+    precedence: int = 0
+    require: List[str] = []
+    include: List[str] = []
+
+class FeedSettings(BaseModel):
+    stream_max_fps: int
+    stream_tunnel_fps: int
+    stream_jpeg_quality: int
+    stream_max_width: int
+    detections_per_second: int
+    detection_interval_ms: int

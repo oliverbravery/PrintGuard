@@ -10,15 +10,21 @@ from fastapi.responses import RedirectResponse
 from py_vapid import Vapid
 
 from ..models import (TunnelProvider, TunnelSettings, SavedConfig,
-                      VapidSettings, SavedKey, SetupCompletion)
+                      VapidSettings, SavedKey, SetupCompletion,
+                      CloudflareTunnelConfig, CloudflareDownloadConfig, FeedSettings)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
-                            store_key, get_config, update_config)
+                            store_key, get_config, update_config, get_key,
+                            STREAM_MAX_FPS, STREAM_TUNNEL_FPS, STREAM_JPEG_QUALITY,
+                            STREAM_MAX_WIDTH, DETECTION_INTERVAL_MS)
 from ..utils.setup_utils import setup_ngrok_tunnel
+from ..utils.cloudflare_utils import CloudflareAPI, get_cloudflare_setup_sequence
+from ..utils.stream_utils import stream_optimizer
 
 router = APIRouter()
 
 @router.get("/setup", include_in_schema=False)
 async def serve_setup(request: Request):
+    # pylint:disable=import-outside-toplevel
     from ..app import templates
     return templates.TemplateResponse("setup.html", {
         "request": request
@@ -127,6 +133,8 @@ async def save_tunnel_settings(settings: TunnelSettings):
             SavedConfig.TUNNEL_PROVIDER: settings.provider,
             SavedConfig.SITE_DOMAIN: settings.domain
         }
+        if settings.email:
+            config_data[SavedConfig.CLOUDFLARE_EMAIL] = settings.email
         store_key(SavedKey.TUNNEL_API_KEY, settings.token)
         update_config(config_data)
         logging.debug("Tunnel settings saved successfully.")
@@ -180,3 +188,242 @@ async def complete_setup(completion: SetupCompletion):
     except Exception as e:
         logging.error("Error completing setup: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to complete setup: {str(e)}")
+
+@router.get("/setup/cloudflare/accounts-zones", include_in_schema=False)
+async def get_cloudflare_accounts_zones():
+    try:
+        config = get_config()
+        api_token = get_key(SavedKey.TUNNEL_API_KEY)
+        email = config.get(SavedConfig.CLOUDFLARE_EMAIL)
+        if not api_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Cloudflare API token not found. Please configure tunnel settings first."
+            )
+        cf = CloudflareAPI(api_token, email)
+        accounts_response = cf.get_accounts()
+        accounts = accounts_response.get("result", [])
+        zones_response = cf.get_zones()
+        zones = zones_response.get("result", [])
+        return {
+            "success": True,
+            "accounts": accounts,
+            "zones": zones
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("Error fetching Cloudflare accounts and zones: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch Cloudflare accounts and zones: {str(e)}"
+        )
+
+@router.post("/setup/cloudflare/create-tunnel", include_in_schema=False)
+async def create_cloudflare_tunnel(config: CloudflareTunnelConfig):
+    try:
+        api_token = get_key(SavedKey.TUNNEL_API_KEY)
+        cf_config = get_config()
+        email = cf_config.get(SavedConfig.CLOUDFLARE_EMAIL)
+        if not api_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Cloudflare API token not found"
+            )
+        cf = CloudflareAPI(api_token, email)
+        tunnel_name = config.subdomain
+        tunnel_response = cf.create_tunnel(config.account_id, tunnel_name)
+        tunnel_id = tunnel_response["result"]["id"]
+        tunnel_token = tunnel_response["result"]["token"]
+        zones_response = cf.get_zones()
+        zone_name = next((z["name"] for z in zones_response["result"] if (
+            z["id"] == config.zone_id)), "")
+        tunnel_url = f"{config.subdomain}.{zone_name}"
+        tunnel_config = {
+            "config": {
+                "ingress": [
+                    {
+                        "hostname": tunnel_url,
+                        "service": "http://localhost:8000"
+                    },
+                    {
+                        "service": "http_status:404"
+                    }
+                ]
+            }
+        }
+        cf.update_tunnel_config(config.account_id, tunnel_id, tunnel_config)
+        _ = cf.create_dns_record(config.zone_id, tunnel_id, config.subdomain)
+        store_key(SavedKey.TUNNEL_TOKEN, tunnel_token)
+        return {
+            "success": True,
+            "url": tunnel_url,
+            "tunnel_token": tunnel_token
+        }
+    except Exception as e:
+        logging.error("Error creating Cloudflare tunnel: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create Cloudflare tunnel: {str(e)}"
+        )
+
+@router.post("/setup/cloudflare/save-os", include_in_schema=False)
+async def save_cloudflare_os(config: CloudflareDownloadConfig):
+    try:
+        update_config({SavedConfig.USER_OPERATING_SYSTEM: config.operating_system})
+        cf_config = get_config()
+        site_domain = cf_config.get(SavedConfig.SITE_DOMAIN)
+        tunnel_token_from_store = get_key(SavedKey.TUNNEL_TOKEN)
+        processed_tunnel_token = ""
+        if not site_domain:
+            raise HTTPException(
+                status_code=400,
+                detail="Site domain not found. Please complete tunnel setup first for automatic flow."
+            )
+        if not tunnel_token_from_store or not tunnel_token_from_store.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Tunnel token not found or is invalid. Please complete tunnel setup first for automatic flow."
+            )
+        processed_tunnel_token = tunnel_token_from_store.strip()
+        setup_commands = get_cloudflare_setup_sequence(
+            config.operating_system,
+            processed_tunnel_token,
+            8000
+        )
+        return {
+            "success": True,
+            "tunnel_token": processed_tunnel_token,
+            "operating_system": config.operating_system,
+            "setup_commands": setup_commands
+        }
+    except Exception as e:
+        logging.error("Error saving operating system selection: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save operating system selection: {str(e)}"
+        )
+
+@router.post("/setup/save-feed-settings", include_in_schema=False)
+async def save_feed_settings(settings: FeedSettings):
+    try:
+        config_data = {
+            SavedConfig.STREAM_MAX_FPS: settings.stream_max_fps,
+            SavedConfig.STREAM_TUNNEL_FPS: settings.stream_tunnel_fps,
+            SavedConfig.STREAM_JPEG_QUALITY: settings.stream_jpeg_quality,
+            SavedConfig.STREAM_MAX_WIDTH: settings.stream_max_width,
+            SavedConfig.DETECTION_INTERVAL_MS: settings.detection_interval_ms
+        }
+        update_config(config_data)
+        stream_optimizer.invalidate_cache()
+        logging.debug("Feed settings saved successfully.")
+        return {"success": True, "message": "Feed settings saved successfully."}
+    except Exception as e:
+        logging.error("Error saving feed settings: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save feed settings: {str(e)}"
+        )
+
+@router.get("/setup/get-feed-settings", include_in_schema=False)
+async def get_feed_settings():
+    try:
+        config = get_config()
+        # pylint:disable=import-outside-toplevel
+        settings = {
+            "stream_max_fps": config.get(SavedConfig.STREAM_MAX_FPS, STREAM_MAX_FPS),
+            "stream_tunnel_fps": config.get(SavedConfig.STREAM_TUNNEL_FPS, STREAM_TUNNEL_FPS),
+            "stream_jpeg_quality": config.get(SavedConfig.STREAM_JPEG_QUALITY, STREAM_JPEG_QUALITY),
+            "stream_max_width": config.get(SavedConfig.STREAM_MAX_WIDTH, STREAM_MAX_WIDTH),
+            "detection_interval_ms": config.get(SavedConfig.DETECTION_INTERVAL_MS, DETECTION_INTERVAL_MS)
+        }
+        settings["detections_per_second"] = round(1000 / settings["detection_interval_ms"])
+        return {"success": True, "settings": settings}
+    except Exception as e:
+        logging.error("Error loading feed settings: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load feed settings: {str(e)}"
+        )
+
+@router.get("/setup/warp/add-device", include_in_schema=False)
+async def serve_warp_device_enrollment(request: Request):
+    client_host = request.client.host if request.client else "unknown"
+    if client_host not in ["127.0.0.1", "localhost", "::1"]:
+        raise HTTPException(
+            status_code=403,
+            detail="This endpoint is only accessible from localhost"
+        )
+    try:
+        # pylint:disable=import-outside-toplevel
+        from ..app import templates
+        config = get_config()
+        site_domain = config.get(SavedConfig.SITE_DOMAIN, "")
+        return templates.TemplateResponse("warp_device_enrollment.html", {
+            "request": request,
+            "site_domain": site_domain
+        })
+    except Exception as e:
+        logging.error("Error serving WARP device enrollment page: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to serve WARP device enrollment page: {str(e)}"
+        )
+
+@router.get("/setup/warp/team-name", include_in_schema=False)
+async def get_cloudflare_team_name(request: Request):
+    client_host = request.client.host if request.client else "unknown"
+    if client_host not in ["127.0.0.1", "localhost", "::1"]:
+        raise HTTPException(
+            status_code=403,
+            detail="This endpoint is only accessible from localhost"
+        )
+    try:
+        config = get_config()
+        api_token = get_key(SavedKey.TUNNEL_API_KEY)
+        email = config.get(SavedConfig.CLOUDFLARE_EMAIL)
+        site_domain = config.get(SavedConfig.SITE_DOMAIN, "")
+        if not api_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Cloudflare API token not found. Please complete tunnel setup first."
+            )
+        cf = CloudflareAPI(api_token, email)
+        accounts_response = cf.get_accounts()
+        accounts = accounts_response.get("result", [])
+        if not accounts:
+            raise HTTPException(
+                status_code=400,
+                detail="No Cloudflare accounts found"
+            )
+        account_id = accounts[0]["id"]
+        try:
+            org_response = cf.get_organization(account_id)
+            org_result = org_response.get("result")
+            if org_result:
+                team_name = org_result.get("name", "your-organization")
+                return {
+                    "success": True,
+                    "team_name": team_name,
+                    "site_domain": site_domain
+                }
+            else:
+                return {
+                    "success": False,
+                    "team_name": "your-organization",
+                    "site_domain": site_domain
+                }
+        except Exception as api_error:
+            logging.warning("Could not fetch team name from Cloudflare API: %s", api_error)
+            return {
+                "success": False,
+                "team_name": "your-organization",
+                "site_domain": site_domain
+            }
+    except Exception as e:
+        logging.error("Error fetching Cloudflare team name: %s", e)
+        return {
+            "success": False,
+            "team_name": "your-organization",
+            "site_domain": ""
+        }
