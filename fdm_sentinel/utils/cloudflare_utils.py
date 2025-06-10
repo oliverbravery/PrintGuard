@@ -1,8 +1,6 @@
 from typing import Any, Dict, List, Optional
-
 import requests
 from ..models import OperatingSystem
-
 
 class CloudflareAPI:
     def __init__(self, api_token: str, email: Optional[str] = None):
@@ -32,6 +30,9 @@ class CloudflareAPI:
 
     def get_zones(self, per_page: int = 50) -> Dict[str, Any]:
         return self._request("GET", f"/zones?per_page={per_page}")
+
+    def get_organization(self, account_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/accounts/{account_id}/access/organizations")
 
     def create_tunnel(self, account_id: str, name: str) -> Dict[str, Any]:
         data = {"name": name, "config_src": "cloudflare"}
@@ -84,13 +85,26 @@ def setup_tunnel(api_token: str, account_id: str, zone_id: str, tunnel_name: str
     tunnel_response = cf.create_tunnel(account_id, tunnel_name)
     tunnel_id = tunnel_response["result"]["id"]
     tunnel_token = tunnel_response["result"]["token"]
+    tunnel_config = {
+        "config": {
+            "ingress": [
+                {
+                    "hostname": domain_name,
+                    "service": "http://localhost:8000"
+                },
+                {
+                    "service": "http_status:404"
+                }
+            ]
+        }
+    }
+    cf.update_tunnel_config(account_id, tunnel_id, tunnel_config)
     dns_response = cf.create_dns_record(zone_id, tunnel_id, domain_name)
     return {
         "tunnel_id": tunnel_id,
         "tunnel_token": tunnel_token,
         "dns_record": dns_response["result"]
     }
-
 
 def setup_warp_access(api_token: str, account_id: str, app_name: str,
                       domain: str, device_ids: List[str],
@@ -117,7 +131,7 @@ class CloudflareOSCommands:
         commands = {
             OperatingSystem.LINUX: (
                 "curl -L https://github.com/cloudflare/cloudflared/releases/latest/"
-                "download/cloudflared-linux-amd64 -o ~/bin/cloudflared && \ "
+                "download/cloudflared-linux-amd64 -o ~/bin/cloudflared && \\ "
                 "chmod +x ~/bin/cloudflared"
             ),
             OperatingSystem.MACOS: "brew install cloudflared",
@@ -138,7 +152,7 @@ class CloudflareOSCommands:
         return f"cloudflared tunnel route dns {tunnel_name} {hostname}"
 
     @staticmethod
-    def get_start_command(os: OperatingSystem, tunnel_name: str = "", 
+    def get_start_command(os: OperatingSystem, tunnel_name: str = "",
                           token: str = "", local_port: int = 8000) -> str:
         base = (
             f"cloudflared tunnel run {tunnel_name}"
