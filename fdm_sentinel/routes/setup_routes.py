@@ -11,11 +11,14 @@ from py_vapid import Vapid
 
 from ..models import (TunnelProvider, TunnelSettings, SavedConfig,
                       VapidSettings, SavedKey, SetupCompletion,
-                      CloudflareTunnelConfig, CloudflareDownloadConfig)
+                      CloudflareTunnelConfig, CloudflareDownloadConfig, FeedSettings)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
-                            store_key, get_config, update_config, get_key)
+                            store_key, get_config, update_config, get_key,
+                            STREAM_MAX_FPS, STREAM_TUNNEL_FPS, STREAM_JPEG_QUALITY,
+                            STREAM_MAX_WIDTH, DETECTION_INTERVAL_MS)
 from ..utils.setup_utils import setup_ngrok_tunnel
 from ..utils.cloudflare_utils import CloudflareAPI, get_cloudflare_setup_sequence
+from ..utils.stream_utils import stream_optimizer
 
 router = APIRouter()
 
@@ -301,84 +304,45 @@ async def save_cloudflare_os(config: CloudflareDownloadConfig):
             detail=f"Failed to save operating system selection: {str(e)}"
         )
 
-@router.get("/setup/warp/add-device", include_in_schema=False)
-async def serve_warp_device_enrollment(request: Request):
-    client_host = request.client.host if request.client else "unknown"
-    if client_host not in ["127.0.0.1", "localhost", "::1"]:
-        raise HTTPException(
-            status_code=403,
-            detail="This endpoint is only accessible from localhost"
-        )
+@router.post("/setup/save-feed-settings", include_in_schema=False)
+async def save_feed_settings(settings: FeedSettings):
     try:
-        # pylint:disable=import-outside-toplevel
-        from ..app import templates
-        config = get_config()
-        site_domain = config.get(SavedConfig.SITE_DOMAIN, "")
-        return templates.TemplateResponse("warp_device_enrollment.html", {
-            "request": request,
-            "site_domain": site_domain
-        })
+        config_data = {
+            SavedConfig.STREAM_MAX_FPS: settings.stream_max_fps,
+            SavedConfig.STREAM_TUNNEL_FPS: settings.stream_tunnel_fps,
+            SavedConfig.STREAM_JPEG_QUALITY: settings.stream_jpeg_quality,
+            SavedConfig.STREAM_MAX_WIDTH: settings.stream_max_width,
+            SavedConfig.DETECTION_INTERVAL_MS: settings.detection_interval_ms
+        }
+        update_config(config_data)
+        stream_optimizer.invalidate_cache()
+        logging.debug("Feed settings saved successfully.")
+        return {"success": True, "message": "Feed settings saved successfully."}
     except Exception as e:
-        logging.error("Error serving WARP device enrollment page: %s", e)
+        logging.error("Error saving feed settings: %s", e)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to serve WARP device enrollment page: {str(e)}"
+            detail=f"Failed to save feed settings: {str(e)}"
         )
 
-@router.get("/setup/warp/team-name", include_in_schema=False)
-async def get_cloudflare_team_name(request: Request):
-    client_host = request.client.host if request.client else "unknown"
-    if client_host not in ["127.0.0.1", "localhost", "::1"]:
-        raise HTTPException(
-            status_code=403,
-            detail="This endpoint is only accessible from localhost"
-        )
+@router.get("/setup/get-feed-settings", include_in_schema=False)
+async def get_feed_settings():
     try:
         config = get_config()
-        api_token = get_key(SavedKey.TUNNEL_API_KEY)
-        email = config.get(SavedConfig.CLOUDFLARE_EMAIL)
-        site_domain = config.get(SavedConfig.SITE_DOMAIN, "")
-        if not api_token:
-            raise HTTPException(
-                status_code=400,
-                detail="Cloudflare API token not found. Please complete tunnel setup first."
-            )
-        cf = CloudflareAPI(api_token, email)
-        accounts_response = cf.get_accounts()
-        accounts = accounts_response.get("result", [])
-        if not accounts:
-            raise HTTPException(
-                status_code=400,
-                detail="No Cloudflare accounts found"
-            )
-        account_id = accounts[0]["id"]
-        try:
-            org_response = cf.get_organization(account_id)
-            org_result = org_response.get("result")
-            if org_result:
-                team_name = org_result.get("name", "your-organization")
-                return {
-                    "success": True,
-                    "team_name": team_name,
-                    "site_domain": site_domain
-                }
-            else:
-                return {
-                    "success": False,
-                    "team_name": "your-organization",
-                    "site_domain": site_domain
-                }
-        except Exception as api_error:
-            logging.warning("Could not fetch team name from Cloudflare API: %s", api_error)
-            return {
-                "success": False,
-                "team_name": "your-organization",
-                "site_domain": site_domain
-            }
-    except Exception as e:
-        logging.error("Error fetching Cloudflare team name: %s", e)
-        return {
-            "success": False,
-            "team_name": "your-organization",
-            "site_domain": ""
+        # pylint:disable=import-outside-toplevel
+        settings = {
+            "stream_max_fps": config.get(SavedConfig.STREAM_MAX_FPS, STREAM_MAX_FPS),
+            "stream_tunnel_fps": config.get(SavedConfig.STREAM_TUNNEL_FPS, STREAM_TUNNEL_FPS),
+            "stream_jpeg_quality": config.get(SavedConfig.STREAM_JPEG_QUALITY, STREAM_JPEG_QUALITY),
+            "stream_max_width": config.get(SavedConfig.STREAM_MAX_WIDTH, STREAM_MAX_WIDTH),
+            "detection_interval_ms": config.get(SavedConfig.DETECTION_INTERVAL_MS, DETECTION_INTERVAL_MS)
         }
+        settings["detections_per_second"] = round(1000 / settings["detection_interval_ms"])
+        return {"success": True, "settings": settings}
+    except Exception as e:
+        logging.error("Error loading feed settings: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load feed settings: {str(e)}"
+        )
+
