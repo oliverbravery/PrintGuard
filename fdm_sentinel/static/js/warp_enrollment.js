@@ -2,10 +2,20 @@ document.addEventListener('DOMContentLoaded', async function() {
     const enrollmentUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port || (window.location.protocol === 'https:' ? '443' : '8000')}/setup/warp/add-device`;
     document.getElementById('enrollment-url').textContent = enrollmentUrl;
     await fetchWarpConfig();
+    const screenWidth = window.innerWidth;
+    let qrSize;
+    if (screenWidth <= 480) {
+        qrSize = 150;
+    } else if (screenWidth <= 768) {
+        qrSize = 180;
+    } else {
+        qrSize = 200;
+    }
+    
     const qr = new QRious({
         element: document.getElementById('qr-code'),
         value: enrollmentUrl,
-        size: 200,
+        size: qrSize,
         level: 'M',
         background: 'white',
         foreground: 'black',
@@ -71,4 +81,18 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         }
     }
+    window.addEventListener('resize', function() {
+        const screenWidth = window.innerWidth;
+        let newQrSize;
+        if (screenWidth <= 480) {
+            newQrSize = 150;
+        } else if (screenWidth <= 768) {
+            newQrSize = 180;
+        } else {
+            newQrSize = 200;
+        }
+        if (qr && newQrSize !== qr.size) {
+            qr.size = newQrSize;
+        }
+    });
 });
