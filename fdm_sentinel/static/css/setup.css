@@ -127,28 +127,28 @@
 .button-group {
     display: flex;
     justify-content: flex-end;
-    margin-top: 20px;
+    margin-top: var(--spacing-lg);
 }
 
 .setup-btn {
-    padding: 15px 30px;
-    border: 2px dotted #222;
+    padding: var(--spacing-md) var(--spacing-xl);
+    border: 2px dotted var(--border-primary);
     cursor: pointer;
     background: transparent;
-    transition: background 0.2s, color 0.2s;
+    transition: background var(--transition-fast), color var(--transition-fast);
     font-family: inherit;
-    font-size: 1rem;
+    font-size: var(--font-size-base);
     width: 100%;
 }
 
 .setup-btn:hover {
-    background: #222;
-    color: #fff;
+    background: var(--text-primary);
+    color: var(--text-inverted);
 }
 
 .setup-btn.primary {
-    background: #222;
-    color: #fff;
+    background: var(--text-primary);
+    color: var(--text-inverted);
 }
 
 .setup-btn.primary:hover {
@@ -157,46 +157,46 @@
 
 .setup-summary {
     width: 100%;
-    border: 2px dotted #222;
-    padding: 20px;
-    margin: 20px 0;
+    border: 2px dotted var(--border-primary);
+    padding: var(--spacing-lg);
+    margin: var(--spacing-lg) 0;
 }
 
 .summary-item {
-    margin-bottom: 10px;
+    margin-bottom: var(--spacing-sm);
 }
 
 .status-configured {
-    color: #2ecc40;
+    color: var(--success-color);
 }
 
 .network-option {
     text-align: left;
-    padding: 20px;
+    padding: var(--spacing-lg);
     height: auto;
-    border: 2px dotted #ccc;
-    transition: all 0.3s ease;
+    border: 2px dotted var(--border-tertiary);
+    transition: all var(--transition-normal);
 }
 
 .network-option:hover {
-    border-color: #222;
-    background: #f9f9f9;
+    border-color: var(--border-primary);
+    background: var(--background-accent);
 }
 
 .network-option.selected {
-    border-color: #222;
-    background: #222;
-    color: #fff;
+    border-color: var(--border-primary);
+    background: var(--text-primary);
+    color: var(--text-inverted);
 }
 
 .option-title {
     font-weight: bold;
-    font-size: 1.1rem;
-    margin-bottom: 8px;
+    font-size: var(--font-size-lg);
+    margin-bottom: var(--spacing-sm);
 }
 
 .option-description {
-    font-size: 0.9rem;
+    font-size: var(--font-size-sm);
     line-height: 1.4;
     opacity: 0.8;
 }
@@ -207,21 +207,21 @@
 
 .tunnel-option {
     text-align: left;
-    padding: 20px;
+    padding: var(--spacing-lg);
     height: auto;
-    border: 2px dotted #ccc;
-    transition: all 0.3s ease;
+    border: 2px dotted var(--border-tertiary);
+    transition: all var(--transition-normal);
 }
 
 .tunnel-option:hover {
-    border-color: #222;
-    background: #f9f9f9;
+    border-color: var(--border-primary);
+    background: var(--background-accent);
 }
 
 .tunnel-option.selected {
-    border-color: #222;
-    background: #222;
-    color: #fff;
+    border-color: var(--border-primary);
+    background: var(--text-primary);
+    color: var(--text-inverted);
 }
 
 .tunnel-option.selected .option-description {
@@ -493,4 +493,42 @@
     background-color: #fff9e6;
     border-left: 4px solid #ffa500;
     border-radius: 3px;
+}
+
+.warp-enrollment-section {
+    border: 2px solid #3b82f6;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(139, 92, 246, 0.05));
+}
+
+.warp-enrollment-section h4 {
+    color: #3b82f6;
+    margin-bottom: 0.5rem;
+}
+
+#warp-qr-code canvas {
+    border: 2px solid #e5e7eb;
+    border-radius: 8px;
+    background: white;
+}
+
+.warp-device-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    color: white;
+    text-decoration: none;
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    border: none;
+    cursor: pointer;
+}
+
+.warp-device-link:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(59, 130, 246, 0.3);
+    text-decoration: none;
+    color: white;
 }
