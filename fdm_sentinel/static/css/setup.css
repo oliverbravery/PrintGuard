@@ -206,6 +206,7 @@
 }
 
 .tunnel-option {
+    position: relative;
     text-align: left;
     padding: var(--spacing-lg);
     height: auto;
@@ -531,4 +532,34 @@
     box-shadow: 0 8px 25px rgba(59, 130, 246, 0.3);
     text-decoration: none;
     color: white;
+}
+
+.recommended-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: var(--success-color);
+    color: white;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    border: 2px dotted white;
+    border-radius: 4px;
+    text-transform: uppercase;
+    z-index: 2;
+    animation: pulse-border 2s infinite;
+}
+
+@keyframes pulse-border {
+    0%, 100% {
+        border-color: white;
+    }
+    50% {
+        border-color: rgba(255, 255, 255, 0.6);
+    }
+}
+
+.tunnel-option.selected .recommended-badge {
+    background: rgba(46, 204, 64, 0.9);
+    border-color: rgba(255, 255, 255, 0.8);
 }
