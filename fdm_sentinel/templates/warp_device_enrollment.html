@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WARP Device Enrollment - FDM Sentinel</title>
+    <title>Cloudflare Tunnel Authentication Setup - FDM Sentinel</title>
     <link rel="stylesheet" href="{{ url_for('static', path='css/universal.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='css/warp_enrollment.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic+Coding&display=swap" rel="stylesheet">
@@ -13,8 +13,8 @@
     <div class="universal-container">
         <div class="universal-card">
             <div class="warp-enrollment-header">
-                <h1>🔒 WARP Device Enrollment</h1>
-                <p>Register this device for secure access to FDM Sentinel</p>
+                <h1>🔒 Cloudflare Tunnel Authentication Setup</h1>
+                <p>Setup authentication for your site so it can only be accessed by authorised emails.</p>
             </div>
             <div class="universal-section warp-device-info">
                 <h3>Device Information</h3>
@@ -81,20 +81,15 @@
                 <p>If your setup requires the WARP client, you will need to download and login to the WARP client on each device you wish to visit the site from. Otherwise, you can access the site directly through your Cloudflare domain and by logging in with one of your allowed email addresses.</p>
             </div>
             <div class="universal-section warp-share-section">
-                <h3>📱 Share Enrollment Link</h3>
+                <h3>📱 Share Link</h3>
                 <p class="text-center mb-md" style="color: var(--text-secondary); font-size: var(--font-size-sm);">
-                    Scan the QR code or share the link to enroll other devices
+                    Scan the QR code or share the link to open this page on your other devices.
                 </p>
                 <div class="warp-qr-container">
                     <canvas id="qr-code"></canvas>
                 </div>
                 <div class="code-block warp-share-url" id="enrollment-url">Loading...</div>
                 <button class="btn secondary warp-copy-button" id="copy-url-btn">📋 Copy Link</button>
-            </div>
-            <div class="divider">
-                <p class="warp-security-notice">
-                    This page is only accessible from the local network for security.
-                </p>
             </div>
         </div>
     </div>

@@ -348,12 +348,6 @@ async def get_feed_settings():
 
 @router.get("/setup/warp/add-device", include_in_schema=False)
 async def serve_warp_device_enrollment(request: Request):
-    client_host = request.client.host if request.client else "unknown"
-    if client_host not in ["127.0.0.1", "localhost", "::1"]:
-        raise HTTPException(
-            status_code=403,
-            detail="This endpoint is only accessible from localhost"
-        )
     try:
         # pylint:disable=import-outside-toplevel
         from ..app import templates
