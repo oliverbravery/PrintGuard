@@ -1,7 +1,7 @@
 import asyncio
 from enum import Enum
-from typing import List, Optional
-from pydantic import BaseModel, field_validator
+from typing import List, Optional, Dict
+from pydantic import BaseModel, field_validator, Field
 
 class Alert(BaseModel):
     id: str
@@ -186,3 +186,39 @@ class FeedSettings(BaseModel):
     stream_max_width: int
     detections_per_second: int
     detection_interval_ms: int
+
+class FileInfo(BaseModel):
+    name: str
+    origin: str
+    size: int
+    date: int
+
+
+class Progress(BaseModel):
+    completion: float
+    filepos: Optional[int]
+    printTime: Optional[int]
+    printTimeLeft: Optional[int]
+
+
+class JobInfoResponse(BaseModel):
+    job: Dict[str, FileInfo]
+    progress: Progress
+    state: str
+    error: Optional[str]
+
+
+class TemperatureReading(BaseModel):
+    actual: float
+    target: Optional[float]
+    offset: Optional[float]
+
+
+class PrinterState(BaseModel):
+    temperature: Dict[str, TemperatureReading]
+    
+class CurrentPayload(BaseModel):
+    state: dict
+    job: JobInfoResponse.__fields__['job'].outer_type_
+    progress: Progress
+    temps: Optional[list] = Field(None, alias="temps")
