@@ -851,7 +851,6 @@ document.getElementById('linkPrinterForm').addEventListener('submit', async (e) 
         if (data.success) {
             console.log('Printer linked successfully, updating UI...');
             await fetchAndUpdateMetricsForCamera(camIdx);
-            document.getElementById('settingsButton').textContent = 'Settings ✓';
             printerModalOverlay.style.display = 'none';
             stopPrinterStatsPolling();
             document.getElementById('linkPrinterForm').reset();
