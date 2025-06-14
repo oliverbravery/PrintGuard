@@ -26,6 +26,8 @@ class OctoPrintClient:
             timeout=10,
             json={"command": "cancel"}
         )
+        if resp.status_code == 409:
+            return
         resp.raise_for_status()
 
     def get_printer_temperatures(self) -> Dict[str, TemperatureReading]:

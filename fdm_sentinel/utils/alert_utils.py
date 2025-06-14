@@ -37,9 +37,27 @@ async def cancel_print(alert_id):
                     printer_config['base_url'],
                     printer_config['api_key']
                 )
-                client.cancel_job()
-                logging.info("Print cancelled for printer %s on camera %d",
-                           printer_config['name'], camera_index)
+                try:
+                    job_info = client.get_job_info()
+                    if job_info.state == "Printing":
+                        client.cancel_job()
+                        logging.debug("Print cancelled for printer %s on camera %d",
+                                   printer_config['name'], camera_index)
+                    else:
+                        logging.debug("Print job not active (state: %s) for printer %s on camera %d, dismissing alert",
+                                   job_info.state, printer_config['name'], camera_index)
+                except Exception as e:
+                    logging.warning(
+                        "Could not check job status before cancelling for printer %s: %s",
+                        printer_config['name'], e)
+                    try:
+                        client.cancel_job()
+                        logging.debug(
+                            "Print cancel attempted for printer %s on camera %d",
+                            printer_config['name'], camera_index)
+                    except Exception as cancel_e:
+                        logging.error("Error cancelling print for printer %s: %s",
+                                    printer_config['name'], cancel_e)
         return await dismiss_alert(alert_id)
     except Exception as e:
         logging.error("Error cancelling print for alert %s: %s", alert_id, e)
