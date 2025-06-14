@@ -70,6 +70,8 @@ class CameraState(BaseModel):
     countdown_action: str = None
     majority_vote_threshold: int = None
     majority_vote_window: int = None
+    printer_id: Optional[str] = None
+    printer_config: Optional[Dict] = None
 
     def __init__(self, **data):
         if 'brightness' not in data:
@@ -188,24 +190,28 @@ class FeedSettings(BaseModel):
     detection_interval_ms: int
 
 class FileInfo(BaseModel):
-    name: str
-    origin: str
-    size: int
-    date: int
+    name: Optional[str] = None
+    origin: Optional[str] = None
+    size: Optional[int] = None
+    date: Optional[int] = None
 
 
 class Progress(BaseModel):
-    completion: float
-    filepos: Optional[int]
-    printTime: Optional[int]
-    printTimeLeft: Optional[int]
+    completion: Optional[float] = None
+    filepos: Optional[int] = None
+    printTime: Optional[int] = None
+    printTimeLeft: Optional[int] = None
 
 
 class JobInfoResponse(BaseModel):
-    job: Dict[str, FileInfo]
-    progress: Progress
+    job: Dict = Field(default_factory=dict)
+    progress: Optional[Progress] = None
     state: str
-    error: Optional[str]
+    error: Optional[str] = None
+
+    model_config = {
+        "extra": "ignore"
+    }
 
 
 class TemperatureReading(BaseModel):
@@ -222,3 +228,20 @@ class CurrentPayload(BaseModel):
     job: Any
     progress: Progress
     temps: Optional[list] = Field(None, alias="temps")
+
+class PrinterType(str, Enum):
+    OCTOPRINT = "octoprint"
+
+class PrinterConfig(BaseModel):
+    name: str
+    printer_type: PrinterType
+    camera_index: int
+    base_url: str
+    api_key: str
+
+class PrinterConfigRequest(BaseModel):
+    name: str
+    printer_type: PrinterType
+    camera_index: int
+    base_url: str
+    api_key: str
