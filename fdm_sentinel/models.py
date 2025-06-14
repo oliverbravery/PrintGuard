@@ -153,6 +153,8 @@ class SavedConfig(str, Enum):
     STREAM_JPEG_QUALITY = "stream_jpeg_quality"
     STREAM_MAX_WIDTH = "stream_max_width"
     DETECTION_INTERVAL_MS = "detection_interval_ms"
+    PRINTER_STAT_POLLING_RATE_MS = "printer_stat_polling_rate_ms"
+    TUNNEL_STAT_POLLING_RATE_MS = "tunnel_stat_polling_rate_ms"
 
 class CloudflareTunnelConfig(BaseModel):
     account_id: str
@@ -188,6 +190,8 @@ class FeedSettings(BaseModel):
     stream_max_width: int
     detections_per_second: int
     detection_interval_ms: int
+    printer_stat_polling_rate_ms: int
+    tunnel_stat_polling_rate_ms: int
 
 class FileInfo(BaseModel):
     name: Optional[str] = None

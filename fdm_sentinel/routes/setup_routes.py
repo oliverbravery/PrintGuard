@@ -16,7 +16,8 @@ from ..models import (TunnelProvider, TunnelSettings, SavedConfig,
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
                             store_key, get_config, update_config, get_key,
                             STREAM_MAX_FPS, STREAM_TUNNEL_FPS, STREAM_JPEG_QUALITY,
-                            STREAM_MAX_WIDTH, DETECTION_INTERVAL_MS)
+                            STREAM_MAX_WIDTH, DETECTION_INTERVAL_MS,
+                            PRINTER_STAT_POLLING_RATE_MS, TUNNEL_STAT_POLLING_RATE_MS)
 from ..utils.setup_utils import setup_ngrok_tunnel
 from ..utils.cloudflare_utils import CloudflareAPI, get_cloudflare_setup_sequence
 from ..utils.stream_utils import stream_optimizer
@@ -314,7 +315,9 @@ async def save_feed_settings(settings: FeedSettings):
             SavedConfig.STREAM_TUNNEL_FPS: settings.stream_tunnel_fps,
             SavedConfig.STREAM_JPEG_QUALITY: settings.stream_jpeg_quality,
             SavedConfig.STREAM_MAX_WIDTH: settings.stream_max_width,
-            SavedConfig.DETECTION_INTERVAL_MS: settings.detection_interval_ms
+            SavedConfig.DETECTION_INTERVAL_MS: settings.detection_interval_ms,
+            SavedConfig.PRINTER_STAT_POLLING_RATE_MS: settings.printer_stat_polling_rate_ms,
+            SavedConfig.TUNNEL_STAT_POLLING_RATE_MS: settings.tunnel_stat_polling_rate_ms
         }
         update_config(config_data)
         stream_optimizer.invalidate_cache()
@@ -337,7 +340,9 @@ async def get_feed_settings():
             "stream_tunnel_fps": config.get(SavedConfig.STREAM_TUNNEL_FPS, STREAM_TUNNEL_FPS),
             "stream_jpeg_quality": config.get(SavedConfig.STREAM_JPEG_QUALITY, STREAM_JPEG_QUALITY),
             "stream_max_width": config.get(SavedConfig.STREAM_MAX_WIDTH, STREAM_MAX_WIDTH),
-            "detection_interval_ms": config.get(SavedConfig.DETECTION_INTERVAL_MS, DETECTION_INTERVAL_MS)
+            "detection_interval_ms": config.get(SavedConfig.DETECTION_INTERVAL_MS, DETECTION_INTERVAL_MS),
+            "printer_stat_polling_rate_ms": config.get(SavedConfig.PRINTER_STAT_POLLING_RATE_MS, PRINTER_STAT_POLLING_RATE_MS),
+            "tunnel_stat_polling_rate_ms": config.get(SavedConfig.TUNNEL_STAT_POLLING_RATE_MS, TUNNEL_STAT_POLLING_RATE_MS)
         }
         settings["detections_per_second"] = round(1000 / settings["detection_interval_ms"])
         return {"success": True, "settings": settings}

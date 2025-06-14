@@ -538,7 +538,9 @@ function saveFeedSettings() {
         stream_jpeg_quality: parseInt(document.getElementById('streamJpegQuality').value),
         stream_max_width: parseInt(document.getElementById('streamMaxWidth').value),
         detections_per_second: parseInt(document.getElementById('detectionsPerSecond').value),
-        detection_interval_ms: parseInt(document.getElementById('detectionInterval').value)
+        detection_interval_ms: parseInt(document.getElementById('detectionInterval').value),
+        printer_stat_polling_rate_ms: parseInt(document.getElementById('printerStatPollingRate').value),
+        tunnel_stat_polling_rate_ms: parseInt(document.getElementById('tunnelStatPollingRate').value)
     };
     fetch('/setup/save-feed-settings', {
         method: 'POST',
@@ -603,6 +605,8 @@ function loadFeedSettings() {
             updateSliderValue('streamMaxWidth', settings.stream_max_width);
             updateSliderValue('detectionsPerSecond', settings.detections_per_second);
             updateSliderValue('detectionInterval', settings.detection_interval_ms);
+            updateSliderValue('printerStatPollingRate', settings.printer_stat_polling_rate_ms);
+            updateSliderValue('tunnelStatPollingRate', settings.tunnel_stat_polling_rate_ms);
         }
     })
     .catch(error => {
@@ -767,6 +771,7 @@ printerModalClose.addEventListener('click', () => {
 
 let printerStatsInterval;
 function startPrinterStatsPolling(camIdx) {
+    const rate = parseInt(document.getElementById('printerStatPollingRate').value, 10) || 2000;
     printerStatsInterval = setInterval(() => {
         fetch(`/setup/camera/${camIdx}/printer/stats`)
             .then(res => res.json())
@@ -779,7 +784,7 @@ function startPrinterStatsPolling(camIdx) {
                     document.getElementById('modalBedTarget').textContent = stat.temperatures.bed.target;
                 }
             });
-    }, 500);
+    }, rate);
 }
 
 function stopPrinterStatsPolling() {
@@ -790,6 +795,7 @@ let printerStatusInterval;
 
 function startPrinterStatusPolling(cameraIdx) {
     stopPrinterStatusPolling();
+    const rate = parseInt(document.getElementById('tunnelStatPollingRate').value, 10) || 5000;
     printerStatusInterval = setInterval(() => {
         fetch(`/setup/camera/${cameraIdx}/printer/stats`)
             .then(response => response.json())
@@ -808,7 +814,7 @@ function startPrinterStatusPolling(cameraIdx) {
                     printerConfigStatus.textContent = 'Printer Settings';
                 }
             });
-    }, 3000);
+    }, rate);
 }
 
 function stopPrinterStatusPolling() {

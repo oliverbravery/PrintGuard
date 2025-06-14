@@ -832,7 +832,9 @@ input[type="range"]::-moz-range-thumb {
 #streamJpegQuality::-webkit-slider-runnable-track,
 #streamMaxWidth::-webkit-slider-runnable-track,
 #detectionsPerSecond::-webkit-slider-runnable-track,
-#detectionInterval::-webkit-slider-runnable-track {
+#detectionInterval::-webkit-slider-runnable-track,
+#printerStatPollingRate::-webkit-slider-runnable-track,
+#tunnelStatPollingRate::-webkit-slider-runnable-track {
     background: linear-gradient(to right, #ADD8E6 var(--value, 50%), #ffffff var(--value, 50%));
 }
 
@@ -841,7 +843,9 @@ input[type="range"]::-moz-range-thumb {
 #streamJpegQuality::-moz-range-track,
 #streamMaxWidth::-moz-range-track,
 #detectionsPerSecond::-moz-range-track,
-#detectionInterval::-moz-range-track {
+#detectionInterval::-moz-range-track,
+#printerStatPollingRate::-moz-range-track,
+#tunnelStatPollingRate::-moz-range-track {
     background: linear-gradient(to right, #ADD8E6 var(--value, 50%), #ffffff var(--value, 50%));
 }
 
