@@ -39,6 +39,7 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
     # pylint: disable=E1101
     _, img_buf = cv2.imencode('.jpg', frame)
+    has_printer = hasattr(camera_state_ref, 'printer_config') and camera_state_ref.printer_config
     alert = Alert(
         id=alert_id,
         camera_index=camera_index,
@@ -47,6 +48,7 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
         title=f"Defect - Camera {camera_index}",
         message=f"Defect detected on camera {camera_index}",
         countdown_time=camera_state_ref.countdown_time,
+        has_printer=has_printer,
     )
     asyncio.create_task(_terminate_alert_after_cooldown(alert))
     await update_camera_state(camera_index, {"current_alert_id": alert_id})

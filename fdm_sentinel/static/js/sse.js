@@ -116,10 +116,12 @@ function updateAlertUI(data) {
         alertContent = `<img src="data:image/jpeg;base64,${data.snapshot}" 
                             style="width:100%;margin-bottom:10px;" />` + alertContent;
     }
-
+    const hasPrinter = data.has_printer === true;
     alertContent += `<div>
         <button class="dismiss-btn" data-alert-id="${data.id}">Dismiss</button>
-        <button class="cancel-print-btn" data-alert-id="${data.id}">Cancel Print</button>
+        <button class="cancel-print-btn${!hasPrinter ? ' disabled' : ''}" 
+                data-alert-id="${data.id}"
+                ${!hasPrinter ? 'disabled' : ''}>Cancel Print</button>
     </div>`;
     
     alertElement.innerHTML = alertContent;
@@ -129,9 +131,12 @@ function updateAlertUI(data) {
         dismissAlert('dismiss', data.id);
     });
     
-    alertElement.querySelector('.cancel-print-btn').addEventListener('click', () => {
-        dismissAlert('cancel', data.id);
-    });
+    const cancelBtn = alertElement.querySelector('.cancel-print-btn');
+    if (hasPrinter) {
+        cancelBtn.addEventListener('click', () => {
+            dismissAlert('cancel', data.id);
+        });
+    }
     
     notificationPopup.style.display = 'block';
 }
