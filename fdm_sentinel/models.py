@@ -1,6 +1,6 @@
 import asyncio
 from enum import Enum
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, field_validator, Field
 
 class Alert(BaseModel):
@@ -216,9 +216,9 @@ class TemperatureReading(BaseModel):
 
 class PrinterState(BaseModel):
     temperature: Dict[str, TemperatureReading]
-    
+
 class CurrentPayload(BaseModel):
     state: dict
-    job: JobInfoResponse.__fields__['job'].outer_type_
+    job: Any
     progress: Progress
     temps: Optional[list] = Field(None, alias="temps")
