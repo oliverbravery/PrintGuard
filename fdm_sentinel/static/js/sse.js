@@ -134,7 +134,7 @@ function updateAlertUI(data) {
     const cancelBtn = alertElement.querySelector('.cancel-print-btn');
     if (hasPrinter) {
         cancelBtn.addEventListener('click', () => {
-            dismissAlert('cancel', data.id);
+            dismissAlert('cancel_print', data.id);
         });
     }
     
