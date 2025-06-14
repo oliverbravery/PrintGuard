@@ -198,7 +198,9 @@ function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
             sensitivity: data.sensitivity,
             countdown_time: data.countdown_time,
             majority_vote_threshold: data.majority_vote_threshold,
-            majority_vote_window: data.majority_vote_window
+            majority_vote_window: data.majority_vote_window,
+            printer_id: data.printer_id,
+            printer_config: data.printer_config
         };
         updatePolledDetectionData(metricsData);
         updateSelectedCameraSettings(metricsData);
@@ -268,7 +270,11 @@ cameraItems.forEach(item => {
         cameraIndex = cameraId;
         settingsCameraIndex.value = cameraId;
         updateCameraTitle(cameraId);
+        stopPrinterStatusPolling();
         fetchAndUpdateMetricsForCamera(cameraId);
+        setTimeout(() => {
+            ensurePrinterInfoLoaded(parseInt(cameraId, 10));
+        }, 200);
     });
 });
 
@@ -279,12 +285,16 @@ document.addEventListener('cameraStateUpdated', evt => {
 });
 
 document.addEventListener('DOMContentLoaded', function() {
-    cameraItems.forEach(item => {
-        item.click();
-    });
     const firstCameraItem = cameraItems[0];
     if (firstCameraItem) {
         firstCameraItem.click();
+        const cameraIdText = firstCameraItem.querySelector('.camera-text-content span:first-child').textContent;
+        const cameraId = cameraIdText.split(': ')[1];
+        if (cameraId && cameraId !== "No cameras available") {
+            setTimeout(() => {
+                ensurePrinterInfoLoaded(parseInt(cameraId, 10));
+            }, 500);
+        }
     }
 });
 
@@ -630,22 +640,18 @@ document.addEventListener('keydown', function(e) {
 });
 
 function updatePrinterInfo(cameraData) {
-    const printerInfo = document.getElementById('printerInfo');
-    const noPrinterInfo = document.getElementById('noPrinterInfo');
-    const printerName = document.getElementById('printerName');
-    const printerType = document.getElementById('printerType');
-    const printerStats = document.getElementById('printerStats');
-
+    const printerConfigBtn = document.getElementById('printerConfigBtn');
+    const linkPrinterBtn = document.getElementById('linkPrinterBtn');
+    const printerConfigStatus = document.getElementById('printerConfigStatus');
     if (cameraData.printer_config && cameraData.printer_id) {
-        const config = cameraData.printer_config;
-        printerInfo.style.display = 'block';
-        noPrinterInfo.style.display = 'none';
-        printerName.textContent = config.name;
-        printerType.textContent = `${config.printer_type} | ${config.base_url}`;
-        printerStats.style.display = 'none';
+        printerConfigBtn.style.display = 'block';
+        linkPrinterBtn.style.display = 'none';
+        printerConfigStatus.textContent = `Printer Settings`;
+        startPrinterStatusPolling(cameraData.camera_index);
     } else {
-        printerInfo.style.display = 'none';
-        noPrinterInfo.style.display = 'block';
+        printerConfigBtn.style.display = 'none';
+        linkPrinterBtn.style.display = 'block';
+        stopPrinterStatusPolling();
     }
 }
 
@@ -677,8 +683,8 @@ function showPrinterStats() {
 function unlinkPrinter() {
     const camIdx = parseInt(settingsCameraIndex.value, 10);
     if (!camIdx && camIdx !== 0) return;
-
     if (confirm('Are you sure you want to unlink this printer from the camera?')) {
+        stopPrinterStatusPolling();
         fetch(`/setup/remove-printer/${camIdx}`, {
             method: 'POST'
         })
@@ -698,10 +704,8 @@ function unlinkPrinter() {
     }
 }
 
-document.getElementById('showPrinterStatsBtn')?.addEventListener('click', showPrinterStats);
-document.getElementById('unlinkPrinterBtn')?.addEventListener('click', unlinkPrinter);
-document.getElementById('changePrinterBtn')?.addEventListener('click', openPrinterModal);
 document.getElementById('linkPrinterBtn')?.addEventListener('click', openPrinterModal);
+document.getElementById('printerConfigBtn')?.addEventListener('click', openPrinterModal);
 
 const printerModalOverlay = document.getElementById('printerModalOverlay');
 const printerModalClose = document.getElementById('printerModalClose');
@@ -782,6 +786,38 @@ function stopPrinterStatsPolling() {
     clearInterval(printerStatsInterval);
 }
 
+let printerStatusInterval;
+
+function startPrinterStatusPolling(cameraIdx) {
+    stopPrinterStatusPolling();
+    printerStatusInterval = setInterval(() => {
+        fetch(`/setup/camera/${cameraIdx}/printer/stats`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const printerConfigStatus = document.getElementById('printerConfigStatus');
+                    if (printerConfigStatus && data.printer_config) {
+                        printerConfigStatus.textContent = `Printer Settings`;
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error polling printer status:', error);
+                const printerConfigStatus = document.getElementById('printerConfigStatus');
+                if (printerConfigStatus) {
+                    printerConfigStatus.textContent = 'Printer Settings';
+                }
+            });
+    }, 3000);
+}
+
+function stopPrinterStatusPolling() {
+    if (printerStatusInterval) {
+        clearInterval(printerStatusInterval);
+        printerStatusInterval = null;
+    }
+}
+
 document.getElementById('modalCancelPrintBtn').addEventListener('click', () => {
     const camIdx = parseInt(cameraIndex, 10);
     fetch('/alert/dismiss', {
@@ -796,13 +832,11 @@ document.getElementById('modalUnlinkPrinterBtn').addEventListener('click', () =>
     printerModalOverlay.style.display = 'none';
 });
 
-document.getElementById('changePrinterBtn').addEventListener('click', openPrinterModal);
-
 document.getElementById('modalPrinterConnectionType').addEventListener('change', (e) => {
     document.getElementById('modalOctoprintConfig').style.display = e.target.value === 'octoprint' ? 'block' : 'none';
 });
 
-document.getElementById('linkPrinterForm').addEventListener('submit', async (e) => {
+document.getElementById('linkPrinterForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const submitButton = e.target.querySelector('button[type="submit"]');
     const originalButtonText = submitButton.textContent;
@@ -851,6 +885,9 @@ document.getElementById('linkPrinterForm').addEventListener('submit', async (e) 
         if (data.success) {
             console.log('Printer linked successfully, updating UI...');
             await fetchAndUpdateMetricsForCamera(camIdx);
+            setTimeout(() => {
+                ensurePrinterInfoLoaded(camIdx);
+            }, 100);
             printerModalOverlay.style.display = 'none';
             stopPrinterStatsPolling();
             document.getElementById('linkPrinterForm').reset();
@@ -872,3 +909,42 @@ document.getElementById('linkPrinterForm').addEventListener('submit', async (e) 
         submitButton.textContent = originalButtonText;
     }
 });
+
+window.addEventListener('beforeunload', () => {
+    stopPrinterStatusPolling();
+    stopPrinterStatsPolling();
+});
+
+function ensurePrinterInfoLoaded(cameraIdx, retryCount = 0) {
+    const maxRetries = 3;
+    fetch(`/live/camera`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera_index: cameraIdx })
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('Printer info check for camera', cameraIdx, ':', {
+            printer_id: data.printer_id,
+            printer_config: data.printer_config
+        });
+        updatePrinterInfo({
+            camera_index: cameraIdx,
+            printer_id: data.printer_id,
+            printer_config: data.printer_config
+        });
+        if (!data.printer_id && !data.printer_config && retryCount < maxRetries) {
+            setTimeout(() => {
+                ensurePrinterInfoLoaded(cameraIdx, retryCount + 1);
+            }, 1000);
+        }
+    })
+    .catch(error => {
+        console.error('Error checking printer info:', error);
+        if (retryCount < maxRetries) {
+            setTimeout(() => {
+                ensurePrinterInfoLoaded(cameraIdx, retryCount + 1);
+            }, 1000);
+        }
+    });
+}

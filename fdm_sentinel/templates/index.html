@@ -106,29 +106,12 @@
                         <input type="range" id="majority_vote_window" name="majority_vote_window" min="1" max="100"  value="-" />
                     </div>
                     <div class="settings-item">
-                        <label>Printer Configuration</label>
-                        <div class="printer-control">
-                            <div id="printerInfo" class="printer-info" style="display: none;">
-                                <div class="printer-details">
-                                    <h4 id="printerName">-</h4>
-                                    <p id="printerType">-</p>
-                                    <div class="printer-stats" id="printerStats" style="display: none;">
-                                        <p>Status: <span id="printerStatus">-</span></p>
-                                        <p>Nozzle: <span id="nozzleTemp">-</span>°C / <span id="nozzleTarget">-</span>°C</p>
-                                        <p>Bed: <span id="bedTemp">-</span>°C / <span id="bedTarget">-</span>°C</p>
-                                    </div>
-                                </div>
-                                <div class="printer-actions">
-                                    <button type="button" id="showPrinterStatsBtn" class="printer-btn">Show Stats</button>
-                                    <button type="button" id="changePrinterBtn" class="printer-btn">Change</button>
-                                    <button type="button" id="unlinkPrinterBtn" class="printer-btn danger">Unlink</button>
-                                </div>
-                            </div>
-                            <div id="noPrinterInfo" class="no-printer-info">
-                                <p>No printer linked to this camera</p>
-                                <button type="button" id="linkPrinterBtn" class="printer-btn">Link Printer</button>
-                            </div>
-                        </div>
+                        <button class="start-stop-btn" id="printerConfigBtn" style="display: none;">
+                            <span id="printerConfigStatus">Printer Connected</span>
+                        </button>
+                        <button class="start-stop-btn" id="linkPrinterBtn">
+                            Link Printer
+                        </button>
                     </div>
                     <div class="settings-item">
                         <label for="notificationBtn">Notifications</label>
