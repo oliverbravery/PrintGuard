@@ -30,6 +30,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('base-url').value = domain;
             }
         }
+        if (sectionId === 'printers') {
+            loadCameras();
+        }
         let progressContainer;
         if (selectedNetworkOption === 'external') {
             if (selectedTunnelProvider === 'ngrok') {
@@ -266,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (selectedNetworkOption === 'external' && selectedTunnelProvider === 'cloudflare') {
                     showSection('cloudflare-download');
                 } else if (selectedNetworkOption === 'external') {
-                    showSection('finish');
+                    showSection('printers');
                 } else {
                     showSection('ssl');
                 }
@@ -287,7 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setupState.sslConfigured = true;
                 setupState.sslData = { generated: true };
                 alert('SSL certificate generated successfully');
-                showSection('finish');
+                showSection('printers');
             } else {
                 alert('Failed to generate SSL certificate');
             }
@@ -323,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response.ok) {
                 setupState.sslConfigured = true;
                 setupState.sslData = { imported: true };
-                showSection('finish');
+                showSection('printers');
             } else {
                 const error = await response.json();
                 alert(`Failed to upload SSL certificate: ${error.detail}`);
@@ -588,7 +591,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     document.getElementById('continue-to-finish-from-cloudflare').addEventListener('click', () => {
-        showSection('finish');
+        showSection('printers');
     });
 
     window.copyToClipboard = function(text, button) {
@@ -614,4 +617,202 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 2000);
         });
     };
+
+    document.getElementById('skip-printers-btn').addEventListener('click', () => {
+        showSection('finish');
+    });
+
+    document.getElementById('continue-to-finish-from-printers').addEventListener('click', () => {
+        showSection('finish');
+    });
+
+    async function loadCameras() {
+        document.getElementById('cameras-loading').style.display = 'flex';
+        document.getElementById('printer-buttons').style.display = 'none';
+        document.getElementById('printers-list').style.display = 'none';
+        
+        try {
+            const response = await fetch('/setup/cameras');
+            const data = await response.json();
+            
+            const cameraSelect = document.getElementById('camera-select');
+            cameraSelect.innerHTML = '';
+            
+            if (data.cameras && data.cameras.length > 0) {
+                data.cameras.forEach((camera, index) => {
+                    const option = document.createElement('option');
+                    option.value = index;
+                    option.textContent = `Camera ${index + 1}: ${camera}`;
+                    cameraSelect.appendChild(option);
+                });
+                
+                document.getElementById('camera-select').innerHTML = cameraSelect.innerHTML;
+            } else {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No cameras detected';
+                cameraSelect.appendChild(option);
+            }
+            document.getElementById('cameras-loading').style.display = 'none';
+            document.getElementById('printer-buttons').style.display = 'flex';
+            document.getElementById('printers-list').style.display = 'block';
+            updatePrinterList();
+        } catch (error) {
+            console.error('Error loading cameras:', error);
+            document.getElementById('camera-select').innerHTML = '<option value="">Error loading cameras</option>';
+            document.getElementById('cameras-loading').style.display = 'none';
+            document.getElementById('printer-buttons').style.display = 'flex';
+            document.getElementById('printers-list').style.display = 'block';
+            document.getElementById('printers-list').innerHTML = '<p class="error">Error detecting cameras. Please try again.</p>';
+        }
+    }
+    
+    document.getElementById('add-printer-btn').addEventListener('click', () => {
+        document.getElementById('printer-form').style.display = 'block';
+    });
+
+    document.getElementById('printer-connection-type').addEventListener('change', (e) => {
+        if (e.target.value === 'octoprint') {
+            document.getElementById('octoprint-config').style.display = 'block';
+        } else {
+            document.getElementById('octoprint-config').style.display = 'none';
+        }
+    });
+
+    document.getElementById('test-printer-connection-btn').addEventListener('click', async () => {
+        const connectionType = document.getElementById('printer-connection-type').value;
+        if (connectionType !== 'octoprint') {
+            alert('Only OctoPrint connections are supported at this time.');
+            return;
+        }
+        
+        const octoprintUrl = document.getElementById('octoprint-url').value.trim();
+        const apiKey = document.getElementById('octoprint-api-key').value.trim();
+        
+        if (!octoprintUrl || !apiKey) {
+            alert('Please enter both OctoPrint URL and API key');
+            return;
+        }
+
+        const connectionStatus = document.getElementById('connection-status');
+        connectionStatus.innerHTML = '<p>Testing connection...</p>';
+        connectionStatus.style.display = 'block';
+        
+        try {
+            const response = await fetch('/setup/test-printer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    printer_type: connectionType,
+                    name: document.getElementById('printer-name').value.trim(),
+                    base_url: octoprintUrl,
+                    api_key: apiKey,
+                    camera_index: parseInt(document.getElementById('camera-select').value)
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                connectionStatus.innerHTML = `
+                    <p class="success">✓ Connection successful</p>
+                    <p>Printer state: ${result.printer_state}</p>
+                    <p>Temperatures: Nozzle ${result.temperatures.tool0.actual}°C, Bed ${result.temperatures.bed.actual}°C</p>
+                `;
+                document.getElementById('save-printer-btn').disabled = false;
+            } else {
+                connectionStatus.innerHTML = `
+                    <p class="error">✗ Connection failed</p>
+                    <p>Error: ${result.error}</p>
+                `;
+                document.getElementById('save-printer-btn').disabled = true;
+            }
+        } catch (error) {
+            console.error('Error testing printer connection:', error);
+            connectionStatus.innerHTML = `
+                <p class="error">✗ Connection failed</p>
+                <p>Error: Network error or invalid response</p>
+            `;
+            document.getElementById('save-printer-btn').disabled = true;
+        }
+    });
+
+    document.getElementById('save-printer-btn').addEventListener('click', async () => {
+        const connectionType = document.getElementById('printer-connection-type').value;
+        const printerName = document.getElementById('printer-name').value.trim();
+        const cameraIndex = parseInt(document.getElementById('camera-select').value);
+        
+        if (!printerName || isNaN(cameraIndex)) {
+            alert('Please fill in all required fields');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/setup/add-printer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    printer_type: connectionType,
+                    name: printerName,
+                    base_url: document.getElementById('octoprint-url').value.trim(),
+                    api_key: document.getElementById('octoprint-api-key').value.trim(),
+                    camera_index: cameraIndex
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                document.getElementById('printer-name').value = '';
+                document.getElementById('octoprint-url').value = '';
+                document.getElementById('octoprint-api-key').value = '';
+                document.getElementById('printer-form').style.display = 'none';
+                document.getElementById('connection-status').style.display = 'none';
+                document.getElementById('save-printer-btn').disabled = true;
+                updatePrinterList();
+            } else {
+                alert(`Failed to add printer: ${result.error || 'Unknown error'}`);
+            }
+        } catch (error) {
+            console.error('Error saving printer:', error);
+            alert('Network error while saving printer');
+        }
+    });
+
+    document.getElementById('cancel-printer-btn').addEventListener('click', () => {
+        document.getElementById('printer-form').style.display = 'none';
+        document.getElementById('connection-status').style.display = 'none';
+        document.getElementById('save-printer-btn').disabled = true;
+    });
+
+    async function updatePrinterList() {
+        try {
+            const response = await fetch('/setup/printers');
+            const data = await response.json();
+            
+            const printersList = document.getElementById('printers-list');
+            printersList.innerHTML = '';
+            
+            if (data.printers && Object.keys(data.printers).length > 0) {
+                Object.entries(data.printers).forEach(([id, printer]) => {
+                    const printerElement = document.createElement('div');
+                    printerElement.className = 'printer-item';
+                    printerElement.innerHTML = `
+                        <h4>${printer.name}</h4>
+                        <p>${printer.printer_type} | Camera ${printer.camera_index + 1}</p>
+                        <p class="printer-url">${printer.base_url}</p>
+                        <div class="status-badge connected">Connected</div>
+                    `;
+                    printersList.appendChild(printerElement);
+                });
+                document.getElementById('summary-printers-status').textContent = 
+                    `${Object.keys(data.printers).length} printer${Object.keys(data.printers).length !== 1 ? 's' : ''} configured`;
+            } else {
+                printersList.innerHTML = '<p>No printers configured yet</p>';
+                document.getElementById('summary-printers-status').textContent = 'No printers configured';
+            }
+        } catch (error) {
+            console.error('Error loading printers:', error);
+        }
+    }
 });

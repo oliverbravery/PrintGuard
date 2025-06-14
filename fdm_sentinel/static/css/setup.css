@@ -48,7 +48,95 @@
 
 .form-section {
     width: 100%;
-    margin-top: 20px;
+}
+
+.printers-list {
+    width: 100%;
+    margin: 15px 0;
+}
+
+.printer-item {
+    background-color: #f8f8f8;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    position: relative;
+    border-left: 4px solid #2ecc40;
+}
+
+.printer-item h4 {
+    margin-top: 0;
+    margin-bottom: 8px;
+}
+
+.printer-item p {
+    margin: 5px 0;
+    color: #666;
+}
+
+.printer-url {
+    font-family: 'Nanum Gothic Coding', monospace;
+    font-size: 0.9em;
+}
+
+.status-badge {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    font-size: 0.8em;
+    padding: 3px 8px;
+    border-radius: 10px;
+}
+
+.status-badge.connected {
+    background-color: #e6f9ed;
+    color: #2ecc40;
+}
+
+.status-badge.disconnected {
+    background-color: #ffeaea;
+    color: #ff4136;
+}
+
+#connection-status {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 5px;
+    background-color: #f8f8f8;
+}
+
+#connection-status .success {
+    color: #2ecc40;
+    font-weight: bold;
+}
+
+#connection-status .error {
+    color: #ff4136;
+    font-weight: bold;
+}
+
+.loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 0;
+    width: 100%;
+}
+
+.spinner {
+    border: 4px solid rgba(0, 0, 0, 0.1);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border-left-color: #222;
+    animation: spin 1s linear infinite;
+    margin-bottom: 15px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
 .form-group {

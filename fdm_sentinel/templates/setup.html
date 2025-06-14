@@ -21,21 +21,24 @@
         <div id="setup-progress" style="display:none;">
             <div class="progress-step active" data-step="vapid">1. VAPID Keys</div>
             <div class="progress-step" data-step="ssl">2. SSL Certificate</div>
-            <div class="progress-step" data-step="finish">3. Finish</div>
+            <div class="progress-step" data-step="printers">3. Add Printers</div>
+            <div class="progress-step" data-step="finish">4. Finish</div>
         </div>
         
         <div id="setup-progress-external" style="display:none;">
             <div class="progress-step active" data-step="tunnel">1. Tunnel Provider</div>
             <div class="progress-step" data-step="initialize">2. Initialize Provider</div>
             <div class="progress-step" data-step="vapid">3. VAPID Keys</div>
-            <div class="progress-step" data-step="finish">4. Finish</div>
+            <div class="progress-step" data-step="printers">4. Add Printers</div>
+            <div class="progress-step" data-step="finish">5. Finish</div>
         </div>
         
         <div id="setup-progress-ngrok" style="display:none;">
             <div class="progress-step active" data-step="tunnel">1. Tunnel Provider</div>
             <div class="progress-step" data-step="initialize">2. Initialize Tunnel</div>
             <div class="progress-step" data-step="vapid">3. VAPID Keys</div>
-            <div class="progress-step" data-step="finish">4. Finish</div>
+            <div class="progress-step" data-step="printers">4. Add Printers</div>
+            <div class="progress-step" data-step="finish">5. Finish</div>
         </div>
         
         <div id="setup-progress-cloudflare" style="display:none;">
@@ -43,7 +46,8 @@
             <div class="progress-step" data-step="tunnel-config">2. Tunnel Configuration</div>
             <div class="progress-step" data-step="vapid">3. VAPID Keys</div>
             <div class="progress-step" data-step="cloudflare-download">4. Download Cloudflare</div>
-            <div class="progress-step" data-step="finish">5. Finish</div>
+            <div class="progress-step" data-step="printers">5. Add Printers</div>
+            <div class="progress-step" data-step="finish">6. Finish</div>
         </div>
         
         <div id="setup-content">
@@ -249,7 +253,7 @@
                         </div>
                     </div>
                     <div class="button-group">
-                        <button id="save-vapid-settings" class="setup-btn primary">Save & Continue</button>
+                        <button id="save-vapid-settings" class="setup-btn primary">Save & Continue to Printers</button>
                     </div>
                 </div>
             </div>
@@ -272,7 +276,7 @@
                         <input type="file" id="ssl-key-file" name="ssl-key-file">
                     </div>
                     <div class="button-group">
-                        <button id="save-ssl-settings" class="setup-btn primary">Save & Continue</button>
+                        <button id="save-ssl-settings" class="setup-btn primary">Save & Continue to Printers</button>
                     </div>
                 </div>
             </div>
@@ -322,7 +326,68 @@
                         </a>
                     </div>
                     <div class="button-group">
-                        <button id="continue-to-finish-from-cloudflare" class="setup-btn primary">Continue to Finish</button>
+                        <button id="continue-to-finish-from-cloudflare" class="setup-btn primary">Continue to Printers Setup</button>
+                    </div>
+                </div>
+            </div>
+            <div class="setup-section" id="printers-section">
+                <h3>Add Printers</h3>
+                <p>Add your 3D printers to FDM Sentinel for monitoring and detection.</p>
+                
+                <div class="info-section">
+                    <h4>Printer Setup</h4>
+                    <p>You can add printers now or skip this step and add them later from the main interface.</p>
+                </div>
+                <div id="cameras-loading" class="loading-container">
+                    <div class="spinner"></div>
+                    <p>Detecting available cameras...</p>
+                </div>
+                
+                <div class="printers-list" id="printers-list">
+                </div>
+                
+                <div class="button-group" id="printer-buttons">
+                    <button id="add-printer-btn" class="setup-btn secondary">Add Printer</button>
+                    <button id="skip-printers-btn" class="setup-btn">Skip for Now</button>
+                    <button id="continue-to-finish-from-printers" class="setup-btn primary">Continue to Finish</button>
+                </div>
+                <div class="form-section" id="printer-form" style="display:none;">
+                    <h4>Add New Printer</h4>
+                    <div class="form-group">
+                        <label for="camera-select">Select Camera</label>
+                        <select id="camera-select" name="camera-select" required>
+                            <option value="">Loading cameras...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="printer-connection-type">Connection Type</label>
+                        <select id="printer-connection-type" name="printer-connection-type" required>
+                            <option value="">Select connection type...</option>
+                            <option value="octoprint">OctoPrint</option>
+                        </select>
+                    </div>
+                    <div id="octoprint-config" style="display:none;">
+                        <div class="form-group">
+                            <label for="printer-name">Printer Name</label>
+                            <input type="text" id="printer-name" name="printer-name" placeholder="e.g., Ender 3 Pro" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="octoprint-url">OctoPrint URL</label>
+                            <input type="text" id="octoprint-url" name="octoprint-url" placeholder="e.g., http://192.168.1.100" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="octoprint-api-key">OctoPrint API Key</label>
+                            <input type="text" id="octoprint-api-key" name="octoprint-api-key" placeholder="Your OctoPrint API key" required>
+                        </div>
+                        <div class="form-group">
+                            <button id="test-printer-connection-btn" class="setup-btn secondary">Test Connection</button>
+                        </div>
+                        <div id="connection-status" style="display:none;">
+                        </div>
+                    </div>
+                    <div class="button-group">
+                        <button id="save-printer-btn" class="setup-btn primary" disabled>Save Printer</button>
+                        <button id="cancel-printer-btn" class="setup-btn secondary">Cancel</button>
                     </div>
                 </div>
             </div>
@@ -341,6 +406,9 @@
                     </div>
                     <div class="summary-item" id="ssl-summary-item">
                         <strong>SSL Certificate:</strong> <span id="summary-ssl-status">Not Configured</span>
+                    </div>
+                    <div class="summary-item" id="printers-summary-item">
+                        <strong>Printers Added:</strong> <span id="summary-printers-status">0 printers configured</span>
                     </div>
                 </div>
                 <button id="finish-setup-btn" class="setup-btn primary">Start FDM Sentinel</button>
