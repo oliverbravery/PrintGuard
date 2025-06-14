@@ -2,6 +2,8 @@ import json
 import logging
 import os
 import sys
+import hashlib
+import pickle
 
 import cv2
 import torch
@@ -56,9 +58,66 @@ def draw_label(frame, label, color, success_label="success"):
     return frame
 
 
-def compute_prototypes(model, support_dir, transform, device, success_label="success"):
+def _get_support_dir_hash(support_dir):
+    file_paths = []
+    for root, dirs, files in os.walk(support_dir):
+        dirs.sort()
+        for file in sorted(files):
+            if file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                file_path = os.path.join(root, file)
+                stat = os.stat(file_path)
+                file_paths.append(f"{file_path}:{stat.st_size}:{stat.st_mtime}")
+    content = '\n'.join(file_paths)
+    return hashlib.md5(content.encode()).hexdigest()
+
+
+def _save_prototypes(prototypes, class_names, defect_idx, cache_file):
+    try:
+        cache_dir = os.path.dirname(cache_file)
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_data = {
+            'prototypes': prototypes.cpu(),
+            'class_names': class_names,
+            'defect_idx': defect_idx
+        }
+        with open(cache_file, 'wb') as f:
+            pickle.dump(cache_data, f)
+        logging.debug("Prototypes saved to cache: %s", cache_file)
+    except (OSError, pickle.PickleError) as e:
+        logging.warning("Failed to save prototypes to cache: %s", e)
+
+
+def _load_prototypes(cache_file, device):
+    try:
+        if not os.path.exists(cache_file):
+            return None, None, None
+        with open(cache_file, 'rb') as f:
+            cache_data = pickle.load(f)
+        prototypes = cache_data['prototypes'].to(device)
+        class_names = cache_data['class_names']
+        defect_idx = cache_data['defect_idx']
+        logging.debug("Prototypes loaded from cache: %s", cache_file)
+        return prototypes, class_names, defect_idx
+    except (OSError, pickle.PickleError, KeyError) as e:
+        logging.warning("Failed to load prototypes from cache: %s", e)
+        return None, None, None
+
+
+def compute_prototypes(model, support_dir, transform, device, success_label="success", use_cache=True):
+    support_dir_hash = _get_support_dir_hash(support_dir)
+    cache_dir = os.path.join(support_dir, 'cache')
+    cache_file = os.path.join(cache_dir, f"prototypes_{support_dir_hash}.pkl")
+    if use_cache:
+        cached_prototypes, cached_class_names, cached_defect_idx = _load_prototypes(cache_file,
+                                                                                    device)
+        if cached_prototypes is not None:
+            logging.debug("Using cached prototypes for support directory: %s", support_dir)
+            return cached_prototypes, cached_class_names, cached_defect_idx
+
+    logging.debug("Computing prototypes from scratch for support directory: %s", support_dir)
+
     class_names = sorted([d for d in os.listdir(support_dir)
-                          if os.path.isdir(os.path.join(support_dir, d))])
+                          if os.path.isdir(os.path.join(support_dir, d)) and not d.startswith('.')])
     if not class_names:
         raise ValueError(f"No class subdirectories found in support directory: {support_dir}")
 
@@ -116,6 +175,9 @@ def compute_prototypes(model, support_dir, transform, device, success_label="suc
         logging.warning("'%s' class not found in loaded support set %s. Cannot apply sensitivity adjustment.",
                         success_label, loaded_class_names)
 
+    if use_cache:
+        _save_prototypes(prototypes, loaded_class_names, defect_idx, cache_file)
+
     return prototypes, loaded_class_names, defect_idx
 
 
@@ -154,4 +216,16 @@ def setup_device(requested_device):
                             requested_device)
     logging.debug("Using device: %s", device)
     return device
+
+def clear_prototype_cache(support_dir):
+    cache_dir = os.path.join(support_dir, 'cache')
+    if os.path.exists(cache_dir):
+        try:
+            import shutil
+            shutil.rmtree(cache_dir)
+            logging.info("Prototype cache cleared for support directory: %s", support_dir)
+        except OSError as e:
+            logging.error("Failed to clear prototype cache: %s", e)
+    else:
+        logging.debug("No cache directory found for support directory: %s", support_dir)
 
