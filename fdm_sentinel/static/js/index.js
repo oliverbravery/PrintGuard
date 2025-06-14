@@ -119,6 +119,7 @@ function updateSelectedCameraSettings(d) {
     settingsMajorityVoteWindowLabel.textContent = d.majority_vote_window;
     settingsMajorityVoteWindow.value = d.majority_vote_window;
     updateSliderFill(settingsMajorityVoteWindow);
+    updatePrinterInfo(d);
 }
 
 function updateSelectedCameraData(d) {
@@ -265,6 +266,7 @@ cameraItems.forEach(item => {
             changeLiveCameraFeed(cameraId); 
         }
         cameraIndex = cameraId;
+        settingsCameraIndex.value = cameraId;
         updateCameraTitle(cameraId);
         fetchAndUpdateMetricsForCamera(cameraId);
     });
@@ -624,5 +626,250 @@ document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape' && setupModalOverlay.style.display === 'flex') {
         setupModalOverlay.style.display = 'none';
         document.body.style.overflow = '';
+    }
+});
+
+function updatePrinterInfo(cameraData) {
+    const printerInfo = document.getElementById('printerInfo');
+    const noPrinterInfo = document.getElementById('noPrinterInfo');
+    const printerName = document.getElementById('printerName');
+    const printerType = document.getElementById('printerType');
+    const printerStats = document.getElementById('printerStats');
+
+    if (cameraData.printer_config && cameraData.printer_id) {
+        const config = cameraData.printer_config;
+        printerInfo.style.display = 'block';
+        noPrinterInfo.style.display = 'none';
+        printerName.textContent = config.name;
+        printerType.textContent = `${config.printer_type} | ${config.base_url}`;
+        printerStats.style.display = 'none';
+    } else {
+        printerInfo.style.display = 'none';
+        noPrinterInfo.style.display = 'block';
+    }
+}
+
+function showPrinterStats() {
+    const cameraIdx = parseInt(cameraIndex, 10);
+    if (!cameraIdx && cameraIdx !== 0) return;
+
+    fetch(`/setup/camera/${cameraIdx}/printer/stats`)
+    .then(response => response.json())
+    .then(data => {
+        const printerStats = document.getElementById('printerStats');
+        if (data.success) {
+            document.getElementById('printerStatus').textContent = data.printer_state;
+            document.getElementById('nozzleTemp').textContent = data.temperatures.tool0.actual;
+            document.getElementById('nozzleTarget').textContent = data.temperatures.tool0.target;
+            document.getElementById('bedTemp').textContent = data.temperatures.bed.actual;
+            document.getElementById('bedTarget').textContent = data.temperatures.bed.target;
+            printerStats.style.display = 'block';
+        } else {
+            alert('Failed to fetch printer stats: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching printer stats:', error);
+        alert('Error fetching printer stats');
+    });
+}
+
+function unlinkPrinter() {
+    const camIdx = parseInt(settingsCameraIndex.value, 10);
+    if (!camIdx && camIdx !== 0) return;
+
+    if (confirm('Are you sure you want to unlink this printer from the camera?')) {
+        fetch(`/setup/remove-printer/${camIdx}`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                fetchAndUpdateMetricsForCamera(camIdx);
+                alert('Printer unlinked successfully');
+            } else {
+                alert('Failed to unlink printer: ' + data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Error unlinking printer:', error);
+            alert('Error unlinking printer');
+        });
+    }
+}
+
+document.getElementById('showPrinterStatsBtn')?.addEventListener('click', showPrinterStats);
+document.getElementById('unlinkPrinterBtn')?.addEventListener('click', unlinkPrinter);
+document.getElementById('changePrinterBtn')?.addEventListener('click', openPrinterModal);
+document.getElementById('linkPrinterBtn')?.addEventListener('click', openPrinterModal);
+
+const printerModalOverlay = document.getElementById('printerModalOverlay');
+const printerModalClose = document.getElementById('printerModalClose');
+
+function openPrinterModal() {
+    let camIdx = parseInt(settingsCameraIndex.value, 10);
+    if (isNaN(camIdx) && cameraIndex !== undefined && cameraIndex !== null) {
+        camIdx = parseInt(cameraIndex, 10);
+        settingsCameraIndex.value = camIdx;
+    }
+    if (isNaN(camIdx)) {
+        console.error('Invalid camera index. settingsCameraIndex.value:', settingsCameraIndex.value, 'cameraIndex:', cameraIndex);
+        alert('Please select a camera first before linking a printer');
+        return;
+    }
+    fetch(`/setup/camera/${camIdx}/printer`)
+        .then(res => {
+            console.log('Printer info response status:', res.status);
+            if (!res.ok) {
+                return res.text().then(text => {
+                    console.error('Server response:', text);
+                    if (res.status === 500) {
+                        throw new Error('Server error. Please check if the camera is properly configured.');
+                    } else {
+                        throw new Error(`HTTP error! status: ${res.status}`);
+                    }
+                });
+            }
+            return res.json();
+        })
+        .then(data => {
+            console.log('Printer info data:', data);
+            const formDiv = document.getElementById('modalNoPrinterForm');
+            const modalInfo = document.getElementById('modalPrinterInfo');
+            if (data.printer_config) {
+                formDiv.style.display = 'none';
+                modalInfo.style.display = 'block';
+                document.getElementById('modalPrinterName').textContent = data.printer_config.name;
+                document.getElementById('modalPrinterType').textContent = data.printer_config.printer_type + ' | ' + data.printer_config.base_url;
+                startPrinterStatsPolling(camIdx);
+            } else {
+                modalInfo.style.display = 'none';
+                formDiv.style.display = 'block';
+            }
+            printerModalOverlay.style.display = 'flex';
+        })
+        .catch(error => {
+            console.error('Error opening printer modal:', error);
+            alert('Error loading printer information: ' + error.message);
+        });
+}
+
+window.openPrinterModal = openPrinterModal;
+
+printerModalClose.addEventListener('click', () => {
+    printerModalOverlay.style.display = 'none';
+    stopPrinterStatsPolling();
+});
+
+let printerStatsInterval;
+function startPrinterStatsPolling(camIdx) {
+    printerStatsInterval = setInterval(() => {
+        fetch(`/setup/camera/${camIdx}/printer/stats`)
+            .then(res => res.json())
+            .then(stat => {
+                if (stat.success) {
+                    document.getElementById('modalPrinterStatus').textContent = stat.printer_state;
+                    document.getElementById('modalNozzleTemp').textContent = stat.temperatures.tool0.actual;
+                    document.getElementById('modalNozzleTarget').textContent = stat.temperatures.tool0.target;
+                    document.getElementById('modalBedTemp').textContent = stat.temperatures.bed.actual;
+                    document.getElementById('modalBedTarget').textContent = stat.temperatures.bed.target;
+                }
+            });
+    }, 500);
+}
+
+function stopPrinterStatsPolling() {
+    clearInterval(printerStatsInterval);
+}
+
+document.getElementById('modalCancelPrintBtn').addEventListener('click', () => {
+    const camIdx = parseInt(cameraIndex, 10);
+    fetch('/alert/dismiss', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({alert_id: `${camIdx}_` + 'print', action: 'cancel_print'})
+    }).then(()=>{});
+});
+
+document.getElementById('modalUnlinkPrinterBtn').addEventListener('click', () => {
+    unlinkPrinter();
+    printerModalOverlay.style.display = 'none';
+});
+
+document.getElementById('changePrinterBtn').addEventListener('click', openPrinterModal);
+
+document.getElementById('modalPrinterConnectionType').addEventListener('change', (e) => {
+    document.getElementById('modalOctoprintConfig').style.display = e.target.value === 'octoprint' ? 'block' : 'none';
+});
+
+document.getElementById('linkPrinterForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitButton = e.target.querySelector('button[type="submit"]');
+    const originalButtonText = submitButton.textContent;
+    const printerType = document.getElementById('modalPrinterConnectionType').value.trim();
+    const printerName = document.getElementById('modalPrinterNameInput').value.trim();
+    const baseUrl = document.getElementById('modalOctoprintUrlInput').value.trim();
+    const apiKey = document.getElementById('modalOctoprintApiKeyInput').value.trim();
+
+    if (!printerType) {
+        alert('Please select a connection type');
+        return;
+    }
+    if (!printerName) {
+        alert('Please enter a printer name');
+        return;
+    }
+    if (printerType === 'octoprint') {
+        if (!baseUrl) {
+            alert('Please enter the base URL');
+            return;
+        }
+        if (!apiKey) {
+            alert('Please enter the API key');
+            return;
+        }
+    }
+
+    submitButton.disabled = true;
+    submitButton.textContent = 'Linking...';
+    const camIdx = parseInt(settingsCameraIndex.value, 10);
+    const body = {
+        printer_type: printerType,
+        name: printerName,
+        base_url: baseUrl,
+        api_key: apiKey,
+        camera_index: camIdx
+    }; 
+    try {
+        const res = await fetch('/setup/add-printer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+            console.log('Printer linked successfully, updating UI...');
+            await fetchAndUpdateMetricsForCamera(camIdx);
+            document.getElementById('settingsButton').textContent = 'Settings ✓';
+            printerModalOverlay.style.display = 'none';
+            stopPrinterStatsPolling();
+            document.getElementById('linkPrinterForm').reset();
+            document.getElementById('modalOctoprintConfig').style.display = 'none';
+            alert('Printer linked successfully!');
+            setTimeout(() => {
+                console.log('Reopening modal to show printer info...');
+                openPrinterModal();
+            }, 200);
+        } else {
+            console.error('Failed to link printer:', data.error);
+            alert('Failed to link printer: ' + (data.error || 'unknown'));
+        }
+    } catch (error) {
+        console.error('Error linking printer:', error);
+        alert('Error linking printer. Please check your connection and try again.');
+    } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = originalButtonText;
     }
 });

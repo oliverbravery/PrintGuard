@@ -106,6 +106,31 @@
                         <input type="range" id="majority_vote_window" name="majority_vote_window" min="1" max="100"  value="-" />
                     </div>
                     <div class="settings-item">
+                        <label>Printer Configuration</label>
+                        <div class="printer-control">
+                            <div id="printerInfo" class="printer-info" style="display: none;">
+                                <div class="printer-details">
+                                    <h4 id="printerName">-</h4>
+                                    <p id="printerType">-</p>
+                                    <div class="printer-stats" id="printerStats" style="display: none;">
+                                        <p>Status: <span id="printerStatus">-</span></p>
+                                        <p>Nozzle: <span id="nozzleTemp">-</span>°C / <span id="nozzleTarget">-</span>°C</p>
+                                        <p>Bed: <span id="bedTemp">-</span>°C / <span id="bedTarget">-</span>°C</p>
+                                    </div>
+                                </div>
+                                <div class="printer-actions">
+                                    <button type="button" id="showPrinterStatsBtn" class="printer-btn">Show Stats</button>
+                                    <button type="button" id="changePrinterBtn" class="printer-btn">Change</button>
+                                    <button type="button" id="unlinkPrinterBtn" class="printer-btn danger">Unlink</button>
+                                </div>
+                            </div>
+                            <div id="noPrinterInfo" class="no-printer-info">
+                                <p>No printer linked to this camera</p>
+                                <button type="button" id="linkPrinterBtn" class="printer-btn">Link Printer</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-item">
                         <label for="notificationBtn">Notifications</label>
                         <div class="notification-control">
                             <button id="notificationBtn">Enable Notifications</button>
@@ -165,6 +190,53 @@
                                 <input type="range" id="detectionInterval" name="detectionInterval" min="33" max="1000" step="17" value="67" />
                             </div>
                         </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="setup-modal-overlay" id="printerModalOverlay" style="display:none;">
+        <div class="setup-modal printer-modal">
+            <div class="setup-modal-header">
+                <h2 class="setup-modal-title">Printer Details</h2>
+                <button class="setup-modal-close" id="printerModalClose">×</button>
+            </div>
+            <div class="setup-modal-content">
+                <div id="modalPrinterInfo" style="display:none;">
+                    <h4 id="modalPrinterName">-</h4>
+                    <p id="modalPrinterType">-</p>
+                    <p>Status: <span id="modalPrinterStatus">-</span></p>
+                    <p>Nozzle: <span id="modalNozzleTemp">-</span>°C / <span id="modalNozzleTarget">-</span>°C</p>
+                    <p>Bed: <span id="modalBedTemp">-</span>°C / <span id="modalBedTarget">-</span>°C</p>
+                    <div class="button-group">
+                        <button id="modalCancelPrintBtn" class="setup-btn secondary">Cancel Print</button>
+                        <button id="modalUnlinkPrinterBtn" class="setup-btn danger">Unlink Printer</button>
+                    </div>
+                </div>
+                <div id="modalNoPrinterForm" style="display:none;">
+                    <form id="linkPrinterForm" class="printer-link-form">
+                        <div class="form-group">
+                            <label for="modalPrinterConnectionType">Connection Type</label>
+                            <select id="modalPrinterConnectionType" name="printer_type" required>
+                                <option value="">Select connection type...</option>
+                                <option value="octoprint">OctoPrint</option>
+                            </select>
+                        </div>
+                        <div id="modalOctoprintConfig" style="display:none;">
+                            <div class="form-group">
+                                <label for="modalPrinterNameInput">Printer Name</label>
+                                <input type="text" id="modalPrinterNameInput" name="name" required />
+                            </div>
+                            <div class="form-group">
+                                <label for="modalOctoprintUrlInput">Base URL</label>
+                                <input type="url" id="modalOctoprintUrlInput" name="base_url" required />
+                            </div>
+                            <div class="form-group">
+                                <label for="modalOctoprintApiKeyInput">API Key</label>
+                                <input type="text" id="modalOctoprintApiKeyInput" name="api_key" required />
+                            </div>
+                        </div>
+                        <button type="submit" id="modalLinkPrinterSubmit" class="setup-btn primary">Link Printer</button>
                     </form>
                 </div>
             </div>

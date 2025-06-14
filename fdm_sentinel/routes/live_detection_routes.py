@@ -11,17 +11,19 @@ router = APIRouter()
 
 @router.post("/live/start")
 async def start_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
-    """
-    Starts live detection for the specified camera index.
-    Resets the camera state before starting detection.
-    """
     # pylint: disable=C0415,W0621
     from ..app import get_camera_state, update_camera_state
     camera_state = get_camera_state(camera_index)
     if camera_state.live_detection_running:
         return {"message": f"Live detection already running for camera {camera_index}"}
     else:
-        camera_state = get_camera_state(camera_index, reset=True)
+        await update_camera_state(camera_index, {
+            "current_alert_id": None,
+            "detection_history": [],
+            "last_result": None,
+            "last_time": None,
+            "error": None
+        })
     await update_camera_state(camera_index, {"start_time": time.time(),
                                        "live_detection_running": True,
                                        "live_detection_task": asyncio.create_task(
@@ -32,9 +34,6 @@ async def start_live_detection(request: Request, camera_index: int = Body(..., e
 # pylint: disable=unused-argument
 @router.post("/live/stop")
 async def stop_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
-    """
-    Stops live detection for the specified camera index.
-    """
     # pylint: disable=C0415,W0621
     from ..app import get_camera_state, update_camera_state
     camera_state = get_camera_state(camera_index)
@@ -60,9 +59,6 @@ async def stop_live_detection(request: Request, camera_index: int = Body(..., em
 
 @router.post("/live/camera", include_in_schema=False)
 async def get_camera_state(request: Request, camera_index: int = Body(..., embed=True)):
-    """
-    Get the state of a specific camera index.
-    """
     # pylint: disable=C0415,W0621
     from ..app import get_camera_state as _get_camera_state
     camera_state = _get_camera_state(camera_index)
@@ -83,13 +79,12 @@ async def get_camera_state(request: Request, camera_index: int = Body(..., embed
         "majority_vote_threshold": camera_state.majority_vote_threshold,
         "majority_vote_window": camera_state.majority_vote_window,
         "current_alert_id": camera_state.current_alert_id,
-        "sensitivity": camera_state.sensitivity
+        "sensitivity": camera_state.sensitivity,
+        "printer_id": camera_state.printer_id,
+        "printer_config": camera_state.printer_config
     }
     return response
 
 @router.get("/live/available_cameras")
 async def get_available_cameras(request: Request):
-    """
-    Returns a list of all available camera indices.
-    """
     return {"camera_indices": list(request.app.state.camera_states.keys())}

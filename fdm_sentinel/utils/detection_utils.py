@@ -35,11 +35,11 @@ async def _terminate_alert_after_cooldown(alert):
 async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timestamp_arg):
     # pylint: disable=C0415
     from .notification_utils import send_defect_notification
-    from ..app import update_camera_state, app
+    from ..app import update_camera_state, app, get_camera_printer_config
     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
     # pylint: disable=E1101
     _, img_buf = cv2.imencode('.jpg', frame)
-    has_printer = hasattr(camera_state_ref, 'printer_config') and camera_state_ref.printer_config
+    has_printer = get_camera_printer_config(camera_index) is not None
     alert = Alert(
         id=alert_id,
         camera_index=camera_index,

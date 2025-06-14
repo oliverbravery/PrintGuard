@@ -787,14 +787,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function updatePrinterList() {
         try {
-            const response = await fetch('/setup/printers');
-            const data = await response.json();
-            
+            const camerasResponse = await fetch('/live/available_cameras');
+            const camerasData = await camerasResponse.json();
             const printersList = document.getElementById('printers-list');
             printersList.innerHTML = '';
+            let printers = {};
+            if (camerasData.camera_indices && camerasData.camera_indices.length > 0) {
+                for (const cameraIndex of camerasData.camera_indices) {
+                    try {
+                        const cameraResponse = await fetch('/live/camera', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ camera_index: cameraIndex })
+                        });
+                        
+                        if (cameraResponse.ok) {
+                            const cameraData = await cameraResponse.json();
+                            if (cameraData.printer_id && cameraData.printer_config) {
+                                printers[cameraData.printer_id] = cameraData.printer_config;
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`Error fetching camera ${cameraIndex} state:`, error);
+                    }
+                }
+            }
             
-            if (data.printers && Object.keys(data.printers).length > 0) {
-                Object.entries(data.printers).forEach(([id, printer]) => {
+            if (Object.keys(printers).length > 0) {
+                Object.entries(printers).forEach(([id, printer]) => {
                     const printerElement = document.createElement('div');
                     printerElement.className = 'printer-item';
                     printerElement.innerHTML = `
@@ -806,7 +826,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     printersList.appendChild(printerElement);
                 });
                 document.getElementById('summary-printers-status').textContent = 
-                    `${Object.keys(data.printers).length} printer${Object.keys(data.printers).length !== 1 ? 's' : ''} configured`;
+                    `${Object.keys(printers).length} printer${Object.keys(printers).length !== 1 ? 's' : ''} configured`;
             } else {
                 printersList.innerHTML = '<p>No printers configured yet</p>';
                 document.getElementById('summary-printers-status').textContent = 'No printers configured';

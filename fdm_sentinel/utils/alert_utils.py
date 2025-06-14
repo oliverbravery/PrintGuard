@@ -6,6 +6,7 @@ from PIL import Image
 
 from ..models import SSEDataType
 from .sse_utils import append_new_outbound_packet
+from .printer_services.octoprint import OctoPrintClient
 
 
 async def append_new_alert(alert):
@@ -26,13 +27,11 @@ async def dismiss_alert(alert_id):
 
 async def cancel_print(alert_id):
     # pylint: disable=import-outside-toplevel
-    from ..app import get_camera_state
-    from ..utils.printer_services.octoprint import OctoPrintClient
+    from ..app import get_camera_printer_config
     try:
         camera_index = int(alert_id.split('_')[0])
-        camera_state = get_camera_state(camera_index)
-        if hasattr(camera_state, 'printer_config') and camera_state.printer_config:
-            printer_config = camera_state.printer_config
+        printer_config = get_camera_printer_config(camera_index)
+        if printer_config:
             if printer_config['printer_type'] == 'octoprint':
                 client = OctoPrintClient(
                     printer_config['base_url'],

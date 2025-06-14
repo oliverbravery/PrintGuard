@@ -136,6 +136,32 @@ body, html {
     padding-top: 0px;
 }
 
+.settings-section {
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-secondary) var(--background-secondary);
+}
+
+.settings-section::-webkit-scrollbar {
+    width: 8px;
+}
+
+.settings-section::-webkit-scrollbar-track {
+    background: var(--background-secondary);
+    border-radius: var(--radius-sm);
+}
+
+.settings-section::-webkit-scrollbar-thumb {
+    background: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--background-secondary);
+}
+
+.settings-section::-webkit-scrollbar-thumb:hover {
+    background: var(--text-primary);
+}
+
 .camera-header {
     display: flex;
     align-items: center;
@@ -672,6 +698,8 @@ input[type="range"]::-moz-range-thumb {
     justify-content: flex-start;
     padding-right: var(--spacing-md);
     padding-top: 0px;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 }
 
@@ -827,4 +855,88 @@ input[type="range"]::-moz-range-thumb {
         padding: var(--spacing-lg);
         max-height: 90vh;
     }
+}
+
+.printer-control {
+    width: 100%;
+    margin: var(--spacing-sm) 0;
+}
+
+.printer-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    border: 1px solid var(--text-secondary);
+    border-radius: var(--radius-small);
+    background-color: var(--bg-light);
+}
+
+.printer-details h4 {
+    margin: 0 0 var(--spacing-xs) 0;
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+}
+
+.printer-details p {
+    margin: 0 0 var(--spacing-xs) 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+}
+
+.printer-stats {
+    margin-top: var(--spacing-sm);
+    padding-top: var(--spacing-sm);
+    border-top: 1px solid var(--text-tertiary);
+}
+
+.printer-stats p {
+    margin: 0 0 var(--spacing-xs) 0;
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+}
+
+.printer-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+}
+
+.printer-btn {
+    flex: 1;
+    min-width: 60px;
+    padding: var(--spacing-xs);
+    border: 1px solid var(--text-primary);
+    background: var(--color-white);
+    color: var(--text-primary);
+    font-size: var(--font-size-xs);
+    cursor: pointer;
+    border-radius: var(--radius-small);
+    transition: var(--transition-fast);
+}
+
+.printer-btn:hover {
+    background: var(--text-primary);
+    color: var(--color-white);
+}
+
+.printer-btn.danger {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+}
+
+.printer-btn.danger:hover {
+    background: var(--color-danger);
+    color: var(--color-white);
+}
+
+.no-printer-info {
+    text-align: center;
+    padding: var(--spacing-sm);
+    color: var(--text-secondary);
+}
+
+.no-printer-info p {
+    margin: 0 0 var(--spacing-sm) 0;
+    font-size: var(--font-size-xs);
 }
