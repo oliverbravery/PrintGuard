@@ -6,7 +6,7 @@ router = APIRouter()
 
 @router.post("/alert/dismiss")
 async def alert_response(request: Request, 
-                         alert_id: str = Body(..., embed=True), 
+                         alert_id: str = Body(..., embed=True),
                          action: AlertAction = Body(..., embed=True)):
     alert = request.app.state.alerts.get(alert_id, None)
     if not alert:

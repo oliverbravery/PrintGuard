@@ -48,6 +48,7 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
         title=f"Defect - Camera {camera_index}",
         message=f"Defect detected on camera {camera_index}",
         countdown_time=camera_state_ref.countdown_time,
+        countdown_action=camera_state_ref.countdown_action,
         has_printer=has_printer,
     )
     asyncio.create_task(_terminate_alert_after_cooldown(alert))
@@ -65,7 +66,6 @@ async def _live_detection_loop(app_state, camera_index):
         'update_camera_state': update_camera_state,
         'update_camera_detection_history': update_camera_detection_history,
     }
-    camera_state_ref = get_camera_state(camera_index)
     try:
         await create_optimized_detection_loop(
             app_state,

@@ -153,9 +153,9 @@ function startAlertCountdown(data) {
     }
     
     const startTime = Date.now();
-    const countdownTime = Math.max(10, data.countdown_time || 0);
+    const countdownTime = data.countdown_time || 0;
     const endTime = startTime + countdownTime * 1000;
-    
+
     function updateCountdown() {
         const now = Date.now();
         let secondsLeft = Math.max(0, Math.round((endTime - now) / 1000));
@@ -166,17 +166,13 @@ function startAlertCountdown(data) {
             activeAlerts[data.id].expirationTime = endTime;
             localStorage.setItem('activeAlerts', JSON.stringify(activeAlerts));
         }
-        
         if (secondsLeft <= 0) {
             clearInterval(window[countdownTimerId]);
-            const alertElement = document.getElementById(`alert-${data.id}`);
-            if (alertElement) {
-                alertElement.remove();
-                removeActiveAlert(data.id);
-            }
-
-            if (notificationsContainer.children.length === 0) {
-                notificationPopup.style.display = 'none';
+            const action = data.countdown_action || 'dismiss';
+            if (action === 'cancel_print' && data.has_printer) {
+                executeAlertAction('cancel_print', data.id);
+            } else {
+                executeAlertAction('dismiss', data.id);
             }
         }
     }
@@ -215,9 +211,7 @@ evtSource.onerror = (err) => {
     console.error("SSE error", err);
 };
 
-function dismissAlert(action_type, alertId) {
-    if (!alertId) alertId = currentAlertId;
-    
+function executeAlertAction(action_type, alertId) {
     fetch(`/alert/dismiss`, { 
         method: 'POST',
         headers: {
@@ -235,10 +229,15 @@ function dismissAlert(action_type, alertId) {
                     notificationPopup.style.display = 'none';
                 }
             } else {
-                console.error('Failed to dismiss alert');
+                console.error('Failed to execute alert action');
             }
         })
         .catch(error => console.error('Error:', error));
+}
+
+function dismissAlert(action_type, alertId) {
+    if (!alertId) alertId = currentAlertId;
+    executeAlertAction(action_type, alertId);
 }
 
 document.addEventListener('DOMContentLoaded', () => {

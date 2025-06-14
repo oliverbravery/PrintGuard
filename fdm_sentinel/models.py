@@ -12,6 +12,7 @@ class Alert(BaseModel):
     countdown_time: float
     camera_index: int
     has_printer: bool = False
+    countdown_action: str = "dismiss"
 
 class AlertAction(str, Enum):
     DISMISS = "dismiss"
