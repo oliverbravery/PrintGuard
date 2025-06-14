@@ -11,7 +11,8 @@ from py_vapid import Vapid
 
 from ..models import (TunnelProvider, TunnelSettings, SavedConfig,
                       VapidSettings, SavedKey, SetupCompletion,
-                      CloudflareTunnelConfig, CloudflareDownloadConfig, FeedSettings)
+                      CloudflareTunnelConfig, CloudflareDownloadConfig, FeedSettings,
+                      PrinterConfigRequest)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
                             store_key, get_config, update_config, get_key,
                             STREAM_MAX_FPS, STREAM_TUNNEL_FPS, STREAM_JPEG_QUALITY,
@@ -19,6 +20,7 @@ from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
 from ..utils.setup_utils import setup_ngrok_tunnel
 from ..utils.cloudflare_utils import CloudflareAPI, get_cloudflare_setup_sequence
 from ..utils.stream_utils import stream_optimizer
+from ..utils.printer_services.octoprint import OctoPrintClient
 
 router = APIRouter()
 
@@ -420,4 +422,69 @@ async def get_cloudflare_team_name(request: Request):
             "success": False,
             "team_name": "your-organization",
             "site_domain": ""
+        }
+    
+@router.get("/setup/cameras", include_in_schema=False)
+async def get_available_cameras():
+    try:
+        # pylint: disable=import-outside-toplevel
+        from ..app import detect_available_cameras
+        cameras = detect_available_cameras()
+        return {"cameras": cameras}
+    except Exception as e:
+        logging.error("Error detecting cameras: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to detect cameras: {str(e)}")
+
+@router.post("/setup/add-printer", include_in_schema=False)
+async def add_printer(printer_config: PrinterConfigRequest):
+    # pylint: disable=import-outside-toplevel
+    from ..app import update_camera_state, app
+    try:
+        client = OctoPrintClient(printer_config.base_url, printer_config.api_key)
+        client.get_job_info()
+        if not hasattr(app.state, 'printers'):
+            app.state.printers = {}
+        printer_id = f"{printer_config.camera_index}_{printer_config.name.replace(' ', '_')}"
+        app.state.printers[printer_id] = printer_config.model_dump()
+        await update_camera_state(printer_config.camera_index, {
+            "printer_id": printer_id,
+            "printer_config": printer_config.model_dump()
+        })
+        return {"success": True, "printer_id": printer_id}
+    except Exception as e:
+        logging.error("Error adding printer: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to add printer: {str(e)}")
+
+@router.get("/setup/printers", include_in_schema=False)
+async def get_printers():
+    try:
+        # pylint: disable=import-outside-toplevel
+        from ..app import app
+        printers = getattr(app.state, 'printers', {})
+        return {"printers": printers}
+    except Exception as e:
+        logging.error("Error getting printers: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to get printers: {str(e)}")
+
+@router.post("/setup/test-printer", include_in_schema=False) 
+async def test_printer_connection(printer_config: PrinterConfigRequest):
+    try:
+        client = OctoPrintClient(printer_config.base_url, printer_config.api_key)
+        job_info = client.get_job_info()
+        temps = {"bed": {"actual": 0, "target": 0}, "tool0": {"actual": 0, "target": 0}}
+        try:
+            temps = client.get_printer_temperatures()
+        except Exception:
+            pass
+        return {
+            "success": True, 
+            "connection_status": "Connected",
+            "printer_state": job_info.state,
+            "temperatures": temps
+        }
+    except Exception as e:
+        logging.error("Error testing printer connection: %s", e)
+        return {
+            "success": False,
+            "error": str(e)
         }
