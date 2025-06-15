@@ -4,6 +4,7 @@ from fastapi import Form, Request, APIRouter
 from fastapi.responses import RedirectResponse
 
 from ..utils.config import CAMERA_INDEX
+from ..utils.camera_utils import update_camera_state
 
 router = APIRouter()
 
@@ -33,8 +34,6 @@ async def update_settings(request: Request,
                           majority_vote_threshold: int = Form(...),
                           majority_vote_window: int = Form(...),
                           ):
-    # pylint: disable=import-outside-toplevel
-    from ..utils.camera_utils import update_camera_state
     await update_camera_state(camera_index, {
         "sensitivity": sensitivity,
         "brightness": brightness,

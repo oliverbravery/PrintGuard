@@ -3,6 +3,7 @@ import json
 import logging
 
 from ..models import SSEDataType
+from .camera_utils import get_camera_state
 
 
 async def outbound_packet_fetch():
@@ -27,8 +28,6 @@ def _calculate_frame_rate(detection_history):
     return (len(times) - 1) / duration if duration > 0 else 0.0
 
 async def _sse_update_camera_state_func(camera_index):
-    # pylint: disable=C0415
-    from .camera_utils import get_camera_state
     state = get_camera_state(camera_index)
     detection_history = state.detection_history
     total_detections = len(detection_history)

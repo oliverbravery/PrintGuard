@@ -1,7 +1,8 @@
-from ..models import SavedKey, SiteStartupMode, SavedConfig
-from .config import (SSL_CERT_FILE, get_key,
-                     get_config)
 import logging
+
+from ..models import SavedConfig, SavedKey, SiteStartupMode
+from .config import SSL_CERT_FILE, get_config, get_key
+
 
 def setup_ngrok_tunnel(close: bool = False) -> bool:
     """
@@ -24,6 +25,7 @@ def setup_ngrok_tunnel(close: bool = False) -> bool:
     try:
         # pylint: disable=import-outside-toplevel
         import ngrok
+
         # pylint: disable=E1101
         listener = ngrok.forward(8000, authtoken=tunnel_auth_key, domain=tunnel_domain)
         if listener:

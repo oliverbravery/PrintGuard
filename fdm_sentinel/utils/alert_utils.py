@@ -8,6 +8,7 @@ from PIL import Image
 from ..models import SSEDataType
 from .sse_utils import append_new_outbound_packet
 from .printer_services.octoprint import OctoPrintClient
+from .camera_utils import (update_camera_state, get_camera_printer_config)
 
 
 async def append_new_alert(alert):
@@ -19,7 +20,6 @@ async def append_new_alert(alert):
 async def dismiss_alert(alert_id):
     # pylint: disable=import-outside-toplevel
     from ..app import app
-    from .camera_utils import update_camera_state
     if alert_id in app.state.alerts:
         del app.state.alerts[alert_id]
         camera_index = int(alert_id.split('_')[0])
@@ -28,8 +28,6 @@ async def dismiss_alert(alert_id):
     return False
 
 async def cancel_print(alert_id):
-    # pylint: disable=import-outside-toplevel
-    from .camera_utils import get_camera_printer_config
     try:
         camera_index = int(alert_id.split('_')[0])
         printer_config = get_camera_printer_config(camera_index)
