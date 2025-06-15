@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from ..models import OperatingSystem, SavedConfig, SavedKey
+from ..utils.config import get_config
 
 
 class CloudflareAPI:
@@ -181,8 +182,6 @@ def setup_tunnel(api_token: str, account_id: str, zone_id: str, tunnel_name: str
     }
 
 def get_current_os() -> OperatingSystem:
-    # pylint:disable=import-outside-toplevel
-    from ..app import get_config
     config = get_config()
     stored_os = config.get(SavedConfig.USER_OPERATING_SYSTEM)
     if stored_os:
