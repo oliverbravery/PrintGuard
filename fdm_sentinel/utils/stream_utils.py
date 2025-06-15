@@ -5,7 +5,12 @@ from typing import Dict, Tuple
 
 import cv2
 import numpy as np
+from PIL import Image
 
+from .model_utils import _run_inference
+from .sse_utils import sse_update_camera_state
+from .detection_utils import (_passed_majority_vote, _create_alert_and_notify,
+                              _send_alert)
 from ..models import SavedConfig, SiteStartupMode
 from .config import (get_config, STREAM_MAX_FPS, STREAM_TUNNEL_FPS,
                      STREAM_JPEG_QUALITY, STREAM_TUNNEL_JPEG_QUALITY,
@@ -103,101 +108,67 @@ class StreamOptimizer:
         settings = self._get_current_settings()
         mode_info = f"tunnel ({settings['tunnel_provider']})" if (
             settings['is_tunnel_mode']) else "local"
-
         logging.debug("Stream optimization settings for %s mode:", mode_info)
         logging.debug("  Max FPS: %d", settings['max_fps'])
         logging.debug("  JPEG Quality: %d", settings['jpeg_quality'])
         logging.debug("  Max Width: %d", settings['max_width'])
         logging.debug("  Detection Interval: %dms", settings['detection_interval_ms'])
 
-
-# Global optimizer instance
 stream_optimizer = StreamOptimizer()
 
 
 def create_optimized_frame_generator(camera_index: int, camera_state_getter):
-    """Create an optimized frame generator for streaming."""
     # pylint: disable=E1101
     cap = cv2.VideoCapture(camera_index)
     last_frame_time = 0
     frame_count = 0
-    
-    # Log optimization settings on first use
     if frame_count == 0:
         stream_optimizer.log_optimization_info()
-    
     try:
         while True:
-            # Check FPS limiting
             if stream_optimizer.should_limit_fps(last_frame_time):
-                # Sleep briefly to avoid busy waiting
                 time.sleep(0.001)
                 continue
-            
-            # Get camera state for adjustments
             camera_state = camera_state_getter(camera_index)
             contrast = camera_state.contrast
             brightness = camera_state.brightness
             focus = camera_state.focus
-            
-            # Capture frame
             success, frame = cap.read()
             if not success:
                 logging.warning("Failed to capture frame from camera %d", camera_index)
                 break
-            
-            # Apply camera adjustments
             frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=int((brightness - 1.0) * 255))
             if focus and focus != 1.0:
                 blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=focus)
                 frame = cv2.addWeighted(frame, 1.0 + focus, blurred, -focus, 0)
-            
-            # Optimize frame for streaming
             frame, settings = stream_optimizer.optimize_frame(frame)
-            
-            # Encode with optimal settings
             frame_bytes = stream_optimizer.encode_frame(frame)
-            
-            # Update timing
             last_frame_time = time.time()
             frame_count += 1
-            
-            # Yield frame in proper format for streaming
             yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            
-            # Log performance info occasionally
             if frame_count % 300 == 0:  # Every ~10 seconds at 30fps
                 settings = stream_optimizer.get_stream_settings()
                 logging.debug("Camera %d: Streamed %d frames, mode: %s", 
                             camera_index, frame_count,
                             "tunnel" if settings['is_tunnel_mode'] else "local")
-    
     finally:
         if cap.isOpened():
             cap.release()
 
 
 async def create_optimized_detection_loop(app_state, camera_index, camera_state_getter, update_functions):
-    """Create an optimized detection loop with configurable intervals."""
     # pylint: disable=E1101
     cap = cv2.VideoCapture(camera_index)
     detection_count = 0
-    
-    # Log optimization settings
     stream_optimizer.log_optimization_info()
-    
     try:
         if not cap.isOpened():
             logging.error("Cannot open camera at index %d for detection", camera_index)
             return
-        
         while True:
-            # Get current camera state
             camera_state_ref = camera_state_getter(camera_index)
             if not camera_state_ref.live_detection_running:
                 break
-            
-            # Capture frame
             ret, frame = cap.read()
             if not ret:
                 logging.warning("Failed to read frame from camera %d", camera_index)
@@ -206,28 +177,17 @@ async def create_optimized_detection_loop(app_state, camera_index, camera_state_
                     "live_detection_running": False
                 })
                 break
-            
-            # Apply camera adjustments
             contrast = camera_state_ref.contrast
             brightness = camera_state_ref.brightness
             focus = camera_state_ref.focus
-            
             frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=int((brightness - 1.0) * 255))
             if focus and focus != 1.0:
                 blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=focus)
                 frame = cv2.addWeighted(frame, 1.0 + focus, blurred, -focus, 0)
-            
-            # Optimize frame for detection (may be different from streaming)
             detection_frame, _ = stream_optimizer.optimize_frame(frame)
-            
-            # Convert for ML processing
-            from PIL import Image
             image = Image.fromarray(cv2.cvtColor(detection_frame, cv2.COLOR_BGR2RGB))
             tensor = app_state.transform(image).unsqueeze(0).to(app_state.device)
-            
-            # Run inference
             try:
-                from .model_utils import _run_inference
                 prediction = await _run_inference(app_state.model,
                                                 tensor,
                                                 app_state.prototypes,
@@ -237,32 +197,19 @@ async def create_optimized_detection_loop(app_state, camera_index, camera_state_
             except Exception as e:
                 logging.debug("Detection inference error for camera %d: %s", camera_index, e)
                 numeric = None
-            
-            # Process results
             label = app_state.class_names[numeric] if (
                 isinstance(numeric, int)
                 and 0 <= numeric < len(app_state.class_names)
                 ) else str(numeric)
             current_timestamp = time.time()
-            
-            # Update detection history and state
             await update_functions['update_camera_detection_history'](camera_index, label, current_timestamp)
             await update_functions['update_camera_state'](camera_index, {
                 "last_result": label, 
                 "last_time": current_timestamp
             })
-            
-            # Send SSE update
-            from .sse_utils import sse_update_camera_state
             asyncio.create_task(sse_update_camera_state(camera_index))
-            
             detection_count += 1
-            
-            # Handle failure detection and alerts
             if isinstance(numeric, int) and numeric == app_state.defect_idx:
-                # Import here to avoid circular imports
-                from .detection_utils import _passed_majority_vote, _create_alert_and_notify, _send_alert
-                
                 do_alert = False
                 camera_lock = camera_state_ref.lock
                 async with camera_lock:
@@ -270,25 +217,19 @@ async def create_optimized_detection_loop(app_state, camera_index, camera_state_
                         and _passed_majority_vote(camera_state_ref)):
                         camera_state_ref.current_alert_id = True
                         do_alert = True
-                
                 if do_alert:
                     alert = await _create_alert_and_notify(camera_state_ref,
                                                          camera_index,
-                                                         frame,  # Use original frame for alert
+                                                         frame,
                                                          current_timestamp)
                     asyncio.create_task(_send_alert(alert))
-            
-            # Wait based on optimized detection interval
             detection_interval = stream_optimizer.get_detection_interval()
             await asyncio.sleep(detection_interval)
-            
-            # Log performance info occasionally
             if detection_count % 100 == 0:
                 settings = stream_optimizer.get_stream_settings()
-                logging.debug("Camera %d: Completed %d detections, interval: %.3fs, mode: %s", 
+                logging.debug("Camera %d: Completed %d detections, interval: %.3fs, mode: %s",
                             camera_index, detection_count, detection_interval,
                             "tunnel" if settings['is_tunnel_mode'] else "local")
-    
     finally:
         if cap.isOpened():
             cap.release()

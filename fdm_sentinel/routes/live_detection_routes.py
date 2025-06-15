@@ -12,7 +12,7 @@ router = APIRouter()
 @router.post("/live/start")
 async def start_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
     # pylint: disable=C0415,W0621
-    from ..app import get_camera_state, update_camera_state
+    from ..utils.camera_utils import get_camera_state, update_camera_state
     camera_state = get_camera_state(camera_index)
     if camera_state.live_detection_running:
         return {"message": f"Live detection already running for camera {camera_index}"}
@@ -35,7 +35,7 @@ async def start_live_detection(request: Request, camera_index: int = Body(..., e
 @router.post("/live/stop")
 async def stop_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
     # pylint: disable=C0415,W0621
-    from ..app import get_camera_state, update_camera_state
+    from ..utils.camera_utils import get_camera_state, update_camera_state
     camera_state = get_camera_state(camera_index)
     if not camera_state.live_detection_running:
         return {"message": f"Live detection not running for camera {camera_index}"}
@@ -60,7 +60,7 @@ async def stop_live_detection(request: Request, camera_index: int = Body(..., em
 @router.post("/live/camera", include_in_schema=False)
 async def get_camera_state(request: Request, camera_index: int = Body(..., embed=True)):
     # pylint: disable=C0415,W0621
-    from ..app import get_camera_state as _get_camera_state
+    from ..utils.camera_utils import get_camera_state as _get_camera_state
     camera_state = _get_camera_state(camera_index)
     detection_times = [t for t, _ in camera_state.detection_history] if (
         camera_state.detection_history

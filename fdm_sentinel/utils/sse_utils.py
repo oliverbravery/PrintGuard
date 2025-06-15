@@ -28,7 +28,7 @@ def _calculate_frame_rate(detection_history):
 
 async def _sse_update_camera_state_func(camera_index):
     # pylint: disable=C0415
-    from ..app import get_camera_state
+    from .camera_utils import get_camera_state
     state = get_camera_state(camera_index)
     detection_history = state.detection_history
     total_detections = len(detection_history)

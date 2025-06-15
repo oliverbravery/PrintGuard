@@ -18,7 +18,8 @@ async def append_new_alert(alert):
 
 async def dismiss_alert(alert_id):
     # pylint: disable=import-outside-toplevel
-    from ..app import app, update_camera_state
+    from ..app import app
+    from .camera_utils import update_camera_state
     if alert_id in app.state.alerts:
         del app.state.alerts[alert_id]
         camera_index = int(alert_id.split('_')[0])
@@ -28,7 +29,7 @@ async def dismiss_alert(alert_id):
 
 async def cancel_print(alert_id):
     # pylint: disable=import-outside-toplevel
-    from ..app import get_camera_printer_config
+    from .camera_utils import get_camera_printer_config
     try:
         camera_index = int(alert_id.split('_')[0])
         printer_config = get_camera_printer_config(camera_index)

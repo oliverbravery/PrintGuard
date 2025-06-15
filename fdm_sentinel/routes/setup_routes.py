@@ -419,7 +419,7 @@ async def get_cloudflare_team_name(request: Request):
 async def get_available_cameras():
     try:
         # pylint: disable=import-outside-toplevel
-        from ..app import detect_available_cameras
+        from ..utils.camera_utils import detect_available_cameras
         cameras = detect_available_cameras()
         return {"cameras": cameras}
     except Exception as e:
@@ -429,7 +429,7 @@ async def get_available_cameras():
 @router.post("/setup/add-printer", include_in_schema=False)
 async def add_printer(printer_config: PrinterConfigRequest):
     # pylint: disable=import-outside-toplevel
-    from ..app import set_camera_printer
+    from ..utils.camera_utils import set_camera_printer
     try:
         client = OctoPrintClient(printer_config.base_url, printer_config.api_key)
         client.get_job_info()
@@ -467,7 +467,7 @@ async def test_printer_connection(printer_config: PrinterConfigRequest):
 async def remove_printer_from_camera(camera_index: int):
     try:
         # pylint: disable=import-outside-toplevel
-        from ..app import remove_camera_printer, get_camera_printer_id
+        from ..utils.camera_utils import get_camera_printer_id, remove_camera_printer
         printer_id = get_camera_printer_id(camera_index)
         if printer_id:
             await remove_camera_printer(camera_index)
@@ -482,7 +482,7 @@ async def remove_printer_from_camera(camera_index: int):
 async def get_camera_printer(camera_index: int):
     try:
         # pylint: disable=import-outside-toplevel
-        from ..app import get_camera_printer_config, get_camera_printer_id
+        from ..utils.camera_utils import get_camera_printer_config, get_camera_printer_id
         printer_id = get_camera_printer_id(camera_index)
         printer_config = get_camera_printer_config(camera_index)
         if printer_id and printer_config:
@@ -497,7 +497,7 @@ async def get_camera_printer(camera_index: int):
 async def get_camera_printer_stats(camera_index: int):
     try:
         # pylint: disable=import-outside-toplevel
-        from ..app import get_camera_printer_config
+        from ..utils.camera_utils import get_camera_printer_config
         printer_config = get_camera_printer_config(camera_index)
         if not printer_config:
             raise HTTPException(status_code=404, detail="No printer configured for this camera")
