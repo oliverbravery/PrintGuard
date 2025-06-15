@@ -1,6 +1,5 @@
 import base64
 import logging
-import random
 
 import trustme
 from cryptography.hazmat.primitives import serialization
