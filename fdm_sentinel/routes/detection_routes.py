@@ -1,15 +1,15 @@
 import asyncio
 import json
-from typing import List
 import logging
+import time
+from typing import List
+
 import torch
-from fastapi import (APIRouter,
-                     File,
-                     HTTPException,
-                     UploadFile,
-                     Request)
+from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
+from ..utils.camera_utils import get_camera_state, update_camera_state
+from ..utils.detection_utils import _live_detection_loop
 from ..utils.model_utils import _process_image, _run_inference
 
 router = APIRouter()
@@ -103,3 +103,46 @@ async def detect_ep(request: Request, files: List[UploadFile] = File(...), strea
         except Exception as e:
             logging.error("Unexpected error during batch inference: %s", e)
             raise HTTPException(status_code=500, detail=f"Inference failed: {e}") from e
+
+@router.post("/detect/live/start")
+async def start_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
+    camera_state = get_camera_state(camera_index)
+    if camera_state.live_detection_running:
+        return {"message": f"Live detection already running for camera {camera_index}"}
+    else:
+        await update_camera_state(camera_index, {
+            "current_alert_id": None,
+            "detection_history": [],
+            "last_result": None,
+            "last_time": None,
+            "error": None
+        })
+    await update_camera_state(camera_index, {"start_time": time.time(),
+                                       "live_detection_running": True,
+                                       "live_detection_task": asyncio.create_task(
+                                           _live_detection_loop(request.app.state, camera_index)
+                                           )})
+    return {"message": f"Live detection started for camera {camera_index}"}
+
+@router.post("/detect/live/stop")
+async def stop_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
+    camera_state = get_camera_state(camera_index)
+    if not camera_state.live_detection_running:
+        return {"message": f"Live detection not running for camera {camera_index}"}
+    live_detection_task = camera_state.live_detection_task
+    if live_detection_task:
+        try:
+            await asyncio.wait_for(live_detection_task, timeout=0.25)
+            logging.debug("Live detection task for camera %d finished successfully.", camera_index)
+        except asyncio.TimeoutError:
+            logging.debug("Live detection task for camera %d did not finish in time.", camera_index)
+            if live_detection_task:
+                live_detection_task.cancel()
+        except Exception as e:
+            logging.error("Error stopping live detection task for camera %d: %s", camera_index, e)
+        finally:
+            live_detection_task = None
+    await update_camera_state(camera_index, {"start_time": None,
+                                    "live_detection_running": False,
+                                    "live_detection_task": None})
+    return {"message": f"Live detection stopped for camera {camera_index}"}

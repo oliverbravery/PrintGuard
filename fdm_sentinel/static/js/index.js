@@ -168,7 +168,7 @@ function updatePolledDetectionData(d) {
 function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
     const cameraIdx = parseInt(cameraIndexStr, 10);
 
-    fetch(`/live/camera`, {
+    fetch(`/camera/state`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ camera_index: cameraIdx })
@@ -221,7 +221,7 @@ function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
 }
 
 function sendDetectionRequest(isStart) {
-    fetch(`/live/${isStart ? 'start' : 'stop'}`, {
+    fetch(`/detect/live/${isStart ? 'start' : 'stop'}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -927,7 +927,7 @@ window.addEventListener('beforeunload', () => {
 
 function ensurePrinterInfoLoaded(cameraIdx, retryCount = 0) {
     const maxRetries = 3;
-    fetch(`/live/camera`, {
+    fetch(`/camera/state`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ camera_index: cameraIdx })

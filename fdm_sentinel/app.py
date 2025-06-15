@@ -12,11 +12,11 @@ from .models import (SiteStartupMode,
                      TunnelProvider, SavedConfig)
 from .routes.alert_routes import router as alert_router
 from .routes.detection_routes import router as detection_router
-from .routes.live_detection_routes import router as live_detection_router
 from .routes.notification_routes import router as notification_router
 from .routes.sse_routes import router as sse_router
 from .routes.setup_routes import router as setup_router
 from .routes.index_routes import router as index_router
+from .routes.camera_routes import router as camera_router
 from .utils.config import (get_ssl_private_key_temporary_path,
                            SSL_CERT_FILE, PROTOTYPES_DIR,
                            MODEL_PATH, MODEL_OPTIONS_PATH,
@@ -114,12 +114,12 @@ async def camera_feed(camera_index: int):
                              media_type='multipart/x-mixed-replace; boundary=frame')
 
 app.include_router(detection_router, tags=["detection"])
-app.include_router(live_detection_router, tags=["live_detection"])
 app.include_router(alert_router, tags=["alerts"])
 app.include_router(notification_router, tags=["notifications"])
 app.include_router(sse_router, tags=["sse"])
 app.include_router(setup_router, tags=["setup"])
 app.include_router(index_router, tags=["index"])
+app.include_router(camera_router, tags=["camera"])
 
 def run():
     # pylint: disable=C0415
