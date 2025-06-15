@@ -1,15 +1,14 @@
 import asyncio
 import logging
 import os
-import time
 from contextlib import asynccontextmanager
 
 import cv2
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from .models import (SiteStartupMode,
                      TunnelProvider, SavedConfig)
 from .routes.alert_routes import router as alert_router
@@ -18,17 +17,16 @@ from .routes.live_detection_routes import router as live_detection_router
 from .routes.notification_routes import router as notification_router
 from .routes.sse_routes import router as sse_router
 from .routes.setup_routes import router as setup_router
+from .routes.index_routes import router as index_router
 from .utils.config import (get_ssl_private_key_temporary_path,
                            SSL_CERT_FILE, PROTOTYPES_DIR,
                            MODEL_PATH, MODEL_OPTIONS_PATH,
                            DEVICE_TYPE, SUCCESS_LABEL,
-                           CAMERA_INDEX, get_config,
-                           update_config)
+                           get_config, update_config)
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
 from .utils.cloudflare_utils import (start_cloudflare_tunnel, stop_cloudflare_tunnel)
-from .utils.camera_utils import (setup_camera_indices, update_camera_state,
-                                 get_camera_state)
+from .utils.camera_utils import setup_camera_indices, get_camera_state
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
@@ -109,41 +107,6 @@ templates_dir = os.path.join(base_dir, "templates")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 templates = Jinja2Templates(directory=templates_dir)
 
-@app.get("/", include_in_schema=False)
-async def serve_index(request: Request):
-    camera_index = list(app.state.camera_states.keys())[0] if (
-        app.state.camera_states
-        ) else CAMERA_INDEX
-    return templates.TemplateResponse("index.html", {
-        "camera_states": app.state.camera_states,
-        "request": request,
-        "camera_index": camera_index,
-        "current_time": time.time(),
-    })
-
-# pylint: disable=unused-argument
-@app.post("/", include_in_schema=False)
-async def update_settings(request: Request,
-                          camera_index: int = Form(...),
-                          sensitivity: float = Form(...),
-                          brightness: float = Form(...),
-                          contrast: float = Form(...),
-                          focus: float = Form(...),
-                          countdown_time: int = Form(...),
-                          majority_vote_threshold: int = Form(...),
-                          majority_vote_window: int = Form(...),
-                          ):
-    await update_camera_state(camera_index, {
-        "sensitivity": sensitivity,
-        "brightness": brightness,
-        "contrast": contrast,
-        "focus": focus,
-        "countdown_time": countdown_time,
-        "majority_vote_threshold": majority_vote_threshold,
-        "majority_vote_window": majority_vote_window,
-    })
-    return RedirectResponse("/", status_code=303)
-
 def generate_frames(camera_index: int):
     from .utils.stream_utils import create_optimized_frame_generator
     try:
@@ -189,6 +152,7 @@ app.include_router(alert_router, tags=["alerts"])
 app.include_router(notification_router, tags=["notifications"])
 app.include_router(sse_router, tags=["sse"])
 app.include_router(setup_router, tags=["setup"])
+app.include_router(index_router, tags=["index"])
 
 def run():
     # pylint: disable=C0415
