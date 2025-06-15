@@ -43,6 +43,7 @@ def init_config():
             SavedConfig.STARTUP_MODE: None,
             SavedConfig.SITE_DOMAIN: None,
             SavedConfig.TUNNEL_PROVIDER: None,
+            SavedConfig.PUSH_SUBSCRIPTIONS: []
         }
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(default_config, f, indent=2)
@@ -80,6 +81,7 @@ def reset_config():
         SavedConfig.STARTUP_MODE: None,
         SavedConfig.SITE_DOMAIN: None,
         SavedConfig.TUNNEL_PROVIDER: None,
+        SavedConfig.PUSH_SUBSCRIPTIONS: []
     }
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(default_config, f, indent=2)

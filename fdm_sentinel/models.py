@@ -157,6 +157,7 @@ class SavedConfig(str, Enum):
     DETECTION_INTERVAL_MS = "detection_interval_ms"
     PRINTER_STAT_POLLING_RATE_MS = "printer_stat_polling_rate_ms"
     TUNNEL_STAT_POLLING_RATE_MS = "tunnel_stat_polling_rate_ms"
+    PUSH_SUBSCRIPTIONS = "push_subscriptions"
 
 class CloudflareTunnelConfig(BaseModel):
     account_id: str

@@ -326,21 +326,19 @@ async function checkNotificationsEnabled() {
     if (Notification.permission !== 'granted') {
         return false;
     }
-    if ('serviceWorker' in navigator) {
-        try {
-            const registrations = await navigator.serviceWorker.getRegistrations();
-            for (const registration of registrations) {
-                const subscription = await registration.pushManager.getSubscription();
-                if (subscription) {
-                    return true;
-                }
-            }
-        } catch (error) {
-            console.error('Error checking for active subscriptions:', error);
+    try {
+        const resp = await fetch('/notification/debug');
+        if (resp.ok) {
+            const data = await resp.json();
+            return data.subscriptions_count > 0;
+        } else {
+            console.error('Failed to fetch notification status from server:', resp.status);
+            return false;
         }
+    } catch (error) {
+        console.error('Error checking notification status:', error);
+        return false;
     }
-    
-    return false;
 }
 
 async function updateNotificationButtonState() {
@@ -366,6 +364,12 @@ notificationsBtn.addEventListener('click', async () => {
         if (await checkNotificationsEnabled()) {
             console.debug('Unsubscribing from notifications...');
             await unsubscribeFromPush();
+            try {
+                const res = await fetch('/notification/unsubscribe', {method: 'POST'});
+                if (!res.ok) console.error('Server unsubscribe failed:', res.status);
+            } catch (err) {
+                console.error('Error during server unsubscribe:', err);
+            }
         } else {
             console.debug('Subscribing to notifications...');
             await registerPush();

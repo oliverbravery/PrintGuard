@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Request
 
 from ..models import SavedConfig, SavedKey, Notification
-from ..utils.config import get_config, get_key
+from ..utils.config import get_config, get_key, update_config
 from ..utils.notification_utils import send_notification
 
 router = APIRouter()
@@ -31,12 +31,24 @@ async def subscribe(request: Request):
                 logging.debug("Removed existing subscription for same endpoint")
                 break
         request.app.state.subscriptions.append(subscription)
+        config = get_config() or {}
+        config[SavedConfig.PUSH_SUBSCRIPTIONS] = request.app.state.subscriptions
+        update_config(config)
         logging.debug("Successfully added subscription. Total subscriptions: %d", len(request.app.state.subscriptions))
         return {"success": True}
     # pylint: disable=W0718
     except Exception as e:
         logging.error("Subscription error: %s", str(e))
         return {"success": False, "error": f"Server error: {str(e)}"}
+
+@router.post("/notification/unsubscribe")
+async def unsubscribe(request: Request):
+    request.app.state.subscriptions.clear()
+    config = get_config() or {}
+    config[SavedConfig.PUSH_SUBSCRIPTIONS] = []
+    update_config(config)
+    logging.debug("All push subscriptions cleared and persisted.")
+    return {"success": True}
 
 @router.get("/notification/debug")
 async def notification_debug(request: Request):

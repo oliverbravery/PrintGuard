@@ -203,7 +203,8 @@ app.state.class_names = ['success', 'failure']
 app.state.defect_idx = -1
 app.state.alerts = {}
 app.state.outbound_queue = asyncio.Queue()
-app.state.subscriptions = []
+config = get_config() or {}
+app.state.subscriptions = config.get(SavedConfig.PUSH_SUBSCRIPTIONS, [])
 
 app.state.camera_states = {}
 
