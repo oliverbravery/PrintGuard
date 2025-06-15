@@ -1,6 +1,11 @@
+import logging
+import subprocess
 from typing import Any, Dict, List, Optional
+
 import requests
-from ..models import OperatingSystem
+
+from ..models import OperatingSystem, SavedConfig, SavedKey
+
 
 class CloudflareAPI:
     def __init__(self, api_token: str, email: Optional[str] = None):
@@ -37,9 +42,6 @@ class CloudflareAPI:
     def create_tunnel(self, account_id: str, name: str) -> Dict[str, Any]:
         data = {"name": name, "config_src": "cloudflare"}
         return self._request("POST", f"/accounts/{account_id}/cfd_tunnel", data)
-
-    def update_tunnel_config(self, account_id: str, tunnel_id: str, config: Dict) -> Dict[str, Any]:
-        return self._request("PUT", f"/accounts/{account_id}/cfd_tunnel/{tunnel_id}/config", config)
 
     def create_dns_record(self, zone_id: str, tunnel_id: str,
                           name: str, ttl: int = 120) -> Dict[str, Any]:
@@ -79,51 +81,6 @@ class CloudflareAPI:
             "require": []
         }
         return self._request("POST", f"/accounts/{account_id}/access/apps/{app_id}/policies", data)
-
-def setup_tunnel(api_token: str, account_id: str, zone_id: str, tunnel_name: str, domain_name: str, email: Optional[str] = None) -> Dict[str, Any]:
-    cf = CloudflareAPI(api_token, email)
-    tunnel_response = cf.create_tunnel(account_id, tunnel_name)
-    tunnel_id = tunnel_response["result"]["id"]
-    tunnel_token = tunnel_response["result"]["token"]
-    tunnel_config = {
-        "config": {
-            "ingress": [
-                {
-                    "hostname": domain_name,
-                    "service": "http://localhost:8000"
-                },
-                {
-                    "service": "http_status:404"
-                }
-            ]
-        }
-    }
-    cf.update_tunnel_config(account_id, tunnel_id, tunnel_config)
-    dns_response = cf.create_dns_record(zone_id, tunnel_id, domain_name)
-    return {
-        "tunnel_id": tunnel_id,
-        "tunnel_token": tunnel_token,
-        "dns_record": dns_response["result"]
-    }
-
-def setup_warp_access(api_token: str, account_id: str, app_name: str,
-                      domain: str, device_ids: List[str],
-                      email: Optional[str] = None) -> Dict[str, Any]:
-    cf = CloudflareAPI(api_token, email)
-    list_response = cf.create_device_list(account_id, f"{app_name} Devices")
-    list_id = list_response["result"]["id"]
-    cf.add_devices_to_list(account_id, list_id, device_ids)
-    app_response = cf.create_access_app(account_id, app_name, domain)
-    app_id = app_response["result"]["id"]
-    policy_response = cf.create_access_policy(account_id,
-                                              app_id,
-                                              f"Allow {app_name} Devices",
-                                              list_id)
-    return {
-        "app_id": app_id,
-        "list_id": list_id,
-        "policy_id": policy_response["result"]["id"]
-    }
 
 class CloudflareOSCommands:
     @staticmethod
@@ -210,3 +167,82 @@ def get_cloudflare_commands(os: OperatingSystem, tunnel_name: str, token: str, l
 def get_cloudflare_setup_sequence(os: OperatingSystem, token: str,
                                   local_port: int = 8000) -> List[str]:
     return CloudflareOSCommands.get_setup_sequence(os, token, local_port=local_port)
+
+def setup_tunnel(api_token: str, account_id: str, zone_id: str, tunnel_name: str, domain_name: str, email: Optional[str] = None) -> Dict[str, Any]:
+    cf = CloudflareAPI(api_token, email)
+    tunnel_response = cf.create_tunnel(account_id, tunnel_name)
+    tunnel_id = tunnel_response["result"]["id"]
+    tunnel_token = tunnel_response["result"]["token"]
+    dns_response = cf.create_dns_record(zone_id, tunnel_id, domain_name)
+    return {
+        "tunnel_id": tunnel_id,
+        "tunnel_token": tunnel_token,
+        "dns_record": dns_response["result"]
+    }
+
+def get_current_os() -> OperatingSystem:
+    # pylint:disable=import-outside-toplevel
+    from ..app import get_config
+    config = get_config()
+    stored_os = config.get(SavedConfig.USER_OPERATING_SYSTEM)
+    if stored_os:
+        return OperatingSystem(stored_os)
+
+def start_cloudflare_tunnel() -> bool:
+    # pylint:disable=import-outside-toplevel
+    from ..utils.config import get_key
+    try:
+        current_os = get_current_os()
+        if not current_os:
+            raise ValueError("Current OS not set in config.")
+        tunnel_token = get_key(SavedKey.TUNNEL_TOKEN)
+        if not tunnel_token:
+            raise ValueError("Tunnel token not found. Please complete tunnel setup first.")
+        start_command = CloudflareOSCommands.get_start_command(current_os, "", tunnel_token, 8000)
+        logging.debug("Starting Cloudflare tunnel with command: %s", start_command)
+        result = subprocess.run(start_command, shell=True,
+                             capture_output=True, text=True,
+                             timeout=30, check=False)
+        if result.returncode == 0:
+            logging.debug("Cloudflare tunnel started successfully")
+            return True
+        else:
+            logging.warning("Non-privileged start failed: %s", result.stderr)
+            logging.info("User may need to manually run command with elevated privileges")
+            return True
+    except subprocess.TimeoutExpired:
+        logging.error("Timeout starting Cloudflare tunnel")
+        return False
+    except (OSError, ValueError) as e:
+        logging.error("Error starting Cloudflare tunnel: %s", e)
+        return False
+    except Exception as e:
+        logging.error("Unexpected error starting Cloudflare tunnel: %s", e)
+        return False
+
+def stop_cloudflare_tunnel() -> bool:
+    try:
+        current_os = get_current_os()
+        if not current_os:
+            raise ValueError("Current OS not set in config.")
+        stop_command = CloudflareOSCommands.get_stop_command(current_os)
+        logging.debug("Stopping Cloudflare tunnel with command: %s", stop_command)
+        result = subprocess.run(stop_command, shell=True,
+                             capture_output=True, text=True,
+                             timeout=30, check=False)
+        if result.returncode == 0:
+            logging.debug("Cloudflare tunnel stopped successfully")
+            return True
+        else:
+            logging.warning("Non-privileged stop failed: %s", result.stderr)
+            logging.info("User may need to manually run command with elevated privileges")
+            return True
+    except subprocess.TimeoutExpired:
+        logging.error("Timeout stopping Cloudflare tunnel")
+        return False
+    except (OSError, ValueError) as e:
+        logging.error("Error stopping Cloudflare tunnel: %s", e)
+        return False
+    except Exception as e:
+        logging.error("Unexpected error stopping Cloudflare tunnel: %s", e)
+        return False

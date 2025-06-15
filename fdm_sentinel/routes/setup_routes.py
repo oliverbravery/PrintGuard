@@ -242,20 +242,6 @@ async def create_cloudflare_tunnel(config: CloudflareTunnelConfig):
         zone_name = next((z["name"] for z in zones_response["result"] if (
             z["id"] == config.zone_id)), "")
         tunnel_url = f"{config.subdomain}.{zone_name}"
-        tunnel_config = {
-            "config": {
-                "ingress": [
-                    {
-                        "hostname": tunnel_url,
-                        "service": "http://localhost:8000"
-                    },
-                    {
-                        "service": "http_status:404"
-                    }
-                ]
-            }
-        }
-        cf.update_tunnel_config(config.account_id, tunnel_id, tunnel_config)
         _ = cf.create_dns_record(config.zone_id, tunnel_id, config.subdomain)
         store_key(SavedKey.TUNNEL_TOKEN, tunnel_token)
         return {

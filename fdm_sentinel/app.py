@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import subprocess
 import time
 from contextlib import asynccontextmanager
 
@@ -12,8 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse, StreamingResponse
 from .models import (CameraState, SiteStartupMode,
-                     TunnelProvider, SavedConfig,
-                     OperatingSystem, SavedKey)
+                     TunnelProvider, SavedConfig)
 from .routes.alert_routes import router as alert_router
 from .routes.detection_routes import router as detection_router
 from .routes.live_detection_routes import router as live_detection_router
@@ -26,73 +24,10 @@ from .utils.config import (get_ssl_private_key_temporary_path,
                            DEVICE_TYPE, SUCCESS_LABEL,
                            CAMERA_INDICES, MAX_CAMERAS,
                            CAMERA_INDEX, get_config,
-                           update_config, get_key)
-from .utils.cloudflare_utils import CloudflareOSCommands
+                           update_config)
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
-
-def get_current_os() -> OperatingSystem:
-    config = get_config()
-    stored_os = config.get(SavedConfig.USER_OPERATING_SYSTEM)
-    if stored_os:
-        return OperatingSystem(stored_os)
-
-def start_cloudflare_tunnel() -> bool:
-    try:
-        current_os = get_current_os()
-        if not current_os:
-            raise ValueError("Current OS not set in config.")
-        tunnel_token = get_key(SavedKey.TUNNEL_TOKEN)
-        if not tunnel_token:
-            raise ValueError("Tunnel token not found. Please complete tunnel setup first.")
-        start_command = CloudflareOSCommands.get_start_command(current_os, "", tunnel_token, 8000)
-        logging.debug("Starting Cloudflare tunnel with command: %s", start_command)
-        result = subprocess.run(start_command, shell=True,
-                             capture_output=True, text=True,
-                             timeout=30, check=False)
-        if result.returncode == 0:
-            logging.debug("Cloudflare tunnel started successfully")
-            return True
-        else:
-            logging.warning("Non-privileged start failed: %s", result.stderr)
-            logging.info("User may need to manually run command with elevated privileges")
-            return True
-    except subprocess.TimeoutExpired:
-        logging.error("Timeout starting Cloudflare tunnel")
-        return False
-    except (OSError, ValueError) as e:
-        logging.error("Error starting Cloudflare tunnel: %s", e)
-        return False
-    except Exception as e:
-        logging.error("Unexpected error starting Cloudflare tunnel: %s", e)
-        return False
-
-def stop_cloudflare_tunnel() -> bool:
-    try:
-        current_os = get_current_os()
-        if not current_os:
-            raise ValueError("Current OS not set in config.")
-        stop_command = CloudflareOSCommands.get_stop_command(current_os)
-        logging.debug("Stopping Cloudflare tunnel with command: %s", stop_command)
-        result = subprocess.run(stop_command, shell=True,
-                             capture_output=True, text=True,
-                             timeout=30, check=False)
-        if result.returncode == 0:
-            logging.debug("Cloudflare tunnel stopped successfully")
-            return True
-        else:
-            logging.warning("Non-privileged stop failed: %s", result.stderr)
-            logging.info("User may need to manually run command with elevated privileges")
-            return True
-    except subprocess.TimeoutExpired:
-        logging.error("Timeout stopping Cloudflare tunnel")
-        return False
-    except (OSError, ValueError) as e:
-        logging.error("Error stopping Cloudflare tunnel: %s", e)
-        return False
-    except Exception as e:
-        logging.error("Unexpected error stopping Cloudflare tunnel: %s", e)
-        return False
+from .utils.cloudflare_utils import (start_cloudflare_tunnel, stop_cloudflare_tunnel)
 
 # pylint: disable=W0621
 def get_camera_state(camera_index, reset=False):
