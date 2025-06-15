@@ -63,7 +63,7 @@ async function loadPendingAlerts() {
     
     remoteAlerts.forEach(remoteAlert => {
         if (!activeAlerts[remoteAlert.id]) {
-            const alert_start_time = new Date(remoteAlert.timestamp);
+            const alert_start_time = remoteAlert.timestamp * 1000;
             const expirationTime = alert_start_time + (remoteAlert.countdown_time * 1000);
             activeAlerts[remoteAlert.id] = {
                 data: remoteAlert,
