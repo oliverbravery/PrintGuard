@@ -272,6 +272,50 @@ body, html {
     color: var(--color-white);
 }
 
+.start-stop-btn.primary {
+    background: var(--text-primary);
+    color: var(--color-white);
+    border-color: var(--text-primary);
+}
+
+.start-stop-btn.primary:hover {
+    background: #444;
+    border-color: #444;
+}
+
+.start-stop-btn.secondary {
+    border-color: var(--text-secondary);
+    color: var(--text-secondary);
+}
+
+.start-stop-btn.secondary:hover {
+    background: var(--text-secondary);
+    color: var(--color-white);
+}
+
+.start-stop-btn.danger {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+}
+
+.start-stop-btn.danger:hover {
+    background: var(--color-danger);
+    color: var(--color-white);
+}
+
+.button-group {
+    display: flex;
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-lg);
+    justify-content: center;
+}
+
+.button-group .start-stop-btn {
+    flex: 1;
+    margin: 0;
+    min-width: 120px;
+}
+
 .notification-popup {
     position: fixed;
     top: var(--spacing-md);
