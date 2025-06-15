@@ -5,17 +5,20 @@ import logging
 
 from PIL import Image
 
-from ..models import SSEDataType
-from .sse_utils import append_new_outbound_packet
 from .printer_services.octoprint import OctoPrintClient
 from .camera_utils import (update_camera_state, get_camera_printer_config)
 
 
-async def append_new_alert(alert):
+def append_new_alert(alert):
     # pylint: disable=import-outside-toplevel
     from ..app import app
     app.state.alerts[alert.id] = alert
-    await append_new_outbound_packet(alert_to_response_json(alert), SSEDataType.ALERT)
+
+def get_alert(alert_id):
+    # pylint: disable=import-outside-toplevel
+    from ..app import app
+    alert = app.state.alerts.get(alert_id, None)
+    return alert
 
 async def dismiss_alert(alert_id):
     # pylint: disable=import-outside-toplevel

@@ -3,7 +3,9 @@ import uuid
 import logging
 import cv2
 
-from .alert_utils import cancel_print, dismiss_alert, alert_to_response_json
+from .alert_utils import (cancel_print, dismiss_alert,
+                          alert_to_response_json, get_alert,
+                          append_new_alert)
 from .sse_utils import append_new_outbound_packet
 from .camera_utils import (get_camera_state, get_camera_printer_config,
                            update_camera_state, update_camera_detection_history)
@@ -23,10 +25,8 @@ async def _send_alert(alert):
     await append_new_outbound_packet(alert_to_response_json(alert), SSEDataType.ALERT)
 
 async def _terminate_alert_after_cooldown(alert):
-    # pylint: disable=C0415
-    from ..app import app
     await asyncio.sleep(alert.countdown_time)
-    if app.state.alerts.get(alert.id, None) is not None:
+    if get_alert(alert.id) is not None:
         camera_state = get_camera_state(alert.camera_index)
         if not camera_state:
             return
@@ -37,8 +37,6 @@ async def _terminate_alert_after_cooldown(alert):
                 await cancel_print(alert.id)
 
 async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timestamp_arg):
-    # pylint: disable=C0415
-    from ..app import app
     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
     # pylint: disable=E1101
     _, img_buf = cv2.imencode('.jpg', frame)
@@ -54,10 +52,10 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
         countdown_action=camera_state_ref.countdown_action,
         has_printer=has_printer,
     )
-    app.state.alerts[alert.id] = alert
+    append_new_alert(alert)
     asyncio.create_task(_terminate_alert_after_cooldown(alert))
     await update_camera_state(camera_index, {"current_alert_id": alert_id})
-    send_defect_notification(alert_id, app)
+    send_defect_notification(alert_id)
     return alert
 
 async def _live_detection_loop(app_state, camera_index):

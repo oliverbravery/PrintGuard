@@ -78,7 +78,7 @@ async def test_notification(request: Request):
         body="This is a test notification from FDM Sentinel",
         image_url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
     )
-    success = send_notification(test_notification, request.app)
+    success = send_notification(test_notification)
     return {
         "success": success,
         "message": "Test notification sent" if success else "Failed to send test notification"
