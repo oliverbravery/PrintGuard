@@ -546,7 +546,7 @@ function saveFeedSettings() {
         printer_stat_polling_rate_ms: parseInt(document.getElementById('printerStatPollingRate').value),
         tunnel_stat_polling_rate_ms: parseInt(document.getElementById('tunnelStatPollingRate').value)
     };
-    fetch('/setup/save-feed-settings', {
+    fetch('/save-feed-settings', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -586,7 +586,7 @@ function initializeFeedSettings() {
 }
 
 function loadFeedSettings() {
-    return fetch('/setup/get-feed-settings', {
+    return fetch('/get-feed-settings', {
         method: 'GET',
         headers: {
             'Content-Type': 'application/json',

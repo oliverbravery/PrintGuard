@@ -10,15 +10,11 @@ from py_vapid import Vapid
 
 from ..models import (TunnelProvider, TunnelSettings, SavedConfig,
                       VapidSettings, SavedKey, SetupCompletion,
-                      CloudflareTunnelConfig, CloudflareDownloadConfig, FeedSettings)
+                      CloudflareTunnelConfig, CloudflareDownloadConfig)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
-                            store_key, get_config, update_config, get_key,
-                            STREAM_MAX_FPS, STREAM_TUNNEL_FPS, STREAM_JPEG_QUALITY,
-                            STREAM_MAX_WIDTH, DETECTION_INTERVAL_MS,
-                            PRINTER_STAT_POLLING_RATE_MS, TUNNEL_STAT_POLLING_RATE_MS)
+                            store_key, get_config, update_config, get_key)
 from ..utils.setup_utils import setup_ngrok_tunnel
 from ..utils.cloudflare_utils import CloudflareAPI, get_cloudflare_setup_sequence
-from ..utils.stream_utils import stream_optimizer
 
 router = APIRouter()
 
@@ -279,52 +275,6 @@ async def save_cloudflare_os(config: CloudflareDownloadConfig):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to save operating system selection: {str(e)}"
-        )
-
-@router.post("/setup/save-feed-settings", include_in_schema=False)
-async def save_feed_settings(settings: FeedSettings):
-    try:
-        config_data = {
-            SavedConfig.STREAM_MAX_FPS: settings.stream_max_fps,
-            SavedConfig.STREAM_TUNNEL_FPS: settings.stream_tunnel_fps,
-            SavedConfig.STREAM_JPEG_QUALITY: settings.stream_jpeg_quality,
-            SavedConfig.STREAM_MAX_WIDTH: settings.stream_max_width,
-            SavedConfig.DETECTION_INTERVAL_MS: settings.detection_interval_ms,
-            SavedConfig.PRINTER_STAT_POLLING_RATE_MS: settings.printer_stat_polling_rate_ms,
-            SavedConfig.TUNNEL_STAT_POLLING_RATE_MS: settings.tunnel_stat_polling_rate_ms
-        }
-        update_config(config_data)
-        stream_optimizer.invalidate_cache()
-        logging.debug("Feed settings saved successfully.")
-        return {"success": True, "message": "Feed settings saved successfully."}
-    except Exception as e:
-        logging.error("Error saving feed settings: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save feed settings: {str(e)}"
-        )
-
-@router.get("/setup/get-feed-settings", include_in_schema=False)
-async def get_feed_settings():
-    try:
-        config = get_config()
-        # pylint:disable=import-outside-toplevel
-        settings = {
-            "stream_max_fps": config.get(SavedConfig.STREAM_MAX_FPS, STREAM_MAX_FPS),
-            "stream_tunnel_fps": config.get(SavedConfig.STREAM_TUNNEL_FPS, STREAM_TUNNEL_FPS),
-            "stream_jpeg_quality": config.get(SavedConfig.STREAM_JPEG_QUALITY, STREAM_JPEG_QUALITY),
-            "stream_max_width": config.get(SavedConfig.STREAM_MAX_WIDTH, STREAM_MAX_WIDTH),
-            "detection_interval_ms": config.get(SavedConfig.DETECTION_INTERVAL_MS, DETECTION_INTERVAL_MS),
-            "printer_stat_polling_rate_ms": config.get(SavedConfig.PRINTER_STAT_POLLING_RATE_MS, PRINTER_STAT_POLLING_RATE_MS),
-            "tunnel_stat_polling_rate_ms": config.get(SavedConfig.TUNNEL_STAT_POLLING_RATE_MS, TUNNEL_STAT_POLLING_RATE_MS)
-        }
-        settings["detections_per_second"] = round(1000 / settings["detection_interval_ms"])
-        return {"success": True, "settings": settings}
-    except Exception as e:
-        logging.error("Error loading feed settings: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to load feed settings: {str(e)}"
         )
 
 @router.get("/setup/warp/add-device", include_in_schema=False)
