@@ -223,7 +223,7 @@ def clear_prototype_cache(support_dir):
         try:
             import shutil
             shutil.rmtree(cache_dir)
-            logging.info("Prototype cache cleared for support directory: %s", support_dir)
+            logging.debug("Prototype cache cleared for support directory: %s", support_dir)
         except OSError as e:
             logging.error("Failed to clear prototype cache: %s", e)
     else:

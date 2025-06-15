@@ -136,6 +136,32 @@ body, html {
     padding-top: 0px;
 }
 
+.settings-section {
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-secondary) var(--background-secondary);
+}
+
+.settings-section::-webkit-scrollbar {
+    width: 8px;
+}
+
+.settings-section::-webkit-scrollbar-track {
+    background: var(--background-secondary);
+    border-radius: var(--radius-sm);
+}
+
+.settings-section::-webkit-scrollbar-thumb {
+    background: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--background-secondary);
+}
+
+.settings-section::-webkit-scrollbar-thumb:hover {
+    background: var(--text-primary);
+}
+
 .camera-header {
     display: flex;
     align-items: center;
@@ -246,6 +272,50 @@ body, html {
     color: var(--color-white);
 }
 
+.start-stop-btn.primary {
+    background: var(--text-primary);
+    color: var(--color-white);
+    border-color: var(--text-primary);
+}
+
+.start-stop-btn.primary:hover {
+    background: #444;
+    border-color: #444;
+}
+
+.start-stop-btn.secondary {
+    border-color: var(--text-secondary);
+    color: var(--text-secondary);
+}
+
+.start-stop-btn.secondary:hover {
+    background: var(--text-secondary);
+    color: var(--color-white);
+}
+
+.start-stop-btn.danger {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+}
+
+.start-stop-btn.danger:hover {
+    background: var(--color-danger);
+    color: var(--color-white);
+}
+
+.button-group {
+    display: flex;
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-lg);
+    justify-content: center;
+}
+
+.button-group .start-stop-btn {
+    flex: 1;
+    margin: 0;
+    min-width: 120px;
+}
+
 .notification-popup {
     position: fixed;
     top: var(--spacing-md);
@@ -327,6 +397,19 @@ body, html {
 .alert-item .cancel-print-btn:hover {
     background-color: var(--color-danger-dark);
     border-color: var(--color-danger-dark);
+}
+
+.alert-item .cancel-print-btn.disabled {
+    background-color: #cccccc;
+    color: #666666;
+    border-color: #cccccc;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.alert-item .cancel-print-btn.disabled:hover {
+    background-color: #cccccc;
+    border-color: #cccccc;
 }
 
 @keyframes fadeIn {
@@ -659,6 +742,8 @@ input[type="range"]::-moz-range-thumb {
     justify-content: flex-start;
     padding-right: var(--spacing-md);
     padding-top: 0px;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 }
 
@@ -791,7 +876,9 @@ input[type="range"]::-moz-range-thumb {
 #streamJpegQuality::-webkit-slider-runnable-track,
 #streamMaxWidth::-webkit-slider-runnable-track,
 #detectionsPerSecond::-webkit-slider-runnable-track,
-#detectionInterval::-webkit-slider-runnable-track {
+#detectionInterval::-webkit-slider-runnable-track,
+#printerStatPollingRate::-webkit-slider-runnable-track,
+#tunnelStatPollingRate::-webkit-slider-runnable-track {
     background: linear-gradient(to right, #ADD8E6 var(--value, 50%), #ffffff var(--value, 50%));
 }
 
@@ -800,7 +887,9 @@ input[type="range"]::-moz-range-thumb {
 #streamJpegQuality::-moz-range-track,
 #streamMaxWidth::-moz-range-track,
 #detectionsPerSecond::-moz-range-track,
-#detectionInterval::-moz-range-track {
+#detectionInterval::-moz-range-track,
+#printerStatPollingRate::-moz-range-track,
+#tunnelStatPollingRate::-moz-range-track {
     background: linear-gradient(to right, #ADD8E6 var(--value, 50%), #ffffff var(--value, 50%));
 }
 
@@ -814,4 +903,88 @@ input[type="range"]::-moz-range-thumb {
         padding: var(--spacing-lg);
         max-height: 90vh;
     }
+}
+
+.printer-control {
+    width: 100%;
+    margin: var(--spacing-sm) 0;
+}
+
+.printer-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    border: 1px solid var(--text-secondary);
+    border-radius: var(--radius-small);
+    background-color: var(--bg-light);
+}
+
+.printer-details h4 {
+    margin: 0 0 var(--spacing-xs) 0;
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+}
+
+.printer-details p {
+    margin: 0 0 var(--spacing-xs) 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+}
+
+.printer-stats {
+    margin-top: var(--spacing-sm);
+    padding-top: var(--spacing-sm);
+    border-top: 1px solid var(--text-tertiary);
+}
+
+.printer-stats p {
+    margin: 0 0 var(--spacing-xs) 0;
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+}
+
+.printer-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+}
+
+.printer-btn {
+    flex: 1;
+    min-width: 60px;
+    padding: var(--spacing-xs);
+    border: 1px solid var(--text-primary);
+    background: var(--color-white);
+    color: var(--text-primary);
+    font-size: var(--font-size-xs);
+    cursor: pointer;
+    border-radius: var(--radius-small);
+    transition: var(--transition-fast);
+}
+
+.printer-btn:hover {
+    background: var(--text-primary);
+    color: var(--color-white);
+}
+
+.printer-btn.danger {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+}
+
+.printer-btn.danger:hover {
+    background: var(--color-danger);
+    color: var(--color-white);
+}
+
+.no-printer-info {
+    text-align: center;
+    padding: var(--spacing-sm);
+    color: var(--text-secondary);
+}
+
+.no-printer-info p {
+    margin: 0 0 var(--spacing-sm) 0;
+    font-size: var(--font-size-xs);
 }

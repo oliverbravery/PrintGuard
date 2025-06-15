@@ -1,7 +1,7 @@
 import asyncio
 from enum import Enum
-from typing import List, Optional
-from pydantic import BaseModel, field_validator
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, field_validator, Field
 
 class Alert(BaseModel):
     id: str
@@ -11,6 +11,8 @@ class Alert(BaseModel):
     timestamp: float
     countdown_time: float
     camera_index: int
+    has_printer: bool = False
+    countdown_action: str = "dismiss"
 
 class AlertAction(str, Enum):
     DISMISS = "dismiss"
@@ -70,6 +72,8 @@ class CameraState(BaseModel):
     countdown_action: str = None
     majority_vote_threshold: int = None
     majority_vote_window: int = None
+    printer_id: Optional[str] = None
+    printer_config: Optional[Dict] = None
 
     def __init__(self, **data):
         if 'brightness' not in data:
@@ -151,6 +155,8 @@ class SavedConfig(str, Enum):
     STREAM_JPEG_QUALITY = "stream_jpeg_quality"
     STREAM_MAX_WIDTH = "stream_max_width"
     DETECTION_INTERVAL_MS = "detection_interval_ms"
+    PRINTER_STAT_POLLING_RATE_MS = "printer_stat_polling_rate_ms"
+    TUNNEL_STAT_POLLING_RATE_MS = "tunnel_stat_polling_rate_ms"
 
 class CloudflareTunnelConfig(BaseModel):
     account_id: str
@@ -186,3 +192,62 @@ class FeedSettings(BaseModel):
     stream_max_width: int
     detections_per_second: int
     detection_interval_ms: int
+    printer_stat_polling_rate_ms: int
+    tunnel_stat_polling_rate_ms: int
+
+class FileInfo(BaseModel):
+    name: Optional[str] = None
+    origin: Optional[str] = None
+    size: Optional[int] = None
+    date: Optional[int] = None
+
+
+class Progress(BaseModel):
+    completion: Optional[float] = None
+    filepos: Optional[int] = None
+    printTime: Optional[int] = None
+    printTimeLeft: Optional[int] = None
+
+
+class JobInfoResponse(BaseModel):
+    job: Dict = Field(default_factory=dict)
+    progress: Optional[Progress] = None
+    state: str
+    error: Optional[str] = None
+
+    model_config = {
+        "extra": "ignore"
+    }
+
+
+class TemperatureReading(BaseModel):
+    actual: float
+    target: Optional[float]
+    offset: Optional[float]
+
+
+class PrinterState(BaseModel):
+    temperature: Dict[str, TemperatureReading]
+
+class CurrentPayload(BaseModel):
+    state: dict
+    job: Any
+    progress: Progress
+    temps: Optional[list] = Field(None, alias="temps")
+
+class PrinterType(str, Enum):
+    OCTOPRINT = "octoprint"
+
+class PrinterConfig(BaseModel):
+    name: str
+    printer_type: PrinterType
+    camera_index: int
+    base_url: str
+    api_key: str
+
+class PrinterConfigRequest(BaseModel):
+    name: str
+    printer_type: PrinterType
+    camera_index: int
+    base_url: str
+    api_key: str

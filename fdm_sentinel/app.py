@@ -20,7 +20,6 @@ from .routes.live_detection_routes import router as live_detection_router
 from .routes.notification_routes import router as notification_router
 from .routes.sse_routes import router as sse_router
 from .routes.setup_routes import router as setup_router
-from .routes.debug_routes import router as debug_router
 from .utils.config import (get_ssl_private_key_temporary_path,
                            SSL_CERT_FILE, PROTOTYPES_DIR,
                            MODEL_PATH, MODEL_OPTIONS_PATH,
@@ -225,6 +224,30 @@ async def update_camera_detection_history(camera_index, pred, time_val):
                     camera_index)
     return None
 
+def get_camera_printer_config(camera_index):
+    camera_state = get_camera_state(camera_index)
+    if camera_state and hasattr(camera_state, 'printer_config') and camera_state.printer_config:
+        return camera_state.printer_config
+    return None
+
+def get_camera_printer_id(camera_index):
+    camera_state = get_camera_state(camera_index)
+    if camera_state and hasattr(camera_state, 'printer_id') and camera_state.printer_id:
+        return camera_state.printer_id
+    return None
+
+async def set_camera_printer(camera_index, printer_id, printer_config):
+    return await update_camera_state(camera_index, {
+        "printer_id": printer_id,
+        "printer_config": printer_config
+    })
+
+async def remove_camera_printer(camera_index):
+    return await update_camera_state(camera_index, {
+        "printer_id": None,
+        "printer_config": None
+    })
+
 base_dir = os.path.dirname(__file__)
 static_dir = os.path.join(base_dir, "static")
 templates_dir = os.path.join(base_dir, "templates")
@@ -311,7 +334,6 @@ app.include_router(alert_router, tags=["alerts"])
 app.include_router(notification_router, tags=["notifications"])
 app.include_router(sse_router, tags=["sse"])
 app.include_router(setup_router, tags=["setup"])
-app.include_router(debug_router, tags=["debug"])
 
 def run():
     # pylint: disable=C0415

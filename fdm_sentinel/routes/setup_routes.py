@@ -11,14 +11,17 @@ from py_vapid import Vapid
 
 from ..models import (TunnelProvider, TunnelSettings, SavedConfig,
                       VapidSettings, SavedKey, SetupCompletion,
-                      CloudflareTunnelConfig, CloudflareDownloadConfig, FeedSettings)
+                      CloudflareTunnelConfig, CloudflareDownloadConfig, FeedSettings,
+                      PrinterConfigRequest)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
                             store_key, get_config, update_config, get_key,
                             STREAM_MAX_FPS, STREAM_TUNNEL_FPS, STREAM_JPEG_QUALITY,
-                            STREAM_MAX_WIDTH, DETECTION_INTERVAL_MS)
+                            STREAM_MAX_WIDTH, DETECTION_INTERVAL_MS,
+                            PRINTER_STAT_POLLING_RATE_MS, TUNNEL_STAT_POLLING_RATE_MS)
 from ..utils.setup_utils import setup_ngrok_tunnel
 from ..utils.cloudflare_utils import CloudflareAPI, get_cloudflare_setup_sequence
 from ..utils.stream_utils import stream_optimizer
+from ..utils.printer_services.octoprint import OctoPrintClient
 
 router = APIRouter()
 
@@ -312,7 +315,9 @@ async def save_feed_settings(settings: FeedSettings):
             SavedConfig.STREAM_TUNNEL_FPS: settings.stream_tunnel_fps,
             SavedConfig.STREAM_JPEG_QUALITY: settings.stream_jpeg_quality,
             SavedConfig.STREAM_MAX_WIDTH: settings.stream_max_width,
-            SavedConfig.DETECTION_INTERVAL_MS: settings.detection_interval_ms
+            SavedConfig.DETECTION_INTERVAL_MS: settings.detection_interval_ms,
+            SavedConfig.PRINTER_STAT_POLLING_RATE_MS: settings.printer_stat_polling_rate_ms,
+            SavedConfig.TUNNEL_STAT_POLLING_RATE_MS: settings.tunnel_stat_polling_rate_ms
         }
         update_config(config_data)
         stream_optimizer.invalidate_cache()
@@ -335,7 +340,9 @@ async def get_feed_settings():
             "stream_tunnel_fps": config.get(SavedConfig.STREAM_TUNNEL_FPS, STREAM_TUNNEL_FPS),
             "stream_jpeg_quality": config.get(SavedConfig.STREAM_JPEG_QUALITY, STREAM_JPEG_QUALITY),
             "stream_max_width": config.get(SavedConfig.STREAM_MAX_WIDTH, STREAM_MAX_WIDTH),
-            "detection_interval_ms": config.get(SavedConfig.DETECTION_INTERVAL_MS, DETECTION_INTERVAL_MS)
+            "detection_interval_ms": config.get(SavedConfig.DETECTION_INTERVAL_MS, DETECTION_INTERVAL_MS),
+            "printer_stat_polling_rate_ms": config.get(SavedConfig.PRINTER_STAT_POLLING_RATE_MS, PRINTER_STAT_POLLING_RATE_MS),
+            "tunnel_stat_polling_rate_ms": config.get(SavedConfig.TUNNEL_STAT_POLLING_RATE_MS, TUNNEL_STAT_POLLING_RATE_MS)
         }
         settings["detections_per_second"] = round(1000 / settings["detection_interval_ms"])
         return {"success": True, "settings": settings}
@@ -420,4 +427,110 @@ async def get_cloudflare_team_name(request: Request):
             "success": False,
             "team_name": "your-organization",
             "site_domain": ""
+        }
+    
+@router.get("/setup/cameras", include_in_schema=False)
+async def get_available_cameras():
+    try:
+        # pylint: disable=import-outside-toplevel
+        from ..app import detect_available_cameras
+        cameras = detect_available_cameras()
+        return {"cameras": cameras}
+    except Exception as e:
+        logging.error("Error detecting cameras: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to detect cameras: {str(e)}")
+
+@router.post("/setup/add-printer", include_in_schema=False)
+async def add_printer(printer_config: PrinterConfigRequest):
+    # pylint: disable=import-outside-toplevel
+    from ..app import set_camera_printer
+    try:
+        client = OctoPrintClient(printer_config.base_url, printer_config.api_key)
+        client.get_job_info()
+        printer_id = f"{printer_config.camera_index}_{printer_config.name.replace(' ', '_')}"
+        await set_camera_printer(printer_config.camera_index, printer_id, printer_config.model_dump())
+        return {"success": True, "printer_id": printer_id}
+    except Exception as e:
+        logging.error("Error adding printer: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to add printer: {str(e)}")
+
+@router.post("/setup/test-printer", include_in_schema=False)
+async def test_printer_connection(printer_config: PrinterConfigRequest):
+    try:
+        client = OctoPrintClient(printer_config.base_url, printer_config.api_key)
+        job_info = client.get_job_info()
+        temps = {"bed": {"actual": 0, "target": 0}, "tool0": {"actual": 0, "target": 0}}
+        try:
+            temps = client.get_printer_temperatures()
+        except Exception:
+            pass
+        return {
+            "success": True, 
+            "connection_status": "Connected",
+            "printer_state": job_info.state,
+            "temperatures": temps
+        }
+    except Exception as e:
+        logging.error("Error testing printer connection: %s", e)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@router.post("/setup/remove-printer/{camera_index}", include_in_schema=False)
+async def remove_printer_from_camera(camera_index: int):
+    try:
+        # pylint: disable=import-outside-toplevel
+        from ..app import remove_camera_printer, get_camera_printer_id
+        printer_id = get_camera_printer_id(camera_index)
+        if printer_id:
+            await remove_camera_printer(camera_index)
+            return {"success": True, "message": f"Printer removed from camera {camera_index}"}
+        else:
+            return {"success": False, "error": "No printer configured for this camera"}
+    except Exception as e:
+        logging.error("Error removing printer from camera %d: %s", camera_index, e)
+        raise HTTPException(status_code=500, detail=f"Failed to remove printer: {str(e)}")
+
+@router.get("/setup/camera/{camera_index}/printer", include_in_schema=False)
+async def get_camera_printer(camera_index: int):
+    try:
+        # pylint: disable=import-outside-toplevel
+        from ..app import get_camera_printer_config, get_camera_printer_id
+        printer_id = get_camera_printer_id(camera_index)
+        printer_config = get_camera_printer_config(camera_index)
+        if printer_id and printer_config:
+            return {"success": True, "printer_id": printer_id, "printer_config": printer_config}
+        else:
+            return {"success": True, "printer_id": None, "printer_config": None}
+    except Exception as e:
+        logging.error("Error getting printer for camera %d: %s", camera_index, e)
+        raise HTTPException(status_code=500, detail=f"Failed to get camera printer: {str(e)}")
+
+@router.get("/setup/camera/{camera_index}/printer/stats", include_in_schema=False)
+async def get_camera_printer_stats(camera_index: int):
+    try:
+        # pylint: disable=import-outside-toplevel
+        from ..app import get_camera_printer_config
+        printer_config = get_camera_printer_config(camera_index)
+        if not printer_config:
+            raise HTTPException(status_code=404, detail="No printer configured for this camera")
+        client = OctoPrintClient(printer_config['base_url'], printer_config['api_key'])
+        job_info = client.get_job_info()
+        temps = {"bed": {"actual": 0, "target": 0}, "tool0": {"actual": 0, "target": 0}}
+        try:
+            temps = client.get_printer_temperatures()
+        except Exception:
+            pass
+        return {
+            "success": True, 
+            "connection_status": "Connected",
+            "printer_state": job_info.state,
+            "temperatures": temps
+        }
+    except Exception as e:
+        logging.error("Error getting printer stats for camera %d: %s", camera_index, e)
+        return {
+            "success": False,
+            "error": str(e)
         }

@@ -35,10 +35,11 @@ async def _terminate_alert_after_cooldown(alert):
 async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timestamp_arg):
     # pylint: disable=C0415
     from .notification_utils import send_defect_notification
-    from ..app import update_camera_state, app
+    from ..app import update_camera_state, app, get_camera_printer_config
     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
     # pylint: disable=E1101
     _, img_buf = cv2.imencode('.jpg', frame)
+    has_printer = get_camera_printer_config(camera_index) is not None
     alert = Alert(
         id=alert_id,
         camera_index=camera_index,
@@ -47,6 +48,8 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
         title=f"Defect - Camera {camera_index}",
         message=f"Defect detected on camera {camera_index}",
         countdown_time=camera_state_ref.countdown_time,
+        countdown_action=camera_state_ref.countdown_action,
+        has_printer=has_printer,
     )
     asyncio.create_task(_terminate_alert_after_cooldown(alert))
     await update_camera_state(camera_index, {"current_alert_id": alert_id})
@@ -63,7 +66,6 @@ async def _live_detection_loop(app_state, camera_index):
         'update_camera_state': update_camera_state,
         'update_camera_detection_history': update_camera_detection_history,
     }
-    camera_state_ref = get_camera_state(camera_index)
     try:
         await create_optimized_detection_loop(
             app_state,

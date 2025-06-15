@@ -301,37 +301,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('ssl-import-form').style.display = 'block';
     });
 
-    document.getElementById('save-ssl-settings').addEventListener('click', async () => {
-        const certFile = document.getElementById('ssl-cert-file').files[0];
-        const keyFile = document.getElementById('ssl-key-file').files[0];
-        
-        if (!certFile || !keyFile) {
-            alert('Both certificate and key files are required');
-            return;
-        }
-        
-        const formData = new FormData();
-        formData.append('cert_file', certFile);
-        formData.append('key_file', keyFile);
-        
-        try {
-            const response = await fetch('/setup/upload-ssl-cert', {
-                method: 'POST',
-                body: formData
-            });
-            
-            if (response.ok) {
-                setupState.sslConfigured = true;
-                setupState.sslData = { imported: true };
-                showSection('finish');
-            } else {
-                const error = await response.json();
-                alert(`Failed to upload SSL certificate: ${error.detail}`);
-            }
-        } catch (error) {
-            console.error('Error uploading SSL certificate:', error);
-            alert('Error uploading SSL certificate');
-        }
+    document.getElementById('save-ssl-settings').addEventListener('click', () => {
+        showSection('finish');
     });
 
     document.getElementById('finish-setup-btn').addEventListener('click', async () => {
@@ -587,7 +558,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Error saving operating system selection');
         }
     }
-    document.getElementById('continue-to-finish-from-cloudflare').addEventListener('click', () => {
+    document.getElementById('continue-to-finish_from_cloudflare').addEventListener('click', () => {
         showSection('finish');
     });
 
