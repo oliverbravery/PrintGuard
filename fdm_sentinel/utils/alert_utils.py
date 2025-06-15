@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import logging
 
 from PIL import Image
@@ -69,5 +70,7 @@ def alert_to_response_json(alert):
         img_bytes = base64.b64decode(img_bytes)
     buffer = io.BytesIO()
     Image.open(io.BytesIO(img_bytes)).save(buffer, format="JPEG")
-    alert.snapshot = base64.b64encode(buffer.getvalue()).decode("utf-8")
-    return alert.model_dump_json()
+    base64_snapshot = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    alert_dict = alert.model_dump()
+    alert_dict['snapshot'] = base64_snapshot
+    return json.dumps(alert_dict)

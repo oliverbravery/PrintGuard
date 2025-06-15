@@ -1,6 +1,8 @@
+import json
 from fastapi import APIRouter, Body, Request
-from ..utils.alert_utils import dismiss_alert, cancel_print
 from ..models import AlertAction
+from ..utils.alert_utils import (alert_to_response_json, cancel_print,
+                                 dismiss_alert)
 
 router = APIRouter()
 
@@ -23,5 +25,7 @@ async def alert_response(request: Request,
 
 @router.get("/alert/active")
 async def get_active_alerts(request: Request):
-    active_alerts = [alert for alert in request.app.state.alerts.values()]
-    return {"active_alerts": active_alerts}
+    alerts = []
+    for alert in request.app.state.alerts.values():
+        alerts.append(json.loads(alert_to_response_json(alert)))
+    return {"active_alerts": alerts}

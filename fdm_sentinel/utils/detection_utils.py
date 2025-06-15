@@ -3,8 +3,9 @@ import uuid
 import logging
 import cv2
 
-from .alert_utils import append_new_alert, cancel_print, dismiss_alert
-from ..models import Alert, AlertAction
+from .alert_utils import cancel_print, dismiss_alert, alert_to_response_json
+from .sse_utils import append_new_outbound_packet
+from ..models import Alert, AlertAction, SSEDataType
 
 def _passed_majority_vote(camera_state):
     detection_history = camera_state.detection_history
@@ -16,7 +17,7 @@ def _passed_majority_vote(camera_state):
     return len(failed_detections) >= majority_vote_threshold
 
 async def _send_alert(alert):
-    await append_new_alert(alert)
+    await append_new_outbound_packet(alert_to_response_json(alert), SSEDataType.ALERT)
 
 async def _terminate_alert_after_cooldown(alert):
     # pylint: disable=C0415
@@ -51,6 +52,7 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
         countdown_action=camera_state_ref.countdown_action,
         has_printer=has_printer,
     )
+    app.state.alerts[alert.id] = alert
     asyncio.create_task(_terminate_alert_after_cooldown(alert))
     await update_camera_state(camera_index, {"current_alert_id": alert_id})
     send_defect_notification(alert_id, app)

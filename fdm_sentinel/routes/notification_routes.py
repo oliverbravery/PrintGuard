@@ -2,8 +2,9 @@ import logging
 
 from fastapi import APIRouter, Request
 
-from ..models import SavedConfig
-from ..utils.config import get_config
+from ..models import SavedConfig, SavedKey, Notification
+from ..utils.config import get_config, get_key
+from ..utils.notification_utils import send_notification
 
 router = APIRouter()
 
@@ -20,17 +21,53 @@ async def get_public_key():
 async def subscribe(request: Request):
     try:
         subscription = await request.json()
+        logging.debug("Received subscription request: %s", subscription.get('endpoint', 'no endpoint'))
         if not subscription.get('endpoint') or not subscription.get('keys'):
+            logging.error("Invalid subscription format - missing endpoint or keys")
             return {"success": False, "error": "Invalid subscription format"}
         for existing_sub in request.app.state.subscriptions:
             if existing_sub.get('endpoint') == subscription.get('endpoint'):
                 request.app.state.subscriptions.remove(existing_sub)
+                logging.debug("Removed existing subscription for same endpoint")
                 break
         request.app.state.subscriptions.append(subscription)
-        logging.debug("New push subscription: %s", subscription.get('endpoint'))
+        logging.debug("Successfully added subscription. Total subscriptions: %d", len(request.app.state.subscriptions))
         return {"success": True}
     # pylint: disable=W0718
     except Exception as e:
         logging.error("Subscription error: %s", str(e))
         return {"success": False, "error": f"Server error: {str(e)}"}
 
+@router.get("/notification/debug")
+async def notification_debug(request: Request):
+    config = get_config()
+    debug_info = {
+        "subscriptions_count": len(request.app.state.subscriptions),
+        "subscriptions": [
+            {
+                "endpoint": sub.get('endpoint', 'unknown')[:50] + "..." if len(sub.get('endpoint', '')) > 50 else sub.get('endpoint', 'unknown'),
+                "has_keys": bool(sub.get('keys'))
+            }
+            for sub in request.app.state.subscriptions
+        ],
+        "vapid_config": {
+            "has_public_key": bool(config.get(SavedConfig.VAPID_PUBLIC_KEY)),
+            "has_subject": bool(config.get(SavedConfig.VAPID_SUBJECT)),
+            "has_private_key": bool(get_key(SavedKey.VAPID_PRIVATE_KEY)),
+            "subject": config.get(SavedConfig.VAPID_SUBJECT, "not set")
+        }
+    }
+    return debug_info
+
+@router.post("/notification/test")
+async def test_notification(request: Request):
+    test_notification = Notification(
+        title="Test Notification",
+        body="This is a test notification from FDM Sentinel",
+        image_url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    )
+    success = send_notification(test_notification, request.app)
+    return {
+        "success": success,
+        "message": "Test notification sent" if success else "Failed to send test notification"
+    }
