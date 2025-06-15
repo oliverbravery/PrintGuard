@@ -203,7 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setupState.tunnelData = { provider: selectedTunnelProvider, token, domain };
                 if (selectedTunnelProvider === 'ngrok') {
                     showSection('initialize');
-                    initializeTunnelProvider();
+                    initializeNgrokTunnel();
                 } else if (selectedTunnelProvider === 'cloudflare') {
                     showSection('tunnel-config');
                     fetchCloudflareAccountsZones();
@@ -341,19 +341,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('retry-initialization').addEventListener('click', () => {
-        initializeTunnelProvider();
+        initializeNgrokTunnel();
     });
 
     document.getElementById('back-to-tunnel-config').addEventListener('click', () => {
         showSection('tunnel');
     });
 
-    async function initializeTunnelProvider() {
+    async function initializeNgrokTunnel() {
         document.getElementById('initialization-loading').style.display = 'block';
         document.getElementById('initialization-success').style.display = 'none';
         document.getElementById('initialization-error').style.display = 'none';
         try {
-            const response = await fetch('/setup/initialize-tunnel-provider', {
+            const response = await fetch('/setup/initialize-ngrok-tunnel', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({})

@@ -148,8 +148,8 @@ async def save_tunnel_settings(settings: TunnelSettings):
         logging.error("Error saving tunnel settings: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to save tunnel settings: {str(e)}")
 
-@router.post("/setup/initialize-tunnel-provider", include_in_schema=False)
-async def initialize_tunnel_provider():
+@router.post("/setup/initialize-ngrok-tunnel", include_in_schema=False)
+async def initialize_ngrok_tunnel():
     config = get_config()
     provider = config.get(SavedConfig.TUNNEL_PROVIDER, None)
     site_domain = config.get(SavedConfig.SITE_DOMAIN, None)
@@ -168,15 +168,6 @@ async def initialize_tunnel_provider():
                 "success": False,
                 "message": "Failed to initialize Ngrok tunnel. Please check the auth token and domain."
             }
-    elif provider == TunnelProvider.CLOUDFLARE:
-        # Simulating Cloudflare tunnel initialization
-        tunnel_url = f"https://tunnel-{random.randint(1000, 9999)}.example.com"
-        return {
-            "success": True,
-            "provider": "Cloudflare",
-            "url": tunnel_url,
-            "message": "Cloudflare tunnel initialized successfully"
-        }
     return RedirectResponse('/setup', status_code=303)
 
 @router.post("/setup/complete", include_in_schema=False)
