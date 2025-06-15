@@ -3,8 +3,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-import cv2
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -26,7 +25,7 @@ from .utils.config import (get_ssl_private_key_temporary_path,
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
 from .utils.cloudflare_utils import (start_cloudflare_tunnel, stop_cloudflare_tunnel)
-from .utils.camera_utils import setup_camera_indices, get_camera_state
+from .utils.camera_utils import setup_camera_indices
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
@@ -113,12 +112,6 @@ async def camera_feed(camera_index: int):
     from .utils.stream_utils import generate_frames
     return StreamingResponse(generate_frames(camera_index),
                              media_type='multipart/x-mixed-replace; boundary=frame')
-
-@app.get("/onboarding", include_in_schema=False)
-async def serve_onboarding(request: Request):
-    return templates.TemplateResponse("onboarding.html", {
-        "request": request
-    })
 
 app.include_router(detection_router, tags=["detection"])
 app.include_router(live_detection_router, tags=["live_detection"])
