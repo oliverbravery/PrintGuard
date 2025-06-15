@@ -667,7 +667,7 @@ function showPrinterStats() {
     const cameraIdx = parseInt(cameraIndex, 10);
     if (!cameraIdx && cameraIdx !== 0) return;
 
-    fetch(`/setup/camera/${cameraIdx}/printer/stats`)
+    fetch(`/setup/camera/${cameraIdx}/printer`)
     .then(response => response.json())
     .then(data => {
         const printerStats = document.getElementById('printerStats');
@@ -693,7 +693,7 @@ function unlinkPrinter() {
     if (!camIdx && camIdx !== 0) return;
     if (confirm('Are you sure you want to unlink this printer from the camera?')) {
         stopPrinterStatusPolling();
-        fetch(`/setup/remove-printer/${camIdx}`, {
+        fetch(`/camera/remove-printer/${camIdx}`, {
             method: 'POST'
         })
         .then(response => response.json())
@@ -729,41 +729,38 @@ function openPrinterModal() {
         alert('Please select a camera first before linking a printer');
         return;
     }
-    fetch(`/setup/camera/${camIdx}/printer`)
-        .then(res => {
-            console.log('Printer info response status:', res.status);
-            if (!res.ok) {
-                return res.text().then(text => {
-                    console.error('Server response:', text);
-                    if (res.status === 500) {
-                        throw new Error('Server error. Please check if the camera is properly configured.');
-                    } else {
-                        throw new Error(`HTTP error! status: ${res.status}`);
-                    }
-                });
-            }
-            return res.json();
-        })
-        .then(data => {
-            console.log('Printer info data:', data);
-            const formDiv = document.getElementById('modalNoPrinterForm');
-            const modalInfo = document.getElementById('modalPrinterInfo');
-            if (data.printer_config) {
-                formDiv.style.display = 'none';
-                modalInfo.style.display = 'block';
-                document.getElementById('modalPrinterName').textContent = data.printer_config.name;
-                document.getElementById('modalPrinterType').textContent = data.printer_config.printer_type + ' | ' + data.printer_config.base_url;
-                startPrinterStatsPolling(camIdx);
-            } else {
-                modalInfo.style.display = 'none';
-                formDiv.style.display = 'block';
-            }
-            printerModalOverlay.style.display = 'flex';
-        })
-        .catch(error => {
-            console.error('Error opening printer modal:', error);
-            alert('Error loading printer information: ' + error.message);
-        });
+    fetch(`/camera/state`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera_index: camIdx })
+    })
+    .then(res => {
+        if (!res.ok) {
+            return res.json().then(errData => {
+                throw new Error(`Failed to fetch camera state for camera ${camIdx}: ${errData.detail || res.statusText}`);
+            });
+        }
+        return res.json();
+    })
+    .then(data => {
+        const formDiv = document.getElementById('modalNoPrinterForm');
+        const modalInfo = document.getElementById('modalPrinterInfo');
+        if (data.printer_config) {
+            formDiv.style.display = 'none';
+            modalInfo.style.display = 'block';
+            document.getElementById('modalPrinterName').textContent = data.printer_config.name;
+            document.getElementById('modalPrinterType').textContent = data.printer_config.printer_type + ' | ' + data.printer_config.base_url;
+            startPrinterStatsPolling(camIdx);
+        } else {
+            modalInfo.style.display = 'none';
+            formDiv.style.display = 'block';
+        }
+        printerModalOverlay.style.display = 'flex';
+    })
+    .catch(error => {
+        console.error('Error opening printer modal:', error);
+        alert('Error loading printer information: ' + error.message);
+    });
 }
 
 window.openPrinterModal = openPrinterModal;
@@ -777,7 +774,7 @@ let printerStatsInterval;
 function startPrinterStatsPolling(camIdx) {
     const rate = parseInt(document.getElementById('printerStatPollingRate').value, 10) || 2000;
     printerStatsInterval = setInterval(() => {
-        fetch(`/setup/camera/${camIdx}/printer/stats`)
+        fetch(`/camera/${camIdx}/printer`)
             .then(res => res.json())
             .then(stat => {
                 if (stat.success) {
@@ -801,7 +798,7 @@ function startPrinterStatusPolling(cameraIdx) {
     stopPrinterStatusPolling();
     const rate = parseInt(document.getElementById('tunnelStatPollingRate').value, 10) || 5000;
     printerStatusInterval = setInterval(() => {
-        fetch(`/setup/camera/${cameraIdx}/printer/stats`)
+        fetch(`/camera/${cameraIdx}/printer`)
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
@@ -885,7 +882,7 @@ document.getElementById('linkPrinterForm')?.addEventListener('submit', async (e)
         camera_index: camIdx
     }; 
     try {
-        const res = await fetch('/setup/add-printer', {
+        const res = await fetch('/camera/add-printer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
