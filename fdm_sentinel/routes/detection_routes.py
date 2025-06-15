@@ -1,5 +1,4 @@
 import asyncio
-import io
 import json
 from typing import List
 import logging
@@ -8,11 +7,8 @@ from fastapi import (APIRouter,
                      File,
                      HTTPException,
                      UploadFile,
-                     WebSocket,
-                     WebSocketDisconnect,
                      Request)
 from fastapi.responses import StreamingResponse
-from PIL import Image
 
 from ..utils.model_utils import _process_image, _run_inference
 
@@ -107,36 +103,3 @@ async def detect_ep(request: Request, files: List[UploadFile] = File(...), strea
         except Exception as e:
             logging.error("Unexpected error during batch inference: %s", e)
             raise HTTPException(status_code=500, detail=f"Inference failed: {e}") from e
-
-@router.websocket("/ws/detect")
-async def websocket_detect_ep(websocket: WebSocket):
-    await websocket.accept()
-    app_state = websocket.app.state
-    if (app_state.model is None or 
-        app_state.transform is None or 
-        app_state.device is None or 
-        app_state.prototypes is None):
-        await websocket.close(code=1011, reason="Model not loaded or not ready.")
-        return
-    try:
-        while True:
-            data = await websocket.receive_bytes()
-            image = Image.open(io.BytesIO(data)).convert("RGB")
-            tensor = app_state.transform(image).unsqueeze(0).to(app_state.device)
-            prediction = await _run_inference(app_state.model,
-                                              tensor,
-                                              app_state.prototypes,
-                                              app_state.defect_idx,
-                                              app_state.device)
-            numeric = prediction[0] if isinstance(prediction, list) else prediction
-            label = app_state.class_names[numeric] if (
-                    isinstance(numeric, int)
-                    and 0 <= numeric < len(app_state.class_names)
-                ) else str(numeric)
-            await websocket.send_json({"result": label})
-    except WebSocketDisconnect:
-        logging.debug("WebSocket disconnected")
-    # pylint: disable=W0718
-    except Exception as e:
-        logging.error("Error in WebSocket detection: %s", e)
-        await websocket.close(code=1011, reason=f"Server error: {e}")
