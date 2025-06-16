@@ -5,6 +5,7 @@ const notificationImage = document.getElementById('notificationImage');
 const notificationCountdownTimer = document.getElementById('notificationCountdownTimer');
 const dismissNotificationBtn = document.getElementById('dismissNotificationBtn');
 const cancelPrintBtn = document.getElementById('cancelPrintBtn');
+const pausePrintBtn = document.getElementById('pausePrintBtn');
 
 let currentAlertId = null;
 
@@ -119,9 +120,12 @@ function updateAlertUI(data) {
     const hasPrinter = data.has_printer === true;
     alertContent += `<div>
         <button class="dismiss-btn" data-alert-id="${data.id}">Dismiss</button>
-        <button class="cancel-print-btn${!hasPrinter ? ' disabled' : ''}" 
+        <button class="suspend-print-btn${!hasPrinter ? ' disabled' : ''}" 
                 data-alert-id="${data.id}"
                 ${!hasPrinter ? 'disabled' : ''}>Cancel Print</button>
+        <button class="suspend-print-btn${!hasPrinter ? ' disabled' : ''}" 
+                data-alert-id="${data.id}"
+                ${!hasPrinter ? 'disabled' : ''}>Pause Print</button>
     </div>`;
     
     alertElement.innerHTML = alertContent;
@@ -131,13 +135,19 @@ function updateAlertUI(data) {
         dismissAlert('dismiss', data.id);
     });
     
-    const cancelBtn = alertElement.querySelector('.cancel-print-btn');
-    if (hasPrinter) {
-        cancelBtn.addEventListener('click', () => {
+    const cancelBtns = alertElement.querySelectorAll('.suspend-print-btn');
+    if (hasPrinter && cancelBtns.length >= 1) {
+        cancelBtns[0].addEventListener('click', () => {
             dismissAlert('cancel_print', data.id);
         });
     }
-    
+
+    if (hasPrinter && cancelBtns.length >= 2) {
+        cancelBtns[1].addEventListener('click', () => {
+            dismissAlert('pause_print', data.id);
+        });
+    }
+
     notificationPopup.style.display = 'block';
 }
 
@@ -168,9 +178,11 @@ function startAlertCountdown(data) {
         }
         if (secondsLeft <= 0) {
             clearInterval(window[countdownTimerId]);
-            const action = data.countdown_action || 'dismiss';
+            const action = data.countdown_action || 'pause_print';
             if (action === 'cancel_print' && data.has_printer) {
                 executeAlertAction('cancel_print', data.id);
+            } else if (action === 'pause_print' && data.has_printer) {
+                executeAlertAction('pause_print', data.id);
             } else {
                 executeAlertAction('dismiss', data.id);
             }
@@ -249,7 +261,8 @@ function dismissAlert(action_type, alertId) {
 document.addEventListener('DOMContentLoaded', () => {
     const dismissBtn = document.getElementById('dismissNotificationBtn');
     const cancelBtn = document.getElementById('cancelPrintBtn');
-    
+    const pauseBtn = document.getElementById('pausePrintBtn');
     if (dismissBtn) dismissBtn.remove();
     if (cancelBtn) cancelBtn.remove();
+    if (pauseBtn) pauseBtn.remove();
 });

@@ -388,18 +388,18 @@ body, html {
     background-color: var(--border-light);
 }
 
-.alert-item .cancel-print-btn {
+.alert-item .suspend-print-btn {
     background-color: var(--color-danger);
     color: var(--color-white);
     border-color: var(--color-danger);
 }
 
-.alert-item .cancel-print-btn:hover {
+.alert-item .suspend-print-btn:hover {
     background-color: var(--color-danger-dark);
     border-color: var(--color-danger-dark);
 }
 
-.alert-item .cancel-print-btn.disabled {
+.alert-item .suspend-print-btn.disabled {
     background-color: #cccccc;
     color: #666666;
     border-color: #cccccc;
@@ -407,7 +407,7 @@ body, html {
     opacity: 0.7;
 }
 
-.alert-item .cancel-print-btn.disabled:hover {
+.alert-item .suspend-print-btn.disabled:hover {
     background-color: #cccccc;
     border-color: #cccccc;
 }
