@@ -1,7 +1,8 @@
 from typing import Dict
 import requests
-from ...models import (FileInfo, JobInfoResponse, PrinterState,
-                       TemperatureReading)
+from ...models import (FileInfo, JobInfoResponse,
+                       TemperatureReadings, TemperatureReading,
+                       PrinterState, PrinterTemperatures)
 
 
 class OctoPrintClient:
@@ -35,7 +36,7 @@ class OctoPrintClient:
                             headers=self.headers,
                             timeout=10)
         resp.raise_for_status()
-        state = PrinterState(**resp.json())
+        state = TemperatureReadings(**resp.json())
         return state.temperature
 
     def percent_complete(self) -> float:
@@ -54,3 +55,17 @@ class OctoPrintClient:
             "bed_actual"   : bed.actual,
             "bed_target"   : bed.target,
         }
+    
+    def get_printer_state(self) -> PrinterState:
+        temperature_readings = self.get_printer_temperatures()
+        printer_temps: PrinterTemperatures = PrinterTemperatures(
+            nozzle_actual=temperature_readings.get("tool0").actual if "tool0" in temperature_readings else None,
+            nozzle_target=temperature_readings.get("tool0").target if "tool0" in temperature_readings else None,
+            bed_actual=temperature_readings.get("bed").actual if "bed" in temperature_readings else None,
+            bed_target=temperature_readings.get("bed").target if "bed" in temperature_readings else None
+        )
+        printer_state = PrinterState(
+            jobInfoResponse=self.get_job_info(),
+            temperatureReadings=printer_temps
+        )
+        return printer_state
