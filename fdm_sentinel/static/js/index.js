@@ -688,7 +688,7 @@ function unlinkPrinter() {
     if (!camIdx && camIdx !== 0) return;
     if (confirm('Are you sure you want to unlink this printer from the camera?')) {
         stopPrinterStatusPolling();
-        fetch(`/camera/remove-printer/${camIdx}`, {
+        fetch(`/printer/remove/${camIdx}`, {
             method: 'POST'
         })
         .then(response => response.json())
@@ -835,7 +835,7 @@ document.getElementById('linkPrinterForm')?.addEventListener('submit', async (e)
         camera_index: camIdx
     }; 
     try {
-        const res = await fetch('/camera/add-printer', {
+        const res = await fetch(`/printer/add/${camIdx}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)

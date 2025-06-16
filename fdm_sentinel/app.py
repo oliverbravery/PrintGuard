@@ -17,6 +17,7 @@ from .routes.sse_routes import router as sse_router
 from .routes.setup_routes import router as setup_router
 from .routes.index_routes import router as index_router
 from .routes.camera_routes import router as camera_router
+from .routes.printer_routes import router as printer_router
 from .utils.config import (get_ssl_private_key_temporary_path,
                            SSL_CERT_FILE, PROTOTYPES_DIR,
                            MODEL_PATH, MODEL_OPTIONS_PATH,
@@ -121,6 +122,7 @@ app.include_router(sse_router, tags=["sse"])
 app.include_router(setup_router, tags=["setup"])
 app.include_router(index_router, tags=["index"])
 app.include_router(camera_router, tags=["camera"])
+app.include_router(printer_router, tags=["printer"])
 
 def run():
     # pylint: disable=C0415
