@@ -2,7 +2,8 @@ import asyncio
 import json
 import logging
 
-from ..models import SSEDataType, PrinterState
+from ..models import (SSEDataType, PrinterState,
+                      PollingTask)
 
 
 async def outbound_packet_fetch():
@@ -68,3 +69,29 @@ async def sse_update_camera_state(camera_index):
     except Exception as e:  # pylint: disable=broad-except
         logging.error("Unexpected error in SSE camera state update for camera %d: %s",
                       camera_index, e)
+
+def get_polling_task(camera_index):
+    # pylint: disable=C0415
+    from ..app import app
+    return app.state.polling_tasks.get(camera_index) or None
+
+def stop_and_remove_polling_task(camera_index):
+    # pylint: disable=C0415
+    from ..app import app
+    task = get_polling_task(camera_index)
+    if task:
+        task.stop_event.set()
+        if task.task and not task.task.done():
+            task.task.cancel()
+        logging.debug("Stopped polling task for camera index %d", camera_index)
+        del app.state.polling_tasks[camera_index]
+    else:
+        logging.warning("No polling task found for camera index %d to stop.", camera_index)
+
+def add_polling_task(camera_index, task: PollingTask):
+    # pylint: disable=C0415
+    from ..app import app
+    if camera_index in app.state.polling_tasks:
+        stop_and_remove_polling_task(camera_index)
+    app.state.polling_tasks[camera_index] = task
+    logging.debug("Added polling task for camera index %d", camera_index)

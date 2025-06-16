@@ -267,3 +267,6 @@ class FeedSettings(BaseModel):
 class PollingTask(BaseModel):
     task: Optional[asyncio.Task] = None
     stop_event: Optional[asyncio.Event] = None
+    model_config = {
+        "arbitrary_types_allowed": True
+    }

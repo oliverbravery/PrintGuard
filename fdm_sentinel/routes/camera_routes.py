@@ -2,8 +2,8 @@ import logging
 
 from fastapi import APIRouter, Request, Body
 from fastapi.exceptions import HTTPException
-from ..utils.camera_utils import (get_camera_state, set_camera_printer,
-                                  get_camera_printer_id, remove_camera_printer)
+from ..utils.camera_utils import get_camera_state
+from ..utils.printer_utils import get_printer_id, set_printer, remove_printer
 from ..utils.printer_services.octoprint import OctoPrintClient
 from ..models import PrinterConfigRequest
 
@@ -41,7 +41,7 @@ async def add_printer(printer_config: PrinterConfigRequest):
         client = OctoPrintClient(printer_config.base_url, printer_config.api_key)
         client.get_job_info()
         printer_id = f"{printer_config.camera_index}_{printer_config.name.replace(' ', '_')}"
-        await set_camera_printer(printer_config.camera_index, printer_id, printer_config.model_dump())
+        await set_printer(printer_config.camera_index, printer_id, printer_config.model_dump())
         return {"success": True, "printer_id": printer_id}
     except Exception as e:
         logging.error("Error adding printer: %s", e)
@@ -50,9 +50,9 @@ async def add_printer(printer_config: PrinterConfigRequest):
 @router.post("/camera/remove-printer/{camera_index}", include_in_schema=False)
 async def remove_printer_from_camera(camera_index: int):
     try:
-        printer_id = get_camera_printer_id(camera_index)
+        printer_id = get_printer_id(camera_index)
         if printer_id:
-            await remove_camera_printer(camera_index)
+            await remove_printer(camera_index)
             return {"success": True, "message": f"Printer removed from camera {camera_index}"}
         else:
             return {"success": False, "error": "No printer configured for this camera"}

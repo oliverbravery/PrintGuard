@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, Body
 from sse_starlette.sse import EventSourceResponse
-from ..utils.sse_utils import outbound_packet_fetch
-from ..utils.camera_utils import start_printer_state_polling, stop_and_remove_polling_task
+from ..utils.sse_utils import outbound_packet_fetch, stop_and_remove_polling_task
+from ..utils.printer_utils import start_printer_state_polling
 
 router = APIRouter()
 

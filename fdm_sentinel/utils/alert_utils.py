@@ -6,7 +6,8 @@ import logging
 from PIL import Image
 
 from .printer_services.octoprint import OctoPrintClient
-from .camera_utils import (update_camera_state, get_camera_printer_config)
+from .camera_utils import update_camera_state
+from .printer_utils import get_printer_config
 
 
 def append_new_alert(alert):
@@ -33,7 +34,7 @@ async def dismiss_alert(alert_id):
 async def cancel_print(alert_id):
     try:
         camera_index = int(alert_id.split('_')[0])
-        printer_config = get_camera_printer_config(camera_index)
+        printer_config = get_printer_config(camera_index)
         if printer_config:
             if printer_config['printer_type'] == 'octoprint':
                 client = OctoPrintClient(

@@ -7,8 +7,9 @@ from .alert_utils import (cancel_print, dismiss_alert,
                           alert_to_response_json, get_alert,
                           append_new_alert)
 from .sse_utils import append_new_outbound_packet
-from .camera_utils import (get_camera_state, get_camera_printer_config,
+from .camera_utils import (get_camera_state,
                            update_camera_state, update_camera_detection_history)
+from .printer_utils import get_printer_config
 from .notification_utils import send_defect_notification
 from ..models import Alert, AlertAction, SSEDataType
 
@@ -40,7 +41,7 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
     # pylint: disable=E1101
     _, img_buf = cv2.imencode('.jpg', frame)
-    has_printer = get_camera_printer_config(camera_index) is not None
+    has_printer = get_printer_config(camera_index) is not None
     alert = Alert(
         id=alert_id,
         camera_index=camera_index,
