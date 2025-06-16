@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 import cv2
+import requests
 
 from ..models import CameraState, PollingTask, SavedConfig
 from .config import (CAMERA_INDEX, CAMERA_INDICES, MAX_CAMERAS,
@@ -21,7 +22,8 @@ def stop_and_remove_polling_task(camera_index):
     task = get_polling_task(camera_index)
     if task:
         task.stop_event.set()
-        task.cancel()
+        if task.task and not task.task.done():
+            task.task.cancel()
         logging.debug("Stopped polling task for camera index %d", camera_index)
         del app.state.polling_tasks[camera_index]
     else:
@@ -122,13 +124,22 @@ async def remove_camera_printer(camera_index):
 
 async def poll_printer_state_func(client, interval, stop_event):
     while not stop_event.is_set():
-        current_printer_state = client.get_printer_state()
-        await sse_update_printer_state(current_printer_state)
+        try:
+            current_printer_state = client.get_printer_state()
+            await sse_update_printer_state(current_printer_state)
+        except (requests.exceptions.RequestException, ConnectionError,
+                TimeoutError, ValueError) as e:
+            logging.warning("Error polling printer state: %s", str(e))
+        except Exception as e:
+            logging.error("Unexpected error polling printer state: %s", str(e))
         await asyncio.sleep(interval)
 
 async def start_printer_state_polling(camera_index):
     stop_event = asyncio.Event()
     camera_printer_config = get_camera_printer_config(camera_index)
+    if not camera_printer_config:
+        logging.warning("No printer configuration found for camera index %d", camera_index)
+        return
     config = get_config()
     printer_polling_rate = float(config.get(
         SavedConfig.PRINTER_STAT_POLLING_RATE_MS, PRINTER_STAT_POLLING_RATE_MS
