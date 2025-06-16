@@ -2,9 +2,10 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from ..models import PrinterConfigRequest
+from ..models import PrinterConfigRequest, AlertAction
 from ..utils.printer_services.octoprint import OctoPrintClient
-from ..utils.printer_utils import get_printer_id, remove_printer, set_printer
+from ..utils.printer_utils import (get_printer_id, remove_printer,
+                                   set_printer, suspend_print_job)
 
 router = APIRouter()
 
@@ -32,3 +33,13 @@ async def remove_printer_ep(camera_index: int):
     except Exception as e:
         logging.error("Error removing printer from camera %d: %s", camera_index, e)
         raise HTTPException(status_code=500, detail=f"Failed to remove printer: {str(e)}")
+
+@router.post("/printer/cancel/{camera_index}", include_in_schema=False)
+async def cancel_print_job_ep(camera_index: int):
+    suspend_print_job(camera_index, AlertAction.CANCEL_PRINT)
+    return {"success": True, "message": f"Print job cancelled for camera {camera_index}"}
+
+@router.post("/printer/pause/{camera_index}", include_in_schema=False)
+async def pause_print_job_ep(camera_index: int):
+    suspend_print_job(camera_index, AlertAction.PAUSE_PRINT)
+    return {"success": True, "message": f"Print job paused for camera {camera_index}"}
