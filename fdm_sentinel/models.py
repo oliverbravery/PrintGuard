@@ -21,6 +21,7 @@ class AlertAction(str, Enum):
 class SSEDataType(str, Enum):
     ALERT = "alert"
     CAMERA_STATE = "camera_state"
+    PRINTER_STATE = "printer_state"
 
 class NotificationAction(BaseModel):
     action: str
@@ -53,6 +54,73 @@ def _get_config_value(key: str):
         'DETECTION_VOTING_WINDOW': DETECTION_VOTING_WINDOW,
     }
     return config_map[key]
+
+class FileInfo(BaseModel):
+    name: Optional[str] = None
+    origin: Optional[str] = None
+    size: Optional[int] = None
+    date: Optional[int] = None
+
+
+class Progress(BaseModel):
+    completion: Optional[float] = None
+    filepos: Optional[int] = None
+    printTime: Optional[int] = None
+    printTimeLeft: Optional[int] = None
+
+
+class JobInfoResponse(BaseModel):
+    job: Dict = Field(default_factory=dict)
+    progress: Optional[Progress] = None
+    state: str
+    error: Optional[str] = None
+
+    model_config = {
+        "extra": "ignore"
+    }
+
+
+class TemperatureReading(BaseModel):
+    actual: float
+    target: Optional[float]
+    offset: Optional[float]
+
+
+class TemperatureReadings(BaseModel):
+    temperature: Dict[str, TemperatureReading]
+    
+class PrinterTemperatures(BaseModel):
+    nozzle_actual: Optional[float] = None
+    nozzle_target: Optional[float] = None
+    bed_actual: Optional[float] = None
+    bed_target: Optional[float] = None
+
+class PrinterState(BaseModel):
+    jobInfoResponse: Optional[JobInfoResponse] = None
+    temperatureReading: Optional[PrinterTemperatures] = None
+
+class CurrentPayload(BaseModel):
+    state: dict
+    job: Any
+    progress: Progress
+    temps: Optional[list] = Field(None, alias="temps")
+
+class PrinterType(str, Enum):
+    OCTOPRINT = "octoprint"
+
+class PrinterConfig(BaseModel):
+    name: str
+    printer_type: PrinterType
+    camera_index: int
+    base_url: str
+    api_key: str
+
+class PrinterConfigRequest(BaseModel):
+    name: str
+    printer_type: PrinterType
+    camera_index: int
+    base_url: str
+    api_key: str
 
 class CameraState(BaseModel):
     lock: asyncio.Lock = asyncio.Lock()
@@ -102,7 +170,7 @@ class VapidSettings(BaseModel):
     private_key: str
     subject: str
     base_url: str
-    
+
 class SiteStartupMode(str, Enum):
     SETUP = "setup"
     LOCAL = "local"
@@ -196,59 +264,6 @@ class FeedSettings(BaseModel):
     printer_stat_polling_rate_ms: int
     tunnel_stat_polling_rate_ms: int
 
-class FileInfo(BaseModel):
-    name: Optional[str] = None
-    origin: Optional[str] = None
-    size: Optional[int] = None
-    date: Optional[int] = None
-
-
-class Progress(BaseModel):
-    completion: Optional[float] = None
-    filepos: Optional[int] = None
-    printTime: Optional[int] = None
-    printTimeLeft: Optional[int] = None
-
-
-class JobInfoResponse(BaseModel):
-    job: Dict = Field(default_factory=dict)
-    progress: Optional[Progress] = None
-    state: str
-    error: Optional[str] = None
-
-    model_config = {
-        "extra": "ignore"
-    }
-
-
-class TemperatureReading(BaseModel):
-    actual: float
-    target: Optional[float]
-    offset: Optional[float]
-
-
-class PrinterState(BaseModel):
-    temperature: Dict[str, TemperatureReading]
-
-class CurrentPayload(BaseModel):
-    state: dict
-    job: Any
-    progress: Progress
-    temps: Optional[list] = Field(None, alias="temps")
-
-class PrinterType(str, Enum):
-    OCTOPRINT = "octoprint"
-
-class PrinterConfig(BaseModel):
-    name: str
-    printer_type: PrinterType
-    camera_index: int
-    base_url: str
-    api_key: str
-
-class PrinterConfigRequest(BaseModel):
-    name: str
-    printer_type: PrinterType
-    camera_index: int
-    base_url: str
-    api_key: str
+class PollingTask(BaseModel):
+    task: Optional[asyncio.Task] = None
+    stop_event: Optional[asyncio.Event] = None
