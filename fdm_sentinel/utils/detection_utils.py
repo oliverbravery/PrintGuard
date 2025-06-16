@@ -3,13 +3,12 @@ import uuid
 import logging
 import cv2
 
-from .alert_utils import (cancel_print, dismiss_alert,
-                          alert_to_response_json, get_alert,
-                          append_new_alert)
+from .alert_utils import (dismiss_alert, alert_to_response_json,
+                          get_alert, append_new_alert)
 from .sse_utils import append_new_outbound_packet
 from .camera_utils import (get_camera_state,
                            update_camera_state, update_camera_detection_history)
-from .printer_utils import get_printer_config
+from .printer_utils import get_printer_config, suspend_print_job
 from .notification_utils import send_defect_notification
 from ..models import Alert, AlertAction, SSEDataType
 
@@ -28,14 +27,16 @@ async def _send_alert(alert):
 async def _terminate_alert_after_cooldown(alert):
     await asyncio.sleep(alert.countdown_time)
     if get_alert(alert.id) is not None:
-        camera_state = get_camera_state(alert.camera_index)
+        camera_index = alert.camera_index
+        camera_state = get_camera_state(camera_index)
         if not camera_state:
             return
         match camera_state.countdown_action:
             case AlertAction.DISMISS:
                 await dismiss_alert(alert.id)
-            case AlertAction.CANCEL_PRINT:
-                await cancel_print(alert.id)
+            case AlertAction.CANCEL_PRINT | AlertAction.PAUSE_PRINT:
+                suspend_print_job(camera_index, camera_state.countdown_action)
+                return await dismiss_alert(alert.id)
 
 async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timestamp_arg):
     alert_id = f"{camera_index}_{str(uuid.uuid4())}"

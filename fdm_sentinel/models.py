@@ -17,6 +17,7 @@ class Alert(BaseModel):
 class AlertAction(str, Enum):
     DISMISS = "dismiss"
     CANCEL_PRINT = "cancel_print"
+    PAUSE_PRINT = "pause_print"
 
 class SSEDataType(str, Enum):
     ALERT = "alert"
