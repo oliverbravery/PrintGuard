@@ -122,6 +122,34 @@ function updateSelectedCameraSettings(d) {
     updatePrinterInfo(d);
 }
 
+function printerTileStyle(linked) {
+    const printerConfigBtn = document.getElementById('printerConfigBtn');
+    const linkPrinterBtn = document.getElementById('linkPrinterBtn');
+    const printerConfigStatus = document.getElementById('printerConfigStatus');
+    if (linked) {
+        printerConfigBtn.style.display = 'block';
+        linkPrinterBtn.style.display = 'none';
+        printerConfigStatus.textContent = `Printer Settings`;
+    } else {
+        printerConfigBtn.style.display = 'none';
+        linkPrinterBtn.style.display = 'block';
+    }
+}
+
+function updateSelectedCamerasPrinterModal(printerStatus, printerTemperature, printerBedTemperature) {
+    const printerStatus = document.getElementById('printerStatus');
+    const printerTemperature = document.getElementById('printerTemperature');
+    const printerBedTemperature = document.getElementById('printerBedTemperature');
+    printerTileStyle(printerConfig.printer_id !== undefined && printerConfig.printer_id !== null);
+    if (printerConfig.state) {
+        printerStatus.textContent = printerStatus;
+    }
+    if (printerConfig.temperatures) {
+        printerTemperature.textContent = printerTemperature;
+        printerBedTemperature.textContent = printerBedTemperature;
+    }
+}
+
 function updateSelectedCameraData(d) {
     updateRecentDetectionResult(d.last_result, camPredictionDisplay);
     updateRecentDetectionTime(d.last_time, camPredictionTimeDisplay);
@@ -129,6 +157,7 @@ function updateSelectedCameraData(d) {
     updateFrameRate(d.frame_rate, camFrameRateDisplay);
     toggleIsDetectingStatus(d.live_detection_running);
     updateDetectionButton(d.live_detection_running);
+    printerTileStyle(d.printer_id !== undefined && d.printer_id !== null);
 }
 
 function updateCameraSelectionListData(d) {
@@ -163,6 +192,14 @@ function updatePolledDetectionData(d) {
         updateSelectedCameraData(d);
     }
     updateCameraSelectionListData(d);
+}
+
+function updatePolledPrinterData(d) {
+    updateSelectedCamerasPrinterModal(
+        d.jobInfoResponse.state,
+        d.temperatureReading.nozzle.actual,
+        d.temperatureReading.bed.actual
+    );
 }
 
 function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
@@ -281,6 +318,12 @@ cameraItems.forEach(item => {
 document.addEventListener('cameraStateUpdated', evt => {
     if (evt.detail) {
         updatePolledDetectionData(evt.detail);
+    }
+});
+
+document.addEventListener('printerStateUpdated', evt => {
+    if (evt.detail) {
+        updatePolledPrinterData(evt.detail);
     }
 });
 
@@ -647,22 +690,6 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
-function updatePrinterInfo(cameraData) {
-    const printerConfigBtn = document.getElementById('printerConfigBtn');
-    const linkPrinterBtn = document.getElementById('linkPrinterBtn');
-    const printerConfigStatus = document.getElementById('printerConfigStatus');
-    if (cameraData.printer_config && cameraData.printer_id) {
-        printerConfigBtn.style.display = 'block';
-        linkPrinterBtn.style.display = 'none';
-        printerConfigStatus.textContent = `Printer Settings`;
-        startPrinterStatusPolling(cameraData.camera_index);
-    } else {
-        printerConfigBtn.style.display = 'none';
-        linkPrinterBtn.style.display = 'block';
-        stopPrinterStatusPolling();
-    }
-}
-
 function showPrinterStats() {
     const cameraIdx = parseInt(cameraIndex, 10);
     if (!cameraIdx && cameraIdx !== 0) return;
@@ -767,63 +794,9 @@ window.openPrinterModal = openPrinterModal;
 
 printerModalClose.addEventListener('click', () => {
     printerModalOverlay.style.display = 'none';
-    stopPrinterStatsPolling();
+    stopPrinterStatusPolling();////its here i want to do the call to stop polling
+    
 });
-
-let printerStatsInterval;
-function startPrinterStatsPolling(camIdx) {
-    const rate = parseInt(document.getElementById('printerStatPollingRate').value, 10) || 2000;
-    printerStatsInterval = setInterval(() => {
-        fetch(`/camera/${camIdx}/printer`)
-            .then(res => res.json())
-            .then(stat => {
-                if (stat.success) {
-                    document.getElementById('modalPrinterStatus').textContent = stat.printer_state;
-                    document.getElementById('modalNozzleTemp').textContent = stat.temperatures.tool0.actual;
-                    document.getElementById('modalNozzleTarget').textContent = stat.temperatures.tool0.target;
-                    document.getElementById('modalBedTemp').textContent = stat.temperatures.bed.actual;
-                    document.getElementById('modalBedTarget').textContent = stat.temperatures.bed.target;
-                }
-            });
-    }, rate);
-}
-
-function stopPrinterStatsPolling() {
-    clearInterval(printerStatsInterval);
-}
-
-let printerStatusInterval;
-
-function startPrinterStatusPolling(cameraIdx) {
-    stopPrinterStatusPolling();
-    const rate = parseInt(document.getElementById('tunnelStatPollingRate').value, 10) || 5000;
-    printerStatusInterval = setInterval(() => {
-        fetch(`/camera/${cameraIdx}/printer`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    const printerConfigStatus = document.getElementById('printerConfigStatus');
-                    if (printerConfigStatus && data.printer_config) {
-                        printerConfigStatus.textContent = `Printer Settings`;
-                    }
-                }
-            })
-            .catch(error => {
-                console.error('Error polling printer status:', error);
-                const printerConfigStatus = document.getElementById('printerConfigStatus');
-                if (printerConfigStatus) {
-                    printerConfigStatus.textContent = 'Printer Settings';
-                }
-            });
-    }, rate);
-}
-
-function stopPrinterStatusPolling() {
-    if (printerStatusInterval) {
-        clearInterval(printerStatusInterval);
-        printerStatusInterval = null;
-    }
-}
 
 document.getElementById('modalCancelPrintBtn').addEventListener('click', () => {
     const camIdx = parseInt(cameraIndex, 10);
