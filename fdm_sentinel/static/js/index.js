@@ -780,11 +780,19 @@ function stopPrinterStatusPolling() {
 
 document.getElementById('modalCancelPrintBtn').addEventListener('click', () => {
     const camIdx = parseInt(cameraIndex, 10);
-    fetch('/alert/dismiss', {
+    fetch(`/printer/cancel/${camIdx}`, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({alert_id: `${camIdx}_` + 'print', action: 'cancel_print'})
-    }).then(()=>{});
+        body: JSON.stringify({})
+    }).then(response => {
+        if (response.ok) {
+            alert('Print cancelled successfully');
+        } else {
+            return response.json().then(errData => {
+                console.error('Error cancelling print:', errData);
+            });
+        }
+    });
 });
 
 document.getElementById('modalUnlinkPrinterBtn').addEventListener('click', () => {
