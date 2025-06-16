@@ -94,6 +94,7 @@ app.state.alerts = {}
 app.state.outbound_queue = asyncio.Queue()
 config = get_config() or {}
 app.state.subscriptions = config.get(SavedConfig.PUSH_SUBSCRIPTIONS, [])
+app.state.polling_tasks = {}
 
 app.state.camera_states = {}
 

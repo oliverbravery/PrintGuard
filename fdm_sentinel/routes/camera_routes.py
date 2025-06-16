@@ -3,8 +3,7 @@ import logging
 from fastapi import APIRouter, Request, Body
 from fastapi.exceptions import HTTPException
 from ..utils.camera_utils import (get_camera_state, set_camera_printer,
-                                  get_camera_printer_id, remove_camera_printer,
-                                  get_camera_printer_config)
+                                  get_camera_printer_id, remove_camera_printer)
 from ..utils.printer_services.octoprint import OctoPrintClient
 from ..models import PrinterConfigRequest
 
@@ -60,29 +59,3 @@ async def remove_printer_from_camera(camera_index: int):
     except Exception as e:
         logging.error("Error removing printer from camera %d: %s", camera_index, e)
         raise HTTPException(status_code=500, detail=f"Failed to remove printer: {str(e)}")
-
-@router.get("/camera/{camera_index}/printer", include_in_schema=False)
-async def get_camera_printer_stats(camera_index: int):
-    try:
-        printer_config = get_camera_printer_config(camera_index)
-        if not printer_config:
-            raise HTTPException(status_code=404, detail="No printer configured for this camera")
-        client = OctoPrintClient(printer_config['base_url'], printer_config['api_key'])
-        job_info = client.get_job_info()
-        temps = {"bed": {"actual": 0, "target": 0}, "tool0": {"actual": 0, "target": 0}}
-        try:
-            temps = client.get_printer_temperatures()
-        except Exception:
-            pass
-        return {
-            "success": True, 
-            "connection_status": "Connected",
-            "printer_state": job_info.state,
-            "temperatures": temps
-        }
-    except Exception as e:
-        logging.error("Error getting printer stats for camera %d: %s", camera_index, e)
-        return {
-            "success": False,
-            "error": str(e)
-        }
