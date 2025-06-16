@@ -201,6 +201,12 @@ evtSource.onmessage = (e) => {
                     detail: cameraData
                 }));
             }
+            else if (packet_data.event == "printer_state") {
+                const printerData = packet_data.data;
+                document.dispatchEvent(new CustomEvent('printerStateUpdated', {
+                    detail: printerData
+                }));
+            }
         }
     } catch (error) {
         console.error("Error processing SSE message:", error);
