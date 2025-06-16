@@ -3,7 +3,6 @@ import json
 import logging
 
 from ..models import SSEDataType, PrinterState
-from .camera_utils import get_camera_state
 
 
 async def outbound_packet_fetch():
@@ -28,6 +27,8 @@ def _calculate_frame_rate(detection_history):
     return (len(times) - 1) / duration if duration > 0 else 0.0
 
 async def _sse_update_camera_state_func(camera_index):
+    # pylint: disable=import-outside-toplevel
+    from .camera_utils import get_camera_state
     state = get_camera_state(camera_index)
     detection_history = state.detection_history
     total_detections = len(detection_history)
@@ -51,15 +52,19 @@ async def sse_update_printer_state(printer_state: PrinterState):
             timeout=5.0
         )
     except asyncio.TimeoutError:
-        logging.warning("SSE printer state update timed out for printer %s", printer_state.printer_id)
+        logging.warning("SSE printer state update timed out")
+    except (ValueError, TypeError, AttributeError) as e:
+        logging.error("Error in SSE printer state update: %s", e)
     except Exception as e:
-        logging.error("Error in SSE printer state update for printer %s: %s", printer_state.printer_id, e)
+        logging.error("Unexpected error in SSE printer state update: %s", e)
 
 async def sse_update_camera_state(camera_index):
     try:
         await asyncio.wait_for(_sse_update_camera_state_func(camera_index), timeout=5.0)
     except asyncio.TimeoutError:
         logging.warning("SSE camera state update timed out for camera %d", camera_index)
-    except Exception as e:
+    except (ValueError, TypeError, AttributeError) as e:
         logging.error("Error in SSE camera state update for camera %d: %s", camera_index, e)
-
+    except Exception as e:  # pylint: disable=broad-except
+        logging.error("Unexpected error in SSE camera state update for camera %d: %s",
+                      camera_index, e)
