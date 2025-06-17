@@ -207,7 +207,10 @@ function updatePolledPrinterData(d) {
 
 function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
     const cameraIdx = parseInt(cameraIndexStr, 10);
-
+    if (isNaN(cameraIdx) || cameraIndexStr === null || cameraIndexStr === undefined) {
+        console.warn('Cannot fetch metrics: invalid camera index provided:', cameraIndexStr);
+        return;
+    }
     fetch(`/camera/state`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -261,12 +264,16 @@ function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
 }
 
 function sendDetectionRequest(isStart) {
+    if (cameraIndex === null || cameraIndex === undefined || isNaN(parseInt(cameraIndex, 10))) {
+        console.warn(`Cannot ${isStart ? 'start' : 'stop'} detection: no valid camera selected`);
+        return;
+    }
     fetch(`/detect/live/${isStart ? 'start' : 'stop'}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ camera_index: cameraIndex })
+        body: JSON.stringify({ camera_index: parseInt(cameraIndex, 10) })
     })
     .then(response => {
         if (response.ok) {
@@ -304,14 +311,18 @@ cameraItems.forEach(item => {
         this.classList.add('selected');
         const cameraIdText = this.querySelector('.camera-text-content span:first-child').textContent;
         const cameraId = cameraIdText.split(': ')[1];
-        if (cameraId && cameraId !== "No cameras available") {
+        if (cameraId && cameraId !== "No cameras available" && !cameraIdText.includes("No cameras available")) {
             changeLiveCameraFeed(cameraId); 
+            cameraIndex = cameraId;
+            settingsCameraIndex.value = cameraId;
+            updateCameraTitle(cameraId);
+            stopPrinterStatusPolling();
+            fetchAndUpdateMetricsForCamera(cameraId);
+        } else {
+            cameraIndex = null;
+            settingsCameraIndex.value = '';
+            updateCameraTitle(null);
         }
-        cameraIndex = cameraId;
-        settingsCameraIndex.value = cameraId;
-        updateCameraTitle(cameraId);
-        stopPrinterStatusPolling();
-        fetchAndUpdateMetricsForCamera(cameraId);
     });
 });
 
@@ -330,7 +341,10 @@ document.addEventListener('printerStateUpdated', evt => {
 document.addEventListener('DOMContentLoaded', function() {
     const firstCameraItem = cameraItems[0];
     if (firstCameraItem) {
-        firstCameraItem.click();
+        const cameraIdText = firstCameraItem.querySelector('.camera-text-content span:first-child').textContent;
+        if (!cameraIdText.includes("No cameras available")) {
+            firstCameraItem.click();
+        }
     }
 });
 
@@ -771,11 +785,13 @@ printerModalClose.addEventListener('click', () => {
 
 function stopPrinterStatusPolling() {
     const camIdx = parseInt(cameraIndex, 10);
-    fetch('/sse/stop-polling', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({camera_index: camIdx})
-    });
+    if (!isNaN(camIdx) && cameraIndex !== null && cameraIndex !== undefined) {
+        fetch('/sse/stop-polling', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({camera_index: camIdx})
+        });
+    }
 }
 
 document.getElementById('modalCancelPrintBtn').addEventListener('click', () => {

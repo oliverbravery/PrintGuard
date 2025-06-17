@@ -4,19 +4,19 @@ import logging
 import requests
 
 from ..models import PollingTask, SavedConfig, AlertAction
-from .camera_utils import get_camera_state, update_camera_state
+from .camera_utils import get_camera_state_sync, update_camera_state
 from .config import PRINTER_STAT_POLLING_RATE_MS, get_config
 from .printer_services.octoprint import OctoPrintClient
 from .sse_utils import add_polling_task, sse_update_printer_state
 
 def get_printer_config(camera_index):
-    camera_state = get_camera_state(camera_index)
+    camera_state = get_camera_state_sync(camera_index)
     if camera_state and hasattr(camera_state, 'printer_config') and camera_state.printer_config:
         return camera_state.printer_config
     return None
 
 def get_printer_id(camera_index):
-    camera_state = get_camera_state(camera_index)
+    camera_state = get_camera_state_sync(camera_index)
     if camera_state and hasattr(camera_state, 'printer_id') and camera_state.printer_id:
         return camera_state.printer_id
     return None

@@ -6,7 +6,7 @@ import cv2
 from .alert_utils import (dismiss_alert, alert_to_response_json,
                           get_alert, append_new_alert)
 from .sse_utils import append_new_outbound_packet
-from .camera_utils import (get_camera_state,
+from .camera_utils import (get_camera_state, get_camera_state_sync,
                            update_camera_state, update_camera_detection_history)
 from .printer_utils import get_printer_config, suspend_print_job
 from .notification_utils import send_defect_notification
@@ -28,7 +28,7 @@ async def _terminate_alert_after_cooldown(alert):
     await asyncio.sleep(alert.countdown_time)
     if get_alert(alert.id) is not None:
         camera_index = alert.camera_index
-        camera_state = get_camera_state(camera_index)
+        camera_state = await get_camera_state(camera_index)
         if not camera_state:
             return
         match camera_state.countdown_action:
@@ -71,7 +71,7 @@ async def _live_detection_loop(app_state, camera_index):
         await create_optimized_detection_loop(
             app_state,
             camera_index,
-            get_camera_state,
+            get_camera_state_sync,
             update_functions
         )
     except Exception as e:

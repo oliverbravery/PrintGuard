@@ -124,7 +124,6 @@ class PrinterConfigRequest(BaseModel):
     api_key: str
 
 class CameraState(BaseModel):
-    lock: asyncio.Lock = asyncio.Lock()
     current_alert_id: Optional[str] = None
     detection_history: List[tuple] = []
     live_detection_running: bool = False
@@ -133,10 +132,10 @@ class CameraState(BaseModel):
     last_time: Optional[float] = None
     start_time: Optional[float] = None
     error: Optional[str] = None
-    brightness: int = None
-    contrast: int = None
-    focus: int = None
-    sensitivity: int = None
+    brightness: float = None
+    contrast: float = None
+    focus: float = None
+    sensitivity: float = None
     countdown_time: float = None
     countdown_action: str = None
     majority_vote_threshold: int = None
@@ -227,6 +226,7 @@ class SavedConfig(str, Enum):
     PRINTER_STAT_POLLING_RATE_MS = "printer_stat_polling_rate_ms"
     TUNNEL_STAT_POLLING_RATE_MS = "tunnel_stat_polling_rate_ms"
     PUSH_SUBSCRIPTIONS = "push_subscriptions"
+    CAMERA_STATES = "camera_states"
 
 class CloudflareTunnelConfig(BaseModel):
     account_id: str

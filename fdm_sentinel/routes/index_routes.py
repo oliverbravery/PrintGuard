@@ -10,7 +10,8 @@ from ..utils.config import (STREAM_MAX_FPS, STREAM_TUNNEL_FPS,
                             DETECTION_INTERVAL_MS, PRINTER_STAT_POLLING_RATE_MS,
                             TUNNEL_STAT_POLLING_RATE_MS, CAMERA_INDEX,
                             update_config, get_config)
-from ..utils.camera_utils import update_camera_state
+from ..utils.camera_utils import update_camera_state, setup_camera_indices
+from ..utils.camera_state_manager import get_camera_state_manager
 from ..utils.stream_utils import stream_optimizer
 from ..models import FeedSettings, SavedConfig
 
@@ -19,12 +20,19 @@ router = APIRouter()
 @router.get("/", include_in_schema=False)
 async def serve_index(request: Request):
     # pylint: disable=import-outside-toplevel
-    from ..app import app, templates
-    camera_index = list(app.state.camera_states.keys())[0] if (
-        app.state.camera_states
-        ) else CAMERA_INDEX
+    from ..app import templates
+    camera_state_manager = get_camera_state_manager()
+    camera_indices = await camera_state_manager.get_all_camera_indices()
+    if not camera_indices:
+        logging.warning("No camera indices found, attempting to initialize cameras...")
+        await setup_camera_indices()
+        camera_indices = await camera_state_manager.get_all_camera_indices()
+    camera_states = {}
+    for cam_idx in camera_indices:
+        camera_states[cam_idx] = await camera_state_manager.get_camera_state(cam_idx)
+    camera_index = camera_indices[0] if camera_indices else CAMERA_INDEX
     return templates.TemplateResponse("index.html", {
-        "camera_states": app.state.camera_states,
+        "camera_states": camera_states,
         "request": request,
         "camera_index": camera_index,
         "current_time": time.time(),

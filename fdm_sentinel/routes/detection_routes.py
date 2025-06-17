@@ -106,7 +106,7 @@ async def detect_ep(request: Request, files: List[UploadFile] = File(...), strea
 
 @router.post("/detect/live/start")
 async def start_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
-    camera_state = get_camera_state(camera_index)
+    camera_state = await get_camera_state(camera_index)
     if camera_state.live_detection_running:
         return {"message": f"Live detection already running for camera {camera_index}"}
     else:
@@ -126,7 +126,7 @@ async def start_live_detection(request: Request, camera_index: int = Body(..., e
 
 @router.post("/detect/live/stop")
 async def stop_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
-    camera_state = get_camera_state(camera_index)
+    camera_state = await get_camera_state(camera_index)
     if not camera_state.live_detection_running:
         return {"message": f"Live detection not running for camera {camera_index}"}
     live_detection_task = camera_state.live_detection_task

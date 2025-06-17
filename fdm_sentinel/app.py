@@ -66,7 +66,7 @@ async def lifespan(app_instance: FastAPI):
         app_instance.state.model = None
         raise
     logging.debug("Setting up camera indices...")
-    setup_camera_indices()
+    await setup_camera_indices()
     logging.debug("Camera indices set up successfully.")
     yield
 
@@ -96,8 +96,6 @@ app.state.outbound_queue = asyncio.Queue()
 config = get_config() or {}
 app.state.subscriptions = config.get(SavedConfig.PUSH_SUBSCRIPTIONS, [])
 app.state.polling_tasks = {}
-
-app.state.camera_states = {}
 
 if app.debug:
     logging.basicConfig(level=logging.DEBUG)

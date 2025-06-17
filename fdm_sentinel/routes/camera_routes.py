@@ -5,7 +5,7 @@ router = APIRouter()
 
 @router.post("/camera/state", include_in_schema=False)
 async def get_camera_state_ep(request: Request, camera_index: int = Body(..., embed=True)):
-    camera_state = get_camera_state(camera_index)
+    camera_state = await get_camera_state(camera_index)
     detection_times = [t for t, _ in camera_state.detection_history] if (
         camera_state.detection_history
         ) else []

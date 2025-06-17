@@ -11,7 +11,7 @@ from .model_utils import _run_inference
 from .sse_utils import sse_update_camera_state
 from .detection_utils import (_passed_majority_vote, _create_alert_and_notify,
                               _send_alert)
-from .camera_utils import get_camera_state
+from .camera_utils import get_camera_state_sync
 from ..models import SavedConfig, SiteStartupMode
 from .config import (get_config, STREAM_MAX_FPS, STREAM_TUNNEL_FPS,
                      STREAM_JPEG_QUALITY, STREAM_TUNNEL_JPEG_QUALITY,
@@ -237,7 +237,7 @@ async def create_optimized_detection_loop(app_state, camera_index, camera_state_
 
 def generate_frames(camera_index: int):
     try:
-        for frame_data in create_optimized_frame_generator(camera_index, get_camera_state):
+        for frame_data in create_optimized_frame_generator(camera_index, get_camera_state_sync):
             yield frame_data
     except Exception as e:
         logging.error("Error in optimized frame generation for camera %d: %s", camera_index, e)
@@ -245,7 +245,7 @@ def generate_frames(camera_index: int):
         cap = cv2.VideoCapture(camera_index)
         try:
             while True:
-                camera_state = get_camera_state(camera_index)
+                camera_state = get_camera_state_sync(camera_index)
                 contrast = camera_state.contrast
                 brightness = camera_state.brightness
                 focus = camera_state.focus
