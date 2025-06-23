@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from typing import Dict, Optional
+from pydantic import ValidationError
 from ..models import CameraState
 from .config import get_config, update_config, SavedConfig
 
@@ -8,8 +9,7 @@ from .config import get_config, update_config, SavedConfig
 class CameraStateManager:
     def __init__(self):
         self._states: Dict[int, CameraState] = {}
-        self._locks: Dict[int, asyncio.Lock] = {}
-        self._global_lock = asyncio.Lock()
+        self._lock = asyncio.Lock()
         self._load_states_from_config()
 
     def _load_states_from_config(self):
@@ -19,13 +19,11 @@ class CameraStateManager:
             try:
                 camera_index = int(camera_index_str)
                 self._states[camera_index] = CameraState(**state_data)
-                self._locks[camera_index] = asyncio.Lock()
-            except (ValueError, TypeError, Exception) as e:
+            except (ValueError, TypeError, ValidationError) as e:
                 logging.warning("Failed to load camera state for index %s: %s", camera_index_str, e)
                 try:
                     camera_index = int(camera_index_str)
                     self._states[camera_index] = CameraState()
-                    self._locks[camera_index] = asyncio.Lock()
                     logging.info("Created fresh camera state for index %s", camera_index_str)
                 except ValueError:
                     logging.error("Invalid camera index in config: %s", camera_index_str)
@@ -34,7 +32,7 @@ class CameraStateManager:
         try:
             states_data = {}
             for camera_index, state in self._states.items():
-                state_dict = state.model_dump()
+                state_dict = state.model_dump(exclude={'live_detection_task'})
                 if 'detection_history' in state_dict and len(state_dict['detection_history']) > 1000:
                     state_dict['detection_history'] = state_dict['detection_history'][-1000:]
                 states_data[str(camera_index)] = state_dict
@@ -44,20 +42,17 @@ class CameraStateManager:
 
     async def get_camera_state(self, camera_index: int, reset: bool = False) -> CameraState:
         """Get camera state for the given index, creating if it doesn't exist"""
-        async with self._global_lock:
+        async with self._lock:
             if camera_index not in self._states or reset:
                 self._states[camera_index] = CameraState()
-                self._locks[camera_index] = asyncio.Lock()
                 self._save_states_to_config()
             return self._states[camera_index]
 
-    async def update_camera_state(self, camera_index: int, new_states: Dict) -> Optional[CameraState]:
-        await self.get_camera_state(camera_index)
-        camera_lock = self._locks.get(camera_index)
-        if not camera_lock:
-            logging.warning("Camera index '%d' not found in locks during update.", camera_index)
-            return None
-        async with camera_lock:
+    async def update_camera_state(self, camera_index: int,
+                                  new_states: Dict) -> Optional[CameraState]:
+        async with self._lock:
+            if camera_index not in self._states:
+                self._states[camera_index] = CameraState()
             camera_state_ref = self._states.get(camera_index)
             if camera_state_ref:
                 for key, value in new_states.items():
@@ -68,18 +63,13 @@ class CameraStateManager:
                                         key, camera_index)
                 self._save_states_to_config()
                 return camera_state_ref
-        logging.warning("Camera index '%d' not found in camera states during update.", camera_index)
         return None
 
     async def update_camera_detection_history(self, camera_index: int,
                                               pred: str, time_val: float) -> Optional[CameraState]:
-        await self.get_camera_state(camera_index)
-        camera_lock = self._locks.get(camera_index)
-        if not camera_lock:
-            logging.warning("Camera index '%d' not found in locks when trying to update detection history.",
-                            camera_index)
-            return None
-        async with camera_lock:
+        async with self._lock:
+            if camera_index not in self._states:
+                self._states[camera_index] = CameraState()
             camera_state_ref = self._states.get(camera_index)
             if camera_state_ref:
                 camera_state_ref.detection_history.append((time_val, pred))
@@ -89,14 +79,10 @@ class CameraStateManager:
                 if len(camera_state_ref.detection_history) % 100 == 0:
                     self._save_states_to_config()
                 return camera_state_ref
-        logging.warning("Camera index '%d' not found when trying to update detection history.", camera_index)
         return None
 
-    def get_camera_lock(self, camera_index: int) -> Optional[asyncio.Lock]:
-        return self._locks.get(camera_index)
-
     async def get_all_camera_indices(self) -> list:
-        async with self._global_lock:
+        async with self._lock:
             return list(self._states.keys())
 
 _camera_state_manager = None

@@ -124,6 +124,7 @@ class PrinterConfigRequest(BaseModel):
     api_key: str
 
 class CameraState(BaseModel):
+    lock: asyncio.Lock = Field(default_factory=asyncio.Lock, exclude=True)
     current_alert_id: Optional[str] = None
     detection_history: List[tuple] = []
     live_detection_running: bool = False

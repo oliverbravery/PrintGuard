@@ -22,7 +22,7 @@ from .utils.config import (get_ssl_private_key_temporary_path,
                            SSL_CERT_FILE, PROTOTYPES_DIR,
                            MODEL_PATH, MODEL_OPTIONS_PATH,
                            DEVICE_TYPE, SUCCESS_LABEL,
-                           get_config, update_config)
+                           get_config, update_config, init_config)
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
 from .utils.cloudflare_utils import (start_cloudflare_tunnel, stop_cloudflare_tunnel)
@@ -127,6 +127,7 @@ def run():
     import uvicorn
     from .utils.setup_utils import (startup_mode_requirements_met,
                                     setup_ngrok_tunnel)
+    init_config()
     startup_mode = startup_mode_requirements_met()
     config = get_config()
     site_domain = config.get(SavedConfig.SITE_DOMAIN, "")
