@@ -31,6 +31,7 @@ const settingsMajorityVoteThreshold = document.getElementById('majority_vote_thr
 const settingsMajorityVoteThresholdLabel = document.getElementById('majority_vote_threshold_val');
 const settingsMajorityVoteWindow = document.getElementById('majority_vote_window');
 const settingsMajorityVoteWindowLabel = document.getElementById('majority_vote_window_val');
+const settingsCountdownAction = document.getElementById('countdown_action');
 
 const stopDetectionBtnLabel = 'Stop Detection';
 const startDetectionBtnLabel = 'Start Detection';
@@ -120,6 +121,7 @@ function updateSelectedCameraSettings(d) {
     settingsMajorityVoteWindowLabel.textContent = d.majority_vote_window;
     settingsMajorityVoteWindow.value = d.majority_vote_window;
     updateSliderFill(settingsMajorityVoteWindow);
+    settingsCountdownAction.value = d.countdown_action;
     currentCameraPrinterConfig = d.printer_config;
 }
 
@@ -243,7 +245,8 @@ function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
             majority_vote_threshold: data.majority_vote_threshold,
             majority_vote_window: data.majority_vote_window,
             printer_id: data.printer_id,
-            printer_config: data.printer_config
+            printer_config: data.printer_config,
+            countdown_action: data.countdown_action
         };
         updatePolledDetectionData(metricsData);
         updateSelectedCameraSettings(metricsData);
@@ -484,6 +487,10 @@ document.querySelectorAll('.settings-form input[type="range"]').forEach(slider =
         updateSliderFill(slider);
         saveSetting(slider);
     });
+});
+
+document.getElementById('countdown_action').addEventListener('change', (e) => {
+    saveSetting(e.target);
 });
 
 document.querySelector('.settings-form')?.addEventListener('submit', (e) => {

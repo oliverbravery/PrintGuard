@@ -25,6 +25,7 @@ async def get_camera_state_ep(request: Request, camera_index: int = Body(..., em
         "current_alert_id": camera_state.current_alert_id,
         "sensitivity": camera_state.sensitivity,
         "printer_id": camera_state.printer_id,
-        "printer_config": camera_state.printer_config
+        "printer_config": camera_state.printer_config,
+        "countdown_action": camera_state.countdown_action
     }
     return response
