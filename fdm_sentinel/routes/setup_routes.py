@@ -277,8 +277,8 @@ async def save_cloudflare_os(config: CloudflareDownloadConfig):
             detail=f"Failed to save operating system selection: {str(e)}"
         )
 
-@router.get("/setup/warp/add-device", include_in_schema=False)
-async def serve_warp_device_enrollment(request: Request):
+@router.get("/setup/cloudflare/add-device", include_in_schema=False)
+async def serve_cloudflare_add_device(request: Request):
     try:
         # pylint:disable=import-outside-toplevel
         from ..app import templates
@@ -295,8 +295,8 @@ async def serve_warp_device_enrollment(request: Request):
             detail=f"Failed to serve WARP device enrollment page: {str(e)}"
         )
 
-@router.get("/setup/warp/team-name", include_in_schema=False)
-async def get_cloudflare_team_name(request: Request):
+@router.get("/setup/cloudflare/organisation", include_in_schema=False)
+async def get_cloudflare_organisation(request: Request):
     client_host = request.client.host if request.client else "unknown"
     if client_host not in ["127.0.0.1", "localhost", "::1"]:
         raise HTTPException(

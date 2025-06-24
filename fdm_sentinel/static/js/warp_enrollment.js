@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', async function() {
-    const enrollmentUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port || (window.location.protocol === 'https:' ? '443' : '8000')}/setup/warp/add-device`;
+    const enrollmentUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port || (window.location.protocol === 'https:' ? '443' : '8000')}/setup/cloudflare/add-device`;
     document.getElementById('enrollment-url').textContent = enrollmentUrl;
     await fetchWarpConfig();
     const screenWidth = window.innerWidth;
@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     async function fetchWarpConfig() {
         try {
-            const response = await fetch('/setup/warp/team-name');
+            const response = await fetch('/setup/cloudflare/organisation');
             if (response.ok) {
                 const data = await response.json();
                 document.getElementById('team-name').textContent = data.team_name || 'your-organization';
