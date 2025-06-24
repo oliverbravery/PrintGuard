@@ -265,6 +265,16 @@ body, html {
     align-items: center;
     justify-content: center;
     min-height: 60px;
+    position: relative;
+}
+
+.start-stop-btn::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
 }
 
 .start-stop-btn:hover {
