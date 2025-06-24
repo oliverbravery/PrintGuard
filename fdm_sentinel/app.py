@@ -106,13 +106,6 @@ templates_dir = os.path.join(base_dir, "templates")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 templates = Jinja2Templates(directory=templates_dir)
 
-@app.get('/camera_feed/{camera_index}', include_in_schema=False)
-async def camera_feed(camera_index: int):
-    # pylint: disable=import-outside-toplevel
-    from .utils.stream_utils import generate_frames
-    return StreamingResponse(generate_frames(camera_index),
-                             media_type='multipart/x-mixed-replace; boundary=frame')
-
 app.include_router(detection_router, tags=["detection"])
 app.include_router(alert_router, tags=["alerts"])
 app.include_router(notification_router, tags=["notifications"])

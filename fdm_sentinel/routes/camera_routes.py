@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Request, Body
+from fastapi.responses import StreamingResponse
 from ..utils.camera_utils import get_camera_state
+from ..utils.stream_utils import generate_frames
 
 router = APIRouter()
 
@@ -29,3 +31,8 @@ async def get_camera_state_ep(request: Request, camera_index: int = Body(..., em
         "countdown_action": camera_state.countdown_action
     }
     return response
+
+@router.get('/camera/feed/{camera_index}', include_in_schema=False)
+async def camera_feed(camera_index: int):
+    return StreamingResponse(generate_frames(camera_index),
+                             media_type='multipart/x-mixed-replace; boundary=frame')

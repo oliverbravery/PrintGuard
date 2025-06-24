@@ -40,7 +40,7 @@ let cameraIndex = 0;
 let currentCameraPrinterConfig = null;
 
 function changeLiveCameraFeed(cameraIndex) {
-    camVideoPreview.src = `/camera_feed/${cameraIndex}`;
+    camVideoPreview.src = `/camera/feed/${cameraIndex}`;
 }
 
 function updateCameraTitle(cameraIndex) {
@@ -195,7 +195,7 @@ function updateCameraSelectionListData(d) {
                 statusIndicator.style.color = '#b2b2b2';
                 statusIndicator.style.backgroundColor = 'transparent';
             }
-            item.querySelector('#cameraPreview').src = `/camera_feed/${d.camera_index}`;
+            item.querySelector('#cameraPreview').src = `/camera/feed/${d.camera_index}`;
         }
     });
 }
