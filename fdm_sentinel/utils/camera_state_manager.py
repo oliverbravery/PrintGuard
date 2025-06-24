@@ -9,8 +9,17 @@ from .config import get_config, update_config, SavedConfig
 class CameraStateManager:
     def __init__(self):
         self._states: Dict[int, CameraState] = {}
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._load_states_from_config()
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        if self._lock is None or self._loop is not loop:
+            self._lock = asyncio.Lock()
+            self._loop = loop
+        return self._lock
 
     def _load_states_from_config(self):
         config = get_config() or {}
@@ -42,7 +51,7 @@ class CameraStateManager:
 
     async def get_camera_state(self, camera_index: int, reset: bool = False) -> CameraState:
         """Get camera state for the given index, creating if it doesn't exist"""
-        async with self._lock:
+        async with self.lock:
             if camera_index not in self._states or reset:
                 self._states[camera_index] = CameraState()
                 self._save_states_to_config()
@@ -50,7 +59,7 @@ class CameraStateManager:
 
     async def update_camera_state(self, camera_index: int,
                                   new_states: Dict) -> Optional[CameraState]:
-        async with self._lock:
+        async with self.lock:
             if camera_index not in self._states:
                 self._states[camera_index] = CameraState()
             camera_state_ref = self._states.get(camera_index)
@@ -67,7 +76,7 @@ class CameraStateManager:
 
     async def update_camera_detection_history(self, camera_index: int,
                                               pred: str, time_val: float) -> Optional[CameraState]:
-        async with self._lock:
+        async with self.lock:
             if camera_index not in self._states:
                 self._states[camera_index] = CameraState()
             camera_state_ref = self._states.get(camera_index)
@@ -82,7 +91,7 @@ class CameraStateManager:
         return None
 
     async def get_all_camera_indices(self) -> list:
-        async with self._lock:
+        async with self.lock:
             return list(self._states.keys())
 
 _camera_state_manager = None
