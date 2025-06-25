@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "FDM-Sentinel"
+name = "Print Guard"
 version = "0.1.0"
-description = "FDM Sentinel - Real-time Defect Detection on Edge-devices"
+description = "Print Guard - Real-time Defect Detection on Edge-devices"
 authors = [
     { name = "Oliver Bravery", email = "dev@oliverbravery.uk" }
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 
 dependencies = [
     "fastapi",
@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.scripts]
-fdm-sentinel = "fdm_sentinel.app:run"
+print-guard = "print_guard.app:run"
 
 [tool.black]
 line-length = 88
@@ -35,10 +35,10 @@ line-length = 88
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["fdm_sentinel", "fdm_sentinel.*", "protonets", "protonets.*"]
+include = ["print_guard", "print_guard.*", "protonets", "protonets.*"]
 
 [tool.setuptools.package-data]
-"fdm_sentinel" = [
+"print_guard" = [
     "static/**/*",
     "templates/**/*",
     "model/**/*"
