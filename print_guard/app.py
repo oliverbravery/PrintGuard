@@ -7,7 +7,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import StreamingResponse
 from .models import (SiteStartupMode,
                      TunnelProvider, SavedConfig)
 from .routes.alert_routes import router as alert_router
