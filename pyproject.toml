@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "Print Guard"
+name = "print-guard"
 version = "0.1.0"
-description = "Print Guard - Real-time Defect Detection on Edge-devices"
+description = "PrintGuard - Real-time Defect Detection on Edge-devices"
 authors = [
     { name = "Oliver Bravery", email = "dev@oliverbravery.uk" }
 ]
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 
 dependencies = [
     "fastapi",
@@ -22,7 +22,9 @@ dependencies = [
     "torchvision",
     "pillow",
     "opencv-python",
-    "python-multipart"
+    "python-multipart",
+    "keyring",
+    "trustme"
 ]
 
 [project.scripts]

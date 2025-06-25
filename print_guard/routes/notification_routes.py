@@ -2,9 +2,8 @@ import logging
 
 from fastapi import APIRouter, Request
 
-from ..models import SavedConfig, SavedKey, Notification
+from ..models import SavedConfig, SavedKey
 from ..utils.config import get_config, get_key, update_config
-from ..utils.notification_utils import send_notification
 
 router = APIRouter()
 
@@ -70,16 +69,3 @@ async def notification_debug(request: Request):
         }
     }
     return debug_info
-
-@router.post("/notification/test")
-async def test_notification(request: Request):
-    test_notification = Notification(
-        title="Test Notification",
-        body="This is a test notification from FDM Sentinel",
-        image_url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-    )
-    success = send_notification(test_notification)
-    return {
-        "success": success,
-        "message": "Test notification sent" if success else "Failed to send test notification"
-    }

@@ -317,7 +317,7 @@ camDetectionToggleButton.addEventListener('click', function() {
     }
 });
 
-render_ascii_title(asciiTitle, 'FDM\nsentinel');
+render_ascii_title(asciiTitle, 'PrintGuard');
 
 cameraItems.forEach(item => {
     item.addEventListener('click', function() {
@@ -520,7 +520,7 @@ function updateAsciiTitle() {
     if (isSettingsVisible) {
         render_ascii_title(asciiTitle, 'Settings');
     } else {
-        const title = isMobileView() ? 'FDM Sentinel' : 'FDM\nsentinel';
+        const title = 'PrintGuard';
         render_ascii_title(asciiTitle, title);
 
         if (isMobileView()) {

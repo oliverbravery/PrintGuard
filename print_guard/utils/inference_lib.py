@@ -11,7 +11,7 @@ from PIL import Image
 from torchvision import transforms
 
 try:
-    import fdm_sentinel.protonets as _pn
+    import print_guard.protonets as _pn
     sys.modules['protonets'] = _pn
 except ImportError:
     pass
