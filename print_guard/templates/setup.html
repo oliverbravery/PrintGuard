@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FDM Sentinel Setup</title>
+    <title>PrintGuard Setup</title>
     <link rel="stylesheet" href="{{ url_for('static', path='css/universal.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='css/setup.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic+Coding&display=swap" rel="stylesheet">
@@ -15,7 +15,7 @@
     <div class="container">
         <pre id="ascii-title"></pre>
         <h2>First-time Setup</h2>
-        <p>Complete the following setup to start using FDM Sentinel.</p>
+        <p>Complete the following setup to start using PrintGuard.</p>
         
         <div id="setup-progress" style="display:none;">
             <div class="progress-step active" data-step="vapid">1. VAPID Keys</div>
@@ -48,7 +48,7 @@
         <div id="setup-content">
             <div class="setup-section active" id="network-section">
                 <h3>Network Configuration</h3>
-                <p>Choose how you want to set up your FDM Sentinel service.</p>
+                <p>Choose how you want to set up your PrintGuard service.</p>
                 
                 <div class="option-buttons">
                     <button id="local-network-btn" class="setup-btn network-option">
@@ -69,7 +69,7 @@
             </div>
             <div class="setup-section" id="tunnel-section">
                 <h3>Tunnel Provider Setup</h3>
-                <p>Choose a tunnel provider to enable external access to your FDM Sentinel service.</p>
+                <p>Choose a tunnel provider to enable external access to your PrintGuard service.</p>
                 
                 <div class="option-buttons">
                     <button id="ngrok-btn" class="setup-btn tunnel-option">
@@ -158,10 +158,10 @@
                         <label for="cloudflare-subdomain">Subdomain</label>
                         <div class="input-with-prefix">
                             <span class="input-prefix">https://</span>
-                            <input type="text" id="cloudflare-subdomain" name="cloudflare-subdomain" placeholder="fdm-sentinel" required>
+                            <input type="text" id="cloudflare-subdomain" name="cloudflare-subdomain" placeholder="print-guard" required>
                             <span class="input-suffix" id="domain-suffix">.example.com</span>
                         </div>
-                        <small>Enter the subdomain for your FDM Sentinel tunnel</small>
+                        <small>Enter the subdomain for your PrintGuard tunnel</small>
                     </div>
                     
                     <div class="button-group">
@@ -327,7 +327,7 @@
             </div>
             <div class="setup-section" id="finish-section">
                 <h3>Setup Complete!</h3>
-                <p>Your FDM Sentinel is now configured and ready to use.</p>
+                <p>Your PrintGuard is now configured and ready to use.</p>
                 <div class="setup-summary">
                     <div class="summary-item">
                         <strong>Network Configuration:</strong> <span id="summary-network-status">Not Configured</span>
@@ -342,7 +342,7 @@
                         <strong>SSL Certificate:</strong> <span id="summary-ssl-status">Not Configured</span>
                     </div>
                 </div>
-                <button id="finish-setup-btn" class="setup-btn primary">Start FDM Sentinel</button>
+                <button id="finish-setup-btn" class="setup-btn primary">Start PrintGuard</button>
             </div>
         </div>
     </div>

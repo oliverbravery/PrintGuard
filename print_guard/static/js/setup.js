@@ -2,7 +2,7 @@ import { render_ascii_title } from './utils.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     const asciiTitle = document.getElementById('ascii-title');
-    render_ascii_title(asciiTitle, 'FDM\nSetup');
+    render_ascii_title(asciiTitle, 'PrintGuard');
 
     const setupState = {
         networkConfigured: false,

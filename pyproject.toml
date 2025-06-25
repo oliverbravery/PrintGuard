@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "FDM-Sentinel"
+name = "print-guard"
 version = "0.1.0"
-description = "FDM Sentinel - Real-time Defect Detection on Edge-devices"
+description = "PrintGuard - Real-time Defect Detection on Edge-devices"
 authors = [
     { name = "Oliver Bravery", email = "dev@oliverbravery.uk" }
 ]
@@ -22,11 +22,13 @@ dependencies = [
     "torchvision",
     "pillow",
     "opencv-python",
-    "python-multipart"
+    "python-multipart",
+    "keyring",
+    "trustme"
 ]
 
 [project.scripts]
-fdm-sentinel = "fdm_sentinel.app:run"
+print-guard = "print_guard.app:run"
 
 [tool.black]
 line-length = 88
@@ -35,10 +37,10 @@ line-length = 88
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["fdm_sentinel", "fdm_sentinel.*", "protonets", "protonets.*"]
+include = ["print_guard", "print_guard.*", "protonets", "protonets.*"]
 
 [tool.setuptools.package-data]
-"fdm_sentinel" = [
+"print_guard" = [
     "static/**/*",
     "templates/**/*",
     "model/**/*"

@@ -1,4 +1,4 @@
-// Service worker for FDM Sentinel Push Notifications
+// Service worker for PrintGuard Push Notifications
 self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
@@ -8,7 +8,7 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('push', event => {
-  let notificationTitle = 'FDM Sentinel Alert';
+  let notificationTitle = 'PrintGuard Alert';
   let notificationBody = 'Print detection alert!';
   if (event.data) {
     try {
