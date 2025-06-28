@@ -12,8 +12,8 @@ from platformdirs import user_data_dir
 
 from ..models import AlertAction, SavedKey, SavedConfig
 
-APP_DATA_DIR = user_data_dir("print-guard", "print-guard")
-KEYRING_SERVICE_NAME = "print-guard"
+APP_DATA_DIR = user_data_dir("printguard", "printguard")
+KEYRING_SERVICE_NAME = "printguard"
 os.makedirs(APP_DATA_DIR, exist_ok=True)
 
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.json")
