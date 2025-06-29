@@ -1,6 +1,11 @@
 # API Documentation  
 > This is the API documentation for PrintGuard. For installation and usage guides, see the [README](../README.md).
 
+## Pages
+- [Overview](overview.md)
+- [API Documentation](api.md)
+- [Setup Documentation](setup.md)
+
 ## Table of Contents
 - [Setup Endpoints](#setup-endpoints)
 - [SSE Endpoints](#sse-endpoints)
