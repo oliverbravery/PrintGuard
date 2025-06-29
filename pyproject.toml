@@ -24,7 +24,9 @@ dependencies = [
     "opencv-python",
     "python-multipart",
     "keyring",
-    "trustme"
+    "trustme",
+    "platformdirs",
+    "sse-starlette"
 ]
 
 [project.scripts]

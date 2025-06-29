@@ -104,20 +104,21 @@ def _load_prototypes(cache_file, device):
 
 
 def compute_prototypes(model, support_dir, transform, device, success_label="success", use_cache=True):
-    support_dir_hash = _get_support_dir_hash(support_dir)
     cache_dir = os.path.join(support_dir, 'cache')
-    cache_file = os.path.join(cache_dir, f"prototypes_{support_dir_hash}.pkl")
-    if use_cache:
-        cached_prototypes, cached_class_names, cached_defect_idx = _load_prototypes(cache_file,
-                                                                                    device)
-        if cached_prototypes is not None:
-            logging.debug("Using cached prototypes for support directory: %s", support_dir)
-            return cached_prototypes, cached_class_names, cached_defect_idx
-
+    if use_cache and os.path.exists(cache_dir):
+        for filename in os.listdir(cache_dir):
+            if filename.startswith("prototypes_") and filename.endswith(".pkl"):
+                cache_file = os.path.join(cache_dir, filename)
+                logging.debug("Attempting to load prototypes from cache: %s", cache_file)
+                prototypes, class_names, defect_idx = _load_prototypes(cache_file, device)
+                if prototypes is not None:
+                    logging.debug("Successfully loaded prototypes from cache: %s", cache_file)
+                    return prototypes, class_names, defect_idx
     logging.debug("Computing prototypes from scratch for support directory: %s", support_dir)
-
+    support_dir_hash = _get_support_dir_hash(support_dir)
+    cache_file = os.path.join(cache_dir, f"prototypes_{support_dir_hash}.pkl")
     class_names = sorted([d for d in os.listdir(support_dir)
-                          if os.path.isdir(os.path.join(support_dir, d)) and not d.startswith('.')])
+                          if os.path.isdir(os.path.join(support_dir, d)) and not d.startswith('.') and d != 'cache'])
     if not class_names:
         raise ValueError(f"No class subdirectories found in support directory: {support_dir}")
 
