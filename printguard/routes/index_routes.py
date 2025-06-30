@@ -19,6 +19,14 @@ router = APIRouter()
 
 @router.get("/", include_in_schema=False)
 async def serve_index(request: Request):
+    """Serve the main index page with camera states and configuration.
+
+    Args:
+        request (Request): The FastAPI request object.
+
+    Returns:
+        TemplateResponse: Rendered index.html template with camera states and settings.
+    """
     # pylint: disable=import-outside-toplevel
     from ..app import templates
     camera_state_manager = get_camera_state_manager()
@@ -51,6 +59,23 @@ async def update_settings(request: Request,
                           majority_vote_threshold: int = Form(...),
                           majority_vote_window: int = Form(...),
                           ):
+    """Update camera settings and detection parameters.
+
+    Args:
+        request (Request): The FastAPI request object.
+        camera_index (int): Index of the camera to update settings for.
+        sensitivity (float): Detection sensitivity level.
+        brightness (float): Camera brightness setting.
+        contrast (float): Camera contrast setting.
+        focus (float): Camera focus setting.
+        countdown_time (int): Alert countdown duration in seconds.
+        countdown_action (str): Action to take when countdown expires.
+        majority_vote_threshold (int): Number of detections needed for majority vote.
+        majority_vote_window (int): Time window for majority vote calculation.
+
+    Returns:
+        RedirectResponse: Redirect to the main index page.
+    """
     await update_camera_state(camera_index, {
         "sensitivity": sensitivity,
         "brightness": brightness,
@@ -66,6 +91,18 @@ async def update_settings(request: Request,
 
 @router.post("/save-feed-settings", include_in_schema=False)
 async def save_feed_settings(settings: FeedSettings):
+    """Save camera feed and detection settings to configuration.
+
+    Args:
+        settings (FeedSettings): Feed configuration settings including FPS,
+                                quality, detection intervals, and polling rates.
+
+    Returns:
+        dict: Success status and message indicating settings were saved.
+
+    Raises:
+        HTTPException: If saving settings fails due to validation or storage errors.
+    """
     try:
         config_data = {
             SavedConfig.STREAM_MAX_FPS: settings.stream_max_fps,
@@ -89,6 +126,15 @@ async def save_feed_settings(settings: FeedSettings):
 
 @router.get("/get-feed-settings", include_in_schema=False)
 async def get_feed_settings():
+    """Retrieve current camera feed and detection settings.
+
+    Returns:
+        dict: Current feed settings including FPS, quality, detection intervals,
+              polling rates, and calculated detections per second.
+
+    Raises:
+        HTTPException: If loading settings fails due to configuration errors.
+    """
     try:
         config = get_config()
         # pylint:disable=import-outside-toplevel

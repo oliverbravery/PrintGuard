@@ -16,6 +16,20 @@ router = APIRouter()
 
 @router.post("/detect")
 async def detect_ep(request: Request, files: List[UploadFile] = File(...), stream: bool = False):
+    """Perform defect detection on uploaded image files.
+
+    Args:
+        request (Request): The FastAPI request object containing app state.
+        files (List[UploadFile]): List of image files to analyze for defects.
+        stream (bool): Whether to stream results as they're processed. Defaults to False.
+
+    Returns:
+        Union[List[dict], StreamingResponse]: Detection results for each image,
+                                            either as a list or streaming response.
+
+    Raises:
+        HTTPException: If model is not loaded, no files provided, or inference fails.
+    """
     app_state = request.app.state
     if (app_state.model is None or
         app_state.transform is None or
@@ -106,6 +120,15 @@ async def detect_ep(request: Request, files: List[UploadFile] = File(...), strea
 
 @router.post("/detect/live/start")
 async def start_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
+    """Start continuous live detection on a specified camera.
+
+    Args:
+        request (Request): The FastAPI request object containing app state.
+        camera_index (int): Index of the camera to start live detection on.
+
+    Returns:
+        dict: Message indicating whether live detection was started or already running.
+    """
     camera_state = await get_camera_state(camera_index)
     if camera_state.live_detection_running:
         return {"message": f"Live detection already running for camera {camera_index}"}
@@ -126,6 +149,15 @@ async def start_live_detection(request: Request, camera_index: int = Body(..., e
 
 @router.post("/detect/live/stop")
 async def stop_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
+    """Stop continuous live detection on a specified camera.
+
+    Args:
+        request (Request): The FastAPI request object containing app state.
+        camera_index (int): Index of the camera to stop live detection on.
+
+    Returns:
+        dict: Message indicating whether live detection was stopped or not running.
+    """
     camera_state = await get_camera_state(camera_index)
     if not camera_state.live_detection_running:
         return {"message": f"Live detection not running for camera {camera_index}"}

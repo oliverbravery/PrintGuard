@@ -9,6 +9,12 @@ router = APIRouter()
 
 @router.get("/notification/public_key")
 async def get_public_key():
+    """Retrieve the VAPID public key for push notification subscriptions.
+
+    Returns:
+        dict: VAPID public key for client-side push notification setup,
+              or error message if key is not configured.
+    """
     config = get_config()
     vapid_public_key = config.get(SavedConfig.VAPID_PUBLIC_KEY, None)
     if not vapid_public_key:
@@ -18,6 +24,14 @@ async def get_public_key():
 
 @router.post("/notification/subscribe")
 async def subscribe(request: Request):
+    """Subscribe a client to push notifications.
+
+    Args:
+        request (Request): The FastAPI request object containing subscription data.
+
+    Returns:
+        dict: Success status indicating whether subscription was added successfully.
+    """
     try:
         subscription = await request.json()
         logging.debug("Received subscription request: %s", subscription.get('endpoint', 'no endpoint'))
@@ -42,6 +56,14 @@ async def subscribe(request: Request):
 
 @router.post("/notification/unsubscribe")
 async def unsubscribe(request: Request):
+    """Unsubscribe all clients from push notifications.
+
+    Args:
+        request (Request): The FastAPI request object containing app state.
+
+    Returns:
+        dict: Success status indicating all subscriptions were cleared.
+    """
     request.app.state.subscriptions.clear()
     config = get_config() or {}
     config[SavedConfig.PUSH_SUBSCRIPTIONS] = []
@@ -51,6 +73,15 @@ async def unsubscribe(request: Request):
 
 @router.get("/notification/debug")
 async def notification_debug(request: Request):
+    """Get debug information about notification configuration and subscriptions.
+
+    Args:
+        request (Request): The FastAPI request object containing app state.
+
+    Returns:
+        dict: Debug information including subscription count, VAPID configuration,
+              and subscription details for troubleshooting.
+    """
     config = get_config()
     debug_info = {
         "subscriptions_count": len(request.app.state.subscriptions),

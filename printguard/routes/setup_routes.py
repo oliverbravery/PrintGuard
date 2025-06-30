@@ -20,6 +20,14 @@ router = APIRouter()
 
 @router.get("/setup", include_in_schema=False)
 async def serve_setup(request: Request):
+    """Serve the setup page for initial application configuration.
+
+    Args:
+        request (Request): The FastAPI request object.
+
+    Returns:
+        TemplateResponse: Rendered setup.html template for configuration.
+    """
     # pylint:disable=import-outside-toplevel
     from ..app import templates
     return templates.TemplateResponse("setup.html", {
@@ -28,6 +36,14 @@ async def serve_setup(request: Request):
 
 @router.post("/setup/generate-vapid-keys", include_in_schema=False)
 async def generate_vapid_keys():
+    """Generate new VAPID key pair for push notification authentication.
+
+    Returns:
+        dict: Generated VAPID public key, private key, and default subject.
+
+    Raises:
+        HTTPException: If key generation fails due to cryptographic errors.
+    """
     try:
         vapid = Vapid()
         vapid.generate_keys()
@@ -56,6 +72,18 @@ async def generate_vapid_keys():
 
 @router.post("/setup/save-vapid-settings", include_in_schema=False)
 async def save_vapid_settings(settings: VapidSettings):
+    """Save VAPID settings for push notification configuration.
+
+    Args:
+        settings (VapidSettings): VAPID configuration including public key,
+                                 private key, subject, and base URL.
+
+    Returns:
+        dict: Success status indicating settings were saved.
+
+    Raises:
+        HTTPException: If saving VAPID settings fails due to validation or storage errors.
+    """
     try:
         domain = settings.base_url
         if domain.startswith(('http://', 'https://')):
@@ -80,6 +108,14 @@ async def save_vapid_settings(settings: VapidSettings):
 
 @router.post("/setup/generate-ssl-cert", include_in_schema=False)
 async def generate_ssl_cert():
+    """Generate self-signed SSL certificate for HTTPS communication.
+
+    Returns:
+        dict: Success status and message indicating certificate was generated.
+
+    Raises:
+        HTTPException: If SSL certificate generation fails or domain is not configured.
+    """
     config = get_config()
     try:
         ca = trustme.CA()
@@ -105,6 +141,17 @@ async def generate_ssl_cert():
 
 @router.post("/setup/upload-ssl-cert", include_in_schema=False)
 async def upload_ssl_cert(request: Request):
+    """Upload custom SSL certificate and key files.
+
+    Args:
+        request (Request): The FastAPI request object containing uploaded files.
+
+    Returns:
+        dict: Success status and message indicating certificate was uploaded.
+
+    Raises:
+        HTTPException: If both certificate and key files are not provided or upload fails.
+    """
     form = await request.form()
     cert_file = form.get("cert_file")
     key_file = form.get("key_file")
@@ -124,6 +171,17 @@ async def upload_ssl_cert(request: Request):
 
 @router.post("/setup/save-tunnel-settings", include_in_schema=False)
 async def save_tunnel_settings(settings: TunnelSettings):
+    """Save tunnel configuration settings for external access.
+
+    Args:
+        settings (TunnelSettings): Tunnel configuration including provider and API key.
+
+    Returns:
+        dict: Success status indicating tunnel settings were saved.
+
+    Raises:
+        HTTPException: If saving tunnel settings fails due to validation or storage errors.
+    """
     try:
         config_data = {
             SavedConfig.TUNNEL_PROVIDER: settings.provider,
@@ -141,6 +199,14 @@ async def save_tunnel_settings(settings: TunnelSettings):
 
 @router.post("/setup/initialize-ngrok-tunnel", include_in_schema=False)
 async def initialize_ngrok_tunnel():
+    """Initialize and start an ngrok tunnel for external access.
+
+    Returns:
+        RedirectResponse: Redirect to setup page after tunnel initialization.
+
+    Raises:
+        HTTPException: If tunnel provider or domain is not configured, or ngrok setup fails.
+    """
     config = get_config()
     provider = config.get(SavedConfig.TUNNEL_PROVIDER, None)
     site_domain = config.get(SavedConfig.SITE_DOMAIN, None)
@@ -163,6 +229,17 @@ async def initialize_ngrok_tunnel():
 
 @router.post("/setup/complete", include_in_schema=False)
 async def complete_setup(completion: SetupCompletion):
+    """Complete the initial setup process and mark configuration as finished.
+
+    Args:
+        completion (SetupCompletion): Setup completion status and configuration.
+
+    Returns:
+        dict: Success status indicating setup was completed successfully.
+
+    Raises:
+        HTTPException: If completing setup fails due to configuration errors.
+    """
     try:
         config_data = {
             SavedConfig.STARTUP_MODE: completion.startup_mode
@@ -178,6 +255,14 @@ async def complete_setup(completion: SetupCompletion):
 
 @router.get("/setup/cloudflare/accounts-zones", include_in_schema=False)
 async def get_cloudflare_accounts_zones():
+    """Retrieve Cloudflare accounts and zones for tunnel configuration.
+
+    Returns:
+        dict: Available Cloudflare accounts and zones for domain setup.
+
+    Raises:
+        HTTPException: If API key is invalid or Cloudflare API request fails.
+    """
     try:
         config = get_config()
         api_token = get_key(SavedKey.TUNNEL_API_KEY)
@@ -208,6 +293,18 @@ async def get_cloudflare_accounts_zones():
 
 @router.post("/setup/cloudflare/create-tunnel", include_in_schema=False)
 async def create_cloudflare_tunnel(config: CloudflareTunnelConfig):
+    """Create a new Cloudflare tunnel with specified configuration.
+
+    Args:
+        config (CloudflareTunnelConfig): Tunnel configuration including account,
+                                       zone, subdomain, and tunnel name.
+
+    Returns:
+        dict: Success status and tunnel creation details.
+
+    Raises:
+        HTTPException: If tunnel creation fails due to API errors or invalid configuration.
+    """
     try:
         api_token = get_key(SavedKey.TUNNEL_API_KEY)
         cf_config = get_config()
@@ -242,6 +339,18 @@ async def create_cloudflare_tunnel(config: CloudflareTunnelConfig):
 
 @router.post("/setup/cloudflare/save-os", include_in_schema=False)
 async def save_cloudflare_os(config: CloudflareDownloadConfig):
+    """Save operating system selection for Cloudflare tunnel client download.
+
+    Args:
+        config (CloudflareDownloadConfig): Operating system configuration for
+                                         tunnel client download.
+
+    Returns:
+        dict: Success status indicating OS selection was saved.
+
+    Raises:
+        HTTPException: If saving OS configuration fails.
+    """
     try:
         update_config({SavedConfig.USER_OPERATING_SYSTEM: config.operating_system})
         cf_config = get_config()
@@ -279,6 +388,17 @@ async def save_cloudflare_os(config: CloudflareDownloadConfig):
 
 @router.get("/setup/cloudflare/add-device", include_in_schema=False)
 async def serve_cloudflare_add_device(request: Request):
+    """Serve the Cloudflare device addition page for tunnel setup.
+
+    Args:
+        request (Request): The FastAPI request object.
+
+    Returns:
+        TemplateResponse: Rendered cloudflare_setup.html template with setup instructions.
+
+    Raises:
+        HTTPException: If tunnel configuration is incomplete or template rendering fails.
+    """
     try:
         # pylint:disable=import-outside-toplevel
         from ..app import templates
@@ -297,6 +417,17 @@ async def serve_cloudflare_add_device(request: Request):
 
 @router.get("/setup/cloudflare/organisation", include_in_schema=False)
 async def get_cloudflare_organisation(request: Request):
+    """Get Cloudflare organization information for tunnel configuration.
+
+    Args:
+        request (Request): The FastAPI request object for client validation.
+
+    Returns:
+        dict: Cloudflare organization details and configuration options.
+
+    Raises:
+        HTTPException: If access is not from localhost or API request fails.
+    """
     client_host = request.client.host if request.client else "unknown"
     if client_host not in ["127.0.0.1", "localhost", "::1"]:
         raise HTTPException(
