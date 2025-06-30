@@ -1,183 +1,48 @@
-# FDM Sentinel - Print Failure Detection
+# PrintGuard - Local 3D Printing Failure Detection and Monitoring
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/printguard?style=for-the-badge&logo=pypi&logoColor=white&logoSize=auto&color=yellow)](https://pypi.org/project/printguard/)
+[![GitHub Repo stars](https://img.shields.io/github/stars/oliverbravery/printguard?style=for-the-badge&logo=github&logoColor=white&logoSize=auto&color=yellow)](https://github.com/oliverbravery/printguard)
 
-A FastAPI-powered service using a Prototypical Neural Network to monitor 3D prints and send web push notifications on defect detection.
+PrintGuard offers local, **real-time print failure detection** for **3D printing** on edge devices. A **web interface** enables users to **monitor multiple printer-facing cameras**, **connect to printers** through compatible services (i.e. [Octoprint](https://octoprint.org)) and **receive failure notifications** when the **computer vision** fault detection model designed for local edge deployment detects an issue and **automatically suspend or terminate the print job**.
 
-## Key Features
+## Features
+- **Web Interface**: A user-friendly web interface to monitor print jobs and camera feeds.
+- **Live Print Failure Detection**: Uses a custom computer vision model to detect print failures in real-time on edge devices.
+- **Notifications**: Sends notifications subscribable on desktop and mobile devices via web push notifications to notify of detected print failures.
+- **Camera Integration**: Supports multiple camera feeds and simultaneous failure detection.
+- **Printer Integration**: Integrates with printers through services like Octoprint, allowing users to link cameras to specific printers for automatic print termination or suspension when a failure is detected.
+- **Local and Remote Access**: Can be accessed locally or remotely via secure tunnels (e.g. ngrok, Cloudflare Tunnel) or within a local network utilising the setup page for easy configuration.
 
-- **Real-time 3D Print Monitoring**: Uses machine learning to detect defects in your 3D prints
-- **Push Notifications**: Get instant alerts when a print fails through web push notifications
-- **Multiple Camera Support**: Monitor multiple printers simultaneously
-- **Easy Setup**: Works with standard webcams and USB cameras
+## Table of Contents
+- [Features](#features)
+- [Installation](#installation)
+- [Initial Configuration](#initial-configuration)
+- [Usage](#usage)
+- [Technical Documentation](/docs/overview.md)
 
-## Install
-
-Install the package from PyPI:
+## Installation
+PrintGuard is installable via [pip](https://pypi.org/project/printguard/). The following command will install the latest version:
 ```bash
-pip install fdm-sentinel
+pip install printguard
 ```
-
-Or install locally in editable mode:
+To start the web interface, run:
 ```bash
-git clone https://github.com/oliverbravery/FDM-Sentinel.git
-cd FDM-Sentinel
-python3 -m venv venv
-source venv/bin/activate
-pip install -e .
+printguard
 ```
 
-### SSL & VAPID
+## Initial Configuration
+After installation, you will need to configure PrintGuard. First, visit the setup page at `http://localhost:8000/setup`. The setup page allows users to configure network access to the locally hosted site, including seamless options for exposing it via popular reverse proxies for a streamlined setup. All setups require you to choose to either automatically generate or import self-signed SSL certificates for secure access, alongside VAPID keys which are required for web push notifications.
 
-For local HTTPS and service worker support, generate a self-signed cert:
-```bash
-# using homebrew
-brew install mkcert
-brew install nss
-mkcert -install
-mkcert -key-file .key.pem -cert-file .cert.pem localhost 127.0.0.1 ::1
-```
+> [Cloudflare](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) - A secure way to expose your local web interface to the internet via reverse proxies, providing a reliable and secure connection without needing to open ports on your router. Cloudflare tunnels are free to use and offer a simple setup process however, a domain connected to your Cloudflare account is required. Restricted access to your PrintGuard site can be setup through [Cloudflare Access](https://one.dash.cloudflare.com/), configurable in the setup page. During setup, your API key is used to create a tunnel to your local server and insert a DNS record for the tunnel, allowing you to access your PrintGuard instance via your custom domain or subdomain.
 
-Generate VAPID keys:
-```bash
-npm install -g web-push
-web-push generate-vapid-keys --json
-```
+> [Ngrok](https://ngrok.com/) - Reverse proxy tool which allows you to expose the local web interface to the internet for access outside of your local network, offering a secure tunnel to your local server with minimal configuration through both free and paid plans. The setup uses your ngrok API to create a tunnel to your local server and link it to your free static ngrok domain aquired during setup, allowing access to PrintGuard via a custom, static subdomain.
 
-Copy `publicKey` and `privateKey` into `.env`:
-```
-VAPID_PUBLIC_KEY=<your_public_key>
-VAPID_PRIVATE_KEY=<your_private_key>
-VAPID_SUBJECT=mailto:you@example.com
-```
+> Local Network Access - If you prefer not to expose your web interface to the internet, you can configure PrintGuard to be accessible only within your local network.
 
-## Setup
-
-1. Clone the repository
-
-2. Create a `.env` file in the project root:
-   ```env
-   VAPID_PUBLIC_KEY=your_public_key
-   VAPID_PRIVATE_KEY=your_private_key
-   VAPID_SUBJECT=mailto:your_email@example.com  # Subject email for VAPID claims
-   ```
-
-3. Install dependencies:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
-
-4. Run the server:
-   ```bash
-   uvicorn fdm_sentinel.app:app --reload --ssl-certfile .cert.pem --ssl-keyfile .key.pem
-   ```
-
-## How It Works
-
-The Print Sentinel uses a Prototypical Neural Network to analyze images from your 3D printer's camera feed. When it detects signs of printing failure like:
-- Spaghetti mess
-- Layer shifting
-- Warping or curling
-- Print detachment
-
-It immediately sends a push notification to your devices so you can intervene.
-
-## Website
-
-A simple browser-based UI is included. After starting the server with:
-```bash
-uvicorn fdm_sentinel.app:app --reload --ssl-certfile .cert.pem --ssl-keyfile .key.pem
-```
-
-Navigate to:
-```
-https://localhost:8000/
-```
-
-- Click **Subscribe to Notifications** and grant permission.
-- Use **Start Monitoring** to begin live detection.
-- Adjust settings via **Settings**.
-- Alerts appear in the UI and via push notifications.
-
-### UI Features
-
-The main interface includes:
-- Live camera feed with camera selection dropdown
-- Start/Stop controls for print monitoring
-- Status display showing current detection state
-- Settings page for configuring detection parameters
-
-### Advanced Features
-
-- **Multiple Camera Support**: Monitor several printers by selecting different cameras
-- **Custom Scheduling**: Set up recurring notifications using cron expressions
-- **Alert History**: View past detected failures with timestamps and images
-- **Configurable Sensitivity**: Adjust detection thresholds in settings
-
-### Technical Notes
-
-- Uses FastAPI and a prototypical neural network for defect detection
-- In-memory storage is used for demo purposes; consider a persistent DB for production
-- Handle errors and retries in production environments
-- Ensure HTTPS in production for service workers to function properly
-- Model detection uses pre-trained weights located in the model directory
-
-## API Endpoints
-
-### Detection
-**POST** `/detect`
-Detect print failures using a camera image:
-```json
-{ "files": ["img_1.png", "img_2.png"] }
-```
-
-### Public Key
-**GET** `/notifications/publicKey`
-Returns the VAPID public key for subscribing:
-```json
-{ "public_key": "<VAPID_PUBLIC_KEY>" }
-```
-
-### Subscribe / Unsubscribe
-**POST** `/notifications/subscribe`
-Register a push subscription:
-```json
-{ "endpoint": "<endpoint_url>", "keys": { "p256dh": "...", "auth": "..." } }
-```
-
-**POST** `/notifications/unsubscribe/{subscription_id}`
-Remove an existing subscription.
-
-### Send Notification
-**POST** `/notifications/send/{subscription_id}`
-Send an immediate push notification:
-```json
-{ "title": "Alert", "body": "Defect detected", "url": "https://..." }
-```
-
-### Schedule Notification
-**POST** `/notifications/schedule`
-Schedule recurring notifications via cron expression:
-```json
-{ "subscription_id": "<id>", "message": { "title": "Daily", "body": "Update" }, "cron": "0 9 * * *" }
-```
-
-### Live Detection
-**GET** `/live`
-Open a server-sent events stream of detection results.
-
-**POST** `/live/start`
-Start continuous live detection on configured camera.
-
-**POST** `/live/stop`
-Stop live detection.
-
-**GET** `/live/alerts`
-Stream detected alert IDs and timestamps.
-
-**GET** `/live/status`
-Get current live detection status and camera info.
-
-### Settings UI
-**GET** `/settings`
-Open a web form to configure sensitivity, camera index, brightness, contrast, focus, and warning intervals.
+## Usage
+ | | |
+ | --- | --- |
+ | ![PrintGuard Web Interface](docs/media/images/interface-index.png) | The main interface of PrintGuard. All cameras are selectable in the bottom left camera list. The live camera view displayed in the top right shows the feed of the currently selected camera. The current detection status, total detections and frame rate are displayed in the bottom right alongside a button to toggle live detection for the selected camera on or off. |
+  | ![PrintGuard Camera Settings](docs/media/images/interface-camera-settings.png) | The camera settings page is accessible via the settings button in the bottom right of the main interface. It allows you to configure camera settings, including camera brightness and contrast, detection thresholds, link a printer to the camera via services such as Octoprint, and configure alert and notification settings for that camera. You can also opt into web push notifications for real-time alerts here. |
+  | ![PrintGuard Setup Settings](docs/media/images/interface-setup-settings.png) | Accessible via the configure setup button in the settings menu, the setup page allows configuration of camera feed streaming settings such as resolution and frame rate, as well as polling intervals and detection rates. |
+  | ![PrintGuard Alerts and Notifications](docs/media/images/interface-alerts-notifications.png) | When a failure is detected a notification is dispatched to subscribed devices via web push notifications, allowing users to get real-time alerts and updates about their print. On the web interface, an alert modal appears showing a snapshot of the failure and buttons to dismiss the alert or suspend/cancel the print job. If the alert is not addressed within the customisable countdown time, the printer will automatically be suspended, cancelled or resumed based on user settings. |
+  | | |
