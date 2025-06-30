@@ -20,16 +20,34 @@ from .config import (get_config, STREAM_MAX_FPS, STREAM_TUNNEL_FPS,
 
 
 class StreamOptimizer:
+    """Optimizes video stream frames and detection loops based on configuration."""
+
     def __init__(self):
+        """Initialize the stream optimizer with empty cache and timing."""
         self._config_cache = {}
         self._last_config_check = 0
         self._config_check_interval = 30.0
 
     def invalidate_cache(self):
+        """Clear cached streaming settings to force re-read from configuration."""
         self._last_config_check = 0
         self._config_cache.clear()
 
     def _get_current_settings(self) -> Dict:
+        """Retrieve or update current stream settings from configuration.
+
+        Returns:
+            Dict: A dictionary containing stream settings:
+                {
+                    'max_fps': int,
+                    'jpeg_quality': int,
+                    'max_width': int,
+                    'detection_interval_ms': float,
+                    'is_tunnel_mode': bool,
+                    'startup_mode': SiteStartupMode,
+                    'tunnel_provider': Optional[str]
+                }
+        """
         current_time = time.time()
         if (current_time - self._last_config_check) > self._config_check_interval:
             config = get_config()
@@ -64,9 +82,18 @@ class StreamOptimizer:
         return self._config_cache
 
     def get_stream_settings(self) -> Dict:
+        """Get the cached stream settings."""
         return self._get_current_settings()
 
     def should_limit_fps(self, last_frame_time: float) -> bool:
+        """Determine if streaming should pause to respect max FPS.
+
+        Args:
+            last_frame_time (float): Timestamp of the last streamed frame.
+
+        Returns:
+            bool: True if waiting is needed, False otherwise.
+        """
         settings = self._get_current_settings()
         max_fps = settings['max_fps']
         if max_fps <= 0:
@@ -75,6 +102,14 @@ class StreamOptimizer:
         return (time.time() - last_frame_time) < min_frame_interval
 
     def optimize_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, Dict]:
+        """Resize frame based on max width and return associated settings.
+
+        Args:
+            frame (np.ndarray): The original image frame.
+
+        Returns:
+            Tuple[np.ndarray, Dict]: The resized frame and current stream settings.
+        """
         settings = self._get_current_settings()
         max_width = settings['max_width']
         height, width = frame.shape[:2]
@@ -87,6 +122,14 @@ class StreamOptimizer:
         return frame, settings
 
     def encode_frame(self, frame: np.ndarray) -> bytes:
+        """Encode frame to JPEG with configured quality.
+
+        Args:
+            frame (np.ndarray): The frame to encode.
+
+        Returns:
+            bytes: The JPEG-encoded byte string.
+        """
         settings = self._get_current_settings()
         jpeg_quality = settings['jpeg_quality']
         # pylint: disable=E1101
@@ -102,10 +145,11 @@ class StreamOptimizer:
         return buffer.tobytes()
 
     def get_detection_interval(self) -> float:
-        settings = self._get_current_settings()
-        return settings['detection_interval_ms'] / 1000.0
+        """Get the time interval between detections in seconds."""
+        return self._get_current_settings()['detection_interval_ms'] / 1000.0
 
     def log_optimization_info(self):
+        """Log current stream optimization settings for debugging."""
         settings = self._get_current_settings()
         mode_info = f"tunnel ({settings['tunnel_provider']})" if (
             settings['is_tunnel_mode']) else "local"
@@ -119,6 +163,15 @@ stream_optimizer = StreamOptimizer()
 
 
 def create_optimized_frame_generator(camera_index: int, camera_state_getter):
+    """Generator yielding optimized JPEG frames for streaming.
+
+    Args:
+        camera_index (int): The index of the camera.
+        camera_state_getter (callable): Function to retrieve CameraState.
+
+    Yields:
+        bytes: Multipart JPEG frame data.
+    """
     # pylint: disable=E1101
     cap = cv2.VideoCapture(camera_index)
     last_frame_time = 0
@@ -158,6 +211,15 @@ def create_optimized_frame_generator(camera_index: int, camera_state_getter):
 
 
 async def create_optimized_detection_loop(app_state, camera_index, camera_state_getter, update_functions):
+    """Asynchronous loop for real-time defect detection with optimizations.
+
+    Args:
+        app_state: Model and transformation context for detection.
+        camera_index (int): The index of the camera.
+        camera_state_getter (callable): Function to retrieve CameraState.
+        update_functions (dict): A mapping of update function names to coroutines,
+            e.g., {'update_camera_state': ..., 'update_camera_detection_history': ...}.
+    """
     # pylint: disable=E1101
     cap = cv2.VideoCapture(camera_index)
     detection_count = 0
@@ -236,6 +298,14 @@ async def create_optimized_detection_loop(app_state, camera_index, camera_state_
             cap.release()
 
 def generate_frames(camera_index: int):
+    """Fallback frame generator if optimized generator fails.
+
+    Args:
+        camera_index (int): The index of the camera.
+
+    Yields:
+        bytes: Multipart JPEG frame data.
+    """
     try:
         for frame_data in create_optimized_frame_generator(camera_index, get_camera_state_sync):
             yield frame_data

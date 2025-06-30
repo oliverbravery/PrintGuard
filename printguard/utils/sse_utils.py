@@ -7,6 +7,11 @@ from ..models import (SSEDataType, PrinterState,
 
 
 async def outbound_packet_fetch():
+    """Async generator yielding outbound SSE packets for clients.
+
+    Yields:
+        str: Serialized JSON packet from application outbound queue.
+    """
     # pylint: disable=C0415
     from ..app import app
     while True:
@@ -14,6 +19,12 @@ async def outbound_packet_fetch():
         yield packet
 
 async def append_new_outbound_packet(packet, sse_data_type: SSEDataType):
+    """Append a new Server-Sent Event packet to the outbound queue.
+
+    Args:
+        packet (str): The JSON-serialized data payload.
+        sse_data_type (SSEDataType): The type of SSE event.
+    """
     # pylint: disable=C0415
     from ..app import app
     pkt = {"data": {"event": sse_data_type.value, "data": packet}}
@@ -21,6 +32,14 @@ async def append_new_outbound_packet(packet, sse_data_type: SSEDataType):
     await app.state.outbound_queue.put(pkt_json)
 
 def _calculate_frame_rate(detection_history):
+    """Calculate frames per second based on detection timestamps.
+
+    Args:
+        detection_history (list of tuples): Each tuple is (timestamp, label).
+
+    Returns:
+        float: The calculated frame rate, or 0.0 if insufficient data.
+    """
     if len(detection_history) < 2:
         return 0.0
     times = [t for t, _ in detection_history]
@@ -28,6 +47,11 @@ def _calculate_frame_rate(detection_history):
     return (len(times) - 1) / duration if duration > 0 else 0.0
 
 async def _sse_update_camera_state_func(camera_index):
+    """Build and send a camera state update SSE packet.
+
+    Args:
+        camera_index (int): The index of the camera.
+    """
     # pylint: disable=import-outside-toplevel
     from .camera_utils import get_camera_state
     state = await get_camera_state(camera_index)
@@ -47,6 +71,11 @@ async def _sse_update_camera_state_func(camera_index):
     await append_new_outbound_packet(data, SSEDataType.CAMERA_STATE)
 
 async def sse_update_printer_state(printer_state: PrinterState):
+    """Send an SSE update with the current printer state.
+
+    Args:
+        printer_state (PrinterState): The printer state object.
+    """
     try:
         await asyncio.wait_for(
             append_new_outbound_packet(printer_state.model_dump(), SSEDataType.PRINTER_STATE),
@@ -60,6 +89,11 @@ async def sse_update_printer_state(printer_state: PrinterState):
         logging.error("Unexpected error in SSE printer state update: %s", e)
 
 async def sse_update_camera_state(camera_index):
+    """Send an SSE update with the current camera state.
+
+    Args:
+        camera_index (int): The index of the camera.
+    """
     try:
         await asyncio.wait_for(_sse_update_camera_state_func(camera_index), timeout=5.0)
     except asyncio.TimeoutError:
@@ -71,11 +105,24 @@ async def sse_update_camera_state(camera_index):
                       camera_index, e)
 
 def get_polling_task(camera_index):
+    """Retrieve the current polling task for a camera.
+
+    Args:
+        camera_index (int): The index of the camera.
+
+    Returns:
+        PollingTask or None: The polling task if exists, otherwise None.
+    """
     # pylint: disable=C0415
     from ..app import app
     return app.state.polling_tasks.get(camera_index) or None
 
 def stop_and_remove_polling_task(camera_index):
+    """Stop and remove a polling task for a specified camera.
+
+    Args:
+        camera_index (int): The index of the camera.
+    """
     # pylint: disable=C0415
     from ..app import app
     task = get_polling_task(camera_index)
@@ -89,6 +136,12 @@ def stop_and_remove_polling_task(camera_index):
         logging.warning("No polling task found for camera index %d to stop.", camera_index)
 
 def add_polling_task(camera_index, task: PollingTask):
+    """Add or replace a polling task for a camera.
+
+    Args:
+        camera_index (int): The index of the camera.
+        task (PollingTask): The task object containing the asyncio.Task and stop_event.
+    """
     # pylint: disable=C0415
     from ..app import app
     if camera_index in app.state.polling_tasks:

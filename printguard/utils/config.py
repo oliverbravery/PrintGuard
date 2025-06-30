@@ -25,6 +25,11 @@ _config_lock = threading.RLock()
 _file_lock = None
 
 def acquire_lock():
+    """Acquire a thread and file lock for safe configuration file access.
+
+    Ensures exclusive access to the config file by acquiring a threading lock
+    and a file-based lock at `LOCK_FILE`.
+    """
     global _file_lock
     _config_lock.acquire()
     _file_lock = open(LOCK_FILE, 'w')
@@ -35,6 +40,10 @@ def acquire_lock():
 
 
 def release_lock():
+    """Release the configuration file exclusivity locks.
+
+    Releases both the file-based lock and the threading lock.
+    """
     global _file_lock
     if _file_lock:
         fcntl.flock(_file_lock, fcntl.LOCK_UN)
@@ -43,6 +52,11 @@ def release_lock():
     _config_lock.release()
 
 def _get_config_nolock():
+    """Load configuration from disk without acquiring any locks.
+
+    Returns:
+        dict or None: The JSON-loaded configuration, or None if the file doesn't exist or fails to load.
+    """
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -52,6 +66,13 @@ def _get_config_nolock():
     return None
 
 def get_config():
+    """Thread-safe retrieval of the application configuration.
+
+    Acquires locks before reading the config file.
+
+    Returns:
+        dict or None: The loaded configuration dictionary, or None if not initialized.
+    """
     acquire_lock()
     try:
         return _get_config_nolock()
@@ -59,6 +80,11 @@ def get_config():
         release_lock()
 
 def update_config(updates: dict):
+    """Thread-safe update of configuration values in the config file.
+
+    Args:
+        updates (dict): A mapping of config keys to their new values.
+    """
     acquire_lock()
     try:
         config = _get_config_nolock() or {}
@@ -70,6 +96,10 @@ def update_config(updates: dict):
         release_lock()
 
 def init_config():
+    """Initialize the configuration file with default keys if missing.
+
+    Creates `config.json` with default entries for all SavedConfig keys.
+    """
     acquire_lock()
     try:
         if not os.path.exists(CONFIG_FILE):
@@ -89,12 +119,31 @@ def init_config():
         release_lock()
 
 def store_key(key: SavedKey, value: str):
+    """Store a secret value in the system keyring.
+
+    Args:
+        key (SavedKey): The key identifier for storage.
+        value (str): The secret value to store.
+    """
     keyring.set_password(KEYRING_SERVICE_NAME, key.value, value)
 
 def get_key(key: SavedKey):
+    """Retrieve a secret value from the system keyring.
+
+    Args:
+        key (SavedKey): The key identifier to look up.
+
+    Returns:
+        str or None: The stored secret, or None if not found.
+    """
     return keyring.get_password(KEYRING_SERVICE_NAME, key.value)
 
 def get_ssl_private_key_temporary_path():
+    """Write the SSL private key from keyring to a temp file.
+
+    Returns:
+        str or None: The path to the temporary PEM file, or None if no key found.
+    """
     private_key = get_key(SavedKey.SSL_PRIVATE_KEY)
     if private_key:
         temp_file = tempfile.NamedTemporaryFile("w+",
@@ -107,6 +156,7 @@ def get_ssl_private_key_temporary_path():
     return None
 
 def reset_all_keys():
+    """Delete all stored keys in the system keyring for the application."""
     for key in SavedKey:
         try:
             keyring.delete_password(KEYRING_SERVICE_NAME, key.value)
@@ -114,6 +164,10 @@ def reset_all_keys():
             pass
 
 def reset_config():
+    """Reset the configuration file to default values.
+
+    Overwrites `config.json` with default empty fields for all SavedConfig options.
+    """
     acquire_lock()
     try:
         default_config = {
@@ -131,11 +185,16 @@ def reset_config():
         release_lock()
 
 def reset_ssl_files():
+    """Remove existing SSL certificate and CA files from the app data directory."""
     for ssl_file in [SSL_CERT_FILE, SSL_CA_FILE]:
         if os.path.exists(ssl_file):
             os.remove(ssl_file)
 
 def reset_all():
+    """Reset keyring, config, and SSL files to a clean state.
+
+    Invokes `reset_all_keys`, `reset_config`, and `reset_ssl_files` sequentially.
+    """
     reset_all_keys()
     reset_config()
     reset_ssl_files()

@@ -25,7 +25,6 @@ def setup_ngrok_tunnel(close: bool = False) -> bool:
     try:
         # pylint: disable=import-outside-toplevel
         import ngrok
-
         # pylint: disable=E1101
         listener = ngrok.forward(8000, authtoken=tunnel_auth_key, domain=tunnel_domain)
         if listener:

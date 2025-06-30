@@ -10,30 +10,78 @@ from .printer_services.octoprint import OctoPrintClient
 from .sse_utils import add_polling_task, sse_update_printer_state
 
 def get_printer_config(camera_index):
+    """Retrieve printer configuration from camera state.
+
+    Args:
+        camera_index (int): The index of the camera.
+
+    Returns:
+        dict or None: The printer_config dictionary if set, otherwise None.
+            Structure of printer_config example:
+            {
+                'printer_type': str,
+                'base_url': str,
+                'api_key': str,
+                'name': str
+            }
+    """
     camera_state = get_camera_state_sync(camera_index)
     if camera_state and hasattr(camera_state, 'printer_config') and camera_state.printer_config:
         return camera_state.printer_config
     return None
 
 def get_printer_id(camera_index):
+    """Retrieve the printer ID associated with a camera.
+
+    Args:
+        camera_index (int): The index of the camera.
+
+    Returns:
+        str or None: The printer_id if set, otherwise None.
+    """
     camera_state = get_camera_state_sync(camera_index)
     if camera_state and hasattr(camera_state, 'printer_id') and camera_state.printer_id:
         return camera_state.printer_id
     return None
 
 async def set_printer(camera_index, printer_id, printer_config):
+    """Associate a printer with a camera and persist in state.
+
+    Args:
+        camera_index (int): The index of the camera.
+        printer_id (str): The unique identifier for the printer.
+        printer_config (dict): The configuration details for the printer.
+
+    Returns:
+        Optional[CameraState]: The updated camera state, or None if failed.
+    """
     return await update_camera_state(camera_index, {
         "printer_id": printer_id,
         "printer_config": printer_config
     })
 
 async def remove_printer(camera_index):
+    """Remove the printer association from a camera.
+
+    Args:
+        camera_index (int): The index of the camera.
+
+    Returns:
+        Optional[CameraState]: The updated camera state, or None if failed.
+    """
     return await update_camera_state(camera_index, {
         "printer_id": None,
         "printer_config": None
     })
 
 async def poll_printer_state_func(client, interval, stop_event):
+    """Continuously poll the printer state and send updates via SSE.
+
+    Args:
+        client (OctoPrintClient): The client to query printer status.
+        interval (float): Time in seconds between polls.
+        stop_event (asyncio.Event): An event to signal polling should stop.
+    """
     while not stop_event.is_set():
         try:
             current_printer_state = client.get_printer_state()
@@ -46,6 +94,11 @@ async def poll_printer_state_func(client, interval, stop_event):
         await asyncio.sleep(interval)
 
 async def start_printer_state_polling(camera_index):
+    """Start background polling of printer state for a camera.
+
+    Args:
+        camera_index (int): The index of the camera to poll.
+    """
     stop_event = asyncio.Event()
     camera_printer_config = get_printer_config(camera_index)
     if not camera_printer_config:
@@ -64,8 +117,14 @@ async def start_printer_state_polling(camera_index):
     logging.debug("Started printer state polling for camera index %d", camera_index)
 
 def suspend_print_job(camera_index, action: AlertAction):
-    """
-    Pauses or cancels a print job based on the action provided in the alert.
+    """Pause or cancel an ongoing print job based on an alert action.
+
+    Args:
+        camera_index (int): The index of the camera associated with the printer.
+        action (AlertAction): The action to perform (CANCEL_PRINT or PAUSE_PRINT).
+
+    Returns:
+        bool: True if the job was suspended successfully or no job was active, False otherwise.
     """
     printer_config = get_printer_config(camera_index)
     if printer_config:

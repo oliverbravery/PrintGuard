@@ -7,7 +7,9 @@ from .config import get_config, update_config, SavedConfig
 
 
 class CameraStateManager:
+    """Manages the state of all cameras in the application."""
     def __init__(self):
+        """Initializes the CameraStateManager, loading states from the configuration."""
         self._states: Dict[int, CameraState] = {}
         self._lock: Optional[asyncio.Lock] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -15,6 +17,11 @@ class CameraStateManager:
 
     @property
     def lock(self) -> asyncio.Lock:
+        """Provides a lock for thread-safe operations on camera states.
+
+        Returns:
+            asyncio.Lock: The lock instance for the current event loop.
+        """
         loop = asyncio.get_running_loop()
         if self._lock is None or self._loop is not loop:
             self._lock = asyncio.Lock()
@@ -22,6 +29,7 @@ class CameraStateManager:
         return self._lock
 
     def _load_states_from_config(self):
+        """Loads camera states from the application's configuration file."""
         config = get_config() or {}
         saved_states = config.get(SavedConfig.CAMERA_STATES, {})
         for camera_index_str, state_data in saved_states.items():
@@ -38,6 +46,7 @@ class CameraStateManager:
                     logging.error("Invalid camera index in config: %s", camera_index_str)
 
     def _save_states_to_config(self):
+        """Saves the current camera states to the application's configuration file."""
         try:
             states_data = {}
             for camera_index, state in self._states.items():
@@ -50,7 +59,15 @@ class CameraStateManager:
             logging.error("Failed to save camera states to config: %s", e)
 
     async def get_camera_state(self, camera_index: int, reset: bool = False) -> CameraState:
-        """Get camera state for the given index, creating if it doesn't exist"""
+        """Get camera state for the given index, creating if it doesn't exist
+
+        Args:
+            camera_index (int): The index of the camera.
+            reset (bool): If True, resets the camera state to its default.
+
+        Returns:
+            CameraState: The state of the camera.
+        """
         async with self.lock:
             if camera_index not in self._states or reset:
                 self._states[camera_index] = CameraState()
@@ -59,6 +76,20 @@ class CameraStateManager:
 
     async def update_camera_state(self, camera_index: int,
                                   new_states: Dict) -> Optional[CameraState]:
+        """Updates the state of a specific camera.
+
+        Args:
+            camera_index (int): The index of the camera to update.
+            new_states (Dict): A dictionary containing the state updates.
+                Example:
+                {
+                    "state_key": new_value,
+                    ...
+                }
+
+        Returns:
+            Optional[CameraState]: The updated camera state, or None if not found.
+        """
         async with self.lock:
             if camera_index not in self._states:
                 self._states[camera_index] = CameraState()
@@ -76,6 +107,16 @@ class CameraStateManager:
 
     async def update_camera_detection_history(self, camera_index: int,
                                               pred: str, time_val: float) -> Optional[CameraState]:
+        """Updates the detection history for a camera.
+
+        Args:
+            camera_index (int): The index of the camera.
+            pred (str): The prediction (detection) label.
+            time_val (float): The timestamp of the detection.
+
+        Returns:
+            Optional[CameraState]: The updated camera state, or None if not found.
+        """
         async with self.lock:
             if camera_index not in self._states:
                 self._states[camera_index] = CameraState()
@@ -91,6 +132,11 @@ class CameraStateManager:
         return None
 
     async def get_all_camera_indices(self) -> list:
+        """Retrieves a list of all camera indices.
+
+        Returns:
+            list: A list of all camera indices.
+        """
         async with self.lock:
             return list(self._states.keys())
 

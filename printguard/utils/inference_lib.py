@@ -4,7 +4,7 @@ import os
 import sys
 import hashlib
 import pickle
-
+import shutil
 import cv2
 import torch
 from PIL import Image
@@ -17,6 +17,18 @@ except ImportError:
     pass
 
 def load_model(model_path, options_path, device):
+    """Load a PyTorch model and its configuration options.
+
+    Args:
+        model_path (str): Path to the saved model file.
+        options_path (str): Path to the JSON options file.
+        device (torch.device): Device to load the model onto.
+
+    Returns:
+        tuple: A tuple containing (model, x_dim) where:
+            - model: The loaded PyTorch model in eval mode
+            - x_dim: List of input dimensions from the options
+    """
     model = torch.load(model_path, weights_only=False)
     model.eval()
     model.to(device)
@@ -26,6 +38,11 @@ def load_model(model_path, options_path, device):
     return model, x_dim
 
 def make_transform():
+    """Create the standard image preprocessing transform pipeline.
+
+    Returns:
+        torchvision.transforms.Compose: Transform pipeline for preprocessing images.
+    """
     return transforms.Compose([
         transforms.Resize(256),
         transforms.Grayscale(num_output_channels=3),
@@ -35,6 +52,17 @@ def make_transform():
     ])
 
 def draw_label(frame, label, color, success_label="success"):
+    """Draw a detection label on an image frame.
+
+    Args:
+        frame (numpy.ndarray): The image frame to draw on.
+        label (str): The prediction label to display.
+        color (tuple): RGB color tuple for the label background.
+        success_label (str): Label considered as "success" (non-defective).
+
+    Returns:
+        numpy.ndarray: The frame with the label drawn on it.
+    """
     text = "non-defective" if label == success_label else "defect"
     # pylint: disable=E1101
     font = cv2.FONT_HERSHEY_SIMPLEX
@@ -59,6 +87,14 @@ def draw_label(frame, label, color, success_label="success"):
 
 
 def _get_support_dir_hash(support_dir):
+    """Generate a hash of the support directory contents for caching.
+
+    Args:
+        support_dir (str): Path to the support directory.
+
+    Returns:
+        str: MD5 hash of the directory structure and file metadata.
+    """
     file_paths = []
     for root, dirs, files in os.walk(support_dir):
         dirs.sort()
@@ -72,6 +108,14 @@ def _get_support_dir_hash(support_dir):
 
 
 def _save_prototypes(prototypes, class_names, defect_idx, cache_file):
+    """Save computed prototypes to a cache file.
+
+    Args:
+        prototypes (torch.Tensor): The computed prototype tensors.
+        class_names (list): List of class names.
+        defect_idx (int): Index of the defect class.
+        cache_file (str): Path to save the cache file.
+    """
     try:
         cache_dir = os.path.dirname(cache_file)
         os.makedirs(cache_dir, exist_ok=True)
@@ -88,6 +132,15 @@ def _save_prototypes(prototypes, class_names, defect_idx, cache_file):
 
 
 def _load_prototypes(cache_file, device):
+    """Load prototypes from a cache file.
+
+    Args:
+        cache_file (str): Path to the cache file.
+        device (torch.device): Device to load tensors onto.
+
+    Returns:
+        tuple: A tuple containing (prototypes, class_names, defect_idx) or (None, None, None) if loading fails.
+    """
     try:
         if not os.path.exists(cache_file):
             return None, None, None
@@ -104,6 +157,22 @@ def _load_prototypes(cache_file, device):
 
 
 def compute_prototypes(model, support_dir, transform, device, success_label="success", use_cache=True):
+    """Compute class prototypes from support images.
+
+    Args:
+        model (torch.nn.Module): The encoder model to use.
+        support_dir (str): Directory containing class subdirectories with support images.
+        transform (torchvision.transforms.Compose): Image preprocessing transform.
+        device (torch.device): Device to run computations on.
+        success_label (str): Label for the non-defective class.
+        use_cache (bool): Whether to use cached prototypes if available.
+
+    Returns:
+        tuple: A tuple containing (prototypes, class_names, defect_idx) where:
+            - prototypes: Tensor of shape (num_classes, embedding_dim)
+            - class_names: List of class names
+            - defect_idx: Index of the defect class (-1 if not found)
+    """
     cache_dir = os.path.join(support_dir, 'cache')
     if use_cache and os.path.exists(cache_dir):
         for filename in os.listdir(cache_dir):
@@ -118,10 +187,12 @@ def compute_prototypes(model, support_dir, transform, device, success_label="suc
     support_dir_hash = _get_support_dir_hash(support_dir)
     cache_file = os.path.join(cache_dir, f"prototypes_{support_dir_hash}.pkl")
     class_names = sorted([d for d in os.listdir(support_dir)
-                          if os.path.isdir(os.path.join(support_dir, d)) and not d.startswith('.') and d != 'cache'])
+                          if os.path.isdir(
+                              os.path.join(
+                                  support_dir, d)
+                              ) and not d.startswith('.') and d != 'cache'])
     if not class_names:
         raise ValueError(f"No class subdirectories found in support directory: {support_dir}")
-
     prototypes = []
     loaded_class_names = []
     for cls in class_names:
@@ -153,7 +224,6 @@ def compute_prototypes(model, support_dir, transform, device, success_label="suc
         raise ValueError("Failed to build any prototypes from the support set.")
     prototypes = torch.stack(prototypes)
     logging.debug("Prototypes built for classes: %s", loaded_class_names)
-
     defect_idx = -1
     if success_label in loaded_class_names:
         try:
@@ -175,7 +245,6 @@ def compute_prototypes(model, support_dir, transform, device, success_label="suc
     else:
         logging.warning("'%s' class not found in loaded support set %s. Cannot apply sensitivity adjustment.",
                         success_label, loaded_class_names)
-
     if use_cache:
         _save_prototypes(prototypes, loaded_class_names, defect_idx, cache_file)
 
@@ -183,6 +252,19 @@ def compute_prototypes(model, support_dir, transform, device, success_label="suc
 
 
 def predict_batch(model, batch_tensors, prototypes, defect_idx, sensitivity, device):
+    """Predict classes for a batch of image tensors using prototype matching.
+
+    Args:
+        model (torch.nn.Module): The encoder model.
+        batch_tensors (torch.Tensor): Batch of preprocessed image tensors.
+        prototypes (torch.Tensor): Class prototype tensors.
+        defect_idx (int): Index of the defect class for sensitivity adjustment.
+        sensitivity (float): Sensitivity multiplier for defect detection.
+        device (torch.device): Device to run computations on.
+
+    Returns:
+        list: List of predicted class indices for each input.
+    """
     if batch_tensors is None or batch_tensors.shape[0] == 0:
         logging.warning("Received empty or invalid batch for prediction.")
         return []
@@ -206,6 +288,14 @@ def predict_batch(model, batch_tensors, prototypes, defect_idx, sensitivity, dev
 
 
 def setup_device(requested_device):
+    """Set up the compute device based on availability and request.
+
+    Args:
+        requested_device (str): Requested device ('cuda', 'mps', or 'cpu').
+
+    Returns:
+        torch.device: The actual device to use for computations.
+    """
     if requested_device == 'cuda' and torch.cuda.is_available():
         device = torch.device('cuda')
     elif requested_device == 'mps' and torch.backends.mps.is_available():
@@ -219,10 +309,14 @@ def setup_device(requested_device):
     return device
 
 def clear_prototype_cache(support_dir):
+    """Clear the prototype cache for a support directory.
+
+    Args:
+        support_dir (str): Path to the support directory whose cache should be cleared.
+    """
     cache_dir = os.path.join(support_dir, 'cache')
     if os.path.exists(cache_dir):
         try:
-            import shutil
             shutil.rmtree(cache_dir)
             logging.debug("Prototype cache cleared for support directory: %s", support_dir)
         except OSError as e:

@@ -13,6 +13,16 @@ from .notification_utils import send_defect_notification
 from ..models import Alert, AlertAction, SSEDataType
 
 def _passed_majority_vote(camera_state):
+    """Determine if failures in detection history meet the majority threshold.
+
+    Args:
+        camera_state (CameraState): The camera state containing detection history,
+            which includes a list of tuples `(timestamp, label)`.
+
+    Returns:
+        bool: True if the number of 'failure' labels in the most recent
+              `majority_vote_window` entries is at least `majority_vote_threshold`.
+    """
     detection_history = camera_state.detection_history
     majority_vote_window = camera_state.majority_vote_window
     majority_vote_threshold = camera_state.majority_vote_threshold
@@ -22,9 +32,19 @@ def _passed_majority_vote(camera_state):
     return len(failed_detections) >= majority_vote_threshold
 
 async def _send_alert(alert):
+    """Send an alert to clients via Server-Sent Events.
+
+    Args:
+        alert (Alert): The alert object to send.
+    """
     await append_new_outbound_packet(alert_to_response_json(alert), SSEDataType.ALERT)
 
 async def _terminate_alert_after_cooldown(alert):
+    """Wait for the alert's countdown, then dismiss or act on the print job.
+
+    Args:
+        alert (Alert): The alert object with `countdown_time` and `countdown_action`.
+    """
     await asyncio.sleep(alert.countdown_time)
     if get_alert(alert.id) is not None:
         camera_index = alert.camera_index
@@ -39,6 +59,17 @@ async def _terminate_alert_after_cooldown(alert):
                 return await dismiss_alert(alert.id)
 
 async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timestamp_arg):
+    """Create a new Alert object and notify all subsystems.
+
+    Args:
+        camera_state_ref (CameraState): The state reference for the camera.
+        camera_index (int): The index of the camera.
+        frame (ndarray): The image frame where a defect was detected.
+        timestamp_arg (float): The timestamp of detection.
+
+    Returns:
+        Alert: The newly created alert.
+    """
     alert_id = f"{camera_index}_{str(uuid.uuid4())}"
     # pylint: disable=E1101
     _, img_buf = cv2.imencode('.jpg', frame)
@@ -61,6 +92,15 @@ async def _create_alert_and_notify(camera_state_ref, camera_index, frame, timest
     return alert
 
 async def _live_detection_loop(app_state, camera_index):
+    """Continuously run detection on camera frames and generate alerts.
+
+    This loop reads frames, runs inference, updates state, and dispatches alerts
+    when defects are detected based on majority vote.
+
+    Args:
+        app_state: The application state holding model, transforms, and other context.
+        camera_index (int): The index of the camera to process.
+    """
     # pylint: disable=C0415
     from .stream_utils import create_optimized_detection_loop
     update_functions = {

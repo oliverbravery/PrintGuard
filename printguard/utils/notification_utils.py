@@ -8,13 +8,21 @@ from ..utils.config import get_key, get_config
 from ..utils.alert_utils import get_alert
 
 def get_subscriptions():
+    """Retrieve the list of current push notification subscriptions.
+
+    Returns:
+        list: A list of subscription dictionaries, each with at least an 'id' and 'endpoint'.
+    """
     # pylint: disable=C0415
     from ..app import app
     return app.state.subscriptions
 
 def remove_subscription(subscription_id = None, subscription = None):
-    """
-    Remove a subscription by ID or subscription object.
+    """Remove a subscription by ID or subscription object.
+
+    Args:
+        subscription_id (str, optional): The ID of the subscription to remove.
+        subscription (dict, optional): The subscription object to remove.
     """
     # pylint: disable=C0415
     from ..app import app
@@ -28,6 +36,11 @@ def remove_subscription(subscription_id = None, subscription = None):
         logging.error("No subscription ID or object provided to remove.")
 
 def send_defect_notification(alert_id):
+    """Send a defect notification for a given alert ID to all subscribers.
+
+    Args:
+        alert_id (str): The ID of the alert for which to send a notification.
+    """
     logging.debug("Attempting to send defect notification for alert ID: %s", alert_id)
     alert = get_alert(alert_id)
     if alert:
@@ -44,6 +57,14 @@ def send_defect_notification(alert_id):
         logging.error("No alert found for ID: %s", alert_id)
 
 def send_notification(notification: Notification):
+    """Send a push notification to all current subscriptions.
+
+    Args:
+        notification (Notification): The notification object to send. Should have 'title' and 'body' fields at minimum.
+
+    Returns:
+        bool: True if at least one notification was sent successfully, False otherwise.
+    """
     logging.debug("Starting notification send process")
     config = get_config()
     vapid_subject = config.get(SavedConfig.VAPID_SUBJECT, None)
