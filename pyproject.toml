@@ -26,7 +26,8 @@ dependencies = [
     "keyring",
     "trustme",
     "platformdirs",
-    "sse-starlette"
+    "sse-starlette",
+    "ngrok"
 ]
 
 [project.scripts]
