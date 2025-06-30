@@ -29,6 +29,11 @@ from .utils.camera_utils import setup_camera_indices
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
+    """
+    Lifespan event handler for FastAPI application.
+    
+    Initializes the device and model, sets up camera indices, and handles startup modes.
+    """
     # pylint: disable=C0415
     from .utils.setup_utils import startup_mode_requirements_met
     startup_mode = startup_mode_requirements_met()
@@ -115,6 +120,9 @@ app.include_router(camera_router, tags=["camera"])
 app.include_router(printer_router, tags=["printer"])
 
 def run():
+    """
+    Run the FastAPI application with uvicorn, handling different startup modes.
+    """
     # pylint: disable=C0415
     import uvicorn
     from .utils.setup_utils import (startup_mode_requirements_met,
