@@ -3,8 +3,9 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from .models import (SiteStartupMode,
@@ -119,6 +120,22 @@ app.include_router(index_router, tags=["index"])
 app.include_router(camera_router, tags=["camera"])
 app.include_router(printer_router, tags=["printer"])
 
+@app.middleware("http")
+async def http_redirect_middleware(request: Request, call_next):
+    """
+    Middleware to handle HTTP requests - redirect to setup page unless accessing setup routes.
+    Only allows setup routes and static files when using HTTP.
+    """
+    if request.url.scheme == "http":
+        if (request.url.path.startswith("/setup") or
+            request.url.path.startswith("/static")):
+            response = await call_next(request)
+            return response
+        else:
+            return RedirectResponse(url="/setup", status_code=307)
+    response = await call_next(request)
+    return response
+
 def run():
     """
     Run the FastAPI application with uvicorn, handling different startup modes.
@@ -129,9 +146,9 @@ def run():
                                     setup_ngrok_tunnel)
     init_config()
     startup_mode = startup_mode_requirements_met()
-    config = get_config()
-    site_domain = config.get(SavedConfig.SITE_DOMAIN, "")
-    tunnel_provider = config.get(SavedConfig.TUNNEL_PROVIDER, None)
+    app_config = get_config()
+    site_domain = app_config.get(SavedConfig.SITE_DOMAIN, "")
+    tunnel_provider = app_config.get(SavedConfig.TUNNEL_PROVIDER, None)
     stop_cloudflare_tunnel()
     match startup_mode:
         case SiteStartupMode.SETUP:
