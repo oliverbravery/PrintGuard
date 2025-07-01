@@ -907,7 +907,7 @@ input[type="range"]::-moz-range-thumb {
 #detectionsPerSecond::-webkit-slider-runnable-track,
 #detectionInterval::-webkit-slider-runnable-track,
 #printerStatPollingRate::-webkit-slider-runnable-track,
-#tunnelStatPollingRate::-webkit-slider-runnable-track {
+#minSseDispatchDelay::-webkit-slider-runnable-track {
     background: linear-gradient(to right, #ADD8E6 var(--value, 50%), #ffffff var(--value, 50%));
 }
 
@@ -918,7 +918,7 @@ input[type="range"]::-moz-range-thumb {
 #detectionsPerSecond::-moz-range-track,
 #detectionInterval::-moz-range-track,
 #printerStatPollingRate::-moz-range-track,
-#tunnelStatPollingRate::-moz-range-track {
+#minSseDispatchDelay::-moz-range-track {
     background: linear-gradient(to right, #ADD8E6 var(--value, 50%), #ffffff var(--value, 50%));
 }
 

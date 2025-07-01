@@ -612,7 +612,7 @@ function saveFeedSettings() {
         detections_per_second: parseInt(document.getElementById('detectionsPerSecond').value),
         detection_interval_ms: parseInt(document.getElementById('detectionInterval').value),
         printer_stat_polling_rate_ms: parseInt(document.getElementById('printerStatPollingRate').value),
-        tunnel_stat_polling_rate_ms: parseInt(document.getElementById('tunnelStatPollingRate').value)
+        min_sse_dispatch_delay_ms: parseInt(document.getElementById('minSseDispatchDelay').value)
     };
     fetch('/save-feed-settings', {
         method: 'POST',
@@ -678,7 +678,7 @@ function loadFeedSettings() {
             updateSliderValue('detectionsPerSecond', settings.detections_per_second);
             updateSliderValue('detectionInterval', settings.detection_interval_ms);
             updateSliderValue('printerStatPollingRate', settings.printer_stat_polling_rate_ms);
-            updateSliderValue('tunnelStatPollingRate', settings.tunnel_stat_polling_rate_ms);
+            updateSliderValue('minSseDispatchDelay', settings.min_sse_dispatch_delay_ms);
         }
     })
     .catch(error => {

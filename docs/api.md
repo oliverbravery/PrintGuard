@@ -415,7 +415,7 @@
     "detections_per_second": "integer",
     "detection_interval_ms": "integer",
     "printer_stat_polling_rate_ms": "integer",
-    "tunnel_stat_polling_rate_ms": "integer"
+    "min_sse_dispatch_delay_ms": "integer"
 }
 ```
 **Response:**
@@ -440,7 +440,7 @@
         "detections_per_second": "integer",
         "detection_interval_ms": "integer",
         "printer_stat_polling_rate_ms": "integer",
-        "tunnel_stat_polling_rate_ms": "integer"
+        "min_sse_dispatch_delay_ms": "integer"
     }
 }
 ```

@@ -225,7 +225,7 @@ class SavedConfig(str, Enum):
     STREAM_MAX_WIDTH = "stream_max_width"
     DETECTION_INTERVAL_MS = "detection_interval_ms"
     PRINTER_STAT_POLLING_RATE_MS = "printer_stat_polling_rate_ms"
-    TUNNEL_STAT_POLLING_RATE_MS = "tunnel_stat_polling_rate_ms"
+    MIN_SSE_DISPATCH_DELAY_MS = "min_sse_dispatch_delay_ms"
     PUSH_SUBSCRIPTIONS = "push_subscriptions"
     CAMERA_STATES = "camera_states"
 
@@ -264,7 +264,7 @@ class FeedSettings(BaseModel):
     detections_per_second: int
     detection_interval_ms: int
     printer_stat_polling_rate_ms: int
-    tunnel_stat_polling_rate_ms: int
+    min_sse_dispatch_delay_ms: int
 
 class PollingTask(BaseModel):
     task: Optional[asyncio.Task] = None

@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 from ..utils.config import (STREAM_MAX_FPS, STREAM_TUNNEL_FPS,
                             STREAM_JPEG_QUALITY, STREAM_MAX_WIDTH,
                             DETECTION_INTERVAL_MS, PRINTER_STAT_POLLING_RATE_MS,
-                            TUNNEL_STAT_POLLING_RATE_MS, CAMERA_INDEX,
+                            MIN_SSE_DISPATCH_DELAY_MS, CAMERA_INDEX,
                             update_config, get_config)
 from ..utils.camera_utils import update_camera_state, setup_camera_indices
 from ..utils.camera_state_manager import get_camera_state_manager
@@ -111,7 +111,7 @@ async def save_feed_settings(settings: FeedSettings):
             SavedConfig.STREAM_MAX_WIDTH: settings.stream_max_width,
             SavedConfig.DETECTION_INTERVAL_MS: settings.detection_interval_ms,
             SavedConfig.PRINTER_STAT_POLLING_RATE_MS: settings.printer_stat_polling_rate_ms,
-            SavedConfig.TUNNEL_STAT_POLLING_RATE_MS: settings.tunnel_stat_polling_rate_ms
+            SavedConfig.MIN_SSE_DISPATCH_DELAY_MS: settings.min_sse_dispatch_delay_ms
         }
         update_config(config_data)
         stream_optimizer.invalidate_cache()
@@ -145,7 +145,7 @@ async def get_feed_settings():
             "stream_max_width": config.get(SavedConfig.STREAM_MAX_WIDTH, STREAM_MAX_WIDTH),
             "detection_interval_ms": config.get(SavedConfig.DETECTION_INTERVAL_MS, DETECTION_INTERVAL_MS),
             "printer_stat_polling_rate_ms": config.get(SavedConfig.PRINTER_STAT_POLLING_RATE_MS, PRINTER_STAT_POLLING_RATE_MS),
-            "tunnel_stat_polling_rate_ms": config.get(SavedConfig.TUNNEL_STAT_POLLING_RATE_MS, TUNNEL_STAT_POLLING_RATE_MS)
+            "min_sse_dispatch_delay_ms": config.get(SavedConfig.MIN_SSE_DISPATCH_DELAY_MS, MIN_SSE_DISPATCH_DELAY_MS)
         }
         settings["detections_per_second"] = round(1000 / settings["detection_interval_ms"])
         return {"success": True, "settings": settings}
