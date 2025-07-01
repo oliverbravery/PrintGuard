@@ -1,10 +1,13 @@
 import asyncio
 import json
 import logging
+import time
 
 from ..models import (SSEDataType, PrinterState,
-                      PollingTask)
+                      PollingTask, SavedConfig)
+from ..utils.config import get_config, MIN_SSE_DISPATCH_DELAY_MS
 
+_last_dispatch_times = {}
 
 async def outbound_packet_fetch():
     """Async generator yielding outbound SSE packets for clients.
@@ -25,11 +28,46 @@ async def append_new_outbound_packet(packet, sse_data_type: SSEDataType):
         packet (str): The JSON-serialized data payload.
         sse_data_type (SSEDataType): The type of SSE event.
     """
+    config = get_config()
+    min_sse_dispatch_delay = config.get(SavedConfig.MIN_SSE_DISPATCH_DELAY_MS, MIN_SSE_DISPATCH_DELAY_MS)
+    current_time = time.time() * 1000
+    last_dispatch_time = _last_dispatch_times.get(sse_data_type, 0)
+    time_since_last_dispatch = current_time - last_dispatch_time
+    if time_since_last_dispatch < min_sse_dispatch_delay:
+        logging.debug("Throttling SSE dispatch for %s (time since last: %.1fms)",
+                     sse_data_type.value, time_since_last_dispatch)
+        return
     # pylint: disable=C0415
     from ..app import app
     pkt = {"data": {"event": sse_data_type.value, "data": packet}}
     pkt_json = json.dumps(pkt)
     await app.state.outbound_queue.put(pkt_json)
+    _last_dispatch_times[sse_data_type] = current_time
+
+async def append_new_outbound_packet_force(packet, sse_data_type: SSEDataType):
+    """Force append a new Server-Sent Event packet to the outbound queue, bypassing throttling.
+
+    Args:
+        packet (str): The JSON-serialized data payload.
+        sse_data_type (SSEDataType): The type of SSE event.
+    """
+    # pylint: disable=C0415
+    from ..app import app
+    pkt = {"data": {"event": sse_data_type.value, "data": packet}}
+    pkt_json = json.dumps(pkt)
+    await app.state.outbound_queue.put(pkt_json)
+    current_time = time.time() * 1000
+    _last_dispatch_times[sse_data_type] = current_time
+
+def reset_throttle_for_data_type(sse_data_type: SSEDataType):
+    """Reset the throttle timer for a specific SSE data type.
+
+    Args:
+        sse_data_type (SSEDataType): The type of SSE event to reset throttling for.
+    """
+    if sse_data_type in _last_dispatch_times:
+        del _last_dispatch_times[sse_data_type]
+        logging.debug("Reset throttle for SSE data type: %s", sse_data_type.value)
 
 def _calculate_frame_rate(detection_history):
     """Calculate frames per second based on detection timestamps.
