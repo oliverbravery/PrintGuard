@@ -331,7 +331,9 @@ async def create_cloudflare_tunnel(config: CloudflareTunnelConfig):
             "tunnel_token": tunnel_token
         }
     except Exception as e:
-        logging.error("Error creating Cloudflare tunnel: %s", e)
+        logging.error(
+            "Error creating Cloudflare tunnel. Ensure the DNS record and tunnel do not already exist: %s",
+            e)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create Cloudflare tunnel: {str(e)}"
