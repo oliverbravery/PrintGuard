@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "printguard"
-version = "0.1.0"
+version = "0.1.0b1"
 description = "PrintGuard - Real-time Defect Detection on Edge-devices"
 authors = [
     { name = "Oliver Bravery", email = "dev@oliverbravery.uk" }
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 
 dependencies = [
     "fastapi",
