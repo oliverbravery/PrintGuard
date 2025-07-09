@@ -20,9 +20,11 @@ PrintGuard offers local, **real-time print failure detection** for **3D printing
 - [Technical Documentation](/docs/overview.md)
 
 ## Installation
+> _The project is currently in pre-release, so the `--pre` flag is required for installation._
+
 PrintGuard is installable via [pip](https://pypi.org/project/printguard/). The following command will install the latest version:
 ```bash
-pip install printguard
+pip install --pre printguard
 ```
 To start the web interface, run:
 ```bash
