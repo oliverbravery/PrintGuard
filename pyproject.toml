@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "printguard"
-version = "1.0.0b1"
+version = "1.0.0b2"
 description = "PrintGuard - Real-time Defect Detection on Edge-devices"
 authors = [
     { name = "Oliver Bravery", email = "dev@oliverbravery.uk" }
