@@ -27,7 +27,8 @@ dependencies = [
     "trustme",
     "platformdirs",
     "sse-starlette",
-    "ngrok"
+    "ngrok",
+    "secretstorage"
 ]
 
 [project.scripts]

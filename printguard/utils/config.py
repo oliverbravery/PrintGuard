@@ -200,6 +200,13 @@ def reset_all():
     reset_ssl_files()
     logging.debug("All saved keys, config, and SSL files have been reset")
 
+def configure_keyring():
+    """
+    Configure the keyring backend to use SecretService if the default is not set.
+    """
+    if isinstance(keyring.get_keyring(), keyring.backends.fail.Keyring):
+        keyring.set_keyring(keyring.backends.SecretService.Keyring())
+
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "model", "best_model.pt")
 MODEL_OPTIONS_PATH = os.path.join(BASE_DIR, "model", "opt.json")

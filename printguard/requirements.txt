@@ -14,3 +14,4 @@ trustme
 platformdirs
 keyring
 ngrok
+secretstorage

@@ -15,7 +15,16 @@ RUN pip install --no-cache-dir .
 # ---- Final Stage ----
 FROM python:3.13-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx \
+    dbus-x11 \
+    gnome-keyring \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
+
+COPY docker/ /app/docker/
+RUN chmod +x /app/docker/entrypoint.sh
 
 RUN useradd --create-home --shell /bin/bash appuser
 USER appuser
@@ -27,4 +36,5 @@ COPY --chown=appuser:appuser printguard/model/ /app/printguard/model/
 
 EXPOSE 8000
 
+ENTRYPOINT ["/app/docker/entrypoint.sh"]
 CMD ["printguard"]
