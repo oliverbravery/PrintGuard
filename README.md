@@ -4,6 +4,8 @@
 
 PrintGuard offers local, **real-time print failure detection** for **3D printing** on edge devices. A **web interface** enables users to **monitor multiple printer-facing cameras**, **connect to printers** through compatible services (i.e. [Octoprint](https://octoprint.org)) and **receive failure notifications** when the **computer vision** fault detection model designed for local edge deployment detects an issue and **automatically suspend or terminate the print job**.
 
+> _The machine learning model's training code and technical research paper can be found [here](https://github.com/oliverbravery/Edge-FDM-Fault-Detection)._
+
 ## Features
 - **Web Interface**: A user-friendly web interface to monitor print jobs and camera feeds.
 - **Live Print Failure Detection**: Uses a custom computer vision model to detect print failures in real-time on edge devices.
