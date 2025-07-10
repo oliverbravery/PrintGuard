@@ -21,7 +21,7 @@ dependencies = [
     "torch",
     "torchvision",
     "pillow",
-    "opencv-python",
+    "opencv-python-headless",
     "python-multipart",
     "keyring",
     "trustme",
