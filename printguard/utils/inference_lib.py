@@ -29,9 +29,8 @@ def load_model(model_path, options_path, device):
             - model: The loaded PyTorch model in eval mode
             - x_dim: List of input dimensions from the options
     """
-    model = torch.load(model_path, weights_only=False)
+    model = torch.load(model_path, map_location=device, weights_only=False)
     model.eval()
-    model.to(device)
     with open(options_path, 'r', encoding='utf-8') as f:
         model_opt = json.load(f)
     x_dim = list(map(int, model_opt['model.x_dim'].split(',')))

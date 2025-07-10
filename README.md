@@ -17,11 +17,15 @@ PrintGuard offers local, **real-time print failure detection** for **3D printing
 ## Table of Contents
 - [Features](#features)
 - [Installation](#installation)
+    - [PyPI Installation](#pypi-installation)
+    - [Docker Installation](#docker-installation)
 - [Initial Configuration](#initial-configuration)
 - [Usage](#usage)
 - [Technical Documentation](/docs/overview.md)
 
 ## Installation
+
+### PyPI Installation
 > _The project is currently in pre-release, so the `--pre` flag is required for installation._
 
 PrintGuard is installable via [pip](https://pypi.org/project/printguard/). The following command will install the latest version:
@@ -31,6 +35,22 @@ pip install --pre printguard
 To start the web interface, run:
 ```bash
 printguard
+```
+
+### Docker Installation
+PrintGuard is also available as a Docker image, which can be pulled from GitHub Container Registry (GHCR):
+```bash
+docker pull ghcr.io/oliverbravery/printguard:latest
+```
+
+Alternatively, you can build the Docker image from the source:
+```bash
+docker build -t printguard .
+```
+
+To run the Docker container, use the following command. Note that the container requires a volume for persistent data storage and an environment variable for the secret key:
+```bash
+docker run -p 8000:8000 -v printguard_data:/data -e PRINTGUARD_SECRET_KEY='your-super-secret-key' printguard
 ```
 
 ## Initial Configuration

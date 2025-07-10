@@ -6,7 +6,7 @@ python-dotenv
 torch
 torchvision
 pillow
-opencv-python
+opencv-python-headless
 torch
 python-multipart
 sse-starlette
