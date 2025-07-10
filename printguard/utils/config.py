@@ -4,6 +4,10 @@ import os
 import tempfile
 import fcntl
 import threading
+import base64
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 import keyring
 import keyring.errors
@@ -12,11 +16,20 @@ from platformdirs import user_data_dir
 
 from ..models import AlertAction, SavedKey, SavedConfig
 
-APP_DATA_DIR = user_data_dir("printguard", "printguard")
+def is_running_in_docker():
+    """Check if the application is running inside a Docker container."""
+    return os.path.exists('/.dockerenv')
+
+if is_running_in_docker():
+    APP_DATA_DIR = "/data"
+else:
+    APP_DATA_DIR = user_data_dir("printguard", "printguard")
+
 KEYRING_SERVICE_NAME = "printguard"
 os.makedirs(APP_DATA_DIR, exist_ok=True)
 
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.json")
+SECRETS_FILE = os.path.join(APP_DATA_DIR, "secrets.json")
 LOCK_FILE = os.path.join(APP_DATA_DIR, "config.lock")
 SSL_CERT_FILE = os.path.join(APP_DATA_DIR, "cert.pem")
 SSL_CA_FILE = os.path.join(APP_DATA_DIR, "ca.pem")
@@ -118,17 +131,80 @@ def init_config():
     finally:
         release_lock()
 
+def _get_encryption_key(salt):
+    """Derives an encryption key from the PRINTGUARD_SECRET_KEY environment variable."""
+    secret_key = os.environ.get("PRINTGUARD_SECRET_KEY")
+    if not secret_key:
+        return None
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(secret_key.encode()))
+    return Fernet(key)
+
+def _get_secrets_nolock():
+    """Load secrets from disk without acquiring any locks.
+
+    Returns:
+        dict or None: The JSON-loaded secrets, or None if the file doesn't exist or fails to load.
+    """
+    if os.path.exists(SECRETS_FILE):
+        try:
+            with open(SECRETS_FILE, 'rb') as f:
+                file_content = f.read()
+            if not file_content:
+                return {}
+            secret_key = os.environ.get("PRINTGUARD_SECRET_KEY")
+            if secret_key:
+                salt = file_content[:16]
+                encrypted_data = file_content[16:]
+                fernet = _get_encryption_key(salt)
+                if fernet:
+                    decrypted_data = fernet.decrypt(encrypted_data)
+                    return json.loads(decrypted_data)
+            else:
+                return json.loads(file_content)
+        except Exception as e:
+            logging.error("Error loading secrets file: %s", e)
+    return None
+
 def store_key(key: SavedKey, value: str):
-    """Store a secret value in the system keyring.
+    """Store a secret value in the system keyring or a secure file if in Docker.
 
     Args:
         key (SavedKey): The key identifier for storage.
         value (str): The secret value to store.
     """
-    keyring.set_password(KEYRING_SERVICE_NAME, key.value, value)
+    if is_running_in_docker():
+        acquire_lock()
+        try:
+            secrets = _get_secrets_nolock() or {}
+            secrets[key.value] = value
+            data_to_write = json.dumps(secrets, indent=2).encode('utf-8')
+            secret_key = os.environ.get("PRINTGUARD_SECRET_KEY")
+            if secret_key:
+                if os.path.exists(SECRETS_FILE) and os.path.getsize(SECRETS_FILE) > 16:
+                    with open(SECRETS_FILE, 'rb') as f:
+                        salt = f.read(16)
+                else:
+                    salt = os.urandom(16)
+                fernet = _get_encryption_key(salt)
+                if fernet:
+                    encrypted_data = fernet.encrypt(data_to_write)
+                    data_to_write = salt + encrypted_data
+            with open(SECRETS_FILE, 'wb') as f:
+                f.write(data_to_write)
+            os.chmod(SECRETS_FILE, 0o600)
+        finally:
+            release_lock()
+    else:
+        keyring.set_password(KEYRING_SERVICE_NAME, key.value, value)
 
 def get_key(key: SavedKey):
-    """Retrieve a secret value from the system keyring.
+    """Retrieve a secret value from the system keyring or a secure file if in Docker.
 
     Args:
         key (SavedKey): The key identifier to look up.
@@ -136,7 +212,15 @@ def get_key(key: SavedKey):
     Returns:
         str or None: The stored secret, or None if not found.
     """
-    return keyring.get_password(KEYRING_SERVICE_NAME, key.value)
+    if is_running_in_docker():
+        acquire_lock()
+        try:
+            secrets = _get_secrets_nolock()
+            return secrets.get(key.value) if secrets else None
+        finally:
+            release_lock()
+    else:
+        return keyring.get_password(KEYRING_SERVICE_NAME, key.value)
 
 def get_ssl_private_key_temporary_path():
     """Write the SSL private key from keyring to a temp file.
@@ -157,11 +241,19 @@ def get_ssl_private_key_temporary_path():
 
 def reset_all_keys():
     """Delete all stored keys in the system keyring for the application."""
-    for key in SavedKey:
+    if is_running_in_docker():
+        acquire_lock()
         try:
-            keyring.delete_password(KEYRING_SERVICE_NAME, key.value)
-        except keyring.errors.PasswordDeleteError:
-            pass
+            if os.path.exists(SECRETS_FILE):
+                os.remove(SECRETS_FILE)
+        finally:
+            release_lock()
+    else:
+        for key in SavedKey:
+            try:
+                keyring.delete_password(KEYRING_SERVICE_NAME, key.value)
+            except keyring.errors.PasswordDeleteError:
+                pass
 
 def reset_config():
     """Reset the configuration file to default values.
@@ -199,13 +291,6 @@ def reset_all():
     reset_config()
     reset_ssl_files()
     logging.debug("All saved keys, config, and SSL files have been reset")
-
-def configure_keyring():
-    """
-    Configure the keyring backend to use SecretService if the default is not set.
-    """
-    if isinstance(keyring.get_keyring(), keyring.backends.fail.Keyring):
-        keyring.set_keyring(keyring.backends.SecretService.Keyring())
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "model", "best_model.pt")

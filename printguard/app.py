@@ -27,7 +27,6 @@ from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
 from .utils.cloudflare_utils import (start_cloudflare_tunnel, stop_cloudflare_tunnel)
 from .utils.camera_utils import setup_camera_indices
-from .utils.config import reset_all_keys
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
