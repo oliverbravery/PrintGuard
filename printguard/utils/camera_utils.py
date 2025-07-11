@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+import glob
 import logging
 
 import cv2
@@ -69,20 +70,33 @@ async def update_camera_state(camera_index, new_states):
 def detect_available_cameras(max_cameras=MAX_CAMERAS):
     """Detects available cameras connected to the system.
 
+    This function checks for cameras using both numerical indices and device paths
+    like /dev/video* to support Docker environments.
+
     Args:
         max_cameras (int): The maximum number of camera indices to check.
 
     Returns:
         list: A list of available camera indices.
     """
-    available_cameras = []
+    available_cameras = set()
     for i in range(max_cameras):
         # pylint: disable=E1101
         cap = cv2.VideoCapture(i)
         if cap.isOpened():
-            available_cameras.append(i)
+            available_cameras.add(i)
             cap.release()
-    return available_cameras
+    for device in glob.glob('/dev/video*'):
+        try:
+            index = int(device.replace('/dev/video', ''))
+            # pylint: disable=E1101
+            cap = cv2.VideoCapture(index)
+            if cap.isOpened():
+                available_cameras.add(index)
+                cap.release()
+        except ValueError:
+            pass
+    return sorted(list(available_cameras))
 
 async def setup_camera_indices():
     """Initializes camera states for all detected cameras."""
