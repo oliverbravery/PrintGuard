@@ -2,6 +2,7 @@ import asyncio
 import concurrent.futures
 import glob
 import logging
+import platform
 
 import cv2
 
@@ -80,22 +81,25 @@ def detect_available_cameras(max_cameras=MAX_CAMERAS):
         list: A list of available camera indices.
     """
     available_cameras = set()
+    api_preference = cv2.CAP_V4L2 if platform.system() == 'Linux' else cv2.CAP_ANY
     for i in range(max_cameras):
         # pylint: disable=E1101
-        cap = cv2.VideoCapture(i)
+        cap = cv2.VideoCapture(i, api_preference)
         if cap.isOpened():
             available_cameras.add(i)
             cap.release()
-    for device in glob.glob('/dev/video*'):
-        try:
-            index = int(device.replace('/dev/video', ''))
-            # pylint: disable=E1101
-            cap = cv2.VideoCapture(index)
-            if cap.isOpened():
-                available_cameras.add(index)
-                cap.release()
-        except ValueError:
-            pass
+
+    if platform.system() == 'Linux':
+        for device in glob.glob('/dev/video*'):
+            try:
+                index = int(device.replace('/dev/video', ''))
+                # pylint: disable=E1101
+                cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+                if cap.isOpened():
+                    available_cameras.add(index)
+                    cap.release()
+            except ValueError:
+                pass
     return sorted(list(available_cameras))
 
 async def setup_camera_indices():
