@@ -68,38 +68,35 @@ async def update_camera_state(camera_index, new_states):
     manager = get_camera_state_manager()
     return await manager.update_camera_state(camera_index, new_states)
 
-def detect_available_cameras(max_cameras=MAX_CAMERAS):
-    """Detects available cameras connected to the system.
+def detect_available_cameras(max_cameras=10):
+    """
+    Detects available cameras connected to the system, optimized for Docker.
 
-    This function checks for cameras using both numerical indices and device paths
-    like /dev/video* to support Docker environments.
+    This function prioritizes checking device paths (/dev/video*) on Linux,
+    which is a more reliable method within Docker containers.
 
     Args:
-        max_cameras (int): The maximum number of camera indices to check.
+        max_cameras (int): The maximum number of camera device files to check.
 
     Returns:
-        list: A list of available camera indices.
+        list: A sorted list of available camera indices.
     """
     available_cameras = set()
-    api_preference = cv2.CAP_V4L2 if platform.system() == 'Linux' else cv2.CAP_ANY
-    for i in range(max_cameras):
-        # pylint: disable=E1101
-        cap = cv2.VideoCapture(i, api_preference)
-        if cap.isOpened():
-            available_cameras.add(i)
-            cap.release()
-
     if platform.system() == 'Linux':
-        for device in glob.glob('/dev/video*'):
-            try:
-                index = int(device.replace('/dev/video', ''))
-                # pylint: disable=E1101
-                cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+        for i in range(max_cameras):
+            device_path = f"/dev/video{i}"
+            if device_path in glob.glob('/dev/video*'):
+                cap = cv2.VideoCapture(i, cv2.CAP_V4L2)
                 if cap.isOpened():
-                    available_cameras.add(index)
+                    available_cameras.add(i)
                     cap.release()
-            except ValueError:
-                pass
+    else:
+        for i in range(max_cameras):
+            cap = cv2.VideoCapture(i, cv2.CAP_ANY)
+            if cap.isOpened():
+                available_cameras.add(i)
+                cap.release()
+                
     return sorted(list(available_cameras))
 
 async def setup_camera_indices():
