@@ -48,9 +48,16 @@ Alternatively, you can build the Docker image from the source:
 docker build -t printguard .
 ```
 
-To run the Docker container, use the following command. Note that the container requires a volume for persistent data storage and an environment variable for the secret key:
+To run the Docker container, use the following command. Note that the container requires a volume for persistent data storage and an environment variable for the secret key. 
+
+Also, to ensure the camera is accessible, the container must have access to the host's video devices. Pass your camera devices to the container using the `--device` flag:
 ```bash
-docker run -p 8000:8000 -v printguard_data:/data -e PRINTGUARD_SECRET_KEY='your-super-secret-key' printguard
+docker run -p 8000:8000 \
+    -v printguard_data:/data \
+    -e PRINTGUARD_SECRET_KEY='secret' \
+    --device=/dev/video0 \
+    --group-add $(getent group video | cut -d: -f3) \
+    printguard
 ```
 
 ## Initial Configuration
