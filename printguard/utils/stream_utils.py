@@ -11,7 +11,7 @@ from .model_utils import _run_inference
 from .sse_utils import sse_update_camera_state
 from .detection_utils import (_passed_majority_vote, _create_alert_and_notify,
                               _send_alert)
-from .camera_utils import get_camera_state_sync
+from .camera_utils import get_camera_state_sync, open_camera
 from ..models import SavedConfig, SiteStartupMode
 from .config import (get_config, STREAM_MAX_FPS, STREAM_TUNNEL_FPS,
                      STREAM_JPEG_QUALITY, STREAM_TUNNEL_JPEG_QUALITY,
@@ -173,7 +173,7 @@ def create_optimized_frame_generator(camera_index: int, camera_state_getter):
         bytes: Multipart JPEG frame data.
     """
     # pylint: disable=E1101
-    cap = cv2.VideoCapture(camera_index)
+    cap = open_camera(camera_index)
     last_frame_time = 0
     frame_count = 0
     if frame_count == 0:
@@ -200,7 +200,7 @@ def create_optimized_frame_generator(camera_index: int, camera_state_getter):
             last_frame_time = time.time()
             frame_count += 1
             yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            if frame_count % 300 == 0:  # Every ~10 seconds at 30fps
+            if frame_count % 300 == 0:
                 settings = stream_optimizer.get_stream_settings()
                 logging.debug("Camera %d: Streamed %d frames, mode: %s", 
                             camera_index, frame_count,
@@ -210,18 +210,17 @@ def create_optimized_frame_generator(camera_index: int, camera_state_getter):
             cap.release()
 
 
-async def create_optimized_detection_loop(app_state, camera_index, camera_state_getter, update_functions):
+async def create_optimized_detection_loop(app_state, camera_index, get_camera_state_sync_func, update_functions, cap):
     """Asynchronous loop for real-time defect detection with optimizations.
 
     Args:
         app_state: Model and transformation context for detection.
         camera_index (int): The index of the camera.
-        camera_state_getter (callable): Function to retrieve CameraState.
+        get_camera_state_sync_func (callable): Function to get camera state synchronously.
         update_functions (dict): A mapping of update function names to coroutines,
             e.g., {'update_camera_state': ..., 'update_camera_detection_history': ...}.
+        cap: The OpenCV video capture object.
     """
-    # pylint: disable=E1101
-    cap = cv2.VideoCapture(camera_index)
     detection_count = 0
     stream_optimizer.log_optimization_info()
     try:
@@ -229,7 +228,7 @@ async def create_optimized_detection_loop(app_state, camera_index, camera_state_
             logging.error("Cannot open camera at index %d for detection", camera_index)
             return
         while True:
-            camera_state_ref = camera_state_getter(camera_index)
+            camera_state_ref = get_camera_state_sync_func(camera_index)
             if not camera_state_ref.live_detection_running:
                 break
             ret, frame = cap.read()
@@ -312,7 +311,7 @@ def generate_frames(camera_index: int):
     except Exception as e:
         logging.error("Error in optimized frame generation for camera %d: %s", camera_index, e)
         # pylint: disable=E1101
-        cap = cv2.VideoCapture(camera_index)
+        cap = open_camera(camera_index)
         try:
             while True:
                 camera_state = get_camera_state_sync(camera_index)
@@ -330,4 +329,5 @@ def generate_frames(camera_index: int):
                 frame_bytes = buffer.tobytes()
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         finally:
-            cap.release()
+            if cap.isOpened():
+                cap.release()

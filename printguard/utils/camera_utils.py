@@ -8,7 +8,7 @@ import cv2
 
 from ..models import CameraState
 from .camera_state_manager import get_camera_state_manager
-from .config import CAMERA_INDEX, CAMERA_INDICES, MAX_CAMERAS
+from .config import CAMERA_INDEX, CAMERA_INDICES
 
 
 async def get_camera_state(camera_index, reset=False):
@@ -96,8 +96,24 @@ def detect_available_cameras(max_cameras=10):
             if cap.isOpened():
                 available_cameras.add(i)
                 cap.release()
-                
     return sorted(list(available_cameras))
+
+def open_camera(camera_index) -> cv2.VideoCapture:
+    """
+    Opens a camera, prioritizing device path on Linux.
+    
+    Args:
+        camera_index (int): The index of the camera to open.
+        
+    Returns:
+        cv2.VideoCapture: The OpenCV VideoCapture object for the camera.
+    """
+    if platform.system() == 'Linux':
+        device_path = f"/dev/video{camera_index}"
+        cap = cv2.VideoCapture(device_path, cv2.CAP_V4L2)
+        if cap.isOpened():
+            return cap
+    return cv2.VideoCapture(camera_index, cv2.CAP_ANY)
 
 async def setup_camera_indices():
     """Initializes camera states for all detected cameras."""

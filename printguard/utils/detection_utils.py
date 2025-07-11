@@ -7,7 +7,7 @@ from .alert_utils import (dismiss_alert, alert_to_response_json,
                           get_alert, append_new_alert)
 from .sse_utils import append_new_outbound_packet
 from .camera_utils import (get_camera_state, get_camera_state_sync,
-                           update_camera_state, update_camera_detection_history)
+                           update_camera_state, update_camera_detection_history, open_camera)
 from .printer_utils import get_printer_config, suspend_print_job
 from .notification_utils import send_defect_notification
 from ..models import Alert, AlertAction, SSEDataType
@@ -101,6 +101,15 @@ async def _live_detection_loop(app_state, camera_index):
         app_state: The application state holding model, transforms, and other context.
         camera_index (int): The index of the camera to process.
     """
+    cap = open_camera(camera_index)
+    if not cap.isOpened():
+        logging.error("Cannot open camera at index %d for detection", camera_index)
+        await update_camera_state(camera_index, {
+            "error": f"Cannot open camera at index {camera_index}",
+            "live_detection_running": False
+        })
+        return
+
     # pylint: disable=C0415
     from .stream_utils import create_optimized_detection_loop
     update_functions = {
@@ -112,7 +121,8 @@ async def _live_detection_loop(app_state, camera_index):
             app_state,
             camera_index,
             get_camera_state_sync,
-            update_functions
+            update_functions,
+            cap
         )
     except Exception as e:
         logging.error("Error in optimized detection loop for camera %d: %s", camera_index, e)
@@ -120,3 +130,5 @@ async def _live_detection_loop(app_state, camera_index):
             "error": f"Detection loop error: {str(e)}", 
             "live_detection_running": False
         })
+    finally:
+        cap.release()
