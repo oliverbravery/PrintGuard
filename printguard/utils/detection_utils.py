@@ -7,7 +7,7 @@ from .alert_utils import (dismiss_alert, alert_to_response_json,
                           get_alert, append_new_alert)
 from .sse_utils import append_new_outbound_packet
 from .camera_utils import (get_camera_state, get_camera_state_sync,
-                           update_camera_state, update_camera_detection_history, open_camera)
+                           update_camera_state, update_camera_detection_history)
 from .printer_utils import get_printer_config, suspend_print_job
 from .notification_utils import send_defect_notification
 from ..models import Alert, AlertAction, SSEDataType
@@ -92,26 +92,15 @@ async def _create_alert_and_notify(camera_state_ref, camera_uuid, frame, timesta
     return alert
 
 async def _live_detection_loop(app_state, camera_uuid):
-    """Continuously run detection on camera frames and generate alerts.
+    """Continuously run detection on camera frames and generate alerts using shared video stream.
 
-    This loop reads frames, runs inference, updates state, and dispatches alerts
-    when defects are detected based on majority vote.
+    This loop reads frames from the shared video stream, runs inference, updates state, 
+    and dispatches alerts when defects are detected based on majority vote.
 
     Args:
         app_state: The application state holding model, transforms, and other context.
         camera_uuid (str): The UUID of the camera to process.
     """
-    cap = open_camera(camera_uuid)
-    if not cap.isOpened():
-        logging.error("Cannot open camera with UUID %s for detection", camera_uuid)
-        camera_state = await get_camera_state(camera_uuid)
-        camera_nickname = camera_state.nickname if camera_state else camera_uuid
-        await update_camera_state(camera_uuid, {
-            "error": f"Cannot open camera {camera_nickname}",
-            "live_detection_running": False
-        })
-        return
-
     # pylint: disable=C0415
     from .stream_utils import create_optimized_detection_loop
     update_functions = {
@@ -123,8 +112,7 @@ async def _live_detection_loop(app_state, camera_uuid):
             app_state,
             camera_uuid,
             get_camera_state_sync,
-            update_functions,
-            cap
+            update_functions
         )
     except Exception as e:
         logging.error("Error in optimized detection loop for camera %s: %s", camera_uuid, e)
@@ -132,5 +120,3 @@ async def _live_detection_loop(app_state, camera_uuid):
             "error": f"Detection loop error: {str(e)}",
             "live_detection_running": False
         })
-    finally:
-        cap.release()

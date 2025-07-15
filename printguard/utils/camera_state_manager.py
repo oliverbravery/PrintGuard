@@ -138,6 +138,33 @@ class CameraStateManager:
         async with self.lock:
             return list(self._states.keys())
 
+    async def cleanup_camera_resources(self, camera_uuid: str):
+        """
+        Clean up resources for a specific camera including shared video streams.
+
+        Args:
+            camera_uuid (str): The UUID of the camera to clean up.
+        """
+        await self.update_camera_state(camera_uuid, {
+            "live_detection_running": False,
+            "live_detection_task": None
+        })
+        try:
+            from .shared_video_stream import get_shared_stream_manager
+            manager = get_shared_stream_manager()
+            manager.release_stream(camera_uuid)
+        except (ImportError, AttributeError) as e:
+            logging.warning("Error cleaning up shared video stream for camera %s: %s", camera_uuid, e)
+
+    async def cleanup_all_resources(self):
+        """Clean up all camera resources including shared video streams."""
+        try:
+            from .shared_video_stream import get_shared_stream_manager
+            manager = get_shared_stream_manager()
+            manager.cleanup_all()
+        except (ImportError, AttributeError) as e:
+            logging.warning("Error cleaning up all shared video streams: %s", e)
+
 _camera_state_manager = None
 
 def get_camera_state_manager() -> CameraStateManager:

@@ -71,6 +71,14 @@ async def lifespan(app_instance: FastAPI):
         raise
     logging.debug("Camera indices set up successfully.")
     yield
+    logging.debug("Cleaning up resources on shutdown...")
+    try:
+        from .utils.camera_state_manager import get_camera_state_manager
+        manager = get_camera_state_manager()
+        await manager.cleanup_all_resources()
+        logging.debug("Cleaned up camera resources successfully.")
+    except Exception as e:
+        logging.error("Error during cleanup: %s", e)
 
 app = FastAPI(
     title="Standalone Web Push Notification API",

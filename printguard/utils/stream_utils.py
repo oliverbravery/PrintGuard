@@ -11,7 +11,8 @@ from .model_utils import _run_inference
 from .sse_utils import sse_update_camera_state
 from .detection_utils import (_passed_majority_vote, _create_alert_and_notify,
                               _send_alert)
-from .camera_utils import get_camera_state_sync, open_camera
+from .camera_utils import get_camera_state_sync
+from .shared_video_stream import get_shared_camera_frame
 from ..models import SavedConfig, SiteStartupMode
 from .config import (get_config, STREAM_MAX_FPS, STREAM_TUNNEL_FPS,
                      STREAM_JPEG_QUALITY, STREAM_TUNNEL_JPEG_QUALITY,
@@ -55,7 +56,8 @@ class StreamOptimizer:
             tunnel_provider = config.get(SavedConfig.TUNNEL_PROVIDER, None)
             optimize_for_tunnel = config.get(SavedConfig.STREAM_OPTIMIZE_FOR_TUNNEL, None)
             if optimize_for_tunnel is None:
-                is_tunnel_mode = startup_mode == SiteStartupMode.TUNNEL and tunnel_provider is not None
+                is_tunnel_mode = startup_mode == (SiteStartupMode.TUNNEL
+                                                  and tunnel_provider is not None)
             else:
                 is_tunnel_mode = optimize_for_tunnel
             if is_tunnel_mode:
@@ -163,7 +165,7 @@ stream_optimizer = StreamOptimizer()
 
 
 def create_optimized_frame_generator(camera_uuid: str, camera_state_getter):
-    """Generator yielding optimized JPEG frames for streaming.
+    """Generator yielding optimized JPEG frames for streaming using shared video stream.
 
     Args:
         camera_uuid (str): The UUID of the camera.
@@ -173,7 +175,6 @@ def create_optimized_frame_generator(camera_uuid: str, camera_state_getter):
         bytes: Multipart JPEG frame data.
     """
     # pylint: disable=E1101
-    cap = open_camera(camera_uuid)
     last_frame_time = 0
     frame_count = 0
     if frame_count == 0:
@@ -187,10 +188,11 @@ def create_optimized_frame_generator(camera_uuid: str, camera_state_getter):
             contrast = camera_state.contrast
             brightness = camera_state.brightness
             focus = camera_state.focus
-            success, frame = cap.read()
-            if not success:
-                logging.warning("Failed to capture frame from camera %s", camera_uuid)
-                break
+            frame = get_shared_camera_frame(camera_uuid)
+            if frame is None:
+                logging.warning("Failed to get frame from shared camera stream %s", camera_uuid)
+                time.sleep(0.1)
+                continue
             frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=int((brightness - 1.0) * 255))
             if focus and focus != 1.0:
                 blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=focus)
@@ -205,13 +207,13 @@ def create_optimized_frame_generator(camera_uuid: str, camera_state_getter):
                 logging.debug("Camera %s: Streamed %d frames, mode: %s",
                             camera_uuid, frame_count,
                             "tunnel" if settings['is_tunnel_mode'] else "local")
-    finally:
-        if cap.isOpened():
-            cap.release()
+    except Exception as e:
+        logging.error("Error in optimized frame generation for camera %s: %s", camera_uuid, e)
 
-
-async def create_optimized_detection_loop(app_state, camera_uuid, get_camera_state_sync_func, update_functions, cap):
-    """Asynchronous loop for real-time defect detection with optimizations.
+async def create_optimized_detection_loop(app_state, camera_uuid, get_camera_state_sync_func,
+                                          update_functions):
+    """
+    Asynchronous loop for real-time defect detection with optimizations using shared video stream.
 
     Args:
         app_state: Model and transformation context for detection.
@@ -219,23 +221,20 @@ async def create_optimized_detection_loop(app_state, camera_uuid, get_camera_sta
         get_camera_state_sync_func (callable): Function to get camera state synchronously.
         update_functions (dict): A mapping of update function names to coroutines,
             e.g., {'update_camera_state': ..., 'update_camera_detection_history': ...}.
-        cap: The OpenCV video capture object.
     """
     detection_count = 0
     stream_optimizer.log_optimization_info()
+    # pylint: disable=E1101
     try:
-        if not cap.isOpened():
-            logging.error("Cannot open camera with UUID %s for detection", camera_uuid)
-            return
         while True:
             camera_state_ref = get_camera_state_sync_func(camera_uuid)
             if not camera_state_ref.live_detection_running:
                 break
-            ret, frame = cap.read()
-            if not ret:
-                logging.warning("Failed to read frame from camera %s", camera_uuid)
+            frame = get_shared_camera_frame(camera_uuid)
+            if frame is None:
+                logging.warning("Failed to get frame from shared camera stream %s", camera_uuid)
                 await update_functions['update_camera_state'](camera_uuid, {
-                    "error": "Failed to read frame",
+                    "error": "Failed to get frame from shared stream",
                     "live_detection_running": False
                 })
                 break
@@ -264,7 +263,9 @@ async def create_optimized_detection_loop(app_state, camera_uuid, get_camera_sta
                 and 0 <= numeric < len(app_state.class_names)
                 ) else str(numeric)
             current_timestamp = time.time()
-            await update_functions['update_camera_detection_history'](camera_uuid, label, current_timestamp)
+            await update_functions['update_camera_detection_history'](camera_uuid,
+                                                                      label,
+                                                                      current_timestamp)
             await update_functions['update_camera_state'](camera_uuid, {
                 "last_result": label,
                 "last_time": current_timestamp
@@ -293,11 +294,10 @@ async def create_optimized_detection_loop(app_state, camera_uuid, get_camera_sta
                             camera_uuid, detection_count, detection_interval,
                             "tunnel" if settings['is_tunnel_mode'] else "local")
     finally:
-        if cap.isOpened():
-            cap.release()
+        pass
 
 def generate_frames(camera_uuid: str):
-    """Fallback frame generator if optimized generator fails.
+    """Fallback frame generator if optimized generator fails, using shared video stream.
 
     Args:
         camera_uuid (str): The UUID of the camera.
@@ -308,26 +308,30 @@ def generate_frames(camera_uuid: str):
     try:
         for frame_data in create_optimized_frame_generator(camera_uuid, get_camera_state_sync):
             yield frame_data
+    # pylint: disable=E1101
     except Exception as e:
         logging.error("Error in optimized frame generation for camera %s: %s", camera_uuid, e)
-        # pylint: disable=E1101
-        cap = open_camera(camera_uuid)
         try:
             while True:
                 camera_state = get_camera_state_sync(camera_uuid)
                 contrast = camera_state.contrast
                 brightness = camera_state.brightness
                 focus = camera_state.focus
-                success, frame = cap.read()
-                if not success:
-                    break
-                frame = cv2.convertScaleAbs(frame, alpha=contrast, beta=int((brightness - 1.0) * 255))
+                frame = get_shared_camera_frame(camera_uuid)
+                if frame is None:
+                    logging.warning("Failed to get frame from shared camera stream %s", camera_uuid)
+                    time.sleep(0.1)
+                    continue
+                frame = cv2.convertScaleAbs(frame,
+                                            alpha=contrast,
+                                            beta=int((brightness - 1.0) * 255))
                 if focus and focus != 1.0:
                     blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=focus)
                     frame = cv2.addWeighted(frame, 1.0 + focus, blurred, -focus, 0)
                 _, buffer = cv2.imencode('.jpg', frame)
                 frame_bytes = buffer.tobytes()
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        finally:
-            if cap.isOpened():
-                cap.release()
+        except Exception as fallback_e:
+            logging.error("Error in fallback frame generation for camera %s: %s",
+                          camera_uuid,
+                          fallback_e)
