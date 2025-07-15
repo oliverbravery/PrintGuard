@@ -10,25 +10,25 @@ authors = [
     { name = "Oliver Bravery", email = "dev@oliverbravery.uk" }
 ]
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 
 dependencies = [
-    "fastapi",
-    "uvicorn[standard]",
-    "pywebpush",
-    "apscheduler",
-    "python-dotenv",
-    "torch",
-    "torchvision",
-    "pillow",
-    "opencv-python-headless",
-    "python-multipart",
-    "keyring",
-    "trustme",
-    "platformdirs",
-    "sse-starlette",
-    "ngrok",
-    "cryptography"
+    "fastapi==0.116.1",
+    "uvicorn[standard]==0.35.0",
+    "pywebpush==2.0.3",
+    "apscheduler==3.11.0",
+    "python-dotenv==1.1.1",
+    "torch==2.7.1",
+    "torchvision==0.22.1",
+    "pillow==11.3.0",
+    "opencv-python-headless==4.12.0.88",
+    "python-multipart==0.0.20",
+    "keyring==25.6.0",
+    "trustme==1.2.1",
+    "platformdirs==4.3.8",
+    "sse-starlette==2.4.1",
+    "ngrok==1.4.0",
+    "cryptography==45.0.5"
 ]
 
 [project.scripts]

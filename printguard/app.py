@@ -81,8 +81,8 @@ async def lifespan(app_instance: FastAPI):
         logging.error("Error during cleanup: %s", e)
 
 app = FastAPI(
-    title="Standalone Web Push Notification API",
-    description="API to register subscriptions and send web push notifications, including scheduled recurring notifications.",
+    title="PrintGuard",
+    description="Real-time Defect Detection on Edge-devices",
     version="1.0.0",
     lifespan=lifespan,
 )
