@@ -30,11 +30,11 @@
         </div>
         <div class="grid-item" id="camera-list-container">
             <ul id="cameraList" name="camera">
-                {% for camera_id in camera_states %}
-                    <li class="camera-item">
+                {% for camera_id, camera_state in camera_states.items() %}
+                    <li class="camera-item" data-camera-id="{{ camera_id }}">
                         <div class="camera-text-content">
                             <div class="camera-header">
-                                <span>Camera ID: {{ camera_id }}</span>
+                                <span>{{ camera_state.nickname }}</span>
                                 <span class="camera-status"></span>
                             </div>
                             <span class="camera-prediction">-</span>
@@ -129,6 +129,9 @@
                     </div>
                     <div class="settings-item">
                         <button class="start-stop-btn" id="configureSetupBtn">Configure Setup</button>
+                    </div>
+                    <div class="settings-item">
+                        <button class="start-stop-btn" id="addCameraBtn">Add Camera</button>
                     </div>
                 </form>
             </div>
@@ -249,7 +252,35 @@
                 <button class="setup-modal-close" id="addCameraModalClose">×</button>
             </div>
             <div class="setup-modal-content">
-                <p>The form to add a camera will be implemented here.</p>
+                <div id="cameraTypeSelection" class="button-group" style="display: flex; justify-content: center; gap: 10px;">
+                    <button id="addSerialCameraButton" class="start-stop-btn">Setup Serial (USB) Camera</button>
+                    <button id="addRtspCameraButton" class="start-stop-btn">Setup RTSP Camera</button>
+                </div>
+                <form id="addCameraForm" style="display:none;">
+                    <div class="form-group">
+                        <label for="cameraNickname">Camera Nickname</label>
+                        <input type="text" id="cameraNickname" name="nickname" required />
+                    </div>
+                    <div id="serialCameraSetup" style="display:none;">
+                        <div class="form-group">
+                            <label for="serialDevice">Serial Device</label>
+                            <div id="serialLoading" style="display: none;">
+                                <div class="loader"></div>
+                                <span>Loading devices...</span>
+                            </div>
+                            <select id="serialDevice" name="source" class="settings-dropdown" required style="display: none;">
+                            </select>
+                            <p id="noSerialDeviceMessage" style="display: none;">No serial devices available.</p>
+                        </div>
+                    </div>
+                    <div id="rtspCameraSetup" style="display:none;">
+                        <div class="form-group">
+                            <label for="rtspUrl">RTSP Stream URL</label>
+                            <input type="url" id="rtspUrl" name="source" required />
+                        </div>
+                    </div>
+                    <button type="submit" class="start-stop-btn primary">Add Camera</button>
+                </form>
             </div>
         </div>
     </div>

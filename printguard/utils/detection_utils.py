@@ -79,8 +79,8 @@ async def _create_alert_and_notify(camera_state_ref, camera_uuid, frame, timesta
         camera_uuid=camera_uuid,
         timestamp=timestamp_arg,
         snapshot=img_buf.tobytes(),
-        title=f"Defect - Camera {camera_uuid}",
-        message=f"Defect detected on camera {camera_uuid}",
+        title=f"Defect - Camera {camera_state_ref.nickname}",
+        message=f"Defect detected on camera {camera_state_ref.nickname}",
         countdown_time=camera_state_ref.countdown_time,
         countdown_action=camera_state_ref.countdown_action,
         has_printer=has_printer,
@@ -88,7 +88,7 @@ async def _create_alert_and_notify(camera_state_ref, camera_uuid, frame, timesta
     append_new_alert(alert)
     asyncio.create_task(_terminate_alert_after_cooldown(alert))
     await update_camera_state(camera_uuid, {"current_alert_id": alert_id})
-    send_defect_notification(alert_id)
+    await send_defect_notification(alert_id)
     return alert
 
 async def _live_detection_loop(app_state, camera_uuid):
@@ -104,8 +104,10 @@ async def _live_detection_loop(app_state, camera_uuid):
     cap = open_camera(camera_uuid)
     if not cap.isOpened():
         logging.error("Cannot open camera with UUID %s for detection", camera_uuid)
+        camera_state = await get_camera_state(camera_uuid)
+        camera_nickname = camera_state.nickname if camera_state else camera_uuid
         await update_camera_state(camera_uuid, {
-            "error": f"Cannot open camera with UUID {camera_uuid}",
+            "error": f"Cannot open camera {camera_nickname}",
             "live_detection_running": False
         })
         return

@@ -35,6 +35,7 @@ const settingsCountdownAction = document.getElementById('countdown_action');
 
 const addCameraModalOverlay = document.getElementById('addCameraModalOverlay');
 const addCameraModalClose = document.getElementById('addCameraModalClose');
+const addCameraBtn = document.getElementById('addCameraBtn');
 
 const stopDetectionBtnLabel = 'Stop Detection';
 const startDetectionBtnLabel = 'Start Detection';
@@ -46,9 +47,9 @@ function changeLiveCameraFeed(cameraUUID) {
     camVideoPreview.src = `/camera/feed/${cameraUUID}`;
 }
 
-function updateCameraTitle(cameraUUID) {
-    const cameraIdText = cameraUUID ? `Camera ${cameraUUID}` : 'No camera selected';
-    cameraTitle.textContent = cameraIdText;
+function updateCameraTitle(nickname) {
+    const titleText = nickname ? nickname : 'No camera selected';
+    cameraTitle.textContent = titleText;
 }
 
 function updateRecentDetectionResult(result, doc_element) {
@@ -178,11 +179,7 @@ function updateSelectedCameraData(d) {
 
 function updateCameraSelectionListData(d) {
     cameraItems.forEach(item => {
-        const cameraTextElement = item.querySelector('.camera-text-content span:first-child');
-        if (!cameraTextElement) return;
-
-        const cameraIdText = cameraTextElement.textContent;
-        const cameraId = cameraIdText.split(': ')[1];
+        const cameraId = item.dataset.cameraId;
 
         if (cameraId == d.camera_uuid) {
             item.querySelector('.camera-prediction').textContent = d.last_result;
@@ -325,13 +322,13 @@ cameraItems.forEach(item => {
     item.addEventListener('click', function() {
         cameraItems.forEach(i => i.classList.remove('selected'));
         this.classList.add('selected');
-        const cameraIdText = this.querySelector('.camera-text-content span:first-child').textContent;
-        const cameraId = cameraIdText.split(': ')[1];
-        if (cameraId && cameraId !== "No cameras available" && !cameraIdText.includes("No cameras available")) {
+        const cameraId = this.dataset.cameraId;
+        if (cameraId) {
+            const nickname = this.querySelector('.camera-header span:first-child').textContent;
             changeLiveCameraFeed(cameraId);
             cameraUUID = cameraId;
             settingsCameraUUID.value = cameraId;
-            updateCameraTitle(cameraId);
+            updateCameraTitle(nickname);
             stopPrinterStatusPolling();
             fetchAndUpdateMetricsForCamera(cameraId);
         } else {
@@ -357,8 +354,8 @@ document.addEventListener('printerStateUpdated', evt => {
 document.addEventListener('DOMContentLoaded', function() {
     const firstCameraItem = cameraItems[0];
     if (firstCameraItem) {
-        const cameraIdText = firstCameraItem.querySelector('.camera-text-content span:first-child').textContent;
-        if (!cameraIdText.includes("No cameras available")) {
+        const cameraId = firstCameraItem.dataset.cameraId;
+        if (cameraId) {
             firstCameraItem.click();
         } else {
             if (addCameraModalOverlay) {
@@ -366,6 +363,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     }
+});
+
+addCameraBtn?.addEventListener('click', function(e) {
+    e.preventDefault();
+    addCameraModalOverlay.style.display = 'flex';
 });
 
 let isSettingsVisible = false;
@@ -707,20 +709,6 @@ setupModalClose?.addEventListener('click', function() {
     document.body.style.overflow = '';
 });
 
-setupModalOverlay?.addEventListener('click', function(e) {
-    if (e.target === setupModalOverlay) {
-        setupModalOverlay.style.display = 'none';
-        document.body.style.overflow = '';
-    }
-});
-
-document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && setupModalOverlay.style.display === 'flex') {
-        setupModalOverlay.style.display = 'none';
-        document.body.style.overflow = '';
-    }
-});
-
 function unlinkPrinter() {
     const camUUID = settingsCameraUUID.value;
     if (!camUUID) return;
@@ -935,5 +923,122 @@ addCameraModalOverlay?.addEventListener('click', function(e) {
     if (e.target === addCameraModalOverlay) {
         addCameraModalOverlay.style.display = 'none';
     }
+});
+
+const addSerialCameraButton = document.getElementById('addSerialCameraButton');
+const addRtspCameraButton = document.getElementById('addRtspCameraButton');
+const cameraTypeSelection = document.getElementById('cameraTypeSelection');
+const addCameraForm = document.getElementById('addCameraForm');
+const serialCameraSetup = document.getElementById('serialCameraSetup');
+const rtspCameraSetup = document.getElementById('rtspCameraSetup');
+const serialDeviceSelect = document.getElementById('serialDevice');
+const rtspUrlInput = document.getElementById('rtspUrl');
+const serialLoading = document.getElementById('serialLoading');
+const noSerialDeviceMessage = document.getElementById('noSerialDeviceMessage');
+
+addSerialCameraButton?.addEventListener('click', async () => {
+    cameraTypeSelection.style.display = 'none';
+    addCameraForm.style.display = 'block';
+    serialCameraSetup.style.display = 'block';
+    rtspCameraSetup.style.display = 'none';
+    rtspUrlInput.required = false;
+    serialDeviceSelect.required = true;
+    serialLoading.style.display = 'block';
+    serialDeviceSelect.style.display = 'none';
+    noSerialDeviceMessage.style.display = 'none';
+
+    try {
+        const response = await fetch('/camera/serial_devices');
+        const devices = await response.json();
+        serialDeviceSelect.innerHTML = '';
+        if (devices.length > 0) {
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = 'Select a serial device';
+            defaultOption.disabled = true;
+            defaultOption.selected = true;
+            serialDeviceSelect.appendChild(defaultOption);
+            
+            devices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device;
+                option.textContent = device;
+                serialDeviceSelect.appendChild(option);
+            });
+            serialDeviceSelect.style.display = 'block';
+            serialDeviceSelect.selectedIndex = 0;
+            const changeEvent = new Event('change', { bubbles: true });
+            serialDeviceSelect.dispatchEvent(changeEvent);
+        } else {
+            noSerialDeviceMessage.style.display = 'block';
+            serialDeviceSelect.required = false;
+        }
+    } catch (error) {
+        console.error('Error fetching serial devices:', error);
+        noSerialDeviceMessage.textContent = 'Error fetching devices.';
+        noSerialDeviceMessage.style.display = 'block';
+    } finally {
+        serialLoading.style.display = 'none';
+    }
+});
+
+addRtspCameraButton?.addEventListener('click', () => {
+    cameraTypeSelection.style.display = 'none';
+    addCameraForm.style.display = 'block';
+    serialCameraSetup.style.display = 'none';
+    rtspCameraSetup.style.display = 'block';
+    serialDeviceSelect.required = false;
+    rtspUrlInput.required = true;
+});
+
+addCameraForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(addCameraForm);
+    const data = {};
+    formData.forEach((value, key) => {
+        if (value) {
+            data[key] = value;
+        }
+    });
+
+    try {
+        const response = await fetch('/camera/add', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data),
+        });
+
+        if (response.ok) {
+            addCameraModalOverlay.style.display = 'none';
+            addCameraForm.reset();
+            addCameraForm.style.display = 'none';
+            cameraTypeSelection.style.display = 'flex';
+            location.reload();
+        } else {
+            const errorData = await response.json();
+            alert(`Error: ${errorData.detail}`);
+        }
+    } catch (error) {
+        console.error('Error adding camera:', error);
+        alert('An error occurred while adding the camera.');
+    }
+});
+
+addCameraModalClose?.addEventListener('click', function() {
+    addCameraModalOverlay.style.display = 'none';
+    addCameraForm.reset();
+    addCameraForm.style.display = 'none';
+    cameraTypeSelection.style.display = 'flex';
+    serialCameraSetup.style.display = 'none';
+    rtspCameraSetup.style.display = 'none';
+    serialDeviceSelect.required = false;
+    rtspUrlInput.required = false;
+    // Reset the serial device dropdown
+    serialDeviceSelect.innerHTML = '';
+    serialDeviceSelect.style.display = 'none';
+    noSerialDeviceMessage.style.display = 'none';
+    serialLoading.style.display = 'none';
 });
 

@@ -10,7 +10,7 @@ class CameraStateManager:
     """Manages the state of all cameras in the application."""
     def __init__(self):
         """Initializes the CameraStateManager, loading states from the configuration."""
-        self._states: Dict[int, CameraState] = {}
+        self._states: Dict[str, CameraState] = {}
         self._lock: Optional[asyncio.Lock] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._load_states_from_config()
@@ -40,8 +40,8 @@ class CameraStateManager:
                 try:
                     self._states[camera_uuid] = CameraState()
                     logging.info("Created fresh camera state for UUID %s", camera_uuid)
-                except ValueError:
-                    logging.error("Invalid camera UUID in config: %s", camera_uuid)
+                except Exception as ex:
+                    logging.error("Failed to create fresh camera state for UUID %s: %s", camera_uuid, ex)
 
     def _save_states_to_config(self):
         """Saves the current camera states to the application's configuration file."""
@@ -56,11 +56,11 @@ class CameraStateManager:
         except Exception as e:
             logging.error("Failed to save camera states to config: %s", e)
 
-    async def get_camera_state(self, camera_uuid: int, reset: bool = False) -> CameraState:
+    async def get_camera_state(self, camera_uuid: str, reset: bool = False) -> CameraState:
         """Get camera state for the given UUID, creating if it doesn't exist
 
         Args:
-            camera_uuid (int): The UUID of the camera.
+            camera_uuid (str): The UUID of the camera.
             reset (bool): If True, resets the camera state to its default.
 
         Returns:
@@ -72,12 +72,12 @@ class CameraStateManager:
                 self._save_states_to_config()
             return self._states[camera_uuid]
 
-    async def update_camera_state(self, camera_uuid: int,
+    async def update_camera_state(self, camera_uuid: str,
                                   new_states: Dict) -> Optional[CameraState]:
         """Updates the state of a specific camera.
 
         Args:
-            camera_uuid (int): The UUID of the camera to update.
+            camera_uuid (str): The UUID of the camera to update.
             new_states (Dict): A dictionary containing the state updates.
                 Example:
                 {
@@ -89,26 +89,26 @@ class CameraStateManager:
             Optional[CameraState]: The updated camera state, or None if not found.
         """
         async with self.lock:
-            if camera_uuid not in self._states:
-                self._states[camera_uuid] = CameraState()
             camera_state_ref = self._states.get(camera_uuid)
-            if camera_state_ref:
+            if not camera_state_ref:
+                camera_state_ref = CameraState(**new_states)
+                self._states[camera_uuid] = camera_state_ref
+            else:
                 for key, value in new_states.items():
                     if hasattr(camera_state_ref, key):
                         setattr(camera_state_ref, key, value)
                     else:
-                        logging.warning("Key '%s' not found in camera state for UUID %d.",
+                        logging.warning("Key '%s' not found in camera state for UUID %s.",
                                         key, camera_uuid)
-                self._save_states_to_config()
-                return camera_state_ref
-        return None
+            self._save_states_to_config()
+            return camera_state_ref
 
-    async def update_camera_detection_history(self, camera_uuid: int,
+    async def update_camera_detection_history(self, camera_uuid: str,
                                               pred: str, time_val: float) -> Optional[CameraState]:
         """Updates the detection history for a camera.
 
         Args:
-            camera_uuid (int): The UUID of the camera.
+            camera_uuid (str): The UUID of the camera.
             pred (str): The prediction (detection) label.
             time_val (float): The timestamp of the detection.
 

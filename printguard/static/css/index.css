@@ -240,17 +240,46 @@ body, html {
     width: 100%;
     height: 25px;
     border: 2px dotted var(--text-primary);
-    background-color: var(--color-white);
+    background-color: var(--color-white) !important;
     color: var(--text-primary);
     font-family: var(--font-family);
     cursor: pointer;
     border-radius: 0;
     margin: 10px 0;
     padding: 0 var(--spacing-sm);
+    padding-right: 30px;
     box-sizing: border-box;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e") !important;
     background-repeat: no-repeat;
     background-position: right .7em top 50%;
     background-size: .65em auto;
+}
+
+.form-group .settings-dropdown {
+    background: var(--color-white) url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e") no-repeat right .7em top 50% !important;
+    background-size: .65em auto !important;
+    padding-right: 30px !important;
+    padding-left: var(--spacing-sm) !important;
+    height: 25px !important;
+    line-height: 21px !important;
+    border: 2px dotted var(--text-primary) !important;
+    color: var(--text-primary) !important;
+    font-family: var(--font-family) !important;
+    font-size: var(--font-size-base) !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    margin: 10px 0 !important;
+}
+
+.form-group .settings-dropdown option {
+    background: var(--color-white);
+    color: var(--text-primary);
+    padding: var(--spacing-xs);
+}
+
+.form-group .settings-dropdown option:disabled {
+    color: var(--text-secondary);
+    font-style: italic;
 }
 
 .camera-prediction-time {

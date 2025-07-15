@@ -131,7 +131,7 @@ async def start_live_detection(request: Request, camera_uuid: str = Body(..., em
     """
     camera_state = await get_camera_state(camera_uuid)
     if camera_state.live_detection_running:
-        return {"message": f"Live detection already running for camera {camera_uuid}"}
+        return {"message": f"Live detection already running for camera {camera_state.nickname}"}
     else:
         await update_camera_state(camera_uuid, {
             "current_alert_id": None,
@@ -145,7 +145,7 @@ async def start_live_detection(request: Request, camera_uuid: str = Body(..., em
                                        "live_detection_task": asyncio.create_task(
                                            _live_detection_loop(request.app.state, camera_uuid)
                                            )})
-    return {"message": f"Live detection started for camera {camera_uuid}"}
+    return {"message": f"Live detection started for camera {camera_state.nickname}"}
 
 @router.post("/detect/live/stop")
 async def stop_live_detection(request: Request, camera_uuid: str = Body(..., embed=True)):
@@ -160,7 +160,7 @@ async def stop_live_detection(request: Request, camera_uuid: str = Body(..., emb
     """
     camera_state = await get_camera_state(camera_uuid)
     if not camera_state.live_detection_running:
-        return {"message": f"Live detection not running for camera {camera_uuid}"}
+        return {"message": f"Live detection not running for camera {camera_state.nickname}"}
     live_detection_task = camera_state.live_detection_task
     if live_detection_task:
         try:
@@ -177,4 +177,4 @@ async def stop_live_detection(request: Request, camera_uuid: str = Body(..., emb
     await update_camera_state(camera_uuid, {"start_time": None,
                                     "live_detection_running": False,
                                     "live_detection_task": None})
-    return {"message": f"Live detection stopped for camera {camera_uuid}"}
+    return {"message": f"Live detection stopped for camera {camera_state.nickname}"}

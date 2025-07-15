@@ -1,6 +1,10 @@
-from fastapi import APIRouter, Request, Body
+from fastapi import APIRouter, Request, Body, HTTPException
 from fastapi.responses import StreamingResponse
-from ..utils.camera_utils import get_camera_state
+from ..utils.camera_utils import (
+    get_camera_state,
+    find_available_serial_cameras,
+    add_camera
+)
 from ..utils.stream_utils import generate_frames
 
 router = APIRouter()
@@ -55,3 +59,20 @@ async def camera_feed(camera_uuid: str):
     """
     return StreamingResponse(generate_frames(camera_uuid),
                              media_type='multipart/x-mixed-replace; boundary=frame')
+
+@router.post("/camera/add")
+async def add_camera_ep(request: Request):
+    """Add a new camera."""
+    data = await request.json()
+    nickname = data.get('nickname')
+    source = data.get('source')
+    if not nickname or not source:
+        raise HTTPException(status_code=400, detail="Missing camera nickname or source.")
+    camera = await add_camera(source=source, nickname=nickname)
+    return {"camera_uuid": camera['camera_uuid'], "nickname": camera['nickname'], "source": camera['source']}
+
+@router.get("/camera/serial_devices")
+async def get_serial_devices_ep():
+    """Get a list of available serial devices."""
+    devices = find_available_serial_cameras()
+    return devices

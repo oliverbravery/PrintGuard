@@ -6,6 +6,7 @@ from ..models import PrinterConfigRequest, AlertAction
 from ..utils.printer_services.octoprint import OctoPrintClient
 from ..utils.printer_utils import (get_printer_id, remove_printer,
                                    set_printer, suspend_print_job)
+from ..utils.camera_utils import get_camera_state
 
 router = APIRouter()
 
@@ -51,7 +52,9 @@ async def remove_printer_ep(camera_uuid: str):
         printer_id = get_printer_id(camera_uuid)
         if printer_id:
             await remove_printer(camera_uuid)
-            return {"success": True, "message": f"Printer removed from camera {camera_uuid}"}
+            camera_state = await get_camera_state(camera_uuid)
+            camera_nickname = camera_state.nickname if camera_state else camera_uuid
+            return {"success": True, "message": f"Printer removed from camera {camera_nickname}"}
         else:
             return {"success": False, "error": "No printer configured for this camera"}
     except Exception as e:
@@ -69,7 +72,9 @@ async def cancel_print_job_ep(camera_uuid: str):
         dict: Success status and confirmation message.
     """
     suspend_print_job(camera_uuid, AlertAction.CANCEL_PRINT)
-    return {"success": True, "message": f"Print job cancelled for camera {camera_uuid}"}
+    camera_state = await get_camera_state(camera_uuid)
+    camera_nickname = camera_state.nickname if camera_state else camera_uuid
+    return {"success": True, "message": f"Print job cancelled for camera {camera_nickname}"}
 
 @router.post("/printer/pause/{camera_uuid}", include_in_schema=False)
 async def pause_print_job_ep(camera_uuid: str):
@@ -82,4 +87,6 @@ async def pause_print_job_ep(camera_uuid: str):
         dict: Success status and confirmation message.
     """
     suspend_print_job(camera_uuid, AlertAction.PAUSE_PRINT)
-    return {"success": True, "message": f"Print job paused for camera {camera_uuid}"}
+    camera_state = await get_camera_state(camera_uuid)
+    camera_nickname = camera_state.nickname if camera_state else camera_uuid
+    return {"success": True, "message": f"Print job paused for camera {camera_nickname}"}

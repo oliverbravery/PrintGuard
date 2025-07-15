@@ -1,12 +1,78 @@
 import asyncio
 import concurrent.futures
 import logging
+import uuid
+import sys
+import glob
 
 import cv2
 
 from ..models import CameraState
 from .camera_state_manager import get_camera_state_manager
 
+
+async def add_camera(source, nickname):
+    """
+    Adds a new camera, assigns a UUID, and stores it.
+
+    Args:
+        source (str): The camera source (e.g., device path or RTSP URL).
+        nickname (str): A user-friendly name for the camera.
+
+    Returns:
+        dict: A dictionary containing the new camera's UUID, nickname, and source.
+    """
+    manager = get_camera_state_manager()
+    camera_uuid = str(uuid.uuid4())
+    new_camera_state = CameraState(
+        nickname=nickname,
+        source=source,
+    )
+    await manager.update_camera_state(camera_uuid, new_camera_state.model_dump())
+    return {"camera_uuid": camera_uuid, "nickname": nickname, "source": source}
+
+def find_available_serial_cameras() -> list[str]:
+    """
+    Finds all available camera devices and returns their paths or indices.
+
+    This function is designed to be cross-platform and works on Linux, macOS,
+    Windows, and within Docker containers where devices are correctly mapped.
+
+    On Linux, it first attempts to find device paths like '/dev/video*'.
+    If that fails or on other platforms (macOS, Windows), it probes for
+    camera indices by trying to open them sequentially.
+
+    Returns:
+        list[str]: A list of strings, where each string is either a device
+                   path (on Linux) or a camera index. An empty list is
+                   returned if no cameras are found.
+    """
+    logging.debug("INFO: Running on platform: %s", sys.platform)
+    if sys.platform.startswith('linux'):
+        logging.debug("INFO: Detected Linux platform. Searching for /dev/video* devices.")
+        device_paths = glob.glob('/dev/video*')
+        if device_paths:
+            logging.debug("INFO: Found device paths: %s", device_paths)
+            return sorted(device_paths)
+        else:
+            logging.warning("WARN: No /dev/video* devices found. Falling back to index probing.")
+    api_preference = cv2.CAP_ANY
+    if sys.platform == "win32":
+        api_preference = cv2.CAP_DSHOW
+    available_indices = []
+    index = 0
+    while len(available_indices) < 10:
+        cap = cv2.VideoCapture(index, api_preference)
+        if cap.isOpened():
+            logging.debug("INFO: Camera found at index: %s", index)
+            available_indices.append(str(index))
+            cap.release()
+        else:
+            logging.debug("INFO: No camera found at index: %s", index)
+            cap.release()
+            break
+        index += 1
+    return available_indices
 
 def open_camera(camera_uuid) -> cv2.VideoCapture:
     """
@@ -18,11 +84,14 @@ def open_camera(camera_uuid) -> cv2.VideoCapture:
     Returns:
         cv2.VideoCapture: The VideoCapture object for the camera.
     """
-    # get the source from the saved camera state
     camera_state = get_camera_state_sync(camera_uuid)
     if not camera_state or not camera_state.source:
         raise ValueError(f"Camera with UUID {camera_uuid} does not have a valid source.")
-    cap = cv2.VideoCapture(camera_state.source, cv2.CAP_ANY)
+    source = camera_state.source
+    if isinstance(source, str) and source.isdigit():
+        source = int(source)
+
+    cap = cv2.VideoCapture(source, cv2.CAP_ANY)
     if not cap.isOpened():
         raise RuntimeError(f"Failed to open camera with UUID {camera_uuid}")
     return cap
