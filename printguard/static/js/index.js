@@ -211,6 +211,47 @@ function updateCameraSelectionListData(d) {
     });
 }
 
+function removeCamera(cameraUUID) {
+    if (!cameraUUID) {
+        console.warn('Cannot remove camera: invalid camera UUID provided.');
+        return;
+    }
+    if (!confirm('Are you sure you want to remove this camera?')) {
+        return;
+    }
+    fetch('/camera/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera_uuid: cameraUUID })
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(errData => {
+                throw new Error(`Failed to remove camera ${cameraUUID}: ${errData.detail || response.statusText}`);
+            });
+        }
+        return response.json();
+    })
+    .then(() => {
+        const cameraItem = document.querySelector(`.camera-item[data-camera-id="${cameraUUID}"]`);
+        if (cameraItem) {
+            cameraItem.remove();
+        }
+        if (window.cameraUUID === cameraUUID) {
+            const firstCamera = document.querySelector('.camera-item');
+            if (firstCamera) {
+                firstCamera.click();
+            } else {
+                window.location.reload();
+            }
+        }
+    })
+    .catch(error => {
+        console.error(`Error removing camera ${cameraUUID}:`, error.message);
+        alert(`Failed to remove camera: ${error.message}`);
+    });
+}
+
 function updatePolledDetectionData(d) {
     if ('camera_uuid' in d && d.camera_uuid == cameraUUID) {
         updateSelectedCameraData(d);
@@ -347,6 +388,13 @@ cameraItems.forEach(item => {
             settingsCameraUUID.value = '';
             updateCameraTitle(null);
         }
+    });
+
+    const removeButton = item.querySelector('.remove-camera-btn');
+    removeButton.addEventListener('click', function(event) {
+        event.stopPropagation();
+        const cameraId = item.dataset.cameraId;
+        removeCamera(cameraId);
     });
 });
 

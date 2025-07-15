@@ -36,6 +36,7 @@
             <ul id="cameraList" name="camera">
                 {% for camera_id, camera_state in camera_states.items() %}
                     <li class="camera-item" data-camera-id="{{ camera_id }}">
+                        <button class="remove-camera-btn" title="Remove camera">×</button>
                         <div class="camera-text-content">
                             <div class="camera-header">
                                 <span>{{ camera_state.nickname }}</span>

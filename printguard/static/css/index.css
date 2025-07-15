@@ -87,6 +87,7 @@ body, html {
     box-sizing: border-box;
     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
     cursor: pointer;
+    position: relative;
 }
 
 .camera-item:hover {
@@ -103,11 +104,39 @@ body, html {
     background-color: rgba(59, 130, 246, 0.1);
 }
 
+.camera-item .remove-camera-btn {
+    background-color: #ff4d4d;
+    color: white;
+    border: none;
+    width: 5%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-weight: bold;
+    position: absolute;
+    top: 0;
+    left: 0;
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+    border-radius: 0;
+}
+
+.camera-item:hover .remove-camera-btn {
+    opacity: 1;
+}
+
 .camera-text-content {
     display: flex;
     flex-direction: column;
     justify-content: center;
     margin-right: var(--spacing-sm);
+    transition: margin-left 0.2s ease-in-out;
+}
+
+.camera-item:hover .camera-text-content {
+    margin-left: 5%;
 }
 
 .camera-text-content span {

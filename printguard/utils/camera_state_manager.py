@@ -165,10 +165,11 @@ class CameraStateManager:
         Args:
             camera_uuid (str): The UUID of the camera to clean up.
         """
-        await self.update_camera_state(camera_uuid, {
-            "live_detection_running": False,
-            "live_detection_task": None
-        })
+        camera_state_ref = self._states.get(camera_uuid)
+        if camera_state_ref:
+            camera_state_ref.live_detection_running = False
+            camera_state_ref.live_detection_task = None
+        
         try:
             from .shared_video_stream import get_shared_stream_manager
             manager = get_shared_stream_manager()
