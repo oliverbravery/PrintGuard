@@ -3,7 +3,8 @@ from fastapi.responses import StreamingResponse
 from ..utils.camera_utils import (
     get_camera_state,
     find_available_serial_cameras,
-    add_camera
+    add_camera,
+    remove_camera as remove_camera_util
 )
 from ..utils.stream_utils import generate_frames
 
@@ -70,6 +71,18 @@ async def add_camera_ep(request: Request):
         raise HTTPException(status_code=400, detail="Missing camera nickname or source.")
     camera = await add_camera(source=source, nickname=nickname)
     return {"camera_uuid": camera['camera_uuid'], "nickname": camera['nickname'], "source": camera['source']}
+
+@router.post("/camera/remove")
+async def remove_camera_ep(request: Request):
+    """Remove a camera."""
+    data = await request.json()
+    camera_uuid = data.get('camera_uuid')
+    if not camera_uuid:
+        raise HTTPException(status_code=400, detail="Missing camera_uuid.")
+    success = await remove_camera_util(camera_uuid)
+    if not success:
+        raise HTTPException(status_code=404, detail="Camera not found.")
+    return {"message": "Camera removed successfully."}
 
 @router.get("/camera/serial_devices")
 async def get_serial_devices_ep():

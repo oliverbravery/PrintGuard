@@ -31,6 +31,19 @@ async def add_camera(source, nickname):
     await manager.update_camera_state(camera_uuid, new_camera_state.model_dump())
     return {"camera_uuid": camera_uuid, "nickname": nickname, "source": source}
 
+async def remove_camera(camera_uuid: str) -> bool:
+    """
+    Removes a camera completely.
+
+    Args:
+        camera_uuid (str): The UUID of the camera to remove.
+
+    Returns:
+        bool: True if the camera was removed successfully, False otherwise.
+    """
+    manager = get_camera_state_manager()
+    return await manager.remove_camera(camera_uuid)
+
 def find_available_serial_cameras() -> list[str]:
     """
     Finds all available camera devices and returns their paths or indices.

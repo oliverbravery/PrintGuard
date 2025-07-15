@@ -138,6 +138,26 @@ class CameraStateManager:
         async with self.lock:
             return list(self._states.keys())
 
+    async def remove_camera(self, camera_uuid: str) -> bool:
+        """
+        Removes a camera and its state.
+
+        Args:
+            camera_uuid (str): The UUID of the camera to remove.
+
+        Returns:
+            bool: True if the camera was removed, False otherwise.
+        """
+        async with self.lock:
+            if camera_uuid in self._states:
+                await self.cleanup_camera_resources(camera_uuid)
+                del self._states[camera_uuid]
+                self._save_states_to_config()
+                logging.info("Successfully removed camera %s.", camera_uuid)
+                return True
+            logging.warning("Attempted to remove non-existent camera %s.", camera_uuid)
+            return False
+
     async def cleanup_camera_resources(self, camera_uuid: str):
         """
         Clean up resources for a specific camera including shared video streams.
