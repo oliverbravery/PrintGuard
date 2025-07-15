@@ -212,6 +212,7 @@ class SavedKey(str, Enum):
     TUNNEL_TOKEN = "tunnel_token"
 
 class SavedConfig(str, Enum):
+    VERSION = "version"
     VAPID_SUBJECT = "vapid_subject"
     VAPID_PUBLIC_KEY = "vapid_public_key"
     STARTUP_MODE = "startup_mode"

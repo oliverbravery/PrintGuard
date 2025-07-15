@@ -16,6 +16,9 @@ from platformdirs import user_data_dir
 
 from ..models import AlertAction, SavedKey, SavedConfig
 
+# Config version - increment this when the config structure changes
+CONFIG_VERSION = "1.0.0"
+
 def is_running_in_docker():
     """Check if the application is running inside a Docker container."""
     return os.path.exists('/.dockerenv')
@@ -110,13 +113,37 @@ def update_config(updates: dict):
 
 def init_config():
     """Initialize the configuration file with default keys if missing.
-
+    
+    Checks if the config file exists and has the correct version.
+    If the version doesn't match or is missing, deletes the config file and recreates it.
     Creates `config.json` with default entries for all SavedConfig keys.
     """
     acquire_lock()
     try:
-        if not os.path.exists(CONFIG_FILE):
+        config_needs_reset = False
+        if os.path.exists(CONFIG_FILE):
+            try:
+                existing_config = _get_config_nolock()
+                if existing_config is None:
+                    logging.info("Config file is corrupted or empty, recreating")
+                    config_needs_reset = True
+                else:
+                    config_version = existing_config.get(SavedConfig.VERSION)
+                    if config_version != CONFIG_VERSION:
+                        logging.info("Config version mismatch (config: %s, expected: %s), recreating config",
+                                   config_version, CONFIG_VERSION)
+                        config_needs_reset = True
+            except Exception as e:
+                logging.warning("Error reading config file: %s, recreating", e)
+                config_needs_reset = True
+        else:
+            config_needs_reset = True
+        if config_needs_reset:
+            if os.path.exists(CONFIG_FILE):
+                os.remove(CONFIG_FILE)
+                logging.info("Deleted old config file")
             default_config = {
+                SavedConfig.VERSION: CONFIG_VERSION,
                 SavedConfig.VAPID_PUBLIC_KEY: None,
                 SavedConfig.VAPID_SUBJECT: None,
                 SavedConfig.STARTUP_MODE: None,
@@ -127,7 +154,9 @@ def init_config():
             }
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump(default_config, f, indent=2)
-            logging.debug("Default config file created at %s", CONFIG_FILE)
+            logging.info("Created new config file with version %s at %s",
+                         CONFIG_VERSION,
+                         CONFIG_FILE)
     finally:
         release_lock()
 
@@ -263,6 +292,7 @@ def reset_config():
     acquire_lock()
     try:
         default_config = {
+            SavedConfig.VERSION: CONFIG_VERSION,
             SavedConfig.VAPID_PUBLIC_KEY: None,
             SavedConfig.VAPID_SUBJECT: None,
             SavedConfig.STARTUP_MODE: None,
@@ -328,7 +358,3 @@ DETECTION_TUNNEL_INTERVAL_MS = 1000 / DETECTIONS_PER_SECOND
 PRINTER_STAT_POLLING_RATE_MS = 2000
 MIN_SSE_DISPATCH_DELAY_MS = 100
 STANDARD_STAT_POLLING_RATE_MS = 250
-
-MAX_CAMERAS = 64
-CAMERA_INDICES = [int(idx) for idx in os.getenv(
-    "CAMERA_INDICES", "").split(",") if idx != ""]
