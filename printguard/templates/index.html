@@ -76,7 +76,7 @@
             </div>
             <div class="settings-section" style="display: none;">
                 <form action="{{ url_for('update_settings') }}" method="post" class="settings-form settings-grid">
-                    <input type="hidden" id="camera_index" name="camera_index"  value="{{ camera_index }}">
+                    <input type="hidden" id="camera_uuid" name="camera_uuid"  value="{{ camera_uuid }}">
                     <div class="settings-item">
                         <label for="sensitivity">Sensitivity: <span id="sensitivity_val"></span></label>
                         <input type="range" id="sensitivity" name="sensitivity" min="0" max="2" step="0.05"  value="-" />

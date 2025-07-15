@@ -10,7 +10,7 @@ class Alert(BaseModel):
     message: str
     timestamp: float
     countdown_time: float
-    camera_index: int
+    camera_uuid: int
     has_printer: bool = False
     countdown_action: str = "dismiss"
 
@@ -112,18 +112,20 @@ class PrinterType(str, Enum):
 class PrinterConfig(BaseModel):
     name: str
     printer_type: PrinterType
-    camera_index: int
+    camera_uuid: int
     base_url: str
     api_key: str
 
 class PrinterConfigRequest(BaseModel):
     name: str
     printer_type: PrinterType
-    camera_index: int
+    camera_uuid: int
     base_url: str
     api_key: str
 
 class CameraState(BaseModel):
+    nickname: str = None
+    source: str = None
     lock: asyncio.Lock = Field(default_factory=asyncio.Lock, exclude=True)
     current_alert_id: Optional[str] = None
     detection_history: List[tuple] = []
@@ -145,6 +147,10 @@ class CameraState(BaseModel):
     printer_config: Optional[Dict] = None
 
     def __init__(self, **data):
+        if 'nickname' not in data:
+            data['nickname'] = _get_config_value('CAMERA_NICKNAME')
+        if 'source' not in data:
+            data['source'] = _get_config_value('CAMERA_SOURCE')
         if 'brightness' not in data:
             data['brightness'] = _get_config_value('BRIGHTNESS')
         if 'contrast' not in data:

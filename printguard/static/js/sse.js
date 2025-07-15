@@ -203,8 +203,8 @@ evtSource.onmessage = (e) => {
             }
             else if (packet_data.event == "camera_state") {
                 const cameraData = packet_data.data;
-                if (!cameraData.camera_index && cameraData.camera_index !== 0) {
-                    console.warn("Camera data missing camera_index", cameraData);
+                if (!cameraData.camera_uuid) {
+                    console.warn("Camera data missing camera_uuid", cameraData);
                 }
                 if (typeof cameraData.live_detection_running !== 'boolean') {
                     cameraData.live_detection_running = !!cameraData.live_detection_running;

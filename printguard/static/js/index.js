@@ -16,7 +16,7 @@ const cameraDisplaySection = document.querySelector('.camera-display-section');
 const settingsSection = document.querySelector('.settings-section');
 const notificationsBtn = document.getElementById('notificationBtn');
 
-const settingsCameraIndex = document.getElementById('camera_index');
+const settingsCameraUUID = document.getElementById('camera_uuid');
 const settingsSensitivity = document.getElementById('sensitivity');
 const settingsSensitivityLabel = document.getElementById('sensitivity_val');
 const settingsBrightness = document.getElementById('brightness');
@@ -36,15 +36,15 @@ const settingsCountdownAction = document.getElementById('countdown_action');
 const stopDetectionBtnLabel = 'Stop Detection';
 const startDetectionBtnLabel = 'Start Detection';
 
-let cameraIndex = 0;
+let cameraUUID = 0;
 let currentCameraPrinterConfig = null;
 
-function changeLiveCameraFeed(cameraIndex) {
-    camVideoPreview.src = `/camera/feed/${cameraIndex}`;
+function changeLiveCameraFeed(cameraUUID) {
+    camVideoPreview.src = `/camera/feed/${cameraUUID}`;
 }
 
-function updateCameraTitle(cameraIndex) {
-    const cameraIdText = cameraIndex ? `Camera ${cameraIndex}` : 'No camera selected';
+function updateCameraTitle(cameraUUID) {
+    const cameraIdText = cameraUUID ? `Camera ${cameraUUID}` : 'No camera selected';
     cameraTitle.textContent = cameraIdText;
 }
 
@@ -99,7 +99,7 @@ function updateDetectionButton(isActive) {
 }
 
 function updateSelectedCameraSettings(d) {
-    settingsCameraIndex.value = d.camera_index;
+    settingsCameraUUID.value = d.camera_uuid;
     settingsSensitivityLabel.textContent = d.sensitivity;
     settingsSensitivity.value = d.sensitivity;
     updateSliderFill(settingsSensitivity);
@@ -181,7 +181,7 @@ function updateCameraSelectionListData(d) {
         const cameraIdText = cameraTextElement.textContent;
         const cameraId = cameraIdText.split(': ')[1];
 
-        if (cameraId == d.camera_index) {
+        if (cameraId == d.camera_uuid) {
             item.querySelector('.camera-prediction').textContent = d.last_result;
             item.querySelector('#lastTimeValue').textContent = d.last_time ? new Date(d.last_time * 1000).toLocaleTimeString() : '-';
             item.querySelector('.camera-prediction').style.color = d.last_result === 'success' ? 'green' : 'red';
@@ -195,13 +195,13 @@ function updateCameraSelectionListData(d) {
                 statusIndicator.style.color = '#b2b2b2';
                 statusIndicator.style.backgroundColor = 'transparent';
             }
-            item.querySelector('#cameraPreview').src = `/camera/feed/${d.camera_index}`;
+            item.querySelector('#cameraPreview').src = `/camera/feed/${d.camera_uuid}`;
         }
     });
 }
 
 function updatePolledDetectionData(d) {
-    if ('camera_index' in d && d.camera_index == cameraIndex) {
+    if ('camera_uuid' in d && d.camera_uuid == cameraUUID) {
         updateSelectedCameraData(d);
     }
     updateCameraSelectionListData(d);
@@ -218,30 +218,29 @@ function updatePolledPrinterData(d) {
     );
 }
 
-function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
-    const cameraIdx = parseInt(cameraIndexStr, 10);
-    if (isNaN(cameraIdx) || cameraIndexStr === null || cameraIndexStr === undefined) {
-        console.warn('Cannot fetch metrics: invalid camera index provided:', cameraIndexStr);
+function fetchAndUpdateMetricsForCamera(cameraUUID) {
+    if (!cameraUUID) {
+        console.warn('Cannot fetch metrics: invalid camera UUID provided:', cameraUUID);
         return;
     }
     fetch(`/camera/state`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ camera_index: cameraIdx })
+        body: JSON.stringify({ camera_uuid: cameraUUID })
     })
     .then(response => {
         if (!response.ok) {
             return response.json().then(errData => {
-                throw new Error(`Failed to fetch camera state for camera ${cameraIdx}: ${errData.detail || response.statusText}`);
+                throw new Error(`Failed to fetch camera state for camera ${cameraUUID}: ${errData.detail || response.statusText}`);
             }).catch(() => {
-                throw new Error(`Failed to fetch camera state for camera ${cameraIdx}: ${response.statusText}`);
+                throw new Error(`Failed to fetch camera state for camera ${cameraUUID}: ${response.statusText}`);
             });
         }
         return response.json();
     })
     .then(data => {
         const metricsData = {
-            camera_index: cameraIdx,
+            camera_uuid: cameraUUID,
             start_time: data.start_time,
             last_result: data.last_result,
             last_time: data.last_time,
@@ -263,9 +262,9 @@ function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
         updateSelectedCameraSettings(metricsData);
     })
     .catch(error => {
-        console.error(`Error fetching metrics for camera ${cameraIdx}:`, error.message);
+        console.error(`Error fetching metrics for camera ${cameraUUID}:`, error.message);
         const emptyMetrics = {
-            camera_index: cameraIdx,
+            camera_uuid: cameraUUID,
             start_time: null,
             last_result: '-',
             last_time: null,
@@ -278,7 +277,7 @@ function fetchAndUpdateMetricsForCamera(cameraIndexStr) {
 }
 
 function sendDetectionRequest(isStart) {
-    if (cameraIndex === null || cameraIndex === undefined || isNaN(parseInt(cameraIndex, 10))) {
+    if (cameraUUID === null || cameraUUID === undefined) {
         console.warn(`Cannot ${isStart ? 'start' : 'stop'} detection: no valid camera selected`);
         return;
     }
@@ -287,21 +286,21 @@ function sendDetectionRequest(isStart) {
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ camera_index: parseInt(cameraIndex, 10) })
+        body: JSON.stringify({ camera_uuid: cameraUUID })
     })
     .then(response => {
         if (response.ok) {
-            fetchAndUpdateMetricsForCamera(cameraIndex);
+            fetchAndUpdateMetricsForCamera(cameraUUID);
         } else {
             response.json().then(errData => {
-                console.error(`Failed to ${isStart ? 'start' : 'stop'} live detection for camera ${cameraIndex}. Server: ${errData.detail || response.statusText}`);
+                console.error(`Failed to ${isStart ? 'start' : 'stop'} live detection for camera ${cameraUUID}. Server: ${errData.detail || response.statusText}`);
             }).catch(() => {
-                console.error(`Failed to ${isStart ? 'start' : 'stop'} live detection for camera ${cameraIndex}. Status: ${response.status} ${response.statusText}`);
+                console.error(`Failed to ${isStart ? 'start' : 'stop'} live detection for camera ${cameraUUID}. Status: ${response.status} ${response.statusText}`);
             });
         }
     })
     .catch(error => {
-        console.error(`Network error or exception during ${isStart ? 'start' : 'stop'} request for camera ${cameraIndex}:`, error);
+        console.error(`Network error or exception during ${isStart ? 'start' : 'stop'} request for camera ${cameraUUID}:`, error);
     });
 }
 
@@ -326,15 +325,15 @@ cameraItems.forEach(item => {
         const cameraIdText = this.querySelector('.camera-text-content span:first-child').textContent;
         const cameraId = cameraIdText.split(': ')[1];
         if (cameraId && cameraId !== "No cameras available" && !cameraIdText.includes("No cameras available")) {
-            changeLiveCameraFeed(cameraId); 
-            cameraIndex = cameraId;
-            settingsCameraIndex.value = cameraId;
+            changeLiveCameraFeed(cameraId);
+            cameraUUID = cameraId;
+            settingsCameraUUID.value = cameraId;
             updateCameraTitle(cameraId);
             stopPrinterStatusPolling();
             fetchAndUpdateMetricsForCamera(cameraId);
         } else {
-            cameraIndex = null;
-            settingsCameraIndex.value = '';
+            cameraUUID = null;
+            settingsCameraUUID.value = '';
             updateCameraTitle(null);
         }
     });
@@ -716,11 +715,11 @@ document.addEventListener('keydown', function(e) {
 });
 
 function unlinkPrinter() {
-    const camIdx = parseInt(settingsCameraIndex.value, 10);
-    if (!camIdx && camIdx !== 0) return;
+    const camUUID = settingsCameraUUID.value;
+    if (!camUUID) return;
     if (confirm('Are you sure you want to unlink this printer from the camera?')) {
         stopPrinterStatusPolling();
-        fetch(`/printer/remove/${camIdx}`, {
+        fetch(`/printer/remove/${camUUID}`, {
             method: 'POST'
         })
         .then(response => response.json())
@@ -746,30 +745,24 @@ const printerModalOverlay = document.getElementById('printerModalOverlay');
 const printerModalClose = document.getElementById('printerModalClose');
 
 function openPrinterModal() {
-    const camIdx = parseInt(cameraIndex, 10);
+    const cameraUUID = settingsCameraUUID.value;
     fetch ('/sse/start-polling', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({camera_index: camIdx})
+        body: JSON.stringify({camera_uuid: cameraUUID})
     });
-    if (isNaN(camIdx) && cameraIndex !== undefined && cameraIndex !== null) {
-        camIdx = parseInt(cameraIndex, 10);
-        settingsCameraIndex.value = camIdx;
-    }
-    if (isNaN(camIdx)) {
-        console.error('Invalid camera index. settingsCameraIndex.value:', settingsCameraIndex.value, 'cameraIndex:', cameraIndex);
-        alert('Please select a camera first before linking a printer');
-        return;
+    if (cameraUUID !== undefined && cameraUUID !== null) {
+        settingsCameraUUID.value = cameraUUID;
     }
     fetch(`/camera/state`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ camera_index: camIdx })
+        body: JSON.stringify({ camera_uuid: cameraUUID })
     })
     .then(res => {
         if (!res.ok) {
             return res.json().then(errData => {
-                throw new Error(`Failed to fetch camera state for camera ${camIdx}: ${errData.detail || res.statusText}`);
+                throw new Error(`Failed to fetch camera state for camera ${cameraUUID}: ${errData.detail || res.statusText}`);
             });
         }
         return res.json();
@@ -802,19 +795,19 @@ printerModalClose.addEventListener('click', () => {
 });
 
 function stopPrinterStatusPolling() {
-    const camIdx = parseInt(cameraIndex, 10);
-    if (!isNaN(camIdx) && cameraIndex !== null && cameraIndex !== undefined) {
+    const cameraUUID = settingsCameraUUID.value;
+    if (cameraUUID !== null && cameraUUID !== undefined) {
         fetch('/sse/stop-polling', {
             method: 'POST',
             headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({camera_index: camIdx})
+            body: JSON.stringify({camera_uuid: cameraUUID})
         });
     }
 }
 
 document.getElementById('modalCancelPrintBtn').addEventListener('click', () => {
-    const camIdx = parseInt(cameraIndex, 10);
-    fetch(`/printer/cancel/${camIdx}`, {
+    const cameraUUID = settingsCameraUUID.value;
+    fetch(`/printer/cancel/${cameraUUID}`, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({})
@@ -830,8 +823,8 @@ document.getElementById('modalCancelPrintBtn').addEventListener('click', () => {
 });
 
 document.getElementById('modalPausePrintBtn').addEventListener('click', () => {
-    const camIdx = parseInt(cameraIndex, 10);
-    fetch(`/printer/pause/${camIdx}`, {
+    const cameraUUID = settingsCameraUUID.value;
+    fetch(`/printer/pause/${cameraUUID}`, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({})
@@ -885,16 +878,16 @@ document.getElementById('linkPrinterForm')?.addEventListener('submit', async (e)
 
     submitButton.disabled = true;
     submitButton.textContent = 'Linking...';
-    const camIdx = parseInt(settingsCameraIndex.value, 10);
+    const cameraUUID = settingsCameraUUID.value;
     const body = {
         printer_type: printerType,
         name: printerName,
         base_url: baseUrl,
         api_key: apiKey,
-        camera_index: camIdx
-    }; 
+        camera_uuid: cameraUUID
+    };
     try {
-        const res = await fetch(`/printer/add/${camIdx}`, {
+        const res = await fetch(`/printer/add/${cameraUUID}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)

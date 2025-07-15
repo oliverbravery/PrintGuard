@@ -8,9 +8,9 @@ from fastapi.responses import RedirectResponse
 from ..utils.config import (STREAM_MAX_FPS, STREAM_TUNNEL_FPS,
                             STREAM_JPEG_QUALITY, STREAM_MAX_WIDTH,
                             DETECTION_INTERVAL_MS, PRINTER_STAT_POLLING_RATE_MS,
-                            MIN_SSE_DISPATCH_DELAY_MS, CAMERA_INDEX,
+                            MIN_SSE_DISPATCH_DELAY_MS,
                             update_config, get_config)
-from ..utils.camera_utils import update_camera_state, setup_camera_indices
+from ..utils.camera_utils import update_camera_state
 from ..utils.camera_state_manager import get_camera_state_manager
 from ..utils.stream_utils import stream_optimizer
 from ..models import FeedSettings, SavedConfig
@@ -30,26 +30,25 @@ async def serve_index(request: Request):
     # pylint: disable=import-outside-toplevel
     from ..app import templates
     camera_state_manager = get_camera_state_manager()
-    camera_indices = await camera_state_manager.get_all_camera_indices()
-    if not camera_indices:
-        logging.warning("No camera indices found, attempting to initialize cameras...")
-        await setup_camera_indices()
-        camera_indices = await camera_state_manager.get_all_camera_indices()
+    camera_uuids = await camera_state_manager.get_all_camera_uuids()
+    if not camera_uuids:
+        logging.warning("No camera UUIDs found, attempting to initialize cameras...")
+        camera_uuids = await camera_state_manager.get_all_camera_uuids()
     camera_states = {}
-    for cam_idx in camera_indices:
-        camera_states[cam_idx] = await camera_state_manager.get_camera_state(cam_idx)
-    camera_index = camera_indices[0] if camera_indices else CAMERA_INDEX
+    for cam_uuid in camera_uuids:
+        camera_states[cam_uuid] = await camera_state_manager.get_camera_state(cam_uuid)
+    camera_uuid = camera_uuids[0] if camera_uuids else None
     return templates.TemplateResponse("index.html", {
         "camera_states": camera_states,
         "request": request,
-        "camera_index": camera_index,
+        "camera_uuid": camera_uuid,
         "current_time": time.time(),
     })
 
 # pylint: disable=unused-argument
 @router.post("/", include_in_schema=False)
 async def update_settings(request: Request,
-                          camera_index: int = Form(...),
+                          camera_uuid: str = Form(...),
                           sensitivity: float = Form(...),
                           brightness: float = Form(...),
                           contrast: float = Form(...),
@@ -63,7 +62,7 @@ async def update_settings(request: Request,
 
     Args:
         request (Request): The FastAPI request object.
-        camera_index (int): Index of the camera to update settings for.
+        camera_uuid (str): UUID of the camera to update settings for.
         sensitivity (float): Detection sensitivity level.
         brightness (float): Camera brightness setting.
         contrast (float): Camera contrast setting.
@@ -76,7 +75,7 @@ async def update_settings(request: Request,
     Returns:
         RedirectResponse: Redirect to the main index page.
     """
-    await update_camera_state(camera_index, {
+    await update_camera_state(camera_uuid, {
         "sensitivity": sensitivity,
         "brightness": brightness,
         "contrast": contrast,

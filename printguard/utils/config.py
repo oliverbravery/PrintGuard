@@ -301,7 +301,6 @@ SUCCESS_LABEL = "success"
 DEVICE_TYPE = "cuda" if (torch.cuda.is_available()) else (
     "mps" if (torch.backends.mps.is_available()) else "cpu")
 SENSITIVITY = 1.0
-CAMERA_INDEX = 0
 DETECTION_TIMEOUT = 5
 DETECTION_THRESHOLD = 3
 DETECTION_VOTING_WINDOW = 5

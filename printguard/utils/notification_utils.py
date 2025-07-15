@@ -46,8 +46,8 @@ def send_defect_notification(alert_id):
     if alert:
         logging.debug("Alert found for ID %s, preparing notification", alert_id)
         notification = Notification(
-            title=f"Defect - Camera {alert.camera_index}",
-            body=f"Defect detected on camera {alert.camera_index}",
+            title=f"Defect - Camera {alert.camera_uuid}",
+            body=f"Defect detected on camera {alert.camera_uuid}",
         )
         subscriptions = get_subscriptions() or []
         logging.debug("Created notification object without image payload, sending to %d subscriptions",

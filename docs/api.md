@@ -168,22 +168,22 @@
 **Description:** Start polling for printer state for a given camera.  
 **Request Body:**  
 ```json
-{ "camera_index": "integer" }
+{ "camera_uuid": "string" }
 ```
 **Response:**  
 ```json
-{ "message": "Polling started for camera index <camera_index>" }
+{ "message": "Polling started for camera UUID <camera_uuid>" }
 ```
 
 ### POST /sse/stop-polling
 **Description:** Stop polling for printer state for a given camera.  
 **Request Body:**  
 ```json
-{ "camera_index": "integer" }
+{ "camera_uuid": "string" }
 ```
 **Response:**  
 ```json
-{ "message": "Polling stopped for camera index <camera_index>" }
+{ "message": "Polling stopped for camera UUID <camera_uuid>" }
 ```
 
 ---
@@ -194,11 +194,12 @@
 **Description:** Get the state of a camera.  
 **Request Body:**  
 ```json
-{ "camera_index": "integer" }
+{ "camera_uuid": "string" }
 ```
 **Response:**  
 ```json
 {
+    "nickname": "string",
     "start_time": "float",
     "last_result": "string",
     "last_time": "float",
@@ -219,9 +220,9 @@
 }
 ```
 
-### GET /camera/feed/{camera_index}
+### GET /camera/feed/{camera_uuid}
 **Description:** Get the camera feed.  
-**Path Param:** `camera_index: integer`  
+**Path Param:** `camera_uuid: string`  
 **Response:** A multipart response with the video stream.
 
 ---
@@ -249,37 +250,37 @@
 **Description:** Start live detection on a camera feed.
 **Request Body:**
 ```json
-{ "camera_index": "integer" }
+{ "camera_uuid": "string" }
 ```
 **Response:**
 ```json
-{ "message": "Live detection started for camera <camera_index>" }
+{ "message": "Live detection started for camera <camera_uuid>" }
 ```
 
 ### POST /detect/live/stop
 **Description:** Stop live detection on a camera feed.
 **Request Body:**
 ```json
-{ "camera_index": "integer" }
+{ "camera_uuid": "string" }
 ```
 **Response:**
 ```json
-{ "message": "Live detection stopped for camera <camera_index>" }
+{ "message": "Live detection stopped for camera <camera_uuid>" }
 ```
 
 ---
 
 ## Printer Endpoints
 
-### POST /printer/add/{camera_index}
+### POST /printer/add/{camera_uuid}
 **Description:** Add and configure a printer for a camera.
-**Path Param:** `camera_index: integer`
+**Path Param:** `camera_uuid: string`
 **Request Body:**
 ```json
 {
     "name": "string",
     "printer_type": "octoprint",
-    "camera_index": "integer",
+    "camera_uuid": "string",
     "base_url": "string",
     "api_key": "string"
 }
@@ -292,28 +293,28 @@
 }
 ```
 
-### POST /printer/remove/{camera_index}
+### POST /printer/remove/{camera_uuid}
 **Description:** Remove the configured printer from a camera.
-**Path Param:** `camera_index: integer`
+**Path Param:** `camera_uuid: string`
 **Response:**
 ```json
-{ "success": true, "message": "Printer removed from camera <camera_index>" }
+{ "success": true, "message": "Printer removed from camera <camera_uuid>" }
 ```
 
-### POST /printer/cancel/{camera_index}
+### POST /printer/cancel/{camera_uuid}
 **Description:** Cancel the current print job on the configured printer.
-**Path Param:** `camera_index: integer`
+**Path Param:** `camera_uuid: string`
 **Response:**
 ```json
-{ "success": true, "message": "Print job cancelled for camera <camera_index>" }
+{ "success": true, "message": "Print job cancelled for camera <camera_uuid>" }
 ```
 
-### POST /printer/pause/{camera_index}
+### POST /printer/pause/{camera_uuid}
 **Description:** Pause the current print job on the configured printer.
-**Path Param:** `camera_index: integer`
+**Path Param:** `camera_uuid: string`
 **Response:**
 ```json
-{ "success": true, "message": "Print job paused for camera <camera_index>" }
+{ "success": true, "message": "Print job paused for camera <camera_uuid>" }
 ```
 
 ---
@@ -391,7 +392,7 @@
             "message": "string",
             "timestamp": "float",
             "countdown_time": "float",
-            "camera_index": "integer",
+            "camera_uuid": "string",
             "has_printer": "boolean",
             "countdown_action": "string"
         }

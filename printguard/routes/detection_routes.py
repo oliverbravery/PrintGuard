@@ -119,62 +119,62 @@ async def detect_ep(request: Request, files: List[UploadFile] = File(...), strea
             raise HTTPException(status_code=500, detail=f"Inference failed: {e}") from e
 
 @router.post("/detect/live/start")
-async def start_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
+async def start_live_detection(request: Request, camera_uuid: str = Body(..., embed=True)):
     """Start continuous live detection on a specified camera.
 
     Args:
         request (Request): The FastAPI request object containing app state.
-        camera_index (int): Index of the camera to start live detection on.
+        camera_uuid (str): UUID of the camera to start live detection on.
 
     Returns:
         dict: Message indicating whether live detection was started or already running.
     """
-    camera_state = await get_camera_state(camera_index)
+    camera_state = await get_camera_state(camera_uuid)
     if camera_state.live_detection_running:
-        return {"message": f"Live detection already running for camera {camera_index}"}
+        return {"message": f"Live detection already running for camera {camera_uuid}"}
     else:
-        await update_camera_state(camera_index, {
+        await update_camera_state(camera_uuid, {
             "current_alert_id": None,
             "detection_history": [],
             "last_result": None,
             "last_time": None,
             "error": None
         })
-    await update_camera_state(camera_index, {"start_time": time.time(),
+    await update_camera_state(camera_uuid, {"start_time": time.time(),
                                        "live_detection_running": True,
                                        "live_detection_task": asyncio.create_task(
-                                           _live_detection_loop(request.app.state, camera_index)
+                                           _live_detection_loop(request.app.state, camera_uuid)
                                            )})
-    return {"message": f"Live detection started for camera {camera_index}"}
+    return {"message": f"Live detection started for camera {camera_uuid}"}
 
 @router.post("/detect/live/stop")
-async def stop_live_detection(request: Request, camera_index: int = Body(..., embed=True)):
+async def stop_live_detection(request: Request, camera_uuid: str = Body(..., embed=True)):
     """Stop continuous live detection on a specified camera.
 
     Args:
         request (Request): The FastAPI request object containing app state.
-        camera_index (int): Index of the camera to stop live detection on.
+        camera_uuid (str): UUID of the camera to stop live detection on.
 
     Returns:
         dict: Message indicating whether live detection was stopped or not running.
     """
-    camera_state = await get_camera_state(camera_index)
+    camera_state = await get_camera_state(camera_uuid)
     if not camera_state.live_detection_running:
-        return {"message": f"Live detection not running for camera {camera_index}"}
+        return {"message": f"Live detection not running for camera {camera_uuid}"}
     live_detection_task = camera_state.live_detection_task
     if live_detection_task:
         try:
             await asyncio.wait_for(live_detection_task, timeout=0.25)
-            logging.debug("Live detection task for camera %d finished successfully.", camera_index)
+            logging.debug("Live detection task for camera %s finished successfully.", camera_uuid)
         except asyncio.TimeoutError:
-            logging.debug("Live detection task for camera %d did not finish in time.", camera_index)
+            logging.debug("Live detection task for camera %s did not finish in time.", camera_uuid)
             if live_detection_task:
                 live_detection_task.cancel()
         except Exception as e:
-            logging.error("Error stopping live detection task for camera %d: %s", camera_index, e)
+            logging.error("Error stopping live detection task for camera %s: %s", camera_uuid, e)
         finally:
             live_detection_task = None
-    await update_camera_state(camera_index, {"start_time": None,
+    await update_camera_state(camera_uuid, {"start_time": None,
                                     "live_detection_running": False,
                                     "live_detection_task": None})
-    return {"message": f"Live detection stopped for camera {camera_index}"}
+    return {"message": f"Live detection stopped for camera {camera_uuid}"}
