@@ -26,7 +26,6 @@ from .utils.config import (get_ssl_private_key_temporary_path,
 from .utils.inference_lib import (compute_prototypes, load_model,
                                   make_transform, setup_device)
 from .utils.cloudflare_utils import (start_cloudflare_tunnel, stop_cloudflare_tunnel)
-from .utils.camera_utils import setup_camera_indices
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
@@ -70,10 +69,16 @@ async def lifespan(app_instance: FastAPI):
         logging.error("Error during startup: %s", e)
         app_instance.state.model = None
         raise
-    logging.debug("Setting up camera indices...")
-    await setup_camera_indices()
     logging.debug("Camera indices set up successfully.")
     yield
+    logging.debug("Cleaning up resources on shutdown...")
+    try:
+        from .utils.camera_state_manager import get_camera_state_manager
+        manager = get_camera_state_manager()
+        await manager.cleanup_all_resources()
+        logging.debug("Cleaned up camera resources successfully.")
+    except Exception as e:
+        logging.error("Error during cleanup: %s", e)
 
 app = FastAPI(
     title="Standalone Web Push Notification API",

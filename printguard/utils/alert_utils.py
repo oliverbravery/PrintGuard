@@ -20,7 +20,7 @@ def append_new_alert(alert):
                 "message": str,
                 "timestamp": float,
                 "countdown_time": float,
-                "camera_index": int,
+                "camera_uuid": str,
                 "has_printer": bool,
                 "countdown_action": str
             }
@@ -56,8 +56,8 @@ async def dismiss_alert(alert_id):
     from ..app import app
     if alert_id in app.state.alerts:
         del app.state.alerts[alert_id]
-        camera_index = int(alert_id.split('_')[0])
-        await update_camera_state(camera_index, {"current_alert_id": None})
+        camera_uuid = alert_id.split('_')[0]
+        await update_camera_state(camera_uuid, {"current_alert_id": None})
         return True
     return False
 
@@ -79,7 +79,7 @@ def alert_to_response_json(alert):
                 "message": str,
                 "timestamp": float,
                 "countdown_time": float,
-                "camera_index": int,
+                "camera_uuid": str,
                 "has_printer": bool,
                 "countdown_action": str
             }

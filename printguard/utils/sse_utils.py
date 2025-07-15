@@ -84,15 +84,15 @@ def _calculate_frame_rate(detection_history):
     duration = times[-1] - times[0]
     return (len(times) - 1) / duration if duration > 0 else 0.0
 
-async def _sse_update_camera_state_func(camera_index):
+async def _sse_update_camera_state_func(camera_uuid):
     """Build and send a camera state update SSE packet.
 
     Args:
-        camera_index (int): The index of the camera.
+        camera_uuid (str): The UUID of the camera.
     """
     # pylint: disable=import-outside-toplevel
     from .camera_utils import get_camera_state
-    state = await get_camera_state(camera_index)
+    state = await get_camera_state(camera_uuid)
     detection_history = state.detection_history
     total_detections = len(detection_history)
     frame_rate = _calculate_frame_rate(detection_history)
@@ -104,7 +104,7 @@ async def _sse_update_camera_state_func(camera_index):
         "frame_rate": frame_rate,
         "error": state.error,
         "live_detection_running": state.live_detection_running,
-        "camera_index": camera_index
+        "camera_uuid": camera_uuid
     }
     await append_new_outbound_packet(data, SSEDataType.CAMERA_STATE)
 
@@ -126,63 +126,63 @@ async def sse_update_printer_state(printer_state: PrinterState):
     except Exception as e:
         logging.error("Unexpected error in SSE printer state update: %s", e)
 
-async def sse_update_camera_state(camera_index):
+async def sse_update_camera_state(camera_uuid):
     """Send an SSE update with the current camera state.
 
     Args:
-        camera_index (int): The index of the camera.
+        camera_uuid (str): The UUID of the camera.
     """
     try:
-        await asyncio.wait_for(_sse_update_camera_state_func(camera_index), timeout=5.0)
+        await asyncio.wait_for(_sse_update_camera_state_func(camera_uuid), timeout=5.0)
     except asyncio.TimeoutError:
-        logging.warning("SSE camera state update timed out for camera %d", camera_index)
+        logging.warning("SSE camera state update timed out for camera %s", camera_uuid)
     except (ValueError, TypeError, AttributeError) as e:
-        logging.error("Error in SSE camera state update for camera %d: %s", camera_index, e)
+        logging.error("Error in SSE camera state update for camera %s: %s", camera_uuid, e)
     except Exception as e:  # pylint: disable=broad-except
-        logging.error("Unexpected error in SSE camera state update for camera %d: %s",
-                      camera_index, e)
+        logging.error("Unexpected error in SSE camera state update for camera %s: %s",
+                      camera_uuid, e)
 
-def get_polling_task(camera_index):
+def get_polling_task(camera_uuid):
     """Retrieve the current polling task for a camera.
 
     Args:
-        camera_index (int): The index of the camera.
+        camera_uuid (str): The UUID of the camera.
 
     Returns:
         PollingTask or None: The polling task if exists, otherwise None.
     """
     # pylint: disable=C0415
     from ..app import app
-    return app.state.polling_tasks.get(camera_index) or None
+    return app.state.polling_tasks.get(camera_uuid) or None
 
-def stop_and_remove_polling_task(camera_index):
+def stop_and_remove_polling_task(camera_uuid):
     """Stop and remove a polling task for a specified camera.
 
     Args:
-        camera_index (int): The index of the camera.
+        camera_uuid (str): The UUID of the camera.
     """
     # pylint: disable=C0415
     from ..app import app
-    task = get_polling_task(camera_index)
+    task = get_polling_task(camera_uuid)
     if task:
         task.stop_event.set()
         if task.task and not task.task.done():
             task.task.cancel()
-        logging.debug("Stopped polling task for camera index %d", camera_index)
-        del app.state.polling_tasks[camera_index]
+        logging.debug("Stopped polling task for camera UUID %s", camera_uuid)
+        del app.state.polling_tasks[camera_uuid]
     else:
-        logging.warning("No polling task found for camera index %d to stop.", camera_index)
+        logging.warning("No polling task found for camera UUID %s to stop.", camera_uuid)
 
-def add_polling_task(camera_index, task: PollingTask):
+def add_polling_task(camera_uuid, task: PollingTask):
     """Add or replace a polling task for a camera.
 
     Args:
-        camera_index (int): The index of the camera.
+        camera_uuid (str): The UUID of the camera.
         task (PollingTask): The task object containing the asyncio.Task and stop_event.
     """
     # pylint: disable=C0415
     from ..app import app
-    if camera_index in app.state.polling_tasks:
-        stop_and_remove_polling_task(camera_index)
-    app.state.polling_tasks[camera_index] = task
-    logging.debug("Added polling task for camera index %d", camera_index)
+    if camera_uuid in app.state.polling_tasks:
+        stop_and_remove_polling_task(camera_uuid)
+    app.state.polling_tasks[camera_uuid] = task
+    logging.debug("Added polling task for camera UUID %s", camera_uuid)

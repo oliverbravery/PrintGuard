@@ -35,7 +35,7 @@ def remove_subscription(subscription_id = None, subscription = None):
     else:
         logging.error("No subscription ID or object provided to remove.")
 
-def send_defect_notification(alert_id):
+async def send_defect_notification(alert_id):
     """Send a defect notification for a given alert ID to all subscribers.
 
     Args:
@@ -45,9 +45,13 @@ def send_defect_notification(alert_id):
     alert = get_alert(alert_id)
     if alert:
         logging.debug("Alert found for ID %s, preparing notification", alert_id)
+        # pylint: disable=import-outside-toplevel
+        from .camera_utils import get_camera_state
+        camera_state = await get_camera_state(alert.camera_uuid)
+        camera_nickname = camera_state.nickname if camera_state else alert.camera_uuid
         notification = Notification(
-            title=f"Defect - Camera {alert.camera_index}",
-            body=f"Defect detected on camera {alert.camera_index}",
+            title=f"Defect - Camera {camera_nickname}",
+            body=f"Defect detected on camera {camera_nickname}",
         )
         subscriptions = get_subscriptions() or []
         logging.debug("Created notification object without image payload, sending to %d subscriptions",
