@@ -37,6 +37,7 @@ const settingsCountdownAction = document.getElementById('countdown_action');
 const addCameraModalOverlay = document.getElementById('addCameraModalOverlay');
 const addCameraModalClose = document.getElementById('addCameraModalClose');
 const addCameraBtn = document.getElementById('addCameraBtn');
+const addFirstCameraBtn = document.getElementById('addFirstCameraBtn');
 
 camVideoPreview.onload = () => {
     loadingOverlay.style.display = 'none';
@@ -245,6 +246,12 @@ function removeCamera(cameraUUID) {
                 window.location.reload();
             }
         }
+        const remainingCameras = document.querySelectorAll('.camera-item');
+        if (remainingCameras.length === 0) {
+            if (addCameraModalOverlay) {
+                addCameraModalOverlay.style.display = 'flex';
+            }
+        }
     })
     .catch(error => {
         console.error(`Error removing camera ${cameraUUID}:`, error.message);
@@ -421,10 +428,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 addCameraModalOverlay.style.display = 'flex';
             }
         }
+    } else {
+        const noCamerasMessage = document.getElementById('noCamerasMessage');
+        if (noCamerasMessage && addCameraModalOverlay) {
+            addCameraModalOverlay.style.display = 'flex';
+        }
     }
 });
 
 addCameraBtn?.addEventListener('click', function(e) {
+    e.preventDefault();
+    addCameraModalOverlay.style.display = 'flex';
+});
+
+addFirstCameraBtn?.addEventListener('click', function(e) {
     e.preventDefault();
     addCameraModalOverlay.style.display = 'flex';
 });
@@ -995,6 +1012,76 @@ const rtspUrlInput = document.getElementById('rtspUrl');
 const serialLoading = document.getElementById('serialLoading');
 const noSerialDeviceMessage = document.getElementById('noSerialDeviceMessage');
 
+const enablePreview = document.getElementById('enablePreview');
+const cameraPreviewContainer = document.getElementById('cameraPreviewContainer');
+const cameraPreviewImage = document.getElementById('cameraPreviewImage');
+const cameraPreviewLoading = document.getElementById('cameraPreviewLoading');
+const cameraPreviewError = document.getElementById('cameraPreviewError');
+
+let previewUpdateTimeout;
+
+function showPreviewLoading() {
+    cameraPreviewImage.style.display = 'none';
+    cameraPreviewError.style.display = 'none';
+    cameraPreviewLoading.style.display = 'flex';
+}
+
+function showPreviewError() {
+    cameraPreviewImage.style.display = 'none';
+    cameraPreviewLoading.style.display = 'none';
+    cameraPreviewError.style.display = 'flex';
+}
+
+function showPreviewImage(src) {
+    cameraPreviewLoading.style.display = 'none';
+    cameraPreviewError.style.display = 'none';
+    cameraPreviewImage.src = src;
+    cameraPreviewImage.style.display = 'block';
+}
+
+function hidePreview() {
+    cameraPreviewContainer.style.display = 'none';
+    cameraPreviewImage.style.display = 'none';
+    cameraPreviewLoading.style.display = 'none';
+    cameraPreviewError.style.display = 'none';
+}
+
+function updatePreview() {
+    if (!enablePreview.checked) {
+        hidePreview();
+        return;
+    }
+    
+    cameraPreviewContainer.style.display = 'block';
+    let source = '';
+    if (serialCameraSetup.style.display !== 'none' && serialDeviceSelect.value) {
+        source = serialDeviceSelect.value;
+    } else if (rtspCameraSetup.style.display !== 'none' && rtspUrlInput.value) {
+        source = rtspUrlInput.value;
+    }
+    if (!source) {
+        showPreviewError();
+        return;
+    }
+    showPreviewLoading();
+    const previewUrl = `/camera/preview?source=${encodeURIComponent(source)}`;
+    const img = new Image();
+    img.onload = function() {
+        showPreviewImage(previewUrl);
+    };
+    img.onerror = function() {
+        showPreviewError();
+    };
+    img.src = previewUrl;
+}
+
+function schedulePreviewUpdate() {
+    if (previewUpdateTimeout) {
+        clearTimeout(previewUpdateTimeout);
+    }
+    previewUpdateTimeout = setTimeout(updatePreview, 1000);
+}
+
 addSerialCameraButton?.addEventListener('click', async () => {
     cameraTypeSelection.style.display = 'none';
     addCameraForm.style.display = 'block';
@@ -1050,6 +1137,20 @@ addRtspCameraButton?.addEventListener('click', () => {
     rtspUrlInput.required = true;
 });
 
+enablePreview?.addEventListener('change', updatePreview);
+
+serialDeviceSelect?.addEventListener('change', () => {
+    if (enablePreview.checked) {
+        updatePreview();
+    }
+});
+
+rtspUrlInput?.addEventListener('input', () => {
+    if (enablePreview.checked) {
+        schedulePreviewUpdate();
+    }
+});
+
 addCameraForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const formData = new FormData(addCameraForm);
@@ -1094,10 +1195,14 @@ addCameraModalClose?.addEventListener('click', function() {
     rtspCameraSetup.style.display = 'none';
     serialDeviceSelect.required = false;
     rtspUrlInput.required = false;
-    // Reset the serial device dropdown
     serialDeviceSelect.innerHTML = '';
     serialDeviceSelect.style.display = 'none';
     noSerialDeviceMessage.style.display = 'none';
     serialLoading.style.display = 'none';
+    enablePreview.checked = false;
+    hidePreview();
+    if (previewUpdateTimeout) {
+        clearTimeout(previewUpdateTimeout);
+    }
 });
 

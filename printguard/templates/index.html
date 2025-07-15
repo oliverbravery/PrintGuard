@@ -48,16 +48,16 @@
                         <img src="{{ url_for('static', path='images/default_icon.png') }}" alt="Camera Icon" class="camera-video-preview" id="cameraPreview">
                     </li>
                 {% endfor %}
-                {% if not camera_states %}
-                <li class="camera-item">
-                    <div class="camera-text-content">
-                        <span>No cameras available</span>
-                        <span>Check connection or settings</span>
-                    </div>
-                    <img src="{{ url_for('static', path='images/default_icon.png') }}" alt="Icon" class="camera-video-preview">
-                </li>
-                {% endif %}
             </ul>
+            {% if not camera_states %}
+            <div id="noCamerasMessage" class="no-cameras-container">
+                <div class="no-cameras-content">
+                    <h3>No cameras configured</h3>
+                    <p>Get started by adding your first camera</p>
+                    <button id="addFirstCameraBtn" class="start-stop-btn">Add Camera</button>
+                </div>
+            </div>
+            {% endif %}
         </div>
         <div class="grid-item">
             <div class="camera-display-section">
@@ -282,6 +282,27 @@
                         <div class="form-group">
                             <label for="rtspUrl">RTSP Stream URL</label>
                             <input type="url" id="rtspUrl" name="source" required />
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="enablePreview" style="margin-right: 10px;">
+                            Show camera preview
+                        </label>
+                    </div>
+                    <div id="cameraPreviewContainer" style="display: none;">
+                        <div class="form-group">
+                            <label>Camera Preview</label>
+                            <div id="cameraPreviewWrapper" style="position: relative; width: 100%; max-width: 400px; margin: 0 auto;">
+                                <img id="cameraPreviewImage" src="" alt="Camera Preview" style="width: 100%; height: auto; border: 2px dotted var(--text-primary); display: none;">
+                                <div id="cameraPreviewLoading" style="display: none; text-align: center; padding: 20px; border: 2px dotted var(--text-primary); background: var(--background-tertiary);">
+                                    <div class="loading-spinner" style="margin: 0 auto 10px;"></div>
+                                    <p>Loading camera preview...</p>
+                                </div>
+                                <div id="cameraPreviewError" style="display: none; text-align: center; padding: 20px; border: 2px dotted var(--color-danger); background: var(--error-bg); color: var(--color-danger);">
+                                    <p>Unable to load camera preview</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <button type="submit" class="start-stop-btn primary">Add Camera</button>
