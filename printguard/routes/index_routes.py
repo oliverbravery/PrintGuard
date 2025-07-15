@@ -37,11 +37,9 @@ async def serve_index(request: Request):
     camera_states = {}
     for cam_uuid in camera_uuids:
         camera_states[cam_uuid] = await camera_state_manager.get_camera_state(cam_uuid)
-    camera_uuid = camera_uuids[0] if camera_uuids else None
     return templates.TemplateResponse("index.html", {
         "camera_states": camera_states,
         "request": request,
-        "camera_uuid": camera_uuid,
         "current_time": time.time(),
     })
 
