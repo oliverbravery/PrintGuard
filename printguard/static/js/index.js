@@ -10,6 +10,7 @@ const camFrameRateDisplay = document.getElementById('camFrameRateDisplay');
 const camDetectionToggleButton = document.getElementById('camDetectionToggleButton');
 const camDetectionLiveIndicator = document.getElementsByClassName('live-indicator');
 const camVideoPreview = document.getElementById('videoPreview');
+const loadingOverlay = document.getElementById('loadingOverlay');
 const cameraItems = document.querySelectorAll('.camera-item');
 const settingsButton = document.getElementById('settingsButton');
 const cameraDisplaySection = document.querySelector('.camera-display-section');
@@ -37,6 +38,15 @@ const addCameraModalOverlay = document.getElementById('addCameraModalOverlay');
 const addCameraModalClose = document.getElementById('addCameraModalClose');
 const addCameraBtn = document.getElementById('addCameraBtn');
 
+camVideoPreview.onload = () => {
+    loadingOverlay.style.display = 'none';
+};
+
+camVideoPreview.onerror = () => {
+    loadingOverlay.style.display = 'none';
+    console.error("Failed to load camera feed.");
+};
+
 const stopDetectionBtnLabel = 'Stop Detection';
 const startDetectionBtnLabel = 'Start Detection';
 
@@ -44,6 +54,7 @@ let cameraUUID = 0;
 let currentCameraPrinterConfig = null;
 
 function changeLiveCameraFeed(cameraUUID) {
+    loadingOverlay.style.display = 'flex';
     camVideoPreview.src = `/camera/feed/${cameraUUID}`;
 }
 
