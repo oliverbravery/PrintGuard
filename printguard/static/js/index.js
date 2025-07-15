@@ -33,6 +33,9 @@ const settingsMajorityVoteWindow = document.getElementById('majority_vote_window
 const settingsMajorityVoteWindowLabel = document.getElementById('majority_vote_window_val');
 const settingsCountdownAction = document.getElementById('countdown_action');
 
+const addCameraModalOverlay = document.getElementById('addCameraModalOverlay');
+const addCameraModalClose = document.getElementById('addCameraModalClose');
+
 const stopDetectionBtnLabel = 'Stop Detection';
 const startDetectionBtnLabel = 'Start Detection';
 
@@ -357,6 +360,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const cameraIdText = firstCameraItem.querySelector('.camera-text-content span:first-child').textContent;
         if (!cameraIdText.includes("No cameras available")) {
             firstCameraItem.click();
+        } else {
+            if (addCameraModalOverlay) {
+                addCameraModalOverlay.style.display = 'flex';
+            }
         }
     }
 });
@@ -915,6 +922,18 @@ document.getElementById('linkPrinterForm')?.addEventListener('submit', async (e)
     } finally {
         submitButton.disabled = false;
         submitButton.textContent = originalButtonText;
+    }
+});
+
+addCameraModalClose?.addEventListener('click', function() {
+    if (addCameraModalOverlay) {
+        addCameraModalOverlay.style.display = 'none';
+    }
+});
+
+addCameraModalOverlay?.addEventListener('click', function(e) {
+    if (e.target === addCameraModalOverlay) {
+        addCameraModalOverlay.style.display = 'none';
     }
 });
 
