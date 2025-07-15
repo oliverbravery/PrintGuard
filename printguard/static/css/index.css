@@ -91,7 +91,7 @@ body, html {
 }
 
 .camera-item:hover {
-    transform: translateY(-2px);
+    background-color: var(--background-tertiary);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
@@ -117,9 +117,9 @@ body, html {
     font-weight: bold;
     position: absolute;
     top: 0;
-    left: 0;
+    right: 0;
     opacity: 0;
-    transition: opacity 0.2s ease-in-out;
+    transition: opacity 0.1s ease-in-out;
     border-radius: 0;
 }
 
@@ -132,11 +132,11 @@ body, html {
     flex-direction: column;
     justify-content: center;
     margin-right: var(--spacing-sm);
-    transition: margin-left 0.2s ease-in-out;
+    transition: margin-right 0.1s ease-in-out;
 }
 
 .camera-item:hover .camera-text-content {
-    margin-left: 5%;
+    margin-right: 5%;
 }
 
 .camera-text-content span {
@@ -152,6 +152,7 @@ body, html {
     height: 40px;
     object-fit: contain;
     flex-shrink: 0;
+    margin-right: 5%;
 }
 
 .camera-display-section, .settings-section {
@@ -231,7 +232,7 @@ body, html {
 }
 
 .info-item:hover {
-    transform: translateY(-2px);
+    background-color: var(--background-tertiary);
     box-shadow: var(--shadow-medium);
 }
 
@@ -259,7 +260,7 @@ body, html {
 }
 
 .settings-item:hover {
-    transform: translateY(-2px);
+    background-color: var(--background-tertiary);
     box-shadow: var(--shadow-medium);
 }
 
