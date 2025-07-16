@@ -7,6 +7,7 @@ class InferenceBackend(Enum):
     """Supported inference backends."""
     PYTORCH = "pytorch"
     EXECUTORCH = "executorch"
+    ONNXRUNTIME = "onnxruntime"
 
 
 class InferenceEngine(ABC):
@@ -120,6 +121,9 @@ class UniversalInferenceEngine:
             return PyTorchInferenceEngine()
         elif backend == InferenceBackend.EXECUTORCH:
             raise NotImplementedError("ExecuTorch backend not yet implemented")
+        elif backend == InferenceBackend.ONNXRUNTIME:
+            from .backends.onnxruntime_engine import ONNXRuntimeInferenceEngine
+            return ONNXRuntimeInferenceEngine()
         else:
             raise ValueError(f"Unsupported backend: {backend}")
     
@@ -213,4 +217,13 @@ class UniversalInferenceEngine:
                 devices.append("cuda")
             if torch.backends.mps.is_available():
                 devices.append("mps")
+        elif self.backend == InferenceBackend.ONNXRUNTIME:
+            # pylint: disable=import-outside-toplevel
+            try:
+                import onnxruntime as ort
+                available_providers = ort.get_available_providers()
+                if 'CUDAExecutionProvider' in available_providers:
+                    devices.append("cuda")
+            except ImportError:
+                pass
         return devices

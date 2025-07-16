@@ -21,7 +21,14 @@ def _detect_backend() -> InferenceBackend:
         return InferenceBackend.EXECUTORCH
     except ImportError:
         pass
-    # Check for PyTorch
+    # Check for ONNX Runtime (optimized backend)
+    try:
+        import onnxruntime
+        logging.info("ONNX Runtime detected, using ONNX Runtime backend")
+        return InferenceBackend.ONNXRUNTIME
+    except ImportError:
+        pass
+    # Check for PyTorch (fallback backend)
     try:
         import torch
         logging.info("PyTorch detected, using PyTorch backend")
