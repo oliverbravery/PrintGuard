@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Tuple
 from enum import Enum
 
+import cv2
+
 class InferenceBackend(Enum):
     """Supported inference backends."""
     PYTORCH = "pytorch"
@@ -12,7 +14,7 @@ class InferenceBackend(Enum):
 
 class InferenceEngine(ABC):
     """Abstract base class for inference engines."""
-    
+
     @abstractmethod
     def load_model(self, model_path: str, options_path: str, device: str) -> Tuple[Any, List[int]]:
         """Load a model and its configuration.
@@ -25,8 +27,7 @@ class InferenceEngine(ABC):
         Returns:
             Tuple of (model, input_dimensions)
         """
-        pass
-    
+
     @abstractmethod
     def get_transform(self) -> Any:
         """Get the image preprocessing transform pipeline.
@@ -34,11 +35,10 @@ class InferenceEngine(ABC):
         Returns:
             Transform pipeline for preprocessing images
         """
-        pass
-    
+
     @abstractmethod
-    def compute_prototypes(self, model: Any, support_dir: str, transform: Any, 
-                          device: str, success_label: str = "success", 
+    def compute_prototypes(self, model: Any, support_dir: str, transform: Any,
+                          device: str, success_label: str = "success",
                           use_cache: bool = True) -> Tuple[Any, List[str], int]:
         """Compute class prototypes from support images.
         
@@ -53,10 +53,9 @@ class InferenceEngine(ABC):
         Returns:
             Tuple of (prototypes, class_names, defect_idx)
         """
-        pass
-    
+
     @abstractmethod
-    def predict_batch(self, model: Any, batch_tensors: Any, prototypes: Any, 
+    def predict_batch(self, model: Any, batch_tensors: Any, prototypes: Any,
                      defect_idx: int, sensitivity: float, device: str) -> List[int]:
         """Predict classes for a batch of image tensors.
         
@@ -71,8 +70,7 @@ class InferenceEngine(ABC):
         Returns:
             List of predicted class indices
         """
-        pass
-    
+
     @abstractmethod
     def setup_device(self, requested_device: str) -> str:
         """Set up the compute device based on availability and request.
@@ -83,8 +81,7 @@ class InferenceEngine(ABC):
         Returns:
             The actual device string to use
         """
-        pass
-    
+
     @abstractmethod
     def clear_prototype_cache(self, support_dir: str) -> None:
         """Clear the prototype cache for a support directory.
@@ -92,12 +89,9 @@ class InferenceEngine(ABC):
         Args:
             support_dir: Path to the support directory whose cache should be cleared
         """
-        pass
-
 
 class UniversalInferenceEngine:
     """Universal inference engine that delegates to backend-specific engines."""
-    
     def __init__(self, backend: InferenceBackend = InferenceBackend.PYTORCH):
         """Initialize the universal inference engine.
         
@@ -106,7 +100,7 @@ class UniversalInferenceEngine:
         """
         self.backend = backend
         self._engine = self._create_engine(backend)
-    
+
     def _create_engine(self, backend: InferenceBackend) -> InferenceEngine:
         """Create the appropriate backend engine.
         
@@ -116,49 +110,51 @@ class UniversalInferenceEngine:
         Returns:
             The backend-specific inference engine
         """
+        # pylint: disable=import-outside-toplevel
         if backend == InferenceBackend.PYTORCH:
             from .backends.pytorch_engine import PyTorchInferenceEngine
             return PyTorchInferenceEngine()
         elif backend == InferenceBackend.EXECUTORCH:
-            raise NotImplementedError("ExecuTorch backend not yet implemented")
+            from .backends.executorch_engine import ExecutorTorchInferenceEngine
+            return ExecutorTorchInferenceEngine()
         elif backend == InferenceBackend.ONNXRUNTIME:
             from .backends.onnxruntime_engine import ONNXRuntimeInferenceEngine
             return ONNXRuntimeInferenceEngine()
         else:
             raise ValueError(f"Unsupported backend: {backend}")
-    
+
     def load_model(self, model_path: str, options_path: str, device: str) -> Tuple[Any, List[int]]:
         """Load a model and its configuration."""
         return self._engine.load_model(model_path, options_path, device)
-    
+
     def get_transform(self) -> Any:
         """Get the image preprocessing transform pipeline."""
         return self._engine.get_transform()
-    
-    def compute_prototypes(self, model: Any, support_dir: str, transform: Any, 
-                          device: str, success_label: str = "success", 
+
+    def compute_prototypes(self, model: Any, support_dir: str, transform: Any,
+                          device: str, success_label: str = "success",
                           use_cache: bool = True) -> Tuple[Any, List[str], int]:
         """Compute class prototypes from support images."""
         return self._engine.compute_prototypes(
             model, support_dir, transform, device, success_label, use_cache
         )
-    
-    def predict_batch(self, model: Any, batch_tensors: Any, prototypes: Any, 
+
+    def predict_batch(self, model: Any, batch_tensors: Any, prototypes: Any,
                      defect_idx: int, sensitivity: float, device: str) -> List[int]:
         """Predict classes for a batch of image tensors."""
         return self._engine.predict_batch(
             model, batch_tensors, prototypes, defect_idx, sensitivity, device
         )
-    
+
     def setup_device(self, requested_device: str) -> str:
         """Set up the compute device based on availability and request."""
         return self._engine.setup_device(requested_device)
-    
+
     def clear_prototype_cache(self, support_dir: str) -> None:
         """Clear the prototype cache for a support directory."""
         self._engine.clear_prototype_cache(support_dir)
-    
-    def draw_label(self, frame: Any, label: str, color: Tuple[int, int, int], 
+
+    def draw_label(self, frame: Any, label: str, color: Tuple[int, int, int],
                    success_label: str = "success") -> Any:
         """Draw a detection label on an image frame.
         
@@ -173,7 +169,7 @@ class UniversalInferenceEngine:
         Returns:
             The frame with the label drawn on it
         """
-        import cv2
+        # pylint: disable=E1101
         text = "non-defective" if label == success_label else "defect"
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 2
@@ -185,15 +181,14 @@ class UniversalInferenceEngine:
             rect_start = (w - text_w - 40, h - text_h - 40)
             rect_end = (w - 20, h - 20)
             text_pos = (w - text_w - 30, h - 30)
-
             cv2.rectangle(frame, rect_start, rect_end, color, -1)
             cv2.putText(frame, text, text_pos, font, font_scale,
                         (255, 255, 255), thickness, cv2.LINE_AA)
         except Exception as e:
-            logging.error("Error drawing label: %s. Frame shape: %s, Label: %s", 
+            logging.error("Error drawing label: %s. Frame shape: %s, Label: %s",
                          e, frame.shape, label)
         return frame
-    
+
     def get_backend_info(self) -> Dict[str, Any]:
         """Get information about the current backend.
         
@@ -205,11 +200,10 @@ class UniversalInferenceEngine:
             "engine_class": self._engine.__class__.__name__,
             "available_devices": self._get_available_devices()
         }
-    
+
     def _get_available_devices(self) -> List[str]:
         """Get list of available devices for the current backend."""
         devices = ["cpu"]
-        
         if self.backend == InferenceBackend.PYTORCH:
             # pylint: disable=import-outside-toplevel
             import torch
@@ -226,4 +220,6 @@ class UniversalInferenceEngine:
                     devices.append("cuda")
             except ImportError:
                 pass
+        elif self.backend == InferenceBackend.EXECUTORCH:
+            devices = ["cpu"]
         return devices
