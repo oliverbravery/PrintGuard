@@ -60,41 +60,51 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
             logging.error("Failed to load ONNX model from %s: %s", model_path, e)
             raise
     
-    def compute_prototypes(self, model: Any, support_dir: str, transform: Any, 
-                          device: str, success_label: str = "success", 
-                          use_cache: bool = True) -> Tuple[Any, List[str], int]:
-        """Compute class prototypes from support images.
-
+    def _compute_prototype_from_embeddings(self, embeddings: Any) -> Any:
+        """Compute a single prototype from a set of embeddings.
+        
         Args:
-            model: The ONNX inference session
-            support_dir: Directory containing class subdirectories with support images
-            transform: Image preprocessing transform
-            device: Device to run computations on (for compatibility, not used in ONNX)
-            success_label: Label for the non-defective class
-            use_cache: Whether to use cached prototypes if available
-
+            embeddings: Embeddings array for a single class
+            
         Returns:
-            Tuple of (prototypes, class_names, defect_idx)
+            Prototype array for the class
         """
-        if use_cache:
-            prototypes, class_names, defect_idx = self._load_prototypes_from_cache(support_dir)
-            if prototypes is not None:
-                return prototypes, class_names, defect_idx
-        logging.debug("Computing prototypes from scratch for support directory: %s", support_dir)
-        support_dir_hash = self._get_support_dir_hash(support_dir)
-        cache_file = os.path.join(support_dir, 'cache', f"prototypes_{support_dir_hash}.pkl")
-        class_names, processed_images = self._process_support_images(support_dir, transform)
-        prototypes = []
-        for class_tensors in processed_images:
-            embeddings = self._compute_embeddings(model, class_tensors, device)
-            prototype = np.mean(embeddings, axis=0)
-            prototypes.append(prototype)
-        prototypes = np.array(prototypes)
-        logging.debug("Prototypes built for classes: %s", class_names)
-        defect_idx = self._determine_defect_idx(class_names, success_label)
-        if use_cache:
-            self._save_prototypes(prototypes, class_names, defect_idx, cache_file)
-        return prototypes, class_names, defect_idx
+        return np.mean(embeddings, axis=0)
+
+    def _stack_prototypes(self, prototypes: List[Any]) -> Any:
+        """Stack individual prototypes into a single structure.
+        
+        Args:
+            prototypes: List of individual prototype arrays
+            
+        Returns:
+            Stacked prototype array
+        """
+        return np.array(prototypes)
+
+    def _copy_predictions(self, predictions: Any) -> Any:
+        """Create a copy of predictions array."""
+        return predictions.copy()
+
+    def _get_prediction_at_index(self, predictions: Any, index: int) -> int:
+        """Get prediction at a specific index."""
+        return int(predictions[index])
+
+    def _get_min_distance_at_index(self, distances: Any, index: int) -> float:
+        """Get minimum distance for a specific sample."""
+        return float(np.min(distances[index]))
+
+    def _get_distance_to_class(self, distances: Any, sample_idx: int, class_idx: int) -> float:
+        """Get distance from sample to specific class."""
+        return float(distances[sample_idx, class_idx])
+
+    def _set_prediction_at_index(self, predictions: Any, index: int, value: int) -> None:
+        """Set prediction at a specific index."""
+        predictions[index] = value
+
+    def _is_empty_batch(self, batch_tensors: Any) -> bool:
+        """Check if batch is empty (ONNX Runtime-specific)."""
+        return len(batch_tensors) == 0
     
     def _compute_embeddings(self, model: Any, processed_images: List[Any], device: str) -> Any:
         """Compute embeddings for processed images using ONNX Runtime.
@@ -129,8 +139,7 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
         Returns:
             List of predicted class indices for each input
         """
-        if batch_tensors is None or len(batch_tensors) == 0:
-            logging.warning("Received empty or invalid batch for prediction.")
+        if not self._validate_batch_input(batch_tensors):
             return []
         if hasattr(batch_tensors, 'numpy'):
             batch_array = batch_tensors.numpy()
@@ -138,20 +147,16 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
             batch_array = np.array(batch_tensors)
         if len(batch_array.shape) == 3:
             batch_array = np.expand_dims(batch_array, axis=0)
-        predictions = []
+        embeddings = []
         for i in range(batch_array.shape[0]):
             input_array = batch_array[i:i+1]
             embedding = self._run_inference(model, input_array)
-            distances = np.linalg.norm(prototypes - embedding, axis=1)
-            initial_pred = np.argmin(distances)
-            min_dist = distances[initial_pred]
-            final_pred = initial_pred
-            if defect_idx >= 0 and initial_pred != defect_idx:
-                dist_to_defect = distances[defect_idx]
-                if dist_to_defect <= min_dist * sensitivity:
-                    final_pred = defect_idx
-            predictions.append(int(final_pred))
-        return predictions
+            embeddings.append(embedding)
+        embeddings = np.array(embeddings)
+        distances = np.linalg.norm(prototypes[:, np.newaxis, :] - embeddings[np.newaxis, :, :], axis=2).T
+        initial_preds = np.argmin(distances, axis=1)
+        final_preds = self._apply_sensitivity_adjustment(initial_preds, distances, defect_idx, sensitivity)
+        return [int(pred) for pred in final_preds]
     
     def setup_device(self, requested_device: str) -> str:
         """Set up the compute device based on availability and request.

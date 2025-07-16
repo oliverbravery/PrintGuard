@@ -18,7 +18,7 @@ except ImportError:
 
 class PyTorchInferenceEngine(BaseInferenceEngine):
     """PyTorch-based inference engine implementation."""
-    
+
     def load_model(self, model_path: str, options_path: str, device: str) -> Tuple[Any, List[int]]:
         """Load a PyTorch model and its configuration options.
 
@@ -37,42 +37,52 @@ class PyTorchInferenceEngine(BaseInferenceEngine):
             model_opt = json.load(f)
         x_dim = list(map(int, model_opt['model.x_dim'].split(',')))
         return model, x_dim
-    
-    def compute_prototypes(self, model: Any, support_dir: str, transform: Any, 
-                          device: str, success_label: str = "success", 
-                          use_cache: bool = True) -> Tuple[Any, List[str], int]:
-        """Compute class prototypes from support images.
 
+    def _compute_prototype_from_embeddings(self, embeddings: Any) -> Any:
+        """Compute a single prototype from a set of embeddings.
+        
         Args:
-            model: The encoder model to use
-            support_dir: Directory containing class subdirectories with support images
-            transform: Image preprocessing transform
-            device: Device to run computations on
-            success_label: Label for the non-defective class
-            use_cache: Whether to use cached prototypes if available
-
+            embeddings: Embeddings tensor for a single class
+            
         Returns:
-            Tuple of (prototypes, class_names, defect_idx)
+            Prototype tensor for the class
         """
-        if use_cache:
-            prototypes, class_names, defect_idx = self._load_prototypes_from_cache(support_dir, device)
-            if prototypes is not None:
-                return prototypes, class_names, defect_idx
-        logging.debug("Computing prototypes from scratch for support directory: %s", support_dir)
-        support_dir_hash = self._get_support_dir_hash(support_dir)
-        cache_file = os.path.join(support_dir, 'cache', f"prototypes_{support_dir_hash}.pkl")
-        class_names, processed_images = self._process_support_images(support_dir, transform)
-        prototypes = []
-        for class_tensors in processed_images:
-            embeddings = self._compute_embeddings(model, class_tensors, device)
-            prototype = embeddings.mean(0)
-            prototypes.append(prototype)
-        prototypes = torch.stack(prototypes)
-        logging.debug("Prototypes built for classes: %s", class_names)
-        defect_idx = self._determine_defect_idx(class_names, success_label)
-        if use_cache:
-            self._save_prototypes(prototypes, class_names, defect_idx, cache_file)
-        return prototypes, class_names, defect_idx
+        return embeddings.mean(0)
+
+    def _stack_prototypes(self, prototypes: List[Any]) -> Any:
+        """Stack individual prototypes into a single structure.
+        
+        Args:
+            prototypes: List of individual prototype tensors
+            
+        Returns:
+            Stacked prototype tensor
+        """
+        return torch.stack(prototypes)
+
+    def _copy_predictions(self, predictions: Any) -> Any:
+        """Create a copy of predictions tensor."""
+        return predictions.clone()
+
+    def _get_prediction_at_index(self, predictions: Any, index: int) -> int:
+        """Get prediction at a specific index."""
+        return int(predictions[index])
+
+    def _get_min_distance_at_index(self, distances: Any, index: int) -> float:
+        """Get minimum distance for a specific sample."""
+        return float(torch.min(distances[index]))
+
+    def _get_distance_to_class(self, distances: Any, sample_idx: int, class_idx: int) -> float:
+        """Get distance from sample to specific class."""
+        return float(distances[sample_idx, class_idx])
+
+    def _set_prediction_at_index(self, predictions: Any, index: int, value: int) -> None:
+        """Set prediction at a specific index."""
+        predictions[index] = value
+
+    def _is_empty_batch(self, batch_tensors: Any) -> bool:
+        """Check if batch is empty (PyTorch-specific)."""
+        return batch_tensors.shape[0] == 0
     
     def _compute_embeddings(self, model: Any, processed_images: List[Any], device: str) -> Any:
         """Compute embeddings for processed images using PyTorch.
@@ -106,8 +116,7 @@ class PyTorchInferenceEngine(BaseInferenceEngine):
         Returns:
             List of predicted class indices for each input
         """
-        if batch_tensors is None or batch_tensors.shape[0] == 0:
-            logging.warning("Received empty or invalid batch for prediction.")
+        if not self._validate_batch_input(batch_tensors):
             return []
         device_obj = torch.device(device)
         model.eval()
@@ -115,15 +124,10 @@ class PyTorchInferenceEngine(BaseInferenceEngine):
             batch_x = batch_tensors.to(device_obj)
             batch_emb = model.encoder(batch_x)
             distances = torch.cdist(batch_emb, prototypes)
-            min_dists, initial_preds = torch.min(distances, dim=1)
-            final_preds = initial_preds.clone()
-            for i in range(batch_emb.size(0)):
-                if initial_preds[i] != defect_idx:
-                    dist_to_defect = distances[i, defect_idx]
-                    if dist_to_defect <= min_dists[i] * sensitivity:
-                        final_preds[i] = defect_idx
+            _, initial_preds = torch.min(distances, dim=1)
+            final_preds = self._apply_sensitivity_adjustment(initial_preds, distances, defect_idx, sensitivity)
             return final_preds.cpu().tolist()
-    
+
     def setup_device(self, requested_device: str) -> str:
         """Set up the compute device based on availability and request.
 

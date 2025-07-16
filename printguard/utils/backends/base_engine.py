@@ -136,6 +136,137 @@ class BaseInferenceEngine(InferenceEngine, ABC):
             logging.warning("'%s' class not found in loaded support set %s. Cannot apply sensitivity adjustment.",
                            success_label, class_names)
         return defect_idx
+
+    def compute_prototypes(self, model: Any, support_dir: str, transform: Any, 
+                          device: str, success_label: str = "success", 
+                          use_cache: bool = True) -> Tuple[Any, List[str], int]:
+        """Compute class prototypes from support images.
+
+        Args:
+            model: The loaded model
+            support_dir: Directory containing class subdirectories with support images
+            transform: Image preprocessing transform
+            device: Device to run computations on
+            success_label: Label for the non-defective class
+            use_cache: Whether to use cached prototypes if available
+
+        Returns:
+            Tuple of (prototypes, class_names, defect_idx)
+        """
+        if use_cache:
+            prototypes, class_names, defect_idx = self._load_prototypes_from_cache(support_dir, device)
+            if prototypes is not None:
+                return prototypes, class_names, defect_idx
+        logging.debug("Computing prototypes from scratch for support directory: %s", support_dir)
+        support_dir_hash = self._get_support_dir_hash(support_dir)
+        cache_file = os.path.join(support_dir, 'cache', f"prototypes_{support_dir_hash}.pkl")
+        class_names, processed_images = self._process_support_images(support_dir, transform)
+        prototypes = []
+        for class_tensors in processed_images:
+            embeddings = self._compute_embeddings(model, class_tensors, device)
+            prototype = self._compute_prototype_from_embeddings(embeddings)
+            prototypes.append(prototype)
+        prototypes = self._stack_prototypes(prototypes)
+        logging.debug("Prototypes built for classes: %s", class_names)
+        defect_idx = self._determine_defect_idx(class_names, success_label)
+        if use_cache:
+            self._save_prototypes(prototypes, class_names, defect_idx, cache_file)
+        return prototypes, class_names, defect_idx
+
+    @abstractmethod
+    def _compute_prototype_from_embeddings(self, embeddings: Any) -> Any:
+        """Compute a single prototype from a set of embeddings.
+        
+        Args:
+            embeddings: Embeddings for a single class
+            
+        Returns:
+            Prototype representation for the class
+        """
+        pass
+
+    @abstractmethod
+    def _stack_prototypes(self, prototypes: List[Any]) -> Any:
+        """Stack individual prototypes into a single structure.
+        
+        Args:
+            prototypes: List of individual prototype representations
+            
+        Returns:
+            Stacked prototype structure
+        """
+        pass
+
+    def _apply_sensitivity_adjustment(self, initial_preds: Any, distances: Any, 
+                                    defect_idx: int, sensitivity: float) -> Any:
+        """Apply sensitivity adjustment to predictions.
+        
+        Args:
+            initial_preds: Initial predictions (class indices)
+            distances: Distance matrix between embeddings and prototypes
+            defect_idx: Index of the defect class
+            sensitivity: Sensitivity multiplier for defect detection
+            
+        Returns:
+            Adjusted predictions
+        """
+        if defect_idx < 0:
+            return initial_preds
+        final_preds = self._copy_predictions(initial_preds)
+        for i in range(len(initial_preds)):
+            if self._get_prediction_at_index(initial_preds, i) != defect_idx:
+                min_dist = self._get_min_distance_at_index(distances, i)
+                dist_to_defect = self._get_distance_to_class(distances, i, defect_idx)
+                if dist_to_defect <= min_dist * sensitivity:
+                    self._set_prediction_at_index(final_preds, i, defect_idx)
+        return final_preds
+
+    @abstractmethod
+    def _copy_predictions(self, predictions: Any) -> Any:
+        """Create a copy of predictions array."""
+        pass
+
+    @abstractmethod
+    def _get_prediction_at_index(self, predictions: Any, index: int) -> int:
+        """Get prediction at a specific index."""
+        pass
+
+    @abstractmethod
+    def _get_min_distance_at_index(self, distances: Any, index: int) -> float:
+        """Get minimum distance for a specific sample."""
+        pass
+
+    @abstractmethod
+    def _get_distance_to_class(self, distances: Any, sample_idx: int, class_idx: int) -> float:
+        """Get distance from sample to specific class."""
+        pass
+
+    @abstractmethod
+    def _set_prediction_at_index(self, predictions: Any, index: int, value: int) -> None:
+        """Set prediction at a specific index."""
+        pass
+
+    def _validate_batch_input(self, batch_tensors: Any) -> bool:
+        """Validate batch input for prediction.
+        
+        Args:
+            batch_tensors: Batch input to validate
+            
+        Returns:
+            True if valid, False otherwise
+        """
+        if batch_tensors is None:
+            logging.warning("Received None batch for prediction.")
+            return False
+        if self._is_empty_batch(batch_tensors):
+            logging.warning("Received empty batch for prediction.")
+            return False
+        return True
+
+    @abstractmethod
+    def _is_empty_batch(self, batch_tensors: Any) -> bool:
+        """Check if batch is empty (backend-specific)."""
+        pass
     
     @abstractmethod
     def _compute_embeddings(self, model: Any, processed_images: List[Any], device: str) -> Any:
