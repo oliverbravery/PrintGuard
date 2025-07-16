@@ -65,7 +65,14 @@ Updates to the configuration are managed through dedicated functions that handle
 
 PrintGuard employs a sophisticated inference process to detect printing failures in real-time, leveraging a custom-trained prototypical network with a ShuffleNetv2 backbone making it edge-friendly. This approach allows the model to learn from a small number of example images, making it highly adaptable to different printers, materials, and environments.
 
-The core of the inference system is a PyTorch-based model that analyses frames from the camera feed. At startup, the system computes class prototypes by processing a support set of images representing both successful and failed prints. These prototypes serve as idealised representations for each class. To boost performance, these computed prototypes are cached, eliminating the need for re-computation unless the support image set is modified.
+#### Inference Backends
+PrintGuard supports multiple inference backends to accommodate different deployment requirements and hardware configurations:
+
+- **PyTorch**: The original reference implementation providing full flexibility and compatibility. Best for development and systems where PyTorch is already installed.
+- **ONNX Runtime**: Optimized cross-platform inference with support for various hardware accelerators. Provides better performance on many systems while maintaining compatibility.
+- **ExecutorTorch**: PyTorch's optimized edge inference runtime designed for mobile and embedded devices. Offers superior performance and reduced memory footprint for edge deployments.
+
+The core of the inference system analyses frames from the camera feed. At startup, the system computes class prototypes by processing a support set of images representing both successful and failed prints. These prototypes serve as idealised representations for each class. To boost performance, these computed prototypes are cached, eliminating the need for re-computation unless the support image set is modified.
 
 During live detection, each frame from the camera undergoes a series of transformations: it is resized, converted to grayscale, and normalised before being passed to the model. The model then calculates the embedding for the frame and compares its Euclidean distance to the pre-computed class prototypes. The frame is classified based on the closest prototype.
 
