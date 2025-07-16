@@ -323,7 +323,7 @@ def reset_all():
     logging.debug("All saved keys, config, and SSL files have been reset")
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "model", "best_model.pt")
+MODEL_PATH = os.path.join(BASE_DIR, "model", "model.onnx")
 MODEL_OPTIONS_PATH = os.path.join(BASE_DIR, "model", "opt.json")
 PROTOTYPES_DIR = os.path.join(BASE_DIR, "model", "prototypes")
 
