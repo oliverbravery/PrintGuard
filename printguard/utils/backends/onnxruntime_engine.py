@@ -120,7 +120,7 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
         """
         embeddings = []
         for tensor in processed_images:
-            input_array = tensor.unsqueeze(0).numpy()
+            input_array = tensor.unsqueeze(0).cpu().numpy()
             embedding = self._run_inference(model, input_array)
             embeddings.append(embedding)
         return np.array(embeddings)
@@ -142,6 +142,8 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
         """
         if not self._validate_batch_input(batch_tensors):
             return []
+        if hasattr(batch_tensors, 'cpu'):
+            batch_tensors = batch_tensors.cpu()
         if hasattr(batch_tensors, 'numpy'):
             batch_array = batch_tensors.numpy()
         else:
