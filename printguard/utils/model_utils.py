@@ -1,38 +1,10 @@
 import asyncio
-import io
 from typing import Any
 import logging
-import torch
 from PIL import Image
 from fastapi import HTTPException, UploadFile
 
-from .inference_lib import predict_batch
 from .config import SENSITIVITY
-
-async def _process_image(file: UploadFile, transform: Any, device: torch.device) -> torch.Tensor:
-    """Process an uploaded image file into a model-ready tensor.
-
-    Args:
-        file (UploadFile): The uploaded image file.
-        transform (Any): Image preprocessing transform pipeline.
-        device (torch.device): Device to place the tensor on.
-
-    Returns:
-        torch.Tensor: Preprocessed image tensor ready for model inference.
-
-    Raises:
-        HTTPException: If the image cannot be processed or is invalid.
-    """
-    try:
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
-        tensor = transform(image).to(device)
-        return tensor
-    except Exception as e:
-        logging.error("Error processing image %s: %s", file.filename, e)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Error processing image {file.filename}. Invalid image format or data.") from e
 
 async def _run_inference(model: torch.nn.Module,
                          batch_tensor: torch.Tensor,
