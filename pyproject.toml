@@ -30,7 +30,8 @@ dependencies = [
     "ngrok==1.4.0",
     "cryptography==45.0.5",
     "numpy==2.2.6",
-    "onnxruntime==1.22.1"
+    "onnxruntime==1.22.1",
+    "executorch==0.6.0"
 ]
 
 [project.scripts]
