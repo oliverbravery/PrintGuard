@@ -46,13 +46,14 @@ def acquire_lock():
     Ensures exclusive access to the config file by acquiring a threading lock
     and a file-based lock at `LOCK_FILE`.
     """
+    # pylint: disable=global-statement
     global _file_lock
     _config_lock.acquire()
     _file_lock = open(LOCK_FILE, 'w')
     try:
         fcntl.flock(_file_lock, fcntl.LOCK_EX)
     except IOError as e:
-        logging.warning(f"Failed to acquire file lock: {e}")
+        logging.warning("Failed to acquire file lock: %s", e)
 
 
 def release_lock():
@@ -60,6 +61,7 @@ def release_lock():
 
     Releases both the file-based lock and the threading lock.
     """
+    # pylint: disable=global-statement
     global _file_lock
     if _file_lock:
         fcntl.flock(_file_lock, fcntl.LOCK_UN)
@@ -71,7 +73,7 @@ def _get_config_nolock():
     """Load configuration from disk without acquiring any locks.
 
     Returns:
-        dict or None: The JSON-loaded configuration, or None if the file doesn't exist or fails to load.
+        dict or None: The JSON-loaded configuration, or None if file doesn't exist or load fails.
     """
     if os.path.exists(CONFIG_FILE):
         try:
@@ -130,8 +132,9 @@ def init_config():
                 else:
                     config_version = existing_config.get(SavedConfig.VERSION)
                     if config_version != CONFIG_VERSION:
-                        logging.info("Config version mismatch (config: %s, expected: %s), recreating config",
-                                   config_version, CONFIG_VERSION)
+                        logging.info(
+                            "Config version mismatch (config: %s, expected: %s), recreating config",
+                            config_version, CONFIG_VERSION)
                         config_needs_reset = True
             except Exception as e:
                 logging.warning("Error reading config file: %s, recreating", e)
