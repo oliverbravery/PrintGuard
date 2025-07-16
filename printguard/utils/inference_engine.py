@@ -218,6 +218,8 @@ class UniversalInferenceEngine:
                 available_providers = ort.get_available_providers()
                 if 'CUDAExecutionProvider' in available_providers:
                     devices.append("cuda")
+                if 'CoreMLExecutionProvider' in available_providers:
+                    devices.append("mps")
             except ImportError:
                 pass
         elif self.backend == InferenceBackend.EXECUTORCH:

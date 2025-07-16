@@ -20,7 +20,8 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
     def __init__(self):
         """Initialize the ONNX Runtime engine."""
         if ort is None:
-            raise ImportError("ONNX Runtime is not available. Install with: pip install onnxruntime")
+            raise ImportError(
+                "ONNX Runtime is not available. Install with: pip install onnxruntime")
         self._session = None
         self._input_name = None
         self._output_name = None
@@ -53,13 +54,13 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
             self._input_name = self._session.get_inputs()[0].name
             self._output_name = self._session.get_outputs()[0].name
             self._input_shape = self._session.get_inputs()[0].shape
-            logging.info("ONNX model loaded successfully. Input: %s, Output: %s, Shape: %s", 
+            logging.info("ONNX model loaded successfully. Input: %s, Output: %s, Shape: %s",
                         self._input_name, self._output_name, self._input_shape)
             return self._session, x_dim
         except Exception as e:
             logging.error("Failed to load ONNX model from %s: %s", model_path, e)
             raise
-    
+
     def _compute_prototype_from_embeddings(self, embeddings: Any) -> Any:
         """Compute a single prototype from a set of embeddings.
         
@@ -105,7 +106,7 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
     def _is_empty_batch(self, batch_tensors: Any) -> bool:
         """Check if batch is empty (ONNX Runtime-specific)."""
         return len(batch_tensors) == 0
-    
+
     def _compute_embeddings(self, model: Any, processed_images: List[Any], device: str) -> Any:
         """Compute embeddings for processed images using ONNX Runtime.
         
@@ -123,7 +124,7 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
             embedding = self._run_inference(model, input_array)
             embeddings.append(embedding)
         return np.array(embeddings)
-    
+
     def predict_batch(self, model: Any, batch_tensors: Any, prototypes: Any, 
                      defect_idx: int, sensitivity: float, device: str) -> List[int]:
         """Predict classes for a batch of image tensors using prototype matching.
@@ -153,39 +154,46 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
             embedding = self._run_inference(model, input_array)
             embeddings.append(embedding)
         embeddings = np.array(embeddings)
-        distances = np.linalg.norm(prototypes[:, np.newaxis, :] - embeddings[np.newaxis, :, :], axis=2).T
+        distances = np.linalg.norm(
+            prototypes[:, np.newaxis, :] - embeddings[np.newaxis, :, :], axis=2).T
         initial_preds = np.argmin(distances, axis=1)
-        final_preds = self._apply_sensitivity_adjustment(initial_preds, distances, defect_idx, sensitivity)
+        final_preds = self._apply_sensitivity_adjustment(initial_preds,
+                                                         distances,
+                                                         defect_idx,
+                                                         sensitivity)
         return [int(pred) for pred in final_preds]
-    
+
     def setup_device(self, requested_device: str) -> str:
         """Set up the compute device based on availability and request.
 
         Args:
-            requested_device: Requested device ('cuda', 'cpu', etc.)
+            requested_device: Requested device ('cuda', 'cpu', 'mps', etc.)
 
         Returns:
             The actual device string to use
         """
         available_providers = ort.get_available_providers()
-        
         if requested_device == 'cuda' and 'CUDAExecutionProvider' in available_providers:
             device = 'cuda'
+        elif requested_device == 'mps' and 'CoreMLExecutionProvider' in available_providers:
+            device = 'mps'
         elif requested_device == 'cpu' or 'CPUExecutionProvider' in available_providers:
             device = 'cpu'
         else:
             device = 'cpu'
             if requested_device != 'cpu':
-                logging.warning("%s requested but not available. Available providers: %s. Falling back to CPU.", 
-                               requested_device, available_providers)
+                logging.warning(
+                    "%s requested but not available. Available providers: %s. Falling back to CPU.",
+                    requested_device,
+                    available_providers)
         logging.debug("Using device: %s", device)
         return device
-    
+
     def _get_execution_providers(self, device: str) -> List[str]:
         """Get the appropriate execution providers for the requested device.
 
         Args:
-            device: The requested device ('cpu', 'cuda', etc.)
+            device: The requested device ('cpu', 'cuda', 'mps', etc.)
 
         Returns:
             List of execution providers in priority order
@@ -194,13 +202,15 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
         providers = []
         if device == 'cuda' and 'CUDAExecutionProvider' in available_providers:
             providers.append('CUDAExecutionProvider')
+        elif device == 'mps' and 'CoreMLExecutionProvider' in available_providers:
+            providers.append('CoreMLExecutionProvider')
         if 'CPUExecutionProvider' in available_providers:
             providers.append('CPUExecutionProvider')
         if not providers:
             raise RuntimeError("No compatible execution providers available")
         logging.debug("Using execution providers: %s", providers)
         return providers
-    
+
     def _run_inference(self, session: Any, input_array: np.ndarray) -> np.ndarray:
         """Run inference on the ONNX model.
 
@@ -217,7 +227,7 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
         except Exception as e:
             logging.error("Error during ONNX inference: %s", e)
             raise
-    
+
     def _save_prototypes(self, prototypes: np.ndarray, class_names: List[str], 
                         defect_idx: int, cache_file: str) -> None:
         """Save computed prototypes to a cache file.
@@ -241,8 +251,11 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
             logging.debug("Prototypes saved to cache: %s", cache_file)
         except (OSError, pickle.PickleError) as e:
             logging.warning("Failed to save prototypes to cache: %s", e)
-    
-    def _load_prototypes(self, cache_file: str, device: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[List[str]], int]:
+
+    def _load_prototypes(self, cache_file: str,
+                         device: Optional[str] = None) -> Tuple[Optional[np.ndarray],
+                                                                Optional[List[str]],
+                                                                int]:
         """Load prototypes from a cache file.
 
         Args:
@@ -265,7 +278,7 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
         except (OSError, pickle.PickleError, KeyError) as e:
             logging.warning("Failed to load prototypes from cache: %s", e)
             return None, None, -1
-    
+
     def get_model_info(self) -> Dict[str, Any]:
         """Get information about the loaded ONNX model.
 
@@ -284,8 +297,12 @@ class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
                 "model_version": model_metadata.version,
                 "producer_name": model_metadata.producer_name,
                 "domain": model_metadata.domain,
-                "inputs": [{"name": inp.name, "shape": inp.shape, "type": inp.type} for inp in inputs],
-                "outputs": [{"name": out.name, "shape": out.shape, "type": out.type} for out in outputs],
+                "inputs": [{"name": inp.name,
+                            "shape": inp.shape,
+                            "type": inp.type} for inp in inputs],
+                "outputs": [{"name": out.name,
+                             "shape": out.shape,
+                             "type": out.type} for out in outputs],
                 "providers": providers
             }
         except Exception as e:
