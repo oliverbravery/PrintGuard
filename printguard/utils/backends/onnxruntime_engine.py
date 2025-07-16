@@ -1,0 +1,287 @@
+import json
+import logging
+import os
+import pickle
+from typing import Any, List, Tuple, Dict, Optional
+
+import numpy as np
+
+from .base_engine import BaseInferenceEngine
+
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
+    logging.warning("ONNX Runtime not available. Install with: pip install onnxruntime")
+
+
+class ONNXRuntimeInferenceEngine(BaseInferenceEngine):
+    """ONNX Runtime-based inference engine implementation."""
+    def __init__(self):
+        """Initialize the ONNX Runtime engine."""
+        if ort is None:
+            raise ImportError("ONNX Runtime is not available. Install with: pip install onnxruntime")
+        self._session = None
+        self._input_name = None
+        self._output_name = None
+        self._input_shape = None
+        
+    def load_model(self, model_path: str, options_path: str, device: str) -> Tuple[Any, List[int]]:
+        """Load an ONNX model and its configuration options.
+
+        Args:
+            model_path: Path to the ONNX model file (.onnx)
+            options_path: Path to the JSON options file
+            device: Device to run inference on ('cpu', 'cuda', etc.)
+
+        Returns:
+            Tuple of (inference_session, input_dimensions)
+        """
+        with open(options_path, 'r', encoding='utf-8') as f:
+            model_opt = json.load(f)
+        x_dim = list(map(int, model_opt['model.x_dim'].split(',')))
+        providers = self._get_execution_providers(device)
+        session_options = ort.SessionOptions()
+        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        session_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
+        try:
+            self._session = ort.InferenceSession(
+                model_path,
+                sess_options=session_options,
+                providers=providers
+            )
+            self._input_name = self._session.get_inputs()[0].name
+            self._output_name = self._session.get_outputs()[0].name
+            self._input_shape = self._session.get_inputs()[0].shape
+            logging.info("ONNX model loaded successfully. Input: %s, Output: %s, Shape: %s", 
+                        self._input_name, self._output_name, self._input_shape)
+            return self._session, x_dim
+        except Exception as e:
+            logging.error("Failed to load ONNX model from %s: %s", model_path, e)
+            raise
+    
+    def compute_prototypes(self, model: Any, support_dir: str, transform: Any, 
+                          device: str, success_label: str = "success", 
+                          use_cache: bool = True) -> Tuple[Any, List[str], int]:
+        """Compute class prototypes from support images.
+
+        Args:
+            model: The ONNX inference session
+            support_dir: Directory containing class subdirectories with support images
+            transform: Image preprocessing transform
+            device: Device to run computations on (for compatibility, not used in ONNX)
+            success_label: Label for the non-defective class
+            use_cache: Whether to use cached prototypes if available
+
+        Returns:
+            Tuple of (prototypes, class_names, defect_idx)
+        """
+        if use_cache:
+            prototypes, class_names, defect_idx = self._load_prototypes_from_cache(support_dir)
+            if prototypes is not None:
+                return prototypes, class_names, defect_idx
+        logging.debug("Computing prototypes from scratch for support directory: %s", support_dir)
+        support_dir_hash = self._get_support_dir_hash(support_dir)
+        cache_file = os.path.join(support_dir, 'cache', f"prototypes_{support_dir_hash}.pkl")
+        class_names, processed_images = self._process_support_images(support_dir, transform)
+        prototypes = []
+        for class_tensors in processed_images:
+            embeddings = self._compute_embeddings(model, class_tensors, device)
+            prototype = np.mean(embeddings, axis=0)
+            prototypes.append(prototype)
+        prototypes = np.array(prototypes)
+        logging.debug("Prototypes built for classes: %s", class_names)
+        defect_idx = self._determine_defect_idx(class_names, success_label)
+        if use_cache:
+            self._save_prototypes(prototypes, class_names, defect_idx, cache_file)
+        return prototypes, class_names, defect_idx
+    
+    def _compute_embeddings(self, model: Any, processed_images: List[Any], device: str) -> Any:
+        """Compute embeddings for processed images using ONNX Runtime.
+        
+        Args:
+            model: The ONNX inference session
+            processed_images: List of processed image tensors
+            device: Device to run computations on (for compatibility, not used in ONNX)
+            
+        Returns:
+            Computed embeddings array
+        """
+        embeddings = []
+        for tensor in processed_images:
+            input_array = tensor.unsqueeze(0).numpy()
+            embedding = self._run_inference(model, input_array)
+            embeddings.append(embedding)
+        return np.array(embeddings)
+    
+    def predict_batch(self, model: Any, batch_tensors: Any, prototypes: Any, 
+                     defect_idx: int, sensitivity: float, device: str) -> List[int]:
+        """Predict classes for a batch of image tensors using prototype matching.
+
+        Args:
+            model: The ONNX inference session
+            batch_tensors: Batch of preprocessed image tensors (torch.Tensor or numpy.ndarray)
+            prototypes: Class prototype arrays
+            defect_idx: Index of the defect class for sensitivity adjustment
+            sensitivity: Sensitivity multiplier for defect detection
+            device: Device to run computations on (for compatibility, not used in ONNX)
+
+        Returns:
+            List of predicted class indices for each input
+        """
+        if batch_tensors is None or len(batch_tensors) == 0:
+            logging.warning("Received empty or invalid batch for prediction.")
+            return []
+        if hasattr(batch_tensors, 'numpy'):
+            batch_array = batch_tensors.numpy()
+        else:
+            batch_array = np.array(batch_tensors)
+        if len(batch_array.shape) == 3:
+            batch_array = np.expand_dims(batch_array, axis=0)
+        predictions = []
+        for i in range(batch_array.shape[0]):
+            input_array = batch_array[i:i+1]
+            embedding = self._run_inference(model, input_array)
+            distances = np.linalg.norm(prototypes - embedding, axis=1)
+            initial_pred = np.argmin(distances)
+            min_dist = distances[initial_pred]
+            final_pred = initial_pred
+            if defect_idx >= 0 and initial_pred != defect_idx:
+                dist_to_defect = distances[defect_idx]
+                if dist_to_defect <= min_dist * sensitivity:
+                    final_pred = defect_idx
+            predictions.append(int(final_pred))
+        return predictions
+    
+    def setup_device(self, requested_device: str) -> str:
+        """Set up the compute device based on availability and request.
+
+        Args:
+            requested_device: Requested device ('cuda', 'cpu', etc.)
+
+        Returns:
+            The actual device string to use
+        """
+        available_providers = ort.get_available_providers()
+        
+        if requested_device == 'cuda' and 'CUDAExecutionProvider' in available_providers:
+            device = 'cuda'
+        elif requested_device == 'cpu' or 'CPUExecutionProvider' in available_providers:
+            device = 'cpu'
+        else:
+            device = 'cpu'
+            if requested_device != 'cpu':
+                logging.warning("%s requested but not available. Available providers: %s. Falling back to CPU.", 
+                               requested_device, available_providers)
+        logging.debug("Using device: %s", device)
+        return device
+    
+    def _get_execution_providers(self, device: str) -> List[str]:
+        """Get the appropriate execution providers for the requested device.
+
+        Args:
+            device: The requested device ('cpu', 'cuda', etc.)
+
+        Returns:
+            List of execution providers in priority order
+        """
+        available_providers = ort.get_available_providers()
+        providers = []
+        if device == 'cuda' and 'CUDAExecutionProvider' in available_providers:
+            providers.append('CUDAExecutionProvider')
+        if 'CPUExecutionProvider' in available_providers:
+            providers.append('CPUExecutionProvider')
+        if not providers:
+            raise RuntimeError("No compatible execution providers available")
+        logging.debug("Using execution providers: %s", providers)
+        return providers
+    
+    def _run_inference(self, session: Any, input_array: np.ndarray) -> np.ndarray:
+        """Run inference on the ONNX model.
+
+        Args:
+            session: The ONNX inference session
+            input_array: Input array for inference
+
+        Returns:
+            The output embedding/features
+        """
+        try:
+            outputs = session.run([self._output_name], {self._input_name: input_array})
+            return outputs[0].flatten()
+        except Exception as e:
+            logging.error("Error during ONNX inference: %s", e)
+            raise
+    
+    def _save_prototypes(self, prototypes: np.ndarray, class_names: List[str], 
+                        defect_idx: int, cache_file: str) -> None:
+        """Save computed prototypes to a cache file.
+
+        Args:
+            prototypes: The computed prototype arrays
+            class_names: List of class names
+            defect_idx: Index of the defect class
+            cache_file: Path to save the cache file
+        """
+        try:
+            cache_dir = os.path.dirname(cache_file)
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_data = {
+                'prototypes': prototypes,
+                'class_names': class_names,
+                'defect_idx': defect_idx
+            }
+            with open(cache_file, 'wb') as f:
+                pickle.dump(cache_data, f)
+            logging.debug("Prototypes saved to cache: %s", cache_file)
+        except (OSError, pickle.PickleError) as e:
+            logging.warning("Failed to save prototypes to cache: %s", e)
+    
+    def _load_prototypes(self, cache_file: str, device: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[List[str]], int]:
+        """Load prototypes from a cache file.
+
+        Args:
+            cache_file: Path to the cache file
+            device: Device to load tensors onto (for compatibility, not used in ONNX)
+
+        Returns:
+            Tuple of (prototypes, class_names, defect_idx) or (None, None, -1) if loading fails
+        """
+        try:
+            if not os.path.exists(cache_file):
+                return None, None, -1
+            with open(cache_file, 'rb') as f:
+                cache_data = pickle.load(f)
+            prototypes = cache_data['prototypes']
+            class_names = cache_data['class_names']
+            defect_idx = cache_data['defect_idx']
+            logging.debug("Prototypes loaded from cache: %s", cache_file)
+            return prototypes, class_names, defect_idx
+        except (OSError, pickle.PickleError, KeyError) as e:
+            logging.warning("Failed to load prototypes from cache: %s", e)
+            return None, None, -1
+    
+    def get_model_info(self) -> Dict[str, Any]:
+        """Get information about the loaded ONNX model.
+
+        Returns:
+            Dictionary containing model metadata
+        """
+        if self._session is None:
+            return {"status": "No model loaded"}
+        try:
+            model_metadata = self._session.get_modelmeta()
+            inputs = self._session.get_inputs()
+            outputs = self._session.get_outputs()
+            providers = self._session.get_providers()
+            return {
+                "status": "Model loaded",
+                "model_version": model_metadata.version,
+                "producer_name": model_metadata.producer_name,
+                "domain": model_metadata.domain,
+                "inputs": [{"name": inp.name, "shape": inp.shape, "type": inp.type} for inp in inputs],
+                "outputs": [{"name": out.name, "shape": out.shape, "type": out.type} for out in outputs],
+                "providers": providers
+            }
+        except Exception as e:
+            return {"status": "Error getting model info", "error": str(e)}
