@@ -19,8 +19,8 @@ from .routes.index_routes import router as index_router
 from .routes.camera_routes import router as camera_router
 from .routes.printer_routes import router as printer_router
 from .utils.config import (get_ssl_private_key_temporary_path,
-                           SSL_CERT_FILE, PROTOTYPES_DIR,
-                           MODEL_PATH, MODEL_OPTIONS_PATH,
+                           SSL_CERT_FILE, get_prototypes_dir,
+                           get_model_path, get_model_options_path,
                            DEVICE_TYPE, SUCCESS_LABEL,
                            get_config, update_config, init_config)
 from .utils.inference_lib import get_inference_engine
@@ -46,15 +46,15 @@ async def lifespan(app_instance: FastAPI):
     logging.debug("Using device: %s", app_instance.state.device)
     try:
         logging.debug("Loading model...")
-        app_instance.state.model, _ = inference_engine.load_model(MODEL_PATH,
-                                                MODEL_OPTIONS_PATH,
+        app_instance.state.model, _ = inference_engine.load_model(get_model_path(),
+                                                get_model_options_path(),
                                                 app_instance.state.device)
         app_instance.state.transform = inference_engine.get_transform()
         logging.debug("Model loaded successfully.")
         logging.debug("Building prototypes...")
         try:
             prototypes, class_names, defect_idx = inference_engine.compute_prototypes(
-                app_instance.state.model, PROTOTYPES_DIR, app_instance.state.transform,
+                app_instance.state.model, get_prototypes_dir(), app_instance.state.transform,
                 app_instance.state.device, SUCCESS_LABEL
             )
             app_instance.state.prototypes = prototypes
@@ -170,7 +170,9 @@ def run():
         case SiteStartupMode.TUNNEL:
             match tunnel_provider:
                 case TunnelProvider.NGROK:
-                    logging.warning("Starting in tunnel mode with ngrok. Available at %s", site_domain)
+                    logging.warning(
+                        "Starting in tunnel mode with ngrok. Available at %s",
+                        site_domain)
                     tunnel_setup = setup_ngrok_tunnel(close=False)
                     if not tunnel_setup:
                         logging.error("Failed to establish ngrok tunnel. Starting in SETUP mode.")

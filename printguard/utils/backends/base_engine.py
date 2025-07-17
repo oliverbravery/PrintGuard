@@ -13,7 +13,7 @@ from ..inference_engine import InferenceEngine
 
 class BaseInferenceEngine(InferenceEngine, ABC):
     """Base class for inference engines with common functionality."""
-    
+
     def get_transform(self) -> Any:
         """Create the standard image preprocessing transform pipeline.
 
@@ -27,7 +27,7 @@ class BaseInferenceEngine(InferenceEngine, ABC):
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-    
+
     def clear_prototype_cache(self, support_dir: str) -> None:
         """Clear the prototype cache for a support directory.
 
@@ -43,7 +43,7 @@ class BaseInferenceEngine(InferenceEngine, ABC):
                 logging.error("Failed to clear prototype cache: %s", e)
         else:
             logging.debug("No cache directory found for support directory: %s", support_dir)
-    
+
     def _get_support_dir_hash(self, support_dir: str) -> str:
         """Generate a hash of the support directory contents for caching.
 
@@ -63,8 +63,10 @@ class BaseInferenceEngine(InferenceEngine, ABC):
                     file_paths.append(f"{file_path}:{stat.st_size}:{stat.st_mtime}")
         content = '\n'.join(file_paths)
         return hashlib.md5(content.encode()).hexdigest()
-    
-    def _process_support_images(self, support_dir: str, transform: Any) -> Tuple[List[str], List[List[Any]]]:
+
+    def _process_support_images(self,
+                                support_dir: str,
+                                transform: Any) -> Tuple[List[str], List[List[Any]]]:
         """Process support images from directory structure.
         
         Args:
@@ -83,7 +85,7 @@ class BaseInferenceEngine(InferenceEngine, ABC):
         loaded_class_names = []
         for cls in class_names:
             cls_dir = os.path.join(support_dir, cls)
-            imgs = [os.path.join(cls_dir, f) for f in os.listdir(cls_dir) 
+            imgs = [os.path.join(cls_dir, f) for f in os.listdir(cls_dir)
                    if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
             if not imgs:
                 logging.warning("No images found for class '%s' in %s", cls, cls_dir)
@@ -96,14 +98,16 @@ class BaseInferenceEngine(InferenceEngine, ABC):
                 except Exception as e:
                     logging.error("Error processing support image %s: %s", img_path, e)
             if not processed_tensors:
-                logging.warning("Could not load any valid images for class '%s'. Skipping this class.", cls)
+                logging.warning(
+                    "Could not load any valid images for class '%s'. Skipping this class.",
+                    cls)
                 continue
             processed_images.append(processed_tensors)
             loaded_class_names.append(cls)
         if not processed_images:
             raise ValueError("Failed to process any support images from the support set.")
         return loaded_class_names, processed_images
-    
+
     def _determine_defect_idx(self, class_names: List[str], success_label: str = "success") -> int:
         """Determine the defect class index based on class names.
         
@@ -117,24 +121,29 @@ class BaseInferenceEngine(InferenceEngine, ABC):
         defect_idx = -1
         if success_label in class_names:
             try:
-                defect_candidates = [i for i, name in enumerate(class_names) 
+                defect_candidates = [i for i, name in enumerate(class_names)
                                    if name != success_label]
                 if len(defect_candidates) == 1:
                     defect_idx = defect_candidates[0]
                     logging.debug("Identified '%s' as the defect class (index %d).",
                                  class_names[defect_idx], defect_idx)
                 elif len(defect_candidates) > 1:
-                    logging.warning("Multiple non-'%s' classes found: %s. Sensitivity adjustment requires exactly one defect class. Adjustment disabled.",
-                                   success_label, [class_names[i] for i in defect_candidates])
+                    logging.warning(
+                        "Multiple non-'%s' classes found: %s. Sensitivity adjustment requires exactly one defect class. Adjustment disabled.",
+                        success_label,
+                        [class_names[i] for i in defect_candidates])
                 else:
-                    logging.warning("Only found the '%s' class. Cannot apply sensitivity adjustment.",
-                                   success_label)
+                    logging.warning(
+                        "Only found the '%s' class. Cannot apply sensitivity adjustment.",
+                        success_label)
             except IndexError:
-                logging.warning("Could not identify a distinct defect class, though '%s' was present. Sensitivity adjustment disabled.",
-                               success_label)
+                logging.warning(
+                    "Could not identify a distinct defect class, though '%s' was present. Sensitivity adjustment disabled.",
+                    success_label)
         else:
-            logging.warning("'%s' class not found in loaded support set %s. Cannot apply sensitivity adjustment.",
-                           success_label, class_names)
+            logging.warning(
+                "'%s' class not found in loaded support set %s. Cannot apply sensitivity adjustment.",
+                success_label, class_names)
         return defect_idx
 
     def compute_prototypes(self, model: Any, support_dir: str, transform: Any, 
@@ -154,7 +163,9 @@ class BaseInferenceEngine(InferenceEngine, ABC):
             Tuple of (prototypes, class_names, defect_idx)
         """
         if use_cache:
-            prototypes, class_names, defect_idx = self._load_prototypes_from_cache(support_dir, device)
+            prototypes, class_names, defect_idx = self._load_prototypes_from_cache(
+                support_dir,
+                device)
             if prototypes is not None:
                 return prototypes, class_names, defect_idx
         logging.debug("Computing prototypes from scratch for support directory: %s", support_dir)
@@ -183,7 +194,6 @@ class BaseInferenceEngine(InferenceEngine, ABC):
         Returns:
             Prototype representation for the class
         """
-        pass
 
     @abstractmethod
     def _stack_prototypes(self, prototypes: List[Any]) -> Any:
@@ -195,9 +205,8 @@ class BaseInferenceEngine(InferenceEngine, ABC):
         Returns:
             Stacked prototype structure
         """
-        pass
 
-    def _apply_sensitivity_adjustment(self, initial_preds: Any, distances: Any, 
+    def _apply_sensitivity_adjustment(self, initial_preds: Any, distances: Any,
                                     defect_idx: int, sensitivity: float) -> Any:
         """Apply sensitivity adjustment to predictions.
         
@@ -224,27 +233,22 @@ class BaseInferenceEngine(InferenceEngine, ABC):
     @abstractmethod
     def _copy_predictions(self, predictions: Any) -> Any:
         """Create a copy of predictions array."""
-        pass
 
     @abstractmethod
     def _get_prediction_at_index(self, predictions: Any, index: int) -> int:
         """Get prediction at a specific index."""
-        pass
 
     @abstractmethod
     def _get_min_distance_at_index(self, distances: Any, index: int) -> float:
         """Get minimum distance for a specific sample."""
-        pass
 
     @abstractmethod
     def _get_distance_to_class(self, distances: Any, sample_idx: int, class_idx: int) -> float:
         """Get distance from sample to specific class."""
-        pass
 
     @abstractmethod
     def _set_prediction_at_index(self, predictions: Any, index: int, value: int) -> None:
         """Set prediction at a specific index."""
-        pass
 
     def _validate_batch_input(self, batch_tensors: Any) -> bool:
         """Validate batch input for prediction.
@@ -266,8 +270,7 @@ class BaseInferenceEngine(InferenceEngine, ABC):
     @abstractmethod
     def _is_empty_batch(self, batch_tensors: Any) -> bool:
         """Check if batch is empty (backend-specific)."""
-        pass
-    
+
     @abstractmethod
     def _compute_embeddings(self, model: Any, processed_images: List[Any], device: str) -> Any:
         """Compute embeddings for processed images (backend-specific).
@@ -280,10 +283,9 @@ class BaseInferenceEngine(InferenceEngine, ABC):
         Returns:
             Computed embeddings
         """
-        pass
-    
+
     @abstractmethod
-    def _save_prototypes(self, prototypes: Any, class_names: List[str], 
+    def _save_prototypes(self, prototypes: Any, class_names: List[str],
                         defect_idx: int, cache_file: str) -> None:
         """Save computed prototypes to a cache file (backend-specific).
         
@@ -293,10 +295,11 @@ class BaseInferenceEngine(InferenceEngine, ABC):
             defect_idx: Index of the defect class
             cache_file: Path to save the cache file
         """
-        pass
-    
+
     @abstractmethod
-    def _load_prototypes(self, cache_file: str, device: Optional[str] = None) -> Tuple[Any, List[str], int]:
+    def _load_prototypes(self,
+                         cache_file: str,
+                         device: Optional[str] = None) -> Tuple[Any, List[str], int]:
         """Load prototypes from a cache file (backend-specific).
         
         Args:
@@ -306,9 +309,10 @@ class BaseInferenceEngine(InferenceEngine, ABC):
         Returns:
             Tuple of (prototypes, class_names, defect_idx) or (None, None, -1) if loading fails
         """
-        pass
-    
-    def _load_prototypes_from_cache(self, support_dir: str, device: Optional[str] = None) -> Tuple[Any, List[str], int]:
+
+    def _load_prototypes_from_cache(self,
+                                    support_dir: str,
+                                    device: Optional[str] = None) -> Tuple[Any, List[str], int]:
         """Try to load prototypes from cache.
         
         Args:
@@ -321,6 +325,19 @@ class BaseInferenceEngine(InferenceEngine, ABC):
         cache_dir = os.path.join(support_dir, 'cache')
         if not os.path.exists(cache_dir):
             return None, None, -1
+        downloaded_prototypes_file = os.path.join(cache_dir, "prototypes.pkl")
+        if os.path.exists(downloaded_prototypes_file):
+            logging.debug(
+                "Attempting to load prototypes from downloaded file: %s",
+                downloaded_prototypes_file)
+            prototypes, class_names, defect_idx = self._load_prototypes(
+                downloaded_prototypes_file,
+                device)
+            if prototypes is not None:
+                logging.debug(
+                    "Successfully loaded prototypes from downloaded file: %s",
+                    downloaded_prototypes_file)
+                return prototypes, class_names, defect_idx
         for filename in os.listdir(cache_dir):
             if filename.startswith("prototypes_") and filename.endswith(".pkl"):
                 cache_file = os.path.join(cache_dir, filename)
@@ -329,5 +346,4 @@ class BaseInferenceEngine(InferenceEngine, ABC):
                 if prototypes is not None:
                     logging.debug("Successfully loaded prototypes from cache: %s", cache_file)
                     return prototypes, class_names, defect_idx
-        
         return None, None, -1

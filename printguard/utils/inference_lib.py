@@ -26,9 +26,17 @@ def _detect_backend() -> InferenceBackend:
 
 def get_inference_engine() -> UniversalInferenceEngine:
     """Get or create the global inference engine instance."""
+    # pylint: disable=import-outside-toplevel
+    from .model_downloader import ensure_model_files
+    # pylint: disable=global-statement
     global _inference_engine
     if _inference_engine is None:
         backend = _detect_backend()
+        try:
+            if not ensure_model_files(backend):
+                logging.warning("Failed to download model files for %s backend", backend.value)
+        except ImportError:
+            logging.warning("Model downloader not available, assuming models are present")
         _inference_engine = UniversalInferenceEngine(backend)
-        logging.info(f"Created inference engine with {backend.value} backend")
+        logging.info("Created inference engine with %s backend", backend.value)
     return _inference_engine
