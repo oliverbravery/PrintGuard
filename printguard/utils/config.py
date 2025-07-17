@@ -14,6 +14,7 @@ import keyring.errors
 import torch
 from platformdirs import user_data_dir
 
+from .model_downloader import get_model_downloader
 from ..models import AlertAction, SavedKey, SavedConfig
 
 # Config version - increment this when the config structure changes
@@ -326,9 +327,27 @@ def reset_all():
     logging.debug("All saved keys, config, and SSL files have been reset")
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "model", "model.onnx")
-MODEL_OPTIONS_PATH = os.path.join(BASE_DIR, "model", "opt.json")
-PROTOTYPES_DIR = os.path.join(BASE_DIR, "model", "prototypes")
+
+def get_model_path() -> str:
+    """Get the model path for the detected backend."""
+    try:
+        return get_model_downloader().get_model_path()
+    except ImportError:
+        return os.path.join(BASE_DIR, "model", "model.onnx")
+
+def get_model_options_path() -> str:
+    """Get the model options path."""
+    try:
+        return get_model_downloader().get_options_path()
+    except ImportError:
+        return os.path.join(BASE_DIR, "model", "opt.json")
+
+def get_prototypes_dir() -> str:
+    """Get the prototypes directory path."""
+    try:
+        return get_model_downloader().get_prototypes_path()
+    except ImportError:
+        return os.path.join(BASE_DIR, "model", "prototypes")
 
 SUCCESS_LABEL = "success"
 DEVICE_TYPE = "cuda" if (torch.cuda.is_available()) else (
