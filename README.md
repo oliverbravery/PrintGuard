@@ -9,7 +9,7 @@ PrintGuard offers local, **real-time print failure detection** for **3D printing
 ## Features
 - **Web Interface**: A user-friendly web interface to monitor print jobs and camera feeds.
 - **Live Print Failure Detection**: Uses a custom computer vision model to detect print failures in real-time on edge devices.
-- **Multiple Inference Backends**: Supports PyTorch, ONNX Runtime, and ExecutorTorch for optimized performance across different deployment scenarios.
+- **Multiple Inference Backends**: Supports PyTorch & ONNX Runtime for optimized performance across different deployment scenarios.
 - **Notifications**: Sends notifications subscribable on desktop and mobile devices via web push notifications to notify of detected print failures.
 - **Camera Integration**: Supports multiple camera feeds and simultaneous failure detection.
 - **Printer Integration**: Integrates with printers through services like Octoprint, allowing users to link cameras to specific printers for automatic print termination or suspension when a failure is detected.

@@ -70,7 +70,6 @@ PrintGuard supports multiple inference backends to accommodate different deploym
 
 - **PyTorch**: The original reference implementation providing full flexibility and compatibility. Best for development and systems where PyTorch is already installed.
 - **ONNX Runtime**: Optimized cross-platform inference with support for various hardware accelerators. Provides better performance on many systems while maintaining compatibility.
-- **ExecutorTorch**: PyTorch's optimized edge inference runtime designed for mobile and embedded devices. Offers superior performance and reduced memory footprint for edge deployments.
 
 The core of the inference system analyses frames from the camera feed. At startup, the system computes class prototypes by processing a support set of images representing both successful and failed prints. These prototypes serve as idealised representations for each class. To boost performance, these computed prototypes are cached, eliminating the need for re-computation unless the support image set is modified.
 

@@ -14,13 +14,6 @@ except ImportError:
 
 def _detect_backend() -> InferenceBackend:
     """Detect the best available backend based on installed packages.""" 
-    # Check for ExecuTorch first (primary backend)
-    try:
-        import executorch
-        logging.info("ExecuTorch detected, using ExecuTorch backend")
-        return InferenceBackend.EXECUTORCH
-    except ImportError:
-        pass
     # Check for ONNX Runtime (optimized backend)
     try:
         import onnxruntime

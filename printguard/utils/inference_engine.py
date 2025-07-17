@@ -8,7 +8,6 @@ import cv2
 class InferenceBackend(Enum):
     """Supported inference backends."""
     PYTORCH = "pytorch"
-    EXECUTORCH = "executorch"
     ONNXRUNTIME = "onnxruntime"
 
 
@@ -114,9 +113,6 @@ class UniversalInferenceEngine:
         if backend == InferenceBackend.PYTORCH:
             from .backends.pytorch_engine import PyTorchInferenceEngine
             return PyTorchInferenceEngine()
-        elif backend == InferenceBackend.EXECUTORCH:
-            from .backends.executorch_engine import ExecutorTorchInferenceEngine
-            return ExecutorTorchInferenceEngine()
         elif backend == InferenceBackend.ONNXRUNTIME:
             from .backends.onnxruntime_engine import ONNXRuntimeInferenceEngine
             return ONNXRuntimeInferenceEngine()
@@ -222,6 +218,4 @@ class UniversalInferenceEngine:
                     devices.append("mps")
             except ImportError:
                 pass
-        elif self.backend == InferenceBackend.EXECUTORCH:
-            devices = ["cpu"]
         return devices
