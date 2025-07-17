@@ -228,24 +228,6 @@
 ---
 
 ## Detection Endpoints
-
-### POST /detect
-**Description:** Perform batch or streaming defect detection on uploaded images.
-**Request (multipart/form-data):**
-- `files`: array of image files to analyze
-- `stream`: boolean query parameter (default `false`)
-**Response:**
-- If `stream=false`:
-```json
-[
-  { "filename": "string", "result": "string" },
-]
-```
-- If `stream=true`: NDJSON stream of events:
-```json
-{ "filename": "string", "result": "string" }
-```
-
 ### POST /detect/live/start
 **Description:** Start live detection on a camera feed.
 **Request Body:**
