@@ -9,12 +9,11 @@ import torch
 from .base_engine import BaseInferenceEngine
 
 try:
-    import printguard.protonets as _pn
+    from . import protonets as _pn
     import sys
     sys.modules['protonets'] = _pn
 except ImportError:
     pass
-
 
 class PyTorchInferenceEngine(BaseInferenceEngine):
     """PyTorch-based inference engine implementation."""

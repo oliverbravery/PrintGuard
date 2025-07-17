@@ -14,7 +14,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 try:
-    import printguard.protonets as _pn
+    import printguard.utils.backends.protonets as _pn
     sys.modules['protonets'] = _pn
 except ImportError:
     pass

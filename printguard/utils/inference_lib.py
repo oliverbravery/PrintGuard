@@ -1,16 +1,8 @@
 import logging
 from typing import Optional
 from .inference_engine import UniversalInferenceEngine, InferenceBackend
-import sys
 
 _inference_engine: Optional[UniversalInferenceEngine] = None
-
-try:
-    import printguard.protonets as _pn
-    sys.modules['protonets'] = _pn
-except ImportError:
-    pass
-
 
 def _detect_backend() -> InferenceBackend:
     """Detect the best available backend based on installed packages.""" 

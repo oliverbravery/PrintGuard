@@ -43,7 +43,7 @@ line-length = 88
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["printguard", "printguard.*", "protonets", "protonets.*"]
+include = ["printguard", "printguard.*"]
 
 [tool.setuptools.package-data]
 "printguard" = [
