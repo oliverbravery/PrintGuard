@@ -9,11 +9,11 @@ from .config import PRINTER_STAT_POLLING_RATE_MS, get_config
 from .printer_services.octoprint import OctoPrintClient
 from .sse_utils import add_polling_task, sse_update_printer_state
 
-def get_printer_config(camera_index):
+def get_printer_config(camera_uuid):
     """Retrieve printer configuration from camera state.
 
     Args:
-        camera_index (int): The index of the camera.
+        camera_uuid (str): The UUID of the camera.
 
     Returns:
         dict or None: The printer_config dictionary if set, otherwise None.
@@ -25,51 +25,51 @@ def get_printer_config(camera_index):
                 'name': str
             }
     """
-    camera_state = get_camera_state_sync(camera_index)
+    camera_state = get_camera_state_sync(camera_uuid)
     if camera_state and hasattr(camera_state, 'printer_config') and camera_state.printer_config:
         return camera_state.printer_config
     return None
 
-def get_printer_id(camera_index):
+def get_printer_id(camera_uuid):
     """Retrieve the printer ID associated with a camera.
 
     Args:
-        camera_index (int): The index of the camera.
+        camera_uuid (str): The UUID of the camera.
 
     Returns:
         str or None: The printer_id if set, otherwise None.
     """
-    camera_state = get_camera_state_sync(camera_index)
+    camera_state = get_camera_state_sync(camera_uuid)
     if camera_state and hasattr(camera_state, 'printer_id') and camera_state.printer_id:
         return camera_state.printer_id
     return None
 
-async def set_printer(camera_index, printer_id, printer_config):
+async def set_printer(camera_uuid, printer_id, printer_config):
     """Associate a printer with a camera and persist in state.
 
     Args:
-        camera_index (int): The index of the camera.
+        camera_uuid (str): The UUID of the camera.
         printer_id (str): The unique identifier for the printer.
         printer_config (dict): The configuration details for the printer.
 
     Returns:
         Optional[CameraState]: The updated camera state, or None if failed.
     """
-    return await update_camera_state(camera_index, {
+    return await update_camera_state(camera_uuid, {
         "printer_id": printer_id,
         "printer_config": printer_config
     })
 
-async def remove_printer(camera_index):
+async def remove_printer(camera_uuid):
     """Remove the printer association from a camera.
 
     Args:
-        camera_index (int): The index of the camera.
+        camera_uuid (str): The UUID of the camera.
 
     Returns:
         Optional[CameraState]: The updated camera state, or None if failed.
     """
-    return await update_camera_state(camera_index, {
+    return await update_camera_state(camera_uuid, {
         "printer_id": None,
         "printer_config": None
     })
@@ -93,16 +93,16 @@ async def poll_printer_state_func(client, interval, stop_event):
             logging.error("Unexpected error polling printer state: %s", str(e))
         await asyncio.sleep(interval)
 
-async def start_printer_state_polling(camera_index):
+async def start_printer_state_polling(camera_uuid):
     """Start background polling of printer state for a camera.
 
     Args:
-        camera_index (int): The index of the camera to poll.
+        camera_uuid (str): The UUID of the camera to poll.
     """
     stop_event = asyncio.Event()
-    camera_printer_config = get_printer_config(camera_index)
+    camera_printer_config = get_printer_config(camera_uuid)
     if not camera_printer_config:
-        logging.warning("No printer configuration found for camera index %d", camera_index)
+        logging.warning("No printer configuration found for camera UUID %s", camera_uuid)
         return
     config = get_config()
     printer_polling_rate = float(config.get(
@@ -113,20 +113,20 @@ async def start_printer_state_polling(camera_index):
         camera_printer_config.get('api_key')
     )
     task = asyncio.create_task(poll_printer_state_func(client, printer_polling_rate, stop_event))
-    add_polling_task(camera_index, PollingTask(task=task, stop_event=stop_event))
-    logging.debug("Started printer state polling for camera index %d", camera_index)
+    add_polling_task(camera_uuid, PollingTask(task=task, stop_event=stop_event))
+    logging.debug("Started printer state polling for camera UUID %s", camera_uuid)
 
-def suspend_print_job(camera_index, action: AlertAction):
+def suspend_print_job(camera_uuid, action: AlertAction):
     """Pause or cancel an ongoing print job based on an alert action.
 
     Args:
-        camera_index (int): The index of the camera associated with the printer.
+        camera_uuid (str): The UUID of the camera associated with the printer.
         action (AlertAction): The action to perform (CANCEL_PRINT or PAUSE_PRINT).
 
     Returns:
         bool: True if the job was suspended successfully or no job was active, False otherwise.
     """
-    printer_config = get_printer_config(camera_index)
+    printer_config = get_printer_config(camera_uuid)
     if printer_config:
         if printer_config['printer_type'] == 'octoprint':
             client = OctoPrintClient(
@@ -140,21 +140,21 @@ def suspend_print_job(camera_index, action: AlertAction):
                 match action:
                     case AlertAction.CANCEL_PRINT:
                         client.cancel_job()
-                        logging.debug("Print cancelled for printer %s on camera %d",
-                                        printer_config['name'], camera_index)
+                        logging.debug("Print cancelled for printer %s on camera %s",
+                                        printer_config['name'], camera_uuid)
                         return True
                     case AlertAction.PAUSE_PRINT:
                         client.pause_job()
-                        logging.debug("Print paused for printer %s on camera %d",
-                                        printer_config['name'], camera_index)
+                        logging.debug("Print paused for printer %s on camera %s",
+                                        printer_config['name'], camera_uuid)
                         return True
                     case _:
-                        logging.debug("No action taken for printer %s on camera %d as %s",
-                                        printer_config['name'], camera_index, action)
+                        logging.debug("No action taken for printer %s on camera %s as %s",
+                                        printer_config['name'], camera_uuid, action)
                         return True
             except Exception as e:
-                logging.error("Error suspending print job for printer %s on camera %d: %s",
-                                printer_config['name'], camera_index, e)
+                logging.error("Error suspending print job for printer %s on camera %s: %s",
+                                printer_config['name'], camera_uuid, e)
                 return False
-    logging.error("No printer configuration found for camera index %d", camera_index)
+    logging.error("No printer configuration found for camera UUID %s", camera_uuid)
     return False

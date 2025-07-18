@@ -25,16 +25,21 @@
                 <span class="live-indicator"></span>
             </div>
         </div>
-        <div class="grid-item">
+        <div class="grid-item" id="video-feed-container">
             <img id="videoPreview" src="" alt="Live Video Feed Preview" />
+            <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+                <div class="loading-spinner"></div>
+                <p>Loading camera feed...</p>
+            </div>
         </div>
         <div class="grid-item" id="camera-list-container">
             <ul id="cameraList" name="camera">
-                {% for camera_id in camera_states %}
-                    <li class="camera-item">
+                {% for camera_id, camera_state in camera_states.items() %}
+                    <li class="camera-item" data-camera-id="{{ camera_id }}">
+                        <button class="remove-camera-btn" title="Remove camera">×</button>
                         <div class="camera-text-content">
                             <div class="camera-header">
-                                <span>Camera ID: {{ camera_id }}</span>
+                                <span>{{ camera_state.nickname }}</span>
                                 <span class="camera-status"></span>
                             </div>
                             <span class="camera-prediction">-</span>
@@ -43,16 +48,16 @@
                         <img src="{{ url_for('static', path='images/default_icon.png') }}" alt="Camera Icon" class="camera-video-preview" id="cameraPreview">
                     </li>
                 {% endfor %}
-                {% if not camera_states %}
-                <li class="camera-item">
-                    <div class="camera-text-content">
-                        <span>No cameras available</span>
-                        <span>Check connection or settings</span>
-                    </div>
-                    <img src="{{ url_for('static', path='images/default_icon.png') }}" alt="Icon" class="camera-video-preview">
-                </li>
-                {% endif %}
             </ul>
+            {% if not camera_states %}
+            <div id="noCamerasMessage" class="no-cameras-container">
+                <div class="no-cameras-content">
+                    <h3>No cameras configured</h3>
+                    <p>Get started by adding your first camera</p>
+                    <button id="addFirstCameraBtn" class="start-stop-btn">Add Camera</button>
+                </div>
+            </div>
+            {% endif %}
         </div>
         <div class="grid-item">
             <div class="camera-display-section">
@@ -76,7 +81,7 @@
             </div>
             <div class="settings-section" style="display: none;">
                 <form action="{{ url_for('update_settings') }}" method="post" class="settings-form settings-grid">
-                    <input type="hidden" id="camera_index" name="camera_index"  value="{{ camera_index }}">
+                    <input type="hidden" id="camera_uuid" name="camera_uuid"  value="">
                     <div class="settings-item">
                         <label for="sensitivity">Sensitivity: <span id="sensitivity_val"></span></label>
                         <input type="range" id="sensitivity" name="sensitivity" min="0" max="2" step="0.05"  value="-" />
@@ -129,6 +134,9 @@
                     </div>
                     <div class="settings-item">
                         <button class="start-stop-btn" id="configureSetupBtn">Configure Setup</button>
+                    </div>
+                    <div class="settings-item">
+                        <button class="start-stop-btn" id="addCameraBtn">Add Camera</button>
                     </div>
                 </form>
             </div>
@@ -239,6 +247,66 @@
                         <button type="submit" id="modalLinkPrinterSubmit" class="start-stop-btn primary">Link Printer</button>
                     </form>
                 </div>
+            </div>
+        </div>
+    </div>
+    <div class="setup-modal-overlay" id="addCameraModalOverlay" style="display:none;">
+        <div class="setup-modal">
+            <div class="setup-modal-header">
+                <h2 class="setup-modal-title">Add Camera</h2>
+                <button class="setup-modal-close" id="addCameraModalClose">×</button>
+            </div>
+            <div class="setup-modal-content">
+                <div id="cameraTypeSelection" class="button-group" style="display: flex; justify-content: center; gap: 10px;">
+                    <button id="addSerialCameraButton" class="start-stop-btn">Setup Serial (USB) Camera</button>
+                    <button id="addRtspCameraButton" class="start-stop-btn">Setup RTSP Camera</button>
+                </div>
+                <form id="addCameraForm" style="display:none;">
+                    <div class="form-group">
+                        <label for="cameraNickname">Camera Nickname</label>
+                        <input type="text" id="cameraNickname" name="nickname" required />
+                    </div>
+                    <div id="serialCameraSetup" style="display:none;">
+                        <div class="form-group">
+                            <label for="serialDevice">Serial Device</label>
+                            <div id="serialLoading" style="display: none;">
+                                <div class="loader"></div>
+                                <span>Loading devices...</span>
+                            </div>
+                            <select id="serialDevice" name="source" class="settings-dropdown" required style="display: none;">
+                            </select>
+                            <p id="noSerialDeviceMessage" style="display: none;">No serial devices available.</p>
+                        </div>
+                    </div>
+                    <div id="rtspCameraSetup" style="display:none;">
+                        <div class="form-group">
+                            <label for="rtspUrl">RTSP Stream URL</label>
+                            <input type="url" id="rtspUrl" name="source" placeholder="rtsp://0.0.0.0:554/stream" required />
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="enablePreview" style="margin-right: 10px;">
+                            Show camera preview
+                        </label>
+                    </div>
+                    <div id="cameraPreviewContainer" style="display: none;">
+                        <div class="form-group">
+                            <label>Camera Preview</label>
+                            <div id="cameraPreviewWrapper" style="position: relative; width: 100%; max-width: 400px; margin: 0 auto;">
+                                <img id="cameraPreviewImage" src="" alt="Camera Preview" style="width: 100%; height: auto; border: 2px dotted var(--text-primary); display: none;">
+                                <div id="cameraPreviewLoading" style="display: none; text-align: center; padding: 20px; border: 2px dotted var(--text-primary); background: var(--background-tertiary);">
+                                    <div class="loading-spinner" style="margin: 0 auto 10px;"></div>
+                                    <p>Loading camera preview...</p>
+                                </div>
+                                <div id="cameraPreviewError" style="display: none; text-align: center; padding: 20px; border: 2px dotted var(--color-danger); background: var(--error-bg); color: var(--color-danger);">
+                                    <p>Unable to load camera preview</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="start-stop-btn primary">Add Camera</button>
+                </form>
             </div>
         </div>
     </div>

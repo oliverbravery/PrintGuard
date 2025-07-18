@@ -1,0 +1,13 @@
+.venv
+__pycache__
+success
+failure
+build
+*.egg-info
+!.github
+/models
+*.pte
+model/
+data/
+.vscode/
+.DS_Store

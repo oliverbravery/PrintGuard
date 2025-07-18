@@ -10,7 +10,7 @@ class Alert(BaseModel):
     message: str
     timestamp: float
     countdown_time: float
-    camera_index: int
+    camera_uuid: str
     has_printer: bool = False
     countdown_action: str = "dismiss"
 
@@ -112,18 +112,20 @@ class PrinterType(str, Enum):
 class PrinterConfig(BaseModel):
     name: str
     printer_type: PrinterType
-    camera_index: int
+    camera_uuid: str
     base_url: str
     api_key: str
 
 class PrinterConfigRequest(BaseModel):
     name: str
     printer_type: PrinterType
-    camera_index: int
+    camera_uuid: str
     base_url: str
     api_key: str
 
 class CameraState(BaseModel):
+    nickname: str
+    source: str
     lock: asyncio.Lock = Field(default_factory=asyncio.Lock, exclude=True)
     current_alert_id: Optional[str] = None
     detection_history: List[tuple] = []
@@ -210,6 +212,7 @@ class SavedKey(str, Enum):
     TUNNEL_TOKEN = "tunnel_token"
 
 class SavedConfig(str, Enum):
+    VERSION = "version"
     VAPID_SUBJECT = "vapid_subject"
     VAPID_PUBLIC_KEY = "vapid_public_key"
     STARTUP_MODE = "startup_mode"

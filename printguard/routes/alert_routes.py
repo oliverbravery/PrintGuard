@@ -22,15 +22,15 @@ async def alert_response(request: Request,
         dict: Response containing the result of the action or error message.
     """
     alert = get_alert(alert_id)
-    camera_index = alert.camera_index if alert else None
-    if not alert or camera_index is None:
+    camera_uuid = alert.camera_uuid if alert else None
+    if not alert or camera_uuid is None:
         return {"message": f"Alert {alert_id} not found."}
     response = None
     match action:
         case AlertAction.DISMISS:
             response = await dismiss_alert(alert_id)
         case AlertAction.CANCEL_PRINT | AlertAction.PAUSE_PRINT:
-            suspend_print_job(camera_index, action)
+            suspend_print_job(camera_uuid, action)
             return await dismiss_alert(alert_id)
     if not response:
         response = {"message": f"Alert {alert_id} not found."}
