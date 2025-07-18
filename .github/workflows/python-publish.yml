@@ -11,6 +11,7 @@ name: Upload Python Package
 on:
   release:
     types: [published]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -40,6 +41,7 @@ jobs:
 
   pypi-publish:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'release' }}
     needs:
       - release-build
     permissions:

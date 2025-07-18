@@ -6,9 +6,12 @@ name: Docker
 # documentation.
 
 on:
+  push:
+    branches: [main]
   release:
     types: [ published ]
   workflow_dispatch:
+  pull_request:
 
 env:
   # Use docker.io for Docker Hub if empty
