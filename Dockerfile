@@ -1,33 +1,28 @@
-# Dockerfile for PrintGuard
+# syntax=docker/dockerfile:1.4
+FROM --platform=$BUILDPLATFORM python:3.11-slim-bookworm AS base
 
-# ---- Builder Stage ----
-FROM python:3.13-slim AS builder
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential python3-dev libffi-dev \
+      libjpeg-dev zlib1g-dev libtiff-dev \
+      libfreetype6-dev libwebp-dev libopenjp2-7-dev \
+      libgomp1 \
+      ffmpeg libgl1 \
+ && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /printguard
+COPY . /printguard
 
-RUN pip install --upgrade pip setuptools wheel
+RUN pip install --upgrade pip \
+ && pip install .
 
-COPY pyproject.toml .
-COPY printguard/ printguard/
+FROM --platform=$TARGETPLATFORM python:3.11-slim-bookworm AS runtime
 
-RUN pip install --no-cache-dir .
+COPY --from=base /usr/local /usr/local
 
-# ---- Final Stage ----
-FROM python:3.13-slim
-
-WORKDIR /app
-
-RUN useradd --create-home --shell /bin/bash appuser
-RUN mkdir -p /data && chown appuser:appuser /data
-USER appuser
-
-VOLUME /data
-
-COPY --from=builder /usr/local/lib/python3.13/site-packages/ /usr/local/lib/python3.13/site-packages/
-COPY --from=builder /usr/local/bin/printguard /usr/local/bin/printguard
-
-COPY --chown=appuser:appuser printguard/model/ /app/printguard/model/
+WORKDIR /printguard
+COPY --from=base /printguard /printguard
 
 EXPOSE 8000
-
-CMD ["printguard"]
+VOLUME ["/data"]
+ENTRYPOINT ["printguard"]
