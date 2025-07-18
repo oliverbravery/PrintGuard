@@ -19,14 +19,12 @@ from .routes.index_routes import router as index_router
 from .routes.camera_routes import router as camera_router
 from .routes.printer_routes import router as printer_router
 from .utils.config import (get_ssl_private_key_temporary_path,
-                           SSL_CERT_FILE, PROTOTYPES_DIR,
-                           MODEL_PATH, MODEL_OPTIONS_PATH,
+                           SSL_CERT_FILE, get_prototypes_dir,
+                           get_model_path, get_model_options_path,
                            DEVICE_TYPE, SUCCESS_LABEL,
                            get_config, update_config, init_config)
-from .utils.inference_lib import (compute_prototypes, load_model,
-                                  make_transform, setup_device)
+from .utils.inference_lib import get_inference_engine
 from .utils.cloudflare_utils import (start_cloudflare_tunnel, stop_cloudflare_tunnel)
-from .utils.camera_utils import setup_camera_indices
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
@@ -38,24 +36,25 @@ async def lifespan(app_instance: FastAPI):
     # pylint: disable=C0415
     from .utils.setup_utils import startup_mode_requirements_met
     startup_mode = startup_mode_requirements_met()
+    inference_engine = get_inference_engine()
     if startup_mode is SiteStartupMode.SETUP:
         logging.warning("Starting in setup mode. Detection model and device will not be initialized.")
         yield
         return
     logging.debug("Setting up device...")
-    app_instance.state.device = setup_device(DEVICE_TYPE)
+    app_instance.state.device = inference_engine.setup_device(DEVICE_TYPE)
     logging.debug("Using device: %s", app_instance.state.device)
     try:
         logging.debug("Loading model...")
-        app_instance.state.model, _ = load_model(MODEL_PATH,
-                                                MODEL_OPTIONS_PATH,
+        app_instance.state.model, _ = inference_engine.load_model(get_model_path(),
+                                                get_model_options_path(),
                                                 app_instance.state.device)
-        app_instance.state.transform = make_transform()
+        app_instance.state.transform = inference_engine.get_transform()
         logging.debug("Model loaded successfully.")
         logging.debug("Building prototypes...")
         try:
-            prototypes, class_names, defect_idx = compute_prototypes(
-                app_instance.state.model, PROTOTYPES_DIR, app_instance.state.transform,
+            prototypes, class_names, defect_idx = inference_engine.compute_prototypes(
+                app_instance.state.model, get_prototypes_dir(), app_instance.state.transform,
                 app_instance.state.device, SUCCESS_LABEL
             )
             app_instance.state.prototypes = prototypes
@@ -70,14 +69,20 @@ async def lifespan(app_instance: FastAPI):
         logging.error("Error during startup: %s", e)
         app_instance.state.model = None
         raise
-    logging.debug("Setting up camera indices...")
-    await setup_camera_indices()
     logging.debug("Camera indices set up successfully.")
     yield
+    logging.debug("Cleaning up resources on shutdown...")
+    try:
+        from .utils.camera_state_manager import get_camera_state_manager
+        manager = get_camera_state_manager()
+        await manager.cleanup_all_resources()
+        logging.debug("Cleaned up camera resources successfully.")
+    except Exception as e:
+        logging.error("Error during cleanup: %s", e)
 
 app = FastAPI(
-    title="Standalone Web Push Notification API",
-    description="API to register subscriptions and send web push notifications, including scheduled recurring notifications.",
+    title="PrintGuard",
+    description="Real-time Defect Detection on Edge-devices",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -165,7 +170,9 @@ def run():
         case SiteStartupMode.TUNNEL:
             match tunnel_provider:
                 case TunnelProvider.NGROK:
-                    logging.warning("Starting in tunnel mode with ngrok. Available at %s", site_domain)
+                    logging.warning(
+                        "Starting in tunnel mode with ngrok. Available at %s",
+                        site_domain)
                     tunnel_setup = setup_ngrok_tunnel(close=False)
                     if not tunnel_setup:
                         logging.error("Failed to establish ngrok tunnel. Starting in SETUP mode.")

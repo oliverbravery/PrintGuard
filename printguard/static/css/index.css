@@ -87,10 +87,11 @@ body, html {
     box-sizing: border-box;
     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
     cursor: pointer;
+    position: relative;
 }
 
 .camera-item:hover {
-    transform: translateY(-2px);
+    background-color: var(--background-tertiary);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
@@ -103,11 +104,39 @@ body, html {
     background-color: rgba(59, 130, 246, 0.1);
 }
 
+.camera-item .remove-camera-btn {
+    background-color: #ff4d4d;
+    color: white;
+    border: none;
+    width: 5%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-weight: bold;
+    position: absolute;
+    top: 0;
+    right: 0;
+    opacity: 0;
+    transition: opacity 0.1s ease-in-out;
+    border-radius: 0;
+}
+
+.camera-item:hover .remove-camera-btn {
+    opacity: 1;
+}
+
 .camera-text-content {
     display: flex;
     flex-direction: column;
     justify-content: center;
     margin-right: var(--spacing-sm);
+    transition: margin-right 0.1s ease-in-out;
+}
+
+.camera-item:hover .camera-text-content {
+    margin-right: 5%;
 }
 
 .camera-text-content span {
@@ -123,6 +152,43 @@ body, html {
     height: 40px;
     object-fit: contain;
     flex-shrink: 0;
+    margin-right: 5%;
+}
+
+.no-cameras-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+    text-align: center;
+    padding: var(--spacing-lg);
+    box-sizing: border-box;
+}
+
+.no-cameras-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.no-cameras-content h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-bold);
+}
+
+.no-cameras-content p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-base);
+}
+
+.no-cameras-content .start-stop-btn {
+    margin-top: var(--spacing-sm);
 }
 
 .camera-display-section, .settings-section {
@@ -202,7 +268,7 @@ body, html {
 }
 
 .info-item:hover {
-    transform: translateY(-2px);
+    background-color: var(--background-tertiary);
     box-shadow: var(--shadow-medium);
 }
 
@@ -230,7 +296,7 @@ body, html {
 }
 
 .settings-item:hover {
-    transform: translateY(-2px);
+    background-color: var(--background-tertiary);
     box-shadow: var(--shadow-medium);
 }
 
@@ -240,17 +306,73 @@ body, html {
     width: 100%;
     height: 25px;
     border: 2px dotted var(--text-primary);
-    background-color: var(--color-white);
+    background-color: var(--color-white) !important;
     color: var(--text-primary);
     font-family: var(--font-family);
     cursor: pointer;
     border-radius: 0;
     margin: 10px 0;
     padding: 0 var(--spacing-sm);
+    padding-right: 30px;
     box-sizing: border-box;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e") !important;
     background-repeat: no-repeat;
     background-position: right .7em top 50%;
     background-size: .65em auto;
+}
+
+.form-group .settings-dropdown {
+    background: var(--color-white) url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e") no-repeat right .7em top 50% !important;
+    background-size: .65em auto !important;
+    padding: 2px var(--spacing-sm) !important;
+    padding-right: 30px !important;
+    height: 25px !important;
+    border: 2px dotted var(--text-primary) !important;
+    color: var(--text-primary) !important;
+    font-family: var(--font-family) !important;
+    font-size: 14px !important;
+    font-weight: normal !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    margin: 10px 0 !important;
+    display: block !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    text-align: left !important;
+    line-height: 21px !important;
+}
+
+.form-group select#serialDevice.settings-dropdown {
+    background: var(--color-white) url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e") no-repeat right .7em top 50% !important;
+    background-size: .65em auto !important;
+    padding: 2px var(--spacing-sm) !important;
+    padding-right: 30px !important;
+    height: 25px !important;
+    border: 2px dotted var(--text-primary) !important;
+    color: var(--text-primary) !important;
+    font-family: var(--font-family) !important;
+    font-size: 14px !important;
+    font-weight: normal !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    text-align: left !important;
+    line-height: 21px !important;
+    display: block !important;
+}
+
+.form-group .settings-dropdown option {
+    background: var(--color-white);
+    color: var(--text-primary);
+    padding: var(--spacing-xs);
+}
+
+.form-group .settings-dropdown option:disabled {
+    color: var(--text-primary) !important;
+    font-style: italic;
+    opacity: 0.8 !important;
+    background: var(--color-white) !important;
 }
 
 .camera-prediction-time {
@@ -1016,4 +1138,78 @@ input[type="range"]::-moz-range-thumb {
 .no-printer-info p {
     margin: 0 0 var(--spacing-sm) 0;
     font-size: var(--font-size-xs);
+}
+
+#video-feed-container {
+    position: relative;
+}
+
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    color: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+    border-radius: var(--radius-medium);
+}
+
+.loading-spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid var(--text-primary);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+#cameraPreviewContainer {
+    margin: var(--spacing-lg) 0;
+}
+
+#cameraPreviewWrapper {
+    border-radius: var(--radius-medium);
+    overflow: hidden;
+}
+
+#cameraPreviewImage {
+    border-radius: var(--radius-medium);
+    max-height: 300px;
+    object-fit: contain;
+}
+
+#cameraPreviewLoading {
+    border-radius: var(--radius-medium);
+    min-height: 100px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+#cameraPreviewError {
+    border-radius: var(--radius-medium);
+    min-height: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#enablePreview {
+    margin-right: var(--spacing-sm) !important;
+    width: auto !important;
+    height: auto !important;
+    padding: 0 !important;
+    display: inline-block !important;
 }

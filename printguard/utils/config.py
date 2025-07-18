@@ -14,7 +14,11 @@ import keyring.errors
 import torch
 from platformdirs import user_data_dir
 
+from .model_downloader import get_model_downloader
 from ..models import AlertAction, SavedKey, SavedConfig
+
+# Config version - increment this when the config structure changes
+CONFIG_VERSION = "1.0.0"
 
 def is_running_in_docker():
     """Check if the application is running inside a Docker container."""
@@ -43,13 +47,14 @@ def acquire_lock():
     Ensures exclusive access to the config file by acquiring a threading lock
     and a file-based lock at `LOCK_FILE`.
     """
+    # pylint: disable=global-statement
     global _file_lock
     _config_lock.acquire()
     _file_lock = open(LOCK_FILE, 'w')
     try:
         fcntl.flock(_file_lock, fcntl.LOCK_EX)
     except IOError as e:
-        logging.warning(f"Failed to acquire file lock: {e}")
+        logging.warning("Failed to acquire file lock: %s", e)
 
 
 def release_lock():
@@ -57,6 +62,7 @@ def release_lock():
 
     Releases both the file-based lock and the threading lock.
     """
+    # pylint: disable=global-statement
     global _file_lock
     if _file_lock:
         fcntl.flock(_file_lock, fcntl.LOCK_UN)
@@ -68,7 +74,7 @@ def _get_config_nolock():
     """Load configuration from disk without acquiring any locks.
 
     Returns:
-        dict or None: The JSON-loaded configuration, or None if the file doesn't exist or fails to load.
+        dict or None: The JSON-loaded configuration, or None if file doesn't exist or load fails.
     """
     if os.path.exists(CONFIG_FILE):
         try:
@@ -110,13 +116,38 @@ def update_config(updates: dict):
 
 def init_config():
     """Initialize the configuration file with default keys if missing.
-
+    
+    Checks if the config file exists and has the correct version.
+    If the version doesn't match or is missing, deletes the config file and recreates it.
     Creates `config.json` with default entries for all SavedConfig keys.
     """
     acquire_lock()
     try:
-        if not os.path.exists(CONFIG_FILE):
+        config_needs_reset = False
+        if os.path.exists(CONFIG_FILE):
+            try:
+                existing_config = _get_config_nolock()
+                if existing_config is None:
+                    logging.info("Config file is corrupted or empty, recreating")
+                    config_needs_reset = True
+                else:
+                    config_version = existing_config.get(SavedConfig.VERSION)
+                    if config_version != CONFIG_VERSION:
+                        logging.info(
+                            "Config version mismatch (config: %s, expected: %s), recreating config",
+                            config_version, CONFIG_VERSION)
+                        config_needs_reset = True
+            except Exception as e:
+                logging.warning("Error reading config file: %s, recreating", e)
+                config_needs_reset = True
+        else:
+            config_needs_reset = True
+        if config_needs_reset:
+            if os.path.exists(CONFIG_FILE):
+                os.remove(CONFIG_FILE)
+                logging.info("Deleted old config file")
             default_config = {
+                SavedConfig.VERSION: CONFIG_VERSION,
                 SavedConfig.VAPID_PUBLIC_KEY: None,
                 SavedConfig.VAPID_SUBJECT: None,
                 SavedConfig.STARTUP_MODE: None,
@@ -127,7 +158,9 @@ def init_config():
             }
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump(default_config, f, indent=2)
-            logging.debug("Default config file created at %s", CONFIG_FILE)
+            logging.info("Created new config file with version %s at %s",
+                         CONFIG_VERSION,
+                         CONFIG_FILE)
     finally:
         release_lock()
 
@@ -263,6 +296,7 @@ def reset_config():
     acquire_lock()
     try:
         default_config = {
+            SavedConfig.VERSION: CONFIG_VERSION,
             SavedConfig.VAPID_PUBLIC_KEY: None,
             SavedConfig.VAPID_SUBJECT: None,
             SavedConfig.STARTUP_MODE: None,
@@ -293,15 +327,32 @@ def reset_all():
     logging.debug("All saved keys, config, and SSL files have been reset")
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "model", "best_model.pt")
-MODEL_OPTIONS_PATH = os.path.join(BASE_DIR, "model", "opt.json")
-PROTOTYPES_DIR = os.path.join(BASE_DIR, "model", "prototypes")
+
+def get_model_path() -> str:
+    """Get the model path for the detected backend."""
+    try:
+        return get_model_downloader().get_model_path()
+    except ImportError:
+        return os.path.join(BASE_DIR, "model", "model.onnx")
+
+def get_model_options_path() -> str:
+    """Get the model options path."""
+    try:
+        return get_model_downloader().get_options_path()
+    except ImportError:
+        return os.path.join(BASE_DIR, "model", "opt.json")
+
+def get_prototypes_dir() -> str:
+    """Get the prototypes directory path."""
+    try:
+        return get_model_downloader().get_prototypes_path()
+    except ImportError:
+        return os.path.join(BASE_DIR, "model", "prototypes")
 
 SUCCESS_LABEL = "success"
 DEVICE_TYPE = "cuda" if (torch.cuda.is_available()) else (
     "mps" if (torch.backends.mps.is_available()) else "cpu")
 SENSITIVITY = 1.0
-CAMERA_INDEX = 0
 DETECTION_TIMEOUT = 5
 DETECTION_THRESHOLD = 3
 DETECTION_VOTING_WINDOW = 5
@@ -329,7 +380,3 @@ DETECTION_TUNNEL_INTERVAL_MS = 1000 / DETECTIONS_PER_SECOND
 PRINTER_STAT_POLLING_RATE_MS = 2000
 MIN_SSE_DISPATCH_DELAY_MS = 100
 STANDARD_STAT_POLLING_RATE_MS = 250
-
-MAX_CAMERAS = 64
-CAMERA_INDICES = [int(idx) for idx in os.getenv(
-    "CAMERA_INDICES", "").split(",") if idx != ""]

@@ -23,29 +23,29 @@ async def sse_connect(request: Request):
     return EventSourceResponse(send_packet())
 
 @router.post("/sse/start-polling")
-async def start_polling(request: Request, camera_index: int = Body(..., embed=True)):
+async def start_polling(request: Request, camera_uuid: str = Body(..., embed=True)):
     """Start polling for printer state updates on a specific camera.
 
     Args:
         request (Request): The FastAPI request object.
-        camera_index (int): Index of the camera to start polling for.
+        camera_uuid (str): UUID of the camera to start polling for.
 
     Returns:
         dict: Confirmation message that polling was started.
     """
-    await start_printer_state_polling(camera_index)
-    return {"message": "Polling started for camera index {}".format(camera_index)}
+    await start_printer_state_polling(camera_uuid)
+    return {"message": "Polling started for camera UUID {}".format(camera_uuid)}
 
 @router.post("/sse/stop-polling")
-async def stop_polling(request: Request, camera_index: int = Body(..., embed=True)):
+async def stop_polling(request: Request, camera_uuid: str = Body(..., embed=True)):
     """Stop polling for printer state updates on a specific camera.
 
     Args:
         request (Request): The FastAPI request object.
-        camera_index (int): Index of the camera to stop polling for.
+        camera_uuid (str): UUID of the camera to stop polling for.
 
     Returns:
         dict: Confirmation message that polling was stopped.
     """
-    stop_and_remove_polling_task(camera_index)
-    return {"message": "Polling stopped for camera index {}".format(camera_index)}
+    stop_and_remove_polling_task(camera_uuid)
+    return {"message": "Polling stopped for camera UUID {}".format(camera_uuid)}

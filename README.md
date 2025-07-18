@@ -9,6 +9,7 @@ PrintGuard offers local, **real-time print failure detection** for **3D printing
 ## Features
 - **Web Interface**: A user-friendly web interface to monitor print jobs and camera feeds.
 - **Live Print Failure Detection**: Uses a custom computer vision model to detect print failures in real-time on edge devices.
+- **Multiple Inference Backends**: Supports PyTorch & ONNX Runtime for optimized performance across different deployment scenarios.
 - **Notifications**: Sends notifications subscribable on desktop and mobile devices via web push notifications to notify of detected print failures.
 - **Camera Integration**: Supports multiple camera feeds and simultaneous failure detection.
 - **Printer Integration**: Integrates with printers through services like Octoprint, allowing users to link cameras to specific printers for automatic print termination or suspension when a failure is detected.
@@ -43,14 +44,33 @@ PrintGuard is also available as a Docker image, which can be pulled from GitHub 
 docker pull ghcr.io/oliverbravery/printguard:latest
 ```
 
-Alternatively, you can build the Docker image from the source:
+Alternatively, you can build the Docker image from the source, specifying the platforms you want to build for:
 ```bash
-docker build -t printguard .
+docker buildx build \
+  --platform linux/amd64,linux/arm64,linux/arm/v7 \
+  -t oliverbravery/printguard:local \
+  --load \
+  .
 ```
 
-To run the Docker container, use the following command. Note that the container requires a volume for persistent data storage and an environment variable for the secret key:
+To run the Docker container, use the following command. Note that the container requires a volume for persistent data storage and an environment variable for the secret key. Use the `--privileged` flag to allow access to the host's camera devices.
+
+To run the Docker container pulled from GHCR, use the following command:
 ```bash
-docker run -p 8000:8000 -v printguard_data:/data -e PRINTGUARD_SECRET_KEY='your-super-secret-key' printguard
+docker run \
+  -p 8000:8000 \
+  -v "$(pwd)/data:/data" \
+  --privileged \
+  ghcr.io/oliverbravery/printguard:latest
+```
+
+To run the Docker container built from the source, use the following command:
+```bash
+docker run \
+  -p 8000:8000 \
+  -v "$(pwd)/data:/data" \
+  --privileged \
+  oliverbravery/printguard:local
 ```
 
 ## Initial Configuration
