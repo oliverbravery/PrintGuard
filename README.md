@@ -44,21 +44,33 @@ PrintGuard is also available as a Docker image, which can be pulled from GitHub 
 docker pull ghcr.io/oliverbravery/printguard:latest
 ```
 
-Alternatively, you can build the Docker image from the source:
+Alternatively, you can build the Docker image from the source, specifying the platforms you want to build for:
 ```bash
-docker build -t printguard .
+docker buildx build \
+  --platform linux/amd64,linux/arm64,linux/arm/v7 \
+  -t oliverbravery/printguard:local \
+  --load \
+  .
 ```
 
-To run the Docker container, use the following command. Note that the container requires a volume for persistent data storage and an environment variable for the secret key. 
+To run the Docker container, use the following command. Note that the container requires a volume for persistent data storage and an environment variable for the secret key. Use the `--privileged` flag to allow access to the host's camera devices.
 
-Also, to ensure the camera is accessible, the container must have access to the host's video devices. Pass your camera devices to the container using the `--device` flag:
+To run the Docker container pulled from GHCR, use the following command:
 ```bash
-docker run -p 8000:8000 \
-    -v printguard_data:/data \
-    -e PRINTGUARD_SECRET_KEY='secret' \
-    --device=/dev/video0 \
-    --group-add $(getent group video | cut -d: -f3) \
-    printguard
+docker run \
+  -p 8000:8000 \
+  -v "$(pwd)/data:/data" \
+  --privileged \
+  ghcr.io/oliverbravery/printguard:latest
+```
+
+To run the Docker container built from the source, use the following command:
+```bash
+docker run \
+  -p 8000:8000 \
+  -v "$(pwd)/data:/data" \
+  --privileged \
+  oliverbravery/printguard:local
 ```
 
 ## Initial Configuration
