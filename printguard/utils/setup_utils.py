@@ -1,6 +1,6 @@
 import logging
 
-from ..models import SavedConfig, SavedKey, SiteStartupMode
+from schemas import SavedConfig, SavedKey, SiteStartupMode
 from .config import SSL_CERT_FILE, get_config, get_key
 
 

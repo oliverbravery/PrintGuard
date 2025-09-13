@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from ..models import PrinterConfigRequest, AlertAction
+from schemas import PrinterConfigRequest, AlertAction
 from ..utils.printer_services.octoprint import OctoPrintClient
 from ..utils.printer_utils import (get_printer_id, remove_printer,
                                    set_printer, suspend_print_job)

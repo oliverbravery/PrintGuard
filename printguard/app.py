@@ -8,8 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from .models import (SiteStartupMode,
-                     TunnelProvider, SavedConfig)
+from schemas import (SiteStartupMode, TunnelProvider, SavedConfig)
 from .routes.alert_routes import router as alert_router
 from .routes.detection_routes import router as detection_router
 from .routes.notification_routes import router as notification_router

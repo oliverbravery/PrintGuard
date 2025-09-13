@@ -3,7 +3,7 @@ import json
 import logging
 import time
 
-from ..models import (SSEDataType, PrinterState,
+from schemas import (SSEDataType, PrinterState,
                       PollingTask, SavedConfig)
 from ..utils.config import get_config, MIN_SSE_DISPATCH_DELAY_MS
 

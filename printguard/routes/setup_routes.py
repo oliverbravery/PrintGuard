@@ -8,7 +8,7 @@ from fastapi.exceptions import HTTPException
 from fastapi.responses import RedirectResponse
 from py_vapid import Vapid
 
-from ..models import (TunnelProvider, TunnelSettings, SavedConfig,
+from schemas import (TunnelProvider, TunnelSettings, SavedConfig,
                       VapidSettings, SavedKey, SetupCompletion,
                       CloudflareTunnelConfig, CloudflareDownloadConfig)
 from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,

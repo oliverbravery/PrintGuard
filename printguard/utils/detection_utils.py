@@ -10,7 +10,7 @@ from .camera_utils import (get_camera_state, get_camera_state_sync,
                            update_camera_state, update_camera_detection_history)
 from .printer_utils import get_printer_config, suspend_print_job
 from .notification_utils import send_defect_notification
-from ..models import Alert, AlertAction, SSEDataType
+from schemas import Alert, AlertAction, SSEDataType
 
 def _passed_majority_vote(camera_state):
     """Determine if failures in detection history meet the majority threshold.

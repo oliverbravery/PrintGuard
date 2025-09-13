@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Dict, Optional
 from pydantic import ValidationError
-from ..models import CameraState
+from schemas import CameraState
 from .config import get_config, update_config, SavedConfig
 
 

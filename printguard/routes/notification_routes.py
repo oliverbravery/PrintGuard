@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter, Request
 
-from ..models import SavedConfig, SavedKey
+from schemas import SavedConfig, SavedKey
 from ..utils.config import get_config, get_key, update_config
 
 router = APIRouter()

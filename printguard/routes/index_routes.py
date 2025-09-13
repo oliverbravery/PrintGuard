@@ -13,7 +13,7 @@ from ..utils.config import (STREAM_MAX_FPS, STREAM_TUNNEL_FPS,
 from ..utils.camera_utils import update_camera_state
 from ..utils.camera_state_manager import get_camera_state_manager
 from ..utils.stream_utils import stream_optimizer
-from ..models import FeedSettings, SavedConfig
+from schemas import FeedSettings, SavedConfig
 
 router = APIRouter()
 

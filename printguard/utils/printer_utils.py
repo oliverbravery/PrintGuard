@@ -3,7 +3,7 @@ import logging
 
 import requests
 
-from ..models import PollingTask, SavedConfig, AlertAction
+from schemas import PollingTask, SavedConfig, AlertAction
 from .camera_utils import get_camera_state_sync, update_camera_state
 from .config import PRINTER_STAT_POLLING_RATE_MS, get_config
 from .printer_services.octoprint import OctoPrintClient

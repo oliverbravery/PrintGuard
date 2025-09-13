@@ -3,7 +3,7 @@ import logging
 import json
 from pywebpush import WebPushException, webpush
 
-from ..models import Notification, SavedKey, SavedConfig
+from schemas import Notification, SavedKey, SavedConfig
 from ..utils.config import get_key, get_config
 from ..utils.alert_utils import get_alert
 

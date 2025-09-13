@@ -1,6 +1,6 @@
 import json
 from fastapi import APIRouter, Body, Request
-from ..models import AlertAction
+from schemas import AlertAction
 from ..utils.alert_utils import (alert_to_response_json, dismiss_alert,
                                  get_alert)
 from ..utils.printer_utils import suspend_print_job

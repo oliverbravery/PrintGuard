@@ -13,7 +13,7 @@ from .detection_utils import (_passed_majority_vote, _create_alert_and_notify,
                               _send_alert)
 from .camera_utils import get_camera_state_sync
 from .shared_video_stream import get_shared_camera_frame
-from ..models import SavedConfig, SiteStartupMode
+from schemas import SavedConfig, SiteStartupMode
 from .config import (get_config, STREAM_MAX_FPS, STREAM_TUNNEL_FPS,
                      STREAM_JPEG_QUALITY, STREAM_TUNNEL_JPEG_QUALITY,
                      STREAM_MAX_WIDTH, STREAM_TUNNEL_MAX_WIDTH,

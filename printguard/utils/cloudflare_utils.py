@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from ..models import OperatingSystem, SavedConfig, SavedKey
+from schemas import OperatingSystem, SavedConfig, SavedKey
 from ..utils.config import get_config
 
 
