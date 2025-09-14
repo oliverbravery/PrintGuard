@@ -5,8 +5,6 @@ from typing import Dict, Optional, List, Callable
 import cv2
 import numpy as np
 
-from .camera_utils import get_camera_state_sync
-
 
 class SharedVideoStream:
     """A shared video stream that allows multiple consumers to access the same camera source."""
@@ -162,6 +160,7 @@ def get_shared_stream_manager() -> SharedVideoStreamManager:
 
 def get_shared_camera_frame(camera_uuid: str) -> Optional[np.ndarray]:
     """Get a frame from the shared camera stream."""
+    from printguard.utils import get_camera_state_sync
     try:
         camera_state = get_camera_state_sync(camera_uuid)
         if not camera_state or not camera_state.source:

@@ -1,9 +1,8 @@
 import json
 from fastapi import APIRouter, Body, Request
-from schemas import AlertAction
-from ..utils.alert_utils import (alert_to_response_json, dismiss_alert,
-                                 get_alert)
-from ..utils.printer_utils import suspend_print_job
+from printguard.schemas import AlertAction
+from printguard.utils import (alert_to_response_json, dismiss_alert,
+                   get_alert, suspend_print_job)
 
 router = APIRouter()
 

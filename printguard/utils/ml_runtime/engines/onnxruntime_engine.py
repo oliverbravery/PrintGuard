@@ -6,7 +6,7 @@ from typing import Any, List, Tuple, Dict, Optional
 
 import numpy as np
 
-from .base_engine import BaseInferenceEngine
+from printguard.utils.ml_runtime.engines.base_engine import BaseInferenceEngine
 
 try:
     import onnxruntime as ort

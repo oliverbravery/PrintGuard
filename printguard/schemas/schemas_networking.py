@@ -1,12 +1,6 @@
-from enum import Enum
 from typing import Optional, List
 from pydantic import BaseModel, field_validator
-from schemas.schemas_setup import OperatingSystem
-
-
-class TunnelProvider(str, Enum):
-    NGROK = "ngrok"
-    CLOUDFLARE = "cloudflare"
+from printguard.schemas.schemas_settings import OperatingSystem, TunnelProvider
 
 class TunnelSettings(BaseModel):
     provider: TunnelProvider

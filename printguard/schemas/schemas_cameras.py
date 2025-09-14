@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 def _get_config_value(key: str):
     # pylint: disable=import-outside-toplevel
-    from utils.config import (BRIGHTNESS, CONTRAST,
+    from printguard.utils import (BRIGHTNESS, CONTRAST,
                               FOCUS, SENSITIVITY,
                               COUNTDOWN_TIME, COUNTDOWN_ACTION,
                               DETECTION_VOTING_THRESHOLD,

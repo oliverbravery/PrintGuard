@@ -1,6 +1,7 @@
 import logging
 from typing import Optional
-from .inference_engine import UniversalInferenceEngine, InferenceBackend
+from printguard.utils.ml_runtime import UniversalInferenceEngine, InferenceBackend
+
 
 _inference_engine: Optional[UniversalInferenceEngine] = None
 
@@ -26,8 +27,7 @@ def _detect_backend() -> InferenceBackend:
 
 def get_inference_engine() -> UniversalInferenceEngine:
     """Get or create the global inference engine instance."""
-    # pylint: disable=import-outside-toplevel
-    from .model_downloader import ensure_model_files
+    from printguard.utils import ensure_model_files
     # pylint: disable=global-statement
     global _inference_engine
     if _inference_engine is None:

@@ -37,3 +37,12 @@ class FeedSettings(BaseModel):
     detection_interval_ms: int
     printer_stat_polling_rate_ms: int
     min_sse_dispatch_delay_ms: int
+
+class OperatingSystem(str, Enum):
+    MACOS = "macos"
+    WINDOWS = "windows"
+    LINUX = "linux"
+    
+class TunnelProvider(str, Enum):
+    NGROK = "ngrok"
+    CLOUDFLARE = "cloudflare"

@@ -6,11 +6,9 @@ import cv2  # pylint: disable=E0401
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from ..utils.camera_utils import (add_camera, find_available_serial_cameras,
-                                  get_camera_state)
-from ..utils.camera_utils import remove_camera as remove_camera_util
-from ..utils.shared_video_stream import get_shared_stream_manager
-from ..utils.stream_utils import generate_frames
+from printguard.utils import (add_camera, find_available_serial_cameras,
+                   get_camera_state, remove_camera,
+                   get_shared_stream_manager, generate_frames)
 
 router = APIRouter()
 
@@ -83,7 +81,7 @@ async def remove_camera_ep(request: Request):
     camera_uuid = data.get('camera_uuid')
     if not camera_uuid:
         raise HTTPException(status_code=400, detail="Missing camera_uuid.")
-    success = await remove_camera_util(camera_uuid)
+    success = await remove_camera(camera_uuid)
     if not success:
         raise HTTPException(status_code=404, detail="Camera not found.")
     return {"message": "Camera removed successfully."}

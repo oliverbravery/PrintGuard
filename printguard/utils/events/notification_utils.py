@@ -3,9 +3,7 @@ import logging
 import json
 from pywebpush import WebPushException, webpush
 
-from schemas import Notification, SavedKey, SavedConfig
-from ..utils.config import get_key, get_config
-from ..utils.alert_utils import get_alert
+from printguard.schemas import Notification, SavedKey, SavedConfig
 
 def get_subscriptions():
     """Retrieve the list of current push notification subscriptions.
@@ -14,7 +12,7 @@ def get_subscriptions():
         list: A list of subscription dictionaries, each with at least an 'id' and 'endpoint'.
     """
     # pylint: disable=C0415
-    from ..app import app
+    from printguard.app import app
     return app.state.subscriptions
 
 def remove_subscription(subscription_id = None, subscription = None):
@@ -25,7 +23,7 @@ def remove_subscription(subscription_id = None, subscription = None):
         subscription (dict, optional): The subscription object to remove.
     """
     # pylint: disable=C0415
-    from ..app import app
+    from printguard.app import app
     if subscription_id is not None:
         app.state.subscriptions = [
             sub for sub in app.state.subscriptions if sub.get('id') != subscription_id
@@ -41,12 +39,11 @@ async def send_defect_notification(alert_id):
     Args:
         alert_id (str): The ID of the alert for which to send a notification.
     """
+    from printguard.utils import get_alert, get_camera_state
     logging.debug("Attempting to send defect notification for alert ID: %s", alert_id)
     alert = get_alert(alert_id)
     if alert:
         logging.debug("Alert found for ID %s, preparing notification", alert_id)
-        # pylint: disable=import-outside-toplevel
-        from .camera_utils import get_camera_state
         camera_state = await get_camera_state(alert.camera_uuid)
         camera_nickname = camera_state.nickname if camera_state else alert.camera_uuid
         notification = Notification(
@@ -69,6 +66,7 @@ def send_notification(notification: Notification):
     Returns:
         bool: True if at least one notification was sent successfully, False otherwise.
     """
+    from printguard.utils import (get_key, get_config)
     logging.debug("Starting notification send process")
     config = get_config()
     vapid_subject = config.get(SavedConfig.VAPID_SUBJECT, None)

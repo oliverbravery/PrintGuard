@@ -2,11 +2,9 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Body, Request
 
-from ..utils.camera_utils import get_camera_state, update_camera_state
-from ..utils.detection_utils import _live_detection_loop
+from printguard.utils import (get_camera_state, update_camera_state)
 
 router = APIRouter()
 
@@ -21,6 +19,7 @@ async def start_live_detection(request: Request, camera_uuid: str = Body(..., em
     Returns:
         dict: Message indicating whether live detection was started or already running.
     """
+    from printguard.utils import _live_detection_loop
     camera_state = await get_camera_state(camera_uuid)
     if camera_state.live_detection_running:
         return {"message": f"Live detection already running for camera {camera_state.nickname}"}

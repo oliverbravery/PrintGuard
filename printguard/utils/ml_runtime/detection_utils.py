@@ -3,14 +3,15 @@ import uuid
 import logging
 import cv2
 
-from .alert_utils import (dismiss_alert, alert_to_response_json,
-                          get_alert, append_new_alert)
-from .sse_utils import append_new_outbound_packet
-from .camera_utils import (get_camera_state, get_camera_state_sync,
-                           update_camera_state, update_camera_detection_history)
-from .printer_utils import get_printer_config, suspend_print_job
-from .notification_utils import send_defect_notification
-from schemas import Alert, AlertAction, SSEDataType
+from printguard.utils import (
+    get_camera_state, get_camera_state_sync,
+    update_camera_state, update_camera_detection_history,
+    dismiss_alert, alert_to_response_json,
+    get_alert, append_new_alert, append_new_outbound_packet,
+    send_defect_notification, create_optimized_detection_loop
+)
+
+from printguard.schemas import Alert, AlertAction, SSEDataType
 
 def _passed_majority_vote(camera_state):
     """Determine if failures in detection history meet the majority threshold.
@@ -45,6 +46,7 @@ async def _terminate_alert_after_cooldown(alert):
     Args:
         alert (Alert): The alert object with `countdown_time` and `countdown_action`.
     """
+    from printguard.utils import suspend_print_job
     await asyncio.sleep(alert.countdown_time)
     if get_alert(alert.id) is not None:
         camera_uuid = alert.camera_uuid
@@ -70,6 +72,7 @@ async def _create_alert_and_notify(camera_state_ref, camera_uuid, frame, timesta
     Returns:
         Alert: The newly created alert.
     """
+    from printguard.utils import get_printer_config
     alert_id = f"{camera_uuid}_{str(uuid.uuid4())}"
     # pylint: disable=E1101
     _, img_buf = cv2.imencode('.jpg', frame)
@@ -102,7 +105,6 @@ async def _live_detection_loop(app_state, camera_uuid):
         camera_uuid (str): The UUID of the camera to process.
     """
     # pylint: disable=C0415
-    from .stream_utils import create_optimized_detection_loop
     update_functions = {
         'update_camera_state': update_camera_state,
         'update_camera_detection_history': update_camera_detection_history,

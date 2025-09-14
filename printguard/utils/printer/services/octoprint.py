@@ -1,6 +1,6 @@
 from typing import Dict
 import requests
-from schemas import (FileInfo, JobInfoResponse,
+from printguard.schemas import (FileInfo, JobInfoResponse,
                        TemperatureReadings, TemperatureReading,
                        PrinterState, PrinterTemperatures)
 

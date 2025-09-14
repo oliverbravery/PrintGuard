@@ -4,8 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from schemas import OperatingSystem, SavedConfig, SavedKey
-from ..utils.config import get_config
+from printguard.schemas import OperatingSystem, SavedConfig, SavedKey
 
 
 class CloudflareAPI:
@@ -376,6 +375,7 @@ def get_current_os() -> OperatingSystem:
     Returns:
         OperatingSystem: The stored operating system enum value, or None if not set.
     """
+    from printguard.utils import get_config
     config = get_config()
     stored_os = config.get(SavedConfig.USER_OPERATING_SYSTEM)
     if stored_os:
@@ -388,7 +388,7 @@ def start_cloudflare_tunnel() -> bool:
         bool: True if the tunnel was started successfully, False otherwise.
     """
     # pylint:disable=import-outside-toplevel
-    from ..utils.config import get_key
+    from printguard.utils import get_key
     try:
         current_os = get_current_os()
         if not current_os:

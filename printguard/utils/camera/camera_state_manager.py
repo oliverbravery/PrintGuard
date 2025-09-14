@@ -2,8 +2,7 @@ import asyncio
 import logging
 from typing import Dict, Optional
 from pydantic import ValidationError
-from schemas import CameraState
-from .config import get_config, update_config, SavedConfig
+from printguard.schemas import CameraState
 
 
 class CameraStateManager:
@@ -30,6 +29,7 @@ class CameraStateManager:
 
     def _load_states_from_config(self):
         """Loads camera states from the application's configuration file."""
+        from printguard.utils import get_config, SavedConfig
         config = get_config() or {}
         saved_states = config.get(SavedConfig.CAMERA_STATES, {})
         for camera_uuid, state_data in saved_states.items():
@@ -45,6 +45,7 @@ class CameraStateManager:
 
     def _save_states_to_config(self):
         """Saves the current camera states to the application's configuration file."""
+        from printguard.utils import update_config, SavedConfig
         try:
             states_data = {}
             for camera_uuid, state in self._states.items():

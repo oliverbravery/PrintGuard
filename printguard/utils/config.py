@@ -13,9 +13,8 @@ import keyring
 import keyring.errors
 import torch
 from platformdirs import user_data_dir
-
-from .model_downloader import get_model_downloader
-from schemas import (AlertAction, SavedKey, SavedConfig)
+from printguard.utils import get_model_downloader
+from printguard.schemas import (AlertAction, SavedKey, SavedConfig)
 
 # Config version - increment this when the config structure changes
 CONFIG_VERSION = "1.0.0"

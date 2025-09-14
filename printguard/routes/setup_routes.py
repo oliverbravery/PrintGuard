@@ -8,13 +8,13 @@ from fastapi.exceptions import HTTPException
 from fastapi.responses import RedirectResponse
 from py_vapid import Vapid
 
-from schemas import (TunnelProvider, TunnelSettings, SavedConfig,
+from printguard.schemas import (TunnelProvider, TunnelSettings, SavedConfig,
                       VapidSettings, SavedKey, SetupCompletion,
                       CloudflareTunnelConfig, CloudflareDownloadConfig)
-from ..utils.config import (SSL_CA_FILE, SSL_CERT_FILE,
-                            store_key, get_config, update_config, get_key)
-from ..utils.setup_utils import setup_ngrok_tunnel
-from ..utils.cloudflare_utils import CloudflareAPI, get_cloudflare_setup_sequence
+from printguard.utils import (SSL_CA_FILE, SSL_CERT_FILE,
+                   store_key, get_config, update_config,
+                   get_key, setup_ngrok_tunnel,
+                   CloudflareAPI, get_cloudflare_setup_sequence)
 
 router = APIRouter()
 
@@ -29,7 +29,7 @@ async def serve_setup(request: Request):
         TemplateResponse: Rendered setup.html template for configuration.
     """
     # pylint:disable=import-outside-toplevel
-    from ..app import templates
+    from printguard.app import templates
     return templates.TemplateResponse("setup.html", {
         "request": request
     })
@@ -403,7 +403,7 @@ async def serve_cloudflare_add_device(request: Request):
     """
     try:
         # pylint:disable=import-outside-toplevel
-        from ..app import templates
+        from printguard.app import templates
         config = get_config()
         site_domain = config.get(SavedConfig.SITE_DOMAIN, "")
         return templates.TemplateResponse("warp_device_enrollment.html", {

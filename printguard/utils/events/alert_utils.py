@@ -4,7 +4,7 @@ import json
 
 from PIL import Image
 
-from .camera_utils import update_camera_state
+from printguard.utils import update_camera_state
 
 
 def append_new_alert(alert):
@@ -26,7 +26,7 @@ def append_new_alert(alert):
             }
     """
     # pylint: disable=import-outside-toplevel
-    from ..app import app
+    from printguard.app import app
     app.state.alerts[alert.id] = alert
 
 def get_alert(alert_id):
@@ -39,7 +39,7 @@ def get_alert(alert_id):
         Alert: The alert object if found, otherwise None.
     """
     # pylint: disable=import-outside-toplevel
-    from ..app import app
+    from printguard.app import app
     alert = app.state.alerts.get(alert_id, None)
     return alert
 
@@ -53,7 +53,7 @@ async def dismiss_alert(alert_id):
         bool: True if the alert was successfully dismissed, False otherwise.
     """
     # pylint: disable=import-outside-toplevel
-    from ..app import app
+    from printguard.app import app
     if alert_id in app.state.alerts:
         del app.state.alerts[alert_id]
         camera_uuid = alert_id.split('_')[0]

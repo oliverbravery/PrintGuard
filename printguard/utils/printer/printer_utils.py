@@ -3,11 +3,9 @@ import logging
 
 import requests
 
-from schemas import PollingTask, SavedConfig, AlertAction
-from .camera_utils import get_camera_state_sync, update_camera_state
-from .config import PRINTER_STAT_POLLING_RATE_MS, get_config
-from .printer_services.octoprint import OctoPrintClient
-from .sse_utils import add_polling_task, sse_update_printer_state
+from printguard.schemas import PollingTask, SavedConfig, AlertAction
+from printguard.utils import (add_polling_task, sse_update_printer_state,
+                   get_camera_state_sync, update_camera_state)
 
 def get_printer_config(camera_uuid):
     """Retrieve printer configuration from camera state.
@@ -99,6 +97,7 @@ async def start_printer_state_polling(camera_uuid):
     Args:
         camera_uuid (str): The UUID of the camera to poll.
     """
+    from printguard.utils import PRINTER_STAT_POLLING_RATE_MS, get_config, OctoPrintClient
     stop_event = asyncio.Event()
     camera_printer_config = get_printer_config(camera_uuid)
     if not camera_printer_config:
@@ -126,6 +125,7 @@ def suspend_print_job(camera_uuid, action: AlertAction):
     Returns:
         bool: True if the job was suspended successfully or no job was active, False otherwise.
     """
+    from printguard.utils import OctoPrintClient
     printer_config = get_printer_config(camera_uuid)
     if printer_config:
         if printer_config['printer_type'] == 'octoprint':

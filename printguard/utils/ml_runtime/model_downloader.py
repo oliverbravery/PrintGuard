@@ -5,7 +5,7 @@ from pathlib import Path
 
 from huggingface_hub import hf_hub_download
 
-from .inference_lib import _detect_backend, InferenceBackend
+from printguard.utils.ml_runtime import InferenceBackend
 
 class ModelDownloader:
     """Downloads models from Hugging Face Hub based on detected backend."""
@@ -40,6 +40,7 @@ class ModelDownloader:
         Returns:
             Path to the model file
         """
+        from printguard.utils import _detect_backend
         if backend is None:
             backend = _detect_backend()
         model_file = self.backend_files[backend]["model"]
@@ -118,6 +119,7 @@ class ModelDownloader:
         Returns:
             True if model is available (cached or downloaded)
         """
+        from printguard.utils import _detect_backend
         if backend is None:
             backend = _detect_backend()
         model_file = self.backend_files[backend]["model"]
@@ -173,6 +175,7 @@ class ModelDownloader:
         Returns:
             True if all files are available
         """
+        from printguard.utils import _detect_backend
         if backend is None:
             backend = _detect_backend()
         logging.info("Downloading all model files for %s backend", backend.value)
@@ -196,6 +199,7 @@ class ModelDownloader:
         Returns:
             Dictionary with backend info and file status
         """
+        from printguard.utils import _detect_backend
         backend = _detect_backend()
         info = {
             "detected_backend": backend.value,

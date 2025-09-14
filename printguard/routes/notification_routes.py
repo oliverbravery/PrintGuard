@@ -2,8 +2,8 @@ import logging
 
 from fastapi import APIRouter, Request
 
-from schemas import SavedConfig, SavedKey
-from ..utils.config import get_config, get_key, update_config
+from printguard.schemas import SavedConfig, SavedKey
+from printguard.utils import get_config, get_key, update_config
 
 router = APIRouter()
 

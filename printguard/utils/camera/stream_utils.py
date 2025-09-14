@@ -7,17 +7,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from .model_utils import _run_inference
-from .sse_utils import sse_update_camera_state
-from .detection_utils import (_passed_majority_vote, _create_alert_and_notify,
-                              _send_alert)
-from .camera_utils import get_camera_state_sync
-from .shared_video_stream import get_shared_camera_frame
-from schemas import SavedConfig, SiteStartupMode
-from .config import (get_config, STREAM_MAX_FPS, STREAM_TUNNEL_FPS,
-                     STREAM_JPEG_QUALITY, STREAM_TUNNEL_JPEG_QUALITY,
-                     STREAM_MAX_WIDTH, STREAM_TUNNEL_MAX_WIDTH,
-                     DETECTION_INTERVAL_MS, DETECTION_TUNNEL_INTERVAL_MS)
+from printguard.schemas import SavedConfig, SiteStartupMode
 
 
 class StreamOptimizer:
@@ -49,6 +39,11 @@ class StreamOptimizer:
                     'tunnel_provider': Optional[str]
                 }
         """
+        from printguard.utils import (get_config, STREAM_MAX_FPS, 
+                                      STREAM_TUNNEL_FPS, STREAM_JPEG_QUALITY, 
+                                      STREAM_TUNNEL_JPEG_QUALITY, 
+                                      STREAM_MAX_WIDTH, STREAM_TUNNEL_MAX_WIDTH, 
+                                      DETECTION_INTERVAL_MS, DETECTION_TUNNEL_INTERVAL_MS)
         current_time = time.time()
         if (current_time - self._last_config_check) > self._config_check_interval:
             config = get_config()
@@ -174,6 +169,7 @@ def create_optimized_frame_generator(camera_uuid: str, camera_state_getter):
     Yields:
         bytes: Multipart JPEG frame data.
     """
+    from printguard.utils import get_shared_camera_frame
     # pylint: disable=E1101
     last_frame_time = 0
     frame_count = 0
@@ -222,6 +218,9 @@ async def create_optimized_detection_loop(app_state, camera_uuid, get_camera_sta
         update_functions (dict): A mapping of update function names to coroutines,
             e.g., {'update_camera_state': ..., 'update_camera_detection_history': ...}.
     """
+    from printguard.utils import (get_shared_camera_frame, _passed_majority_vote, 
+                                  _create_alert_and_notify, _send_alert,
+                                  sse_update_camera_state, _run_inference)
     detection_count = 0
     stream_optimizer.log_optimization_info()
     # pylint: disable=E1101
@@ -305,6 +304,7 @@ def generate_frames(camera_uuid: str):
     Yields:
         bytes: Multipart JPEG frame data.
     """
+    from printguard.utils import get_shared_camera_frame, get_camera_state_sync
     try:
         for frame_data in create_optimized_frame_generator(camera_uuid, get_camera_state_sync):
             yield frame_data

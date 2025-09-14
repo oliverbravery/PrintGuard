@@ -111,10 +111,10 @@ class UniversalInferenceEngine:
         """
         # pylint: disable=import-outside-toplevel
         if backend == InferenceBackend.PYTORCH:
-            from .backends.pytorch_engine import PyTorchInferenceEngine
+            from printguard.utils import PyTorchInferenceEngine
             return PyTorchInferenceEngine()
         elif backend == InferenceBackend.ONNXRUNTIME:
-            from .backends.onnxruntime_engine import ONNXRuntimeInferenceEngine
+            from printguard.utils import ONNXRuntimeInferenceEngine
             return ONNXRuntimeInferenceEngine()
         else:
             raise ValueError(f"Unsupported backend: {backend}")

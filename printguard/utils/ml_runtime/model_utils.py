@@ -2,8 +2,6 @@ import asyncio
 from typing import Any
 import logging
 
-from .config import SENSITIVITY
-from .inference_lib import get_inference_engine
 
 async def _run_inference(model: Any,
                          batch_tensor: Any,
@@ -26,6 +24,7 @@ async def _run_inference(model: Any,
         TypeError: If the model doesn't have required methods.
         RuntimeError: If inference execution fails.
     """
+    from printguard.utils import SENSITIVITY, get_inference_engine
     inference_engine = get_inference_engine()
     loop = asyncio.get_running_loop()
     try:

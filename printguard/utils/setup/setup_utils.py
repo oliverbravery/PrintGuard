@@ -1,7 +1,6 @@
 import logging
 
-from schemas import SavedConfig, SavedKey, SiteStartupMode
-from .config import SSL_CERT_FILE, get_config, get_key
+from printguard.schemas import SavedConfig, SavedKey, SiteStartupMode
 
 
 def setup_ngrok_tunnel(close: bool = False) -> bool:
@@ -17,6 +16,7 @@ def setup_ngrok_tunnel(close: bool = False) -> bool:
     Returns:
         bool: True if the tunnel was successfully started, False otherwise.
     """
+    from printguard.utils import get_config, get_key
     config = get_config()
     tunnel_auth_key = get_key(SavedKey.TUNNEL_API_KEY)
     tunnel_domain = config.get(SavedConfig.SITE_DOMAIN, None)
@@ -49,6 +49,7 @@ def check_ssl_certificates_exist() -> bool:
     Returns:
         bool: True if SSL requirements exist, False otherwise.
     """
+    from printguard.utils import SSL_CERT_FILE, get_config, get_key
     config = get_config()
     site_domain = config.get(SavedConfig.SITE_DOMAIN, None)
     return True if (
@@ -69,6 +70,7 @@ def check_vapid_keys_exist() -> bool:
     Returns:
         bool: True if VAPID requirements exist, False otherwise.
     """
+    from printguard.utils import get_config, get_key
     config = get_config()
     vapid_public_key = config.get(SavedConfig.VAPID_PUBLIC_KEY, None)
     vapid_subject = config.get(SavedConfig.VAPID_SUBJECT, None)
@@ -89,6 +91,7 @@ def check_tunnel_requirements_met() -> bool:
     Returns:
         bool: True if tunnel requirements are met, False otherwise.
     """
+    from printguard.utils import get_config, get_key
     config = get_config()
     tunnel_provider = config.get(SavedConfig.TUNNEL_PROVIDER, None)
     return True if (
@@ -103,6 +106,7 @@ def startup_mode_requirements_met() -> SiteStartupMode:
     Returns:
         SiteStartupMode: The site startup mode if requirements are met, SETUP otherwise.
     """
+    from printguard.utils import get_config
     startup_mode = get_config().get(SavedConfig.STARTUP_MODE, None)
     match startup_mode:
         case SiteStartupMode.SETUP:

@@ -2,11 +2,10 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from schemas import PrinterConfigRequest, AlertAction
-from ..utils.printer_services.octoprint import OctoPrintClient
-from ..utils.printer_utils import (get_printer_id, remove_printer,
-                                   set_printer, suspend_print_job)
-from ..utils.camera_utils import get_camera_state
+from printguard.schemas import PrinterConfigRequest, AlertAction
+from printguard.utils import (get_printer_id, remove_printer,
+                   set_printer, suspend_print_job,
+                   get_camera_state, OctoPrintClient)
 
 router = APIRouter()
 

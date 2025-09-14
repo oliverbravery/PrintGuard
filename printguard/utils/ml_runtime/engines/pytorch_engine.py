@@ -6,7 +6,7 @@ from typing import Any, List, Tuple
 
 import torch
 
-from .base_engine import BaseInferenceEngine
+from printguard.utils.ml_runtime.engines.base_engine import BaseInferenceEngine
 
 try:
     from . import protonets as _pn

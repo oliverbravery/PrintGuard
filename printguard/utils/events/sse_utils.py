@@ -3,9 +3,9 @@ import json
 import logging
 import time
 
-from schemas import (SSEDataType, PrinterState,
+from printguard.schemas import (SSEDataType, PrinterState,
                       PollingTask, SavedConfig)
-from ..utils.config import get_config, MIN_SSE_DISPATCH_DELAY_MS
+from printguard.utils import get_camera_state
 
 _last_dispatch_times = {}
 
@@ -16,7 +16,7 @@ async def outbound_packet_fetch():
         str: Serialized JSON packet from application outbound queue.
     """
     # pylint: disable=C0415
-    from ..app import app
+    from printguard.app import app
     while True:
         packet = await app.state.outbound_queue.get()
         yield packet
@@ -28,6 +28,7 @@ async def append_new_outbound_packet(packet, sse_data_type: SSEDataType):
         packet (str): The JSON-serialized data payload.
         sse_data_type (SSEDataType): The type of SSE event.
     """
+    from printguard.utils import get_config, MIN_SSE_DISPATCH_DELAY_MS
     config = get_config()
     min_sse_dispatch_delay = config.get(SavedConfig.MIN_SSE_DISPATCH_DELAY_MS, MIN_SSE_DISPATCH_DELAY_MS)
     current_time = time.time() * 1000
@@ -38,7 +39,7 @@ async def append_new_outbound_packet(packet, sse_data_type: SSEDataType):
                      sse_data_type.value, time_since_last_dispatch)
         return
     # pylint: disable=C0415
-    from ..app import app
+    from printguard.app import app
     pkt = {"data": {"event": sse_data_type.value, "data": packet}}
     pkt_json = json.dumps(pkt)
     await app.state.outbound_queue.put(pkt_json)
@@ -52,7 +53,7 @@ async def append_new_outbound_packet_force(packet, sse_data_type: SSEDataType):
         sse_data_type (SSEDataType): The type of SSE event.
     """
     # pylint: disable=C0415
-    from ..app import app
+    from printguard.app import app
     pkt = {"data": {"event": sse_data_type.value, "data": packet}}
     pkt_json = json.dumps(pkt)
     await app.state.outbound_queue.put(pkt_json)
@@ -90,8 +91,6 @@ async def _sse_update_camera_state_func(camera_uuid):
     Args:
         camera_uuid (str): The UUID of the camera.
     """
-    # pylint: disable=import-outside-toplevel
-    from .camera_utils import get_camera_state
     state = await get_camera_state(camera_uuid)
     detection_history = state.detection_history
     total_detections = len(detection_history)
@@ -152,7 +151,7 @@ def get_polling_task(camera_uuid):
         PollingTask or None: The polling task if exists, otherwise None.
     """
     # pylint: disable=C0415
-    from ..app import app
+    from printguard.app import app
     return app.state.polling_tasks.get(camera_uuid) or None
 
 def stop_and_remove_polling_task(camera_uuid):
@@ -162,7 +161,7 @@ def stop_and_remove_polling_task(camera_uuid):
         camera_uuid (str): The UUID of the camera.
     """
     # pylint: disable=C0415
-    from ..app import app
+    from printguard.app import app
     task = get_polling_task(camera_uuid)
     if task:
         task.stop_event.set()
@@ -181,7 +180,7 @@ def add_polling_task(camera_uuid, task: PollingTask):
         task (PollingTask): The task object containing the asyncio.Task and stop_event.
     """
     # pylint: disable=C0415
-    from ..app import app
+    from printguard.app import app
     if camera_uuid in app.state.polling_tasks:
         stop_and_remove_polling_task(camera_uuid)
     app.state.polling_tasks[camera_uuid] = task

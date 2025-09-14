@@ -7,8 +7,7 @@ import glob
 
 import cv2
 
-from schemas import CameraState
-from .camera_state_manager import get_camera_state_manager
+from printguard.schemas import CameraState
 
 
 async def add_camera(source, nickname):
@@ -22,6 +21,7 @@ async def add_camera(source, nickname):
     Returns:
         dict: A dictionary containing the new camera's UUID, nickname, and source.
     """
+    from printguard.utils import get_camera_state_manager
     manager = get_camera_state_manager()
     camera_uuid = str(uuid.uuid4())
     new_camera_state = CameraState(
@@ -41,6 +41,7 @@ async def remove_camera(camera_uuid: str) -> bool:
     Returns:
         bool: True if the camera was removed successfully, False otherwise.
     """
+    from printguard.utils import get_camera_state_manager
     manager = get_camera_state_manager()
     return await manager.remove_camera(camera_uuid)
 
@@ -119,6 +120,7 @@ async def get_camera_state(camera_uuid, reset=False):
     Returns:
         CameraState: The state of the camera.
     """
+    from printguard.utils import get_camera_state_manager
     manager = get_camera_state_manager()
     try:
         def sync_get_state():
@@ -163,6 +165,7 @@ async def update_camera_detection_history(camera_uuid, pred, time_val):
     Returns:
         Optional[CameraState]: The updated camera state, or None if not found.
     """
+    from printguard.utils import get_camera_state_manager
     manager = get_camera_state_manager()
     return await manager.update_camera_detection_history(camera_uuid, pred, time_val)
 
@@ -177,5 +180,6 @@ async def update_camera_state(camera_uuid, new_states):
     Returns:
         Optional[CameraState]: The updated camera state, or None if not found.
     """
+    from printguard.utils import get_camera_state_manager
     manager = get_camera_state_manager()
     return await manager.update_camera_state(camera_uuid, new_states)
