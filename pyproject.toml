@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "printguard"
+version = "0.1.0"
+description = "A FastAPI service for 3D print failure detection"
+requires-python = ">=3.13"
+license = "GPL-2.0-only"
+license-files = ["LICENSE.md"]
+dependencies = [
+    "fastapi==0.124.4",
+    "uvicorn==0.38.0",
+    "torch==2.9.1",
+    "torchvision==0.24.1",
+    "pillow==12.0.0",
+    "numpy==2.3.5",
+    "huggingface-hub==1.2.3",
+    "aiortc==1.14.0",
+    "onnxruntime==1.23.2",
+    "python-multipart==0.0.21",
+    "pywebpush==2.1.2",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "typer-slim==0.20.0",
+]
+
+authors = [
+    {name = "Oliver Bravery", email = "dev@oliverbravery.uk"}
+]
+
+maintainers = [
+    {name = "Oliver Bravery", email = "dev@oliverbravery.uk"}
+]
+
+[project.urls]
+Homepage = "https://github.com/oliverbravery/PrintGuard"
+Repository = "https://github.com/oliverbravery/PrintGuard"
+Issues = "https://github.com/oliverbravery/PrintGuard/issues"
+
+[project.scripts]
+printguard = "printguard.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+printguard = ["model/*"]

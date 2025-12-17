@@ -9,3 +9,4 @@ aiortc
 onnxruntime
 python-multipart
 pywebpush
+pydantic-settings
