@@ -8,3 +8,4 @@ huggingface-hub
 aiortc
 onnxruntime
 python-multipart
+pywebpush
