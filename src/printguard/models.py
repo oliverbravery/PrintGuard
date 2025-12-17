@@ -89,3 +89,42 @@ class PredictionResult(BaseModel):
     confidence: Optional[float] = None
     distances: Optional[dict[str, float]] = None
     status: PredictionStatus = PredictionStatus.SUCCESS
+
+
+class CFAccount(BaseModel):
+    """Cloudflare account info."""
+    id: str
+    name: str
+
+
+class CFZone(BaseModel):
+    """Cloudflare zone info."""
+    id: str
+    name: str
+
+
+class CFTunnelRequest(BaseModel):
+    """Request to create a Cloudflare tunnel."""
+    account_id: str
+    zone_id: str
+    tunnel_name: str
+    subdomain: str = "camera"
+
+
+class CFTunnelResponse(BaseModel):
+    """Response after creating a Cloudflare tunnel."""
+    tunnel_id: str
+    tunnel_secret: str
+    url: str
+
+
+class NgrokTunnelRequest(BaseModel):
+    """Request to create an ngrok tunnel."""
+    authtoken: str
+    domain: Optional[str] = None
+    edge: Optional[str] = None
+
+
+class NgrokTunnelResponse(BaseModel):
+    """Response after creating an ngrok tunnel."""
+    url: str

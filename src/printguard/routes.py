@@ -1,21 +1,47 @@
 """API routes."""
 
 import asyncio
+import logging
 from typing import Annotated
 
 from aiortc import RTCSessionDescription
-from fastapi import APIRouter, File, Query, UploadFile, HTTPException
+from fastapi import APIRouter, File, Query, UploadFile, HTTPException, Depends
 
 from .inference import predict
 from .model import get_model
-from .models import RTCOffer, RTCAnswer, PushSubscription, Session, FeedSettings, StreamInfo, PredictionResult, PredictionStatus
+from .models import (
+    RTCOffer, RTCAnswer, PushSubscription, Session, FeedSettings, 
+    StreamInfo, PredictionResult, PredictionStatus,
+    CFAccount, CFZone, CFTunnelRequest, CFTunnelResponse,
+    NgrokTunnelRequest, NgrokTunnelResponse
+)
 from .notifications import subscribe, unsubscribe, VAPID_PUBLIC_KEY
 from .webrtc import create_peer_connection, create_viewer_connection
+from .tunnel import CloudflareManager, is_cloudflared_installed
+from .ngrok import setup_ngrok_tunnel, is_ngrok_installed
+from .config import get_settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_sessions: dict[str, Session] = {}
+def check_cloudflared():
+    """Dependency to check if cloudflared is installed."""
+    if not is_cloudflared_installed():
+        raise HTTPException(
+            status_code=503, 
+            detail="cloudflared binary not found on system. Please install it to use Cloudflare features."
+        )
 
+def check_ngrok():
+    """Dependency to check if ngrok is installed."""
+    if not is_ngrok_installed():
+        raise HTTPException(
+            status_code=503, 
+            detail="ngrok-python package not found. Please install it to use ngrok features."
+        )
+
+_sessions: dict[str, Session] = {}
 
 
 @router.post("/predict")
@@ -127,6 +153,72 @@ async def push_unsubscribe(session_id: str) -> dict:
     """Unsubscribe from push notifications."""
     unsubscribe(session_id)
     return {"status": "unsubscribed"}
+
+
+@router.get("/cloudflare/accounts", dependencies=[Depends(check_cloudflared)])
+async def list_cf_accounts(api_token: str = Query(...)) -> list[CFAccount]:
+    """List Cloudflare accounts."""
+    try:
+        manager = CloudflareManager(api_token)
+        accounts = await manager.list_accounts()
+        return [CFAccount(id=a.id, name=a.name) for a in accounts]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/cloudflare/zones", dependencies=[Depends(check_cloudflared)])
+async def list_cf_zones(api_token: str = Query(...)) -> list[CFZone]:
+    """List Cloudflare zones."""
+    try:
+        manager = CloudflareManager(api_token)
+        zones = await manager.list_zones()
+        return [CFZone(id=z.id, name=z.name) for z in zones]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/cloudflare/tunnel", dependencies=[Depends(check_cloudflared)])
+async def create_cf_tunnel(
+    request: CFTunnelRequest, 
+    api_token: str = Query(...)
+) -> CFTunnelResponse:
+    """Create a Cloudflare tunnel and DNS record."""
+    try:
+        manager = CloudflareManager(api_token)
+        # 1. Create or get the Tunnel
+        tunnel = await manager.create_tunnel(request.account_id, request.tunnel_name)
+        # 2. Create or update the DNS Record
+        await manager.create_dns_record(request.zone_id, request.subdomain, tunnel.id)
+        # 3. Get Zone name for the URL
+        zones = await manager.list_zones()
+        zone_name = next((z.name for z in zones if z.id == request.zone_id), "unknown")
+        secret = getattr(tunnel, "tunnel_secret", "already-configured") or "already-configured"
+        return CFTunnelResponse(
+            tunnel_id=tunnel.id,
+            tunnel_secret=secret,
+            url=f"https://{request.subdomain}.{zone_name}"
+        )
+    except Exception as e:
+        logger.error(f"Cloudflare tunnel setup failed: {e}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cloudflare error: {str(e)}"
+        )
+
+
+@router.post("/ngrok/tunnel", dependencies=[Depends(check_ngrok)])
+async def create_ngrok_tunnel(request: NgrokTunnelRequest) -> NgrokTunnelResponse:
+    """Create an ngrok tunnel."""
+    settings = get_settings()
+    url = await setup_ngrok_tunnel(
+        authtoken=request.authtoken,
+        domain=request.domain,
+        edge=request.edge,
+        port=settings.port
+    )
+    if not url:
+        raise HTTPException(status_code=400, detail="Failed to set up ngrok tunnel")
+    return NgrokTunnelResponse(url=url)
 
 
 @router.get("/push/vapid-key")

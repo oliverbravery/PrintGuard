@@ -2,8 +2,16 @@
 
 from pathlib import Path
 from functools import lru_cache
+from enum import Enum
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class TunnelProvider(str, Enum):
+    """Available tunnel providers."""
+    LOCAL = "local"
+    CLOUDFLARE = "cloudflare"
+    NGROK = "ngrok"
 
 
 class Settings(BaseSettings):
@@ -20,6 +28,20 @@ class Settings(BaseSettings):
     debug: bool = False
     host: str = "0.0.0.0"
     port: int = 8000
+
+    # Tunnel Settings
+    tunnel_provider: TunnelProvider = TunnelProvider.LOCAL
+
+    # Cloudflare Tunnel Settings
+    cloudflare_api_token: str = ""
+    cloudflare_domain: str = ""
+    cloudflare_tunnel_name: str = "printguard-tunnel"
+    cloudflare_subdomain: str = "camera"
+
+    # ngrok Settings
+    ngrok_authtoken: str = ""
+    ngrok_domain: str = ""
+    ngrok_edge: str = ""
 
 
 MODEL_DIR = Path(__file__).parent / "model"
