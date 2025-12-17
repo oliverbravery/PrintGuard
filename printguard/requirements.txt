@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+torch
+torchvision
+pillow
+numpy
+huggingface-hub
+aiortc
+onnxruntime
+python-multipart
