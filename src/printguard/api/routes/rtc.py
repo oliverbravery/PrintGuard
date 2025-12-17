@@ -1,14 +1,14 @@
 import logging
 from fastapi import APIRouter, HTTPException
 from aiortc import RTCSessionDescription
-from ..inference import predict
-from ..model import get_model
-from ..models import (
+from ...core.inference import predict
+from ...core.model import get_model
+from ...core.models import (
     RTCOffer, RTCAnswer, Session, FeedSettings, 
     StreamInfo, PredictionResult, PredictionStatus
 )
-from ..webrtc import create_peer_connection, create_viewer_connection
-from ..notifications import unsubscribe
+from ...services.webrtc import create_peer_connection, create_viewer_connection
+from ...services.notifications import unsubscribe
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

@@ -4,7 +4,7 @@ import json
 
 from pywebpush import webpush, WebPushException
 
-from .models import SessionSubscription, PushSubscriptionInfo
+from ..core.models import SessionSubscription, PushSubscriptionInfo
 
 VAPID_PRIVATE_KEY = ""
 VAPID_PUBLIC_KEY = ""

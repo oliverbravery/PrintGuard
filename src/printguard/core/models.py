@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from aiortc import RTCPeerConnection
-    from .webrtc import VideoProcessor
+    from ..services.webrtc import VideoProcessor
 
 
 class FeedSettings(BaseModel):

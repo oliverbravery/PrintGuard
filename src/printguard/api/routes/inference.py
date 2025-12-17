@@ -1,9 +1,9 @@
 import asyncio
 from typing import Annotated
 from fastapi import APIRouter, File, UploadFile, Query
-from ..inference import predict
-from ..model import get_model
-from ..models import PredictionResult
+from ...core.inference import predict
+from ...core.model import get_model
+from ...core.models import PredictionResult
 
 router = APIRouter()
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
-from ..models import PushSubscription
-from ..notifications import subscribe, unsubscribe, VAPID_PUBLIC_KEY
+from ...core.models import PushSubscription
+from ...services.notifications import subscribe, unsubscribe, VAPID_PUBLIC_KEY
 
 router = APIRouter()
 

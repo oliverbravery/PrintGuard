@@ -10,7 +10,7 @@ from av import VideoFrame
 from PIL import ImageEnhance
 
 from .notifications import notify_defect
-from .models import FeedSettings, PredictionResult, PredictionStatus, PredictionClass
+from ..core.models import FeedSettings, PredictionResult, PredictionStatus, PredictionClass
 
 relay = MediaRelay()
 pcs: set[RTCPeerConnection] = set()

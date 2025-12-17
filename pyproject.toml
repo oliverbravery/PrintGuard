@@ -40,7 +40,7 @@ Repository = "https://github.com/oliverbravery/PrintGuard"
 Issues = "https://github.com/oliverbravery/PrintGuard/issues"
 
 [project.scripts]
-printguard = "printguard.cli:app"
+printguard = "printguard.cli.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]

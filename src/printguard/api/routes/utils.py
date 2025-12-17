@@ -1,7 +1,7 @@
 from fastapi import HTTPException
-from ..config import get_settings, TunnelProvider
-from ..tunnel import is_cloudflared_installed
-from ..ngrok import is_ngrok_installed
+from ...core.config import get_settings, TunnelProvider
+from ...services.tunnel import is_cloudflared_installed
+from ...services.ngrok import is_ngrok_installed
 
 def check_local_mode():
     """Dependency to ensure we are in local mode before allowing tunnel setup."""

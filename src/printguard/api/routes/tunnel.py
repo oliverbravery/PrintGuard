@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request
-from ..models import TunnelStatus
-from ..config import get_settings, TunnelProvider
+from ...core.models import TunnelStatus
+from ...core.config import get_settings, TunnelProvider
 
 router = APIRouter()
 

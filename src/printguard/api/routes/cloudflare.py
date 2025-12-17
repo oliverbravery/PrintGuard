@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException
-from ..models import CFAccount, CFZone, CFTunnelRequest, CFTunnelResponse
-from ..tunnel import CloudflareManager
+from ...core.models import CFAccount, CFZone, CFTunnelRequest, CFTunnelResponse
+from ...services.tunnel import CloudflareManager
 from .utils import check_cloudflared, check_local_mode
 
 logger = logging.getLogger(__name__)

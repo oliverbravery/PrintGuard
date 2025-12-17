@@ -3,7 +3,7 @@
 import typer
 import os
 from typing import Annotated
-from .config import TunnelProvider
+from ..core.config import TunnelProvider
 
 app = typer.Typer(
     name="printguard",
@@ -176,7 +176,7 @@ def serve(
         os.environ["NGROK_EDGE"] = ngrok_edge
 
     if tunnel == TunnelProvider.CLOUDFLARE:
-        from .tunnel import is_cloudflared_installed
+        from ..services.tunnel import is_cloudflared_installed
         if not is_cloudflared_installed():
             typer.echo(
                 typer.style(
@@ -188,7 +188,7 @@ def serve(
             )
 
     if tunnel == TunnelProvider.NGROK:
-        from .ngrok import is_ngrok_installed
+        from ..services.ngrok import is_ngrok_installed
         if not is_ngrok_installed():
             typer.echo(
                 typer.style(

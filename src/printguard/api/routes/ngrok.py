@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
-from ..models import NgrokTunnelRequest, NgrokTunnelResponse
-from ..ngrok import setup_ngrok_tunnel
-from ..config import get_settings
+from ...core.models import NgrokTunnelRequest, NgrokTunnelResponse
+from ...services.ngrok import setup_ngrok_tunnel
+from ...core.config import get_settings
 from .utils import check_ngrok, check_local_mode
 
 router = APIRouter()

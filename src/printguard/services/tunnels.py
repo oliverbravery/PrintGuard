@@ -1,7 +1,7 @@
 """Unified tunnel management."""
 
 import logging
-from .config import Settings, TunnelProvider
+from ..core.config import Settings, TunnelProvider
 from .tunnel import setup_tunnel as setup_cloudflare, run_tunnel as run_cloudflare
 from .ngrok import setup_ngrok_tunnel
 

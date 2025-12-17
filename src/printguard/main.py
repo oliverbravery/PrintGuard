@@ -5,11 +5,11 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
-from .config import get_settings
-from .model import download_model, load_model
-from .routes import router
-from .webrtc import cleanup
-from .tunnels import setup_active_tunnel
+from .core.config import get_settings
+from .core.model import download_model, load_model
+from .api.routes import router
+from .services.webrtc import cleanup
+from .services.tunnels import setup_active_tunnel
 
 
 @asynccontextmanager
