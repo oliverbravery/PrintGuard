@@ -70,6 +70,7 @@ def serve(
             "--host",
             "-h",
             help="Host to bind the server to",
+            envvar="HOST",
         ),
     ] = "0.0.0.0",
     port: Annotated[
@@ -78,6 +79,7 @@ def serve(
             "--port",
             "-p",
             help="Port to bind the server to",
+            envvar="PORT",
         ),
     ] = 8000,
     reload: Annotated[

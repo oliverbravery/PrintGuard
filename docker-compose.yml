@@ -1,0 +1,24 @@
+services:
+  printguard:
+    build: .
+    container_name: printguard
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+    env_file:
+      - .env
+    environment:
+      - HOST=${HOST:-0.0.0.0}
+      - PORT=${PORT:-8000}
+      - TUNNEL_PROVIDER=${TUNNEL_PROVIDER:-local}
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-}
+      - CLOUDFLARE_DOMAIN=${CLOUDFLARE_DOMAIN:-}
+      - CLOUDFLARE_TUNNEL_NAME=${CLOUDFLARE_TUNNEL_NAME:-printguard-tunnel}
+      - CLOUDFLARE_SUBDOMAIN=${CLOUDFLARE_SUBDOMAIN:-camera}
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
+      - NGROK_DOMAIN=${NGROK_DOMAIN:-}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - MODEL_DIR=/app/model
+    volumes:
+      - ./model:/app/model
+    restart: unless-stopped

@@ -128,3 +128,10 @@ class NgrokTunnelRequest(BaseModel):
 class NgrokTunnelResponse(BaseModel):
     """Response after creating an ngrok tunnel."""
     url: str
+
+
+class TunnelStatus(BaseModel):
+    """Current tunnel status."""
+    provider: str
+    url: Optional[str] = None
+    is_active: bool

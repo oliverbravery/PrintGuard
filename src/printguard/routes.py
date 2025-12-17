@@ -5,7 +5,7 @@ import logging
 from typing import Annotated
 
 from aiortc import RTCSessionDescription
-from fastapi import APIRouter, File, Query, UploadFile, HTTPException, Depends
+from fastapi import APIRouter, File, Query, UploadFile, HTTPException, Depends, Request
 
 from .inference import predict
 from .model import get_model
@@ -13,17 +13,26 @@ from .models import (
     RTCOffer, RTCAnswer, PushSubscription, Session, FeedSettings, 
     StreamInfo, PredictionResult, PredictionStatus,
     CFAccount, CFZone, CFTunnelRequest, CFTunnelResponse,
-    NgrokTunnelRequest, NgrokTunnelResponse
+    NgrokTunnelRequest, NgrokTunnelResponse, TunnelStatus
 )
 from .notifications import subscribe, unsubscribe, VAPID_PUBLIC_KEY
 from .webrtc import create_peer_connection, create_viewer_connection
 from .tunnel import CloudflareManager, is_cloudflared_installed
 from .ngrok import setup_ngrok_tunnel, is_ngrok_installed
-from .config import get_settings
+from .config import get_settings, TunnelProvider
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+def check_local_mode():
+    """Dependency to ensure we are in local mode before allowing tunnel setup."""
+    settings = get_settings()
+    if settings.tunnel_provider != TunnelProvider.LOCAL:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Tunnel setup via API is only allowed when TUNNEL_PROVIDER is 'local'. Current mode: {settings.tunnel_provider}"
+        )
 
 def check_cloudflared():
     """Dependency to check if cloudflared is installed."""
@@ -155,7 +164,7 @@ async def push_unsubscribe(session_id: str) -> dict:
     return {"status": "unsubscribed"}
 
 
-@router.get("/cloudflare/accounts", dependencies=[Depends(check_cloudflared)])
+@router.get("/cloudflare/accounts", dependencies=[Depends(check_cloudflared), Depends(check_local_mode)])
 async def list_cf_accounts(api_token: str = Query(...)) -> list[CFAccount]:
     """List Cloudflare accounts."""
     try:
@@ -166,7 +175,7 @@ async def list_cf_accounts(api_token: str = Query(...)) -> list[CFAccount]:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/cloudflare/zones", dependencies=[Depends(check_cloudflared)])
+@router.get("/cloudflare/zones", dependencies=[Depends(check_cloudflared), Depends(check_local_mode)])
 async def list_cf_zones(api_token: str = Query(...)) -> list[CFZone]:
     """List Cloudflare zones."""
     try:
@@ -177,7 +186,7 @@ async def list_cf_zones(api_token: str = Query(...)) -> list[CFZone]:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/cloudflare/tunnel", dependencies=[Depends(check_cloudflared)])
+@router.post("/cloudflare/tunnel", dependencies=[Depends(check_cloudflared), Depends(check_local_mode)])
 async def create_cf_tunnel(
     request: CFTunnelRequest, 
     api_token: str = Query(...)
@@ -206,7 +215,7 @@ async def create_cf_tunnel(
         )
 
 
-@router.post("/ngrok/tunnel", dependencies=[Depends(check_ngrok)])
+@router.post("/ngrok/tunnel", dependencies=[Depends(check_ngrok), Depends(check_local_mode)])
 async def create_ngrok_tunnel(request: NgrokTunnelRequest) -> NgrokTunnelResponse:
     """Create an ngrok tunnel."""
     settings = get_settings()
@@ -225,4 +234,27 @@ async def create_ngrok_tunnel(request: NgrokTunnelRequest) -> NgrokTunnelRespons
 async def get_vapid_key() -> dict:
     """Get VAPID public key for push subscription."""
     return {"publicKey": VAPID_PUBLIC_KEY}
+
+
+@router.get("/tunnel/status")
+async def get_tunnel_status(request: Request) -> TunnelStatus:
+    """Get current tunnel status."""
+    settings = get_settings()
+    tunnel_type = getattr(request.app.state, "tunnel_type", None)
+    tunnel_url = getattr(request.app.state, "tunnel_url", None)
+    return TunnelStatus(
+        provider=settings.tunnel_provider,
+        is_active=tunnel_type is not None,
+        url=tunnel_url
+    )
+
+
+@router.post("/tunnel/disable")
+async def disable_tunnel(request: Request) -> dict:
+    """Disable any active tunnel and revert to local mode."""
+    settings = get_settings()
+    settings.tunnel_provider = TunnelProvider.LOCAL
+    request.app.state.tunnel_type = None
+    request.app.state.tunnel_url = None
+    return {"status": "success", "message": "Reverted to local mode"}
 

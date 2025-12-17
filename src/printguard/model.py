@@ -6,7 +6,7 @@ import pickle
 import onnxruntime as ort
 from huggingface_hub import hf_hub_download
 
-from .config import MODEL_DIR
+from .config import get_model_dir
 
 REPO_ID = "oliverbravery/printguard"
 FILES = ["model.onnx", "opt.json", "prototypes.pkl"]
@@ -16,14 +16,15 @@ _model_info: dict | None = None
 
 def download_model(force: bool = False) -> None:
     """Download model files from HuggingFace if not present."""
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    model_dir = get_model_dir()
+    model_dir.mkdir(parents=True, exist_ok=True)
     for filename in FILES:
-        filepath = MODEL_DIR / filename
+        filepath = model_dir / filename
         if force or not filepath.exists():
             hf_hub_download(
                 repo_id=REPO_ID,
                 filename=filename,
-                local_dir=MODEL_DIR,
+                local_dir=model_dir,
                 local_dir_use_symlinks=False
             )
 
@@ -33,16 +34,18 @@ def load_model() -> dict:
     global _model_info
     if _model_info is not None:
         return _model_info
+    
+    model_dir = get_model_dir()
     session_options = ort.SessionOptions()
     session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     session = ort.InferenceSession(
-        str(MODEL_DIR / "model.onnx"),
+        str(model_dir / "model.onnx"),
         sess_options=session_options,
         providers=['CPUExecutionProvider']
     )
-    with open(MODEL_DIR / "opt.json") as f:
+    with open(model_dir / "opt.json") as f:
         options = json.load(f)
-    with open(MODEL_DIR / "prototypes.pkl", "rb") as f:
+    with open(model_dir / "prototypes.pkl", "rb") as f:
         prototype_data = pickle.load(f)
     _model_info = {
         "session": session,

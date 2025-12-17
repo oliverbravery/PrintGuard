@@ -43,8 +43,8 @@ class Settings(BaseSettings):
     ngrok_domain: str = ""
     ngrok_edge: str = ""
 
-
-MODEL_DIR = Path(__file__).parent / "model"
+    # Model Settings
+    model_dir: Path = Path(__file__).parent / "model"
 
 
 @lru_cache
@@ -55,3 +55,8 @@ def get_settings() -> Settings:
         Settings: The application settings instance.
     """
     return Settings()
+
+
+def get_model_dir() -> Path:
+    """Get the model directory from settings."""
+    return get_settings().model_dir
