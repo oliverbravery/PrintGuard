@@ -1,6 +1,7 @@
 """Pydantic models for API."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
+from enum import Enum
 
 from pydantic import BaseModel
 
@@ -53,3 +54,38 @@ class Session(BaseModel):
     settings: FeedSettings = FeedSettings()
 
     model_config = {"arbitrary_types_allowed": True}
+
+
+class StreamInfo(BaseModel):
+    """Information about an active stream."""
+    session_id: str
+    device_name: str
+    settings: FeedSettings
+
+
+class RTCAnswer(BaseModel):
+    """WebRTC answer to client."""
+    sdp: str
+    type: str
+
+
+class PredictionStatus(str, Enum):
+    """Status of a prediction."""
+    SUCCESS = "success"
+    WAITING = "waiting"
+    ERROR = "error"
+
+
+class PredictionClass(str, Enum):
+    """Common prediction classes."""
+    NORMAL = "normal"
+    DEFECT = "defect"
+
+
+class PredictionResult(BaseModel):
+    """Prediction result for a frame."""
+    class_name: Optional[PredictionClass | str] = None
+    class_idx: Optional[int] = None
+    confidence: Optional[float] = None
+    distances: Optional[dict[str, float]] = None
+    status: PredictionStatus = PredictionStatus.SUCCESS

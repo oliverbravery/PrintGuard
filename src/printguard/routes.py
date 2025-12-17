@@ -4,13 +4,13 @@ import asyncio
 from typing import Annotated
 
 from aiortc import RTCSessionDescription
-from fastapi import APIRouter, File, Query, UploadFile
+from fastapi import APIRouter, File, Query, UploadFile, HTTPException
 
 from .inference import predict
 from .model import get_model
-from .models import RTCOffer, PushSubscription, Session, FeedSettings
+from .models import RTCOffer, RTCAnswer, PushSubscription, Session, FeedSettings, StreamInfo, PredictionResult, PredictionStatus
 from .notifications import subscribe, unsubscribe, VAPID_PUBLIC_KEY
-from .webrtc import create_peer_connection
+from .webrtc import create_peer_connection, create_viewer_connection
 
 router = APIRouter()
 
@@ -22,12 +22,12 @@ _sessions: dict[str, Session] = {}
 async def predict_image(
     file: Annotated[UploadFile, File(description="Image to classify")],
     sensitivity: Annotated[float, Query(ge=0.1, le=10.0)] = 1.0
-) -> dict:
+) -> PredictionResult:
     """Predict print defect class for an uploaded image."""
     contents = await file.read()
     model_info = get_model()
     result = await asyncio.to_thread(predict, contents, model_info, sensitivity)
-    return result
+    return PredictionResult(**result)
 
 
 @router.get("/health")
@@ -36,8 +36,37 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
+@router.get("/rtc/streams")
+async def rtc_list_streams() -> list[StreamInfo]:
+    """List active WebRTC streams."""
+    return [
+        StreamInfo(
+            session_id=session_id,
+            device_name=session.device_name,
+            settings=session.settings
+        )
+        for session_id, session in _sessions.items()
+    ]
+
+
+@router.post("/rtc/view/{session_id}")
+async def rtc_view(session_id: str, offer: RTCOffer) -> RTCAnswer:
+    """View a live stream from another session."""
+    source_session = _sessions.get(session_id)
+    if not source_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    sdp = RTCSessionDescription(sdp=offer.sdp, type=offer.type)
+    pc = await create_viewer_connection(sdp, source_session.processor)
+
+    return RTCAnswer(
+        sdp=pc.localDescription.sdp,
+        type=pc.localDescription.type
+    )
+
+
 @router.post("/rtc/offer")
-async def rtc_offer(offer: RTCOffer) -> dict:
+async def rtc_offer(offer: RTCOffer) -> RTCAnswer:
     """Accept WebRTC offer and return answer."""
     model_info = get_model()
     sdp = RTCSessionDescription(sdp=offer.sdp, type=offer.type)
@@ -47,10 +76,10 @@ async def rtc_offer(offer: RTCOffer) -> dict:
     _sessions[offer.session_id] = Session(
         pc=pc, processor=processor, device_name=offer.device_name, settings=offer.settings
     )
-    return {
-        "sdp": pc.localDescription.sdp,
-        "type": pc.localDescription.type
-    }
+    return RTCAnswer(
+        sdp=pc.localDescription.sdp,
+        type=pc.localDescription.type
+    )
 
 
 @router.put("/rtc/settings/{session_id}")
@@ -65,13 +94,15 @@ async def rtc_update_settings(session_id: str, settings: FeedSettings) -> dict:
 
 
 @router.get("/rtc/result/{session_id}")
-async def rtc_result(session_id: str) -> dict:
+async def rtc_result(session_id: str) -> PredictionResult | dict:
     """Get latest prediction result for a session."""
     session = _sessions.get(session_id)
     if not session:
         return {"error": "Session not found"}
     result = session.processor.last_result
-    return result if result else {"status": "waiting"}
+    if result:
+        return PredictionResult(**result, status=PredictionStatus.SUCCESS)
+    return PredictionResult(status=PredictionStatus.WAITING)
 
 
 @router.delete("/rtc/{session_id}")
