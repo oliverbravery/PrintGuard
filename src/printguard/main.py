@@ -1,7 +1,8 @@
 """FastAPI application entry point."""
 
-from contextlib import asynccontextmanager
+import asyncio
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .config import get_settings
@@ -13,7 +14,7 @@ from .tunnels import setup_active_tunnel
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Download model on startup if needed, then load it."""
+    """Download model on startup if needed, then load it, sets up tunnel based on configuration and cleans up on shutdown."""
     settings = get_settings()
     download_model()
     load_model()
@@ -22,7 +23,18 @@ async def lifespan(app: FastAPI):
     await setup_active_tunnel(app, settings)
 
     yield
-    await cleanup()
+    
+    # Cleanup tunnel process if it exists
+    if hasattr(app.state, "tunnel_process"):
+        process = app.state.tunnel_process
+        if process:
+            print(f"Stopping tunnel process (PID: {process.pid})...")
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                process.kill()
+    # Cleanup WebRTC resources
     await cleanup()
 
 

@@ -2,6 +2,7 @@
 
 import logging
 import shutil
+import asyncio
 from typing import Tuple, Optional
 
 try:
@@ -14,6 +15,30 @@ logger = logging.getLogger(__name__)
 def is_cloudflared_installed() -> bool:
     """Check if the cloudflared binary is installed and in PATH."""
     return shutil.which("cloudflared") is not None
+
+async def run_tunnel(tunnel_id: str, tunnel_secret: str, port: int = 8000):
+    """Run the cloudflared tunnel in a background process."""
+    if not is_cloudflared_installed():
+        logger.error("cloudflared binary not found. Cannot run tunnel.")
+        return None
+
+    cmd = [
+        "cloudflared", "tunnel", "--no-autoupdate", "run",
+        "--url", f"http://localhost:{port}",
+        tunnel_id
+    ]
+    
+    logger.info(f"Starting cloudflared tunnel {tunnel_id}...")
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        return process
+    except Exception as e:
+        logger.error(f"Failed to start cloudflared process: {e}")
+        return None
 
 class CloudflareManager:
     def __init__(self, api_token: str):

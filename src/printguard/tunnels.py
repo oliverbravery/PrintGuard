@@ -2,7 +2,7 @@
 
 import logging
 from .config import Settings, TunnelProvider
-from .tunnel import setup_tunnel as setup_cloudflare
+from .tunnel import setup_tunnel as setup_cloudflare, run_tunnel as run_cloudflare
 from .ngrok import setup_ngrok_tunnel
 
 logger = logging.getLogger(__name__)
@@ -28,9 +28,19 @@ async def setup_active_tunnel(app, settings: Settings):
             subdomain=settings.cloudflare_subdomain
         )
         if tunnel_info:
+            tunnel_id, tunnel_secret = tunnel_info
             app.state.tunnel_type = "cloudflare"
-            app.state.tunnel_id = tunnel_info[0]
-            return True
+            app.state.tunnel_id = tunnel_id
+            
+            # Start the tunnel process
+            process = await run_cloudflare(tunnel_id, tunnel_secret, settings.port)
+            if process:
+                app.state.tunnel_process = process
+                logger.info(f"Cloudflare tunnel {tunnel_id} started successfully.")
+                return True
+            else:
+                logger.error("Failed to start Cloudflare tunnel process.")
+                return False
 
     if provider == TunnelProvider.NGROK:
         if not settings.ngrok_authtoken:
