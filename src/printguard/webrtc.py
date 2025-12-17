@@ -1,13 +1,17 @@
 """WebRTC video processing."""
 
 import asyncio
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaRelay
 from av import VideoFrame
+from PIL import ImageEnhance
 
 from .notifications import notify_defect
+
+if TYPE_CHECKING:
+    from .models import FeedSettings
 
 relay = MediaRelay()
 pcs: set[RTCPeerConnection] = set()
@@ -16,10 +20,10 @@ pcs: set[RTCPeerConnection] = set()
 class VideoProcessor:
     """Process video frames and run predictions using always-latest-frame pattern."""
     
-    def __init__(self, predict_fn: Callable, model_info: dict, sensitivity: float = 1.0, session_id: Optional[str] = None):
+    def __init__(self, predict_fn: Callable, model_info: dict, settings: "FeedSettings", session_id: Optional[str] = None):
         self.predict_fn = predict_fn
         self.model_info = model_info
-        self.sensitivity = sensitivity
+        self.settings = settings
         self.session_id = session_id
         self.last_result: dict | None = None
         self._latest_frame: VideoFrame | None = None
@@ -50,8 +54,14 @@ class VideoProcessor:
             if frame is None:
                 continue
             image = frame.to_image()
+            if self.settings.resolution:
+                image = image.resize(self.settings.resolution)
+            if self.settings.brightness != 1.0:
+                image = ImageEnhance.Brightness(image).enhance(self.settings.brightness)
+            if self.settings.contrast != 1.0:
+                image = ImageEnhance.Contrast(image).enhance(self.settings.contrast)
             self.last_result = await asyncio.to_thread(
-                self.predict_fn, image, self.model_info, self.sensitivity
+                self.predict_fn, image, self.model_info, self.settings.sensitivity
             )
             if self.last_result and self.session_id:
                 class_name = self.last_result.get("class_name", "")
@@ -72,25 +82,25 @@ async def create_peer_connection(
     offer: RTCSessionDescription,
     predict_fn: Callable,
     model_info: dict,
-    sensitivity: float = 1.0,
+    settings: "FeedSettings",
     session_id: Optional[str] = None
 ) -> tuple[RTCPeerConnection, VideoProcessor]:
     """Create WebRTC peer connection with video processing."""
     pc = RTCPeerConnection()
     pcs.add(pc)
-    processor = VideoProcessor(predict_fn, model_info, sensitivity, session_id)
-    
+    processor = VideoProcessor(predict_fn, model_info, settings, session_id)
+
     @pc.on("connectionstatechanged")
     async def on_state_change():
         if pc.connectionState == "failed":
             await pc.close()
             pcs.discard(pc)
-    
+
     @pc.on("track")
     def on_track(track):
         if track.kind == "video":
             asyncio.create_task(processor.process(relay.subscribe(track)))
-    
+
     await pc.setRemoteDescription(offer)
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)

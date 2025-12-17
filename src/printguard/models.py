@@ -9,12 +9,20 @@ if TYPE_CHECKING:
     from .webrtc import VideoProcessor
 
 
+class FeedSettings(BaseModel):
+    """Settings for a camera feed."""
+    resolution: tuple[int, int] = (640, 480)
+    brightness: float = 1.0
+    contrast: float = 1.0
+    sensitivity: float = 1.0
+
+
 class RTCOffer(BaseModel):
     """WebRTC offer from client."""
     sdp: str
     type: str
     session_id: str
-    sensitivity: float = 1.0
+    settings: FeedSettings = FeedSettings()
     device_name: str = "Camera"
 
 
@@ -42,5 +50,6 @@ class Session(BaseModel):
     pc: "RTCPeerConnection"
     processor: "VideoProcessor"
     device_name: str = "Camera"
+    settings: FeedSettings = FeedSettings()
 
     model_config = {"arbitrary_types_allowed": True}

@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, Query, UploadFile
 
 from .inference import predict
 from .model import get_model
-from .models import RTCOffer, PushSubscription, Session
+from .models import RTCOffer, PushSubscription, Session, FeedSettings
 from .notifications import subscribe, unsubscribe, VAPID_PUBLIC_KEY
 from .webrtc import create_peer_connection
 
@@ -42,15 +42,26 @@ async def rtc_offer(offer: RTCOffer) -> dict:
     model_info = get_model()
     sdp = RTCSessionDescription(sdp=offer.sdp, type=offer.type)
     pc, processor = await create_peer_connection(
-        sdp, predict, model_info, offer.sensitivity, offer.session_id
+        sdp, predict, model_info, offer.settings, offer.session_id
     )
     _sessions[offer.session_id] = Session(
-        pc=pc, processor=processor, device_name=offer.device_name
+        pc=pc, processor=processor, device_name=offer.device_name, settings=offer.settings
     )
     return {
         "sdp": pc.localDescription.sdp,
         "type": pc.localDescription.type
     }
+
+
+@router.put("/rtc/settings/{session_id}")
+async def rtc_update_settings(session_id: str, settings: FeedSettings) -> dict:
+    """Update settings for a session."""
+    session = _sessions.get(session_id)
+    if not session:
+        return {"error": "Session not found"}
+    session.settings = settings
+    session.processor.settings = settings
+    return {"status": "updated"}
 
 
 @router.get("/rtc/result/{session_id}")
