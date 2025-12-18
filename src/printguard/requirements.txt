@@ -12,3 +12,4 @@ pywebpush
 pydantic-settings
 cloudflare
 ngrok
+httpx
