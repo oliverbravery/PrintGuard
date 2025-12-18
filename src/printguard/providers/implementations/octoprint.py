@@ -2,7 +2,10 @@
 
 import httpx
 import logging
-from typing import Optional
+import asyncio
+from typing import Optional, Tuple
+
+from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 
 from ..base import PrinterProvider
 from ..registry import register
@@ -21,6 +24,7 @@ class OctoPrintProvider(PrinterProvider):
             "Content-Type": "application/json"
         }
         self.client: Optional[httpx.AsyncClient] = None
+        self._pcs: set[RTCPeerConnection] = set()
 
     @property
     def name(self) -> str:
@@ -39,7 +43,11 @@ class OctoPrintProvider(PrinterProvider):
             await self.client.post("/api/connection", json={"command": "connect"})
 
     async def disconnect(self) -> None:
-        """Close the HTTP client."""
+        """Close the HTTP client and any active peer connections."""
+        for pc in list(self._pcs):
+            await pc.close()
+        self._pcs.clear()
+
         if self.client:
             await self.client.aclose()
             self.client = None
@@ -59,6 +67,71 @@ class OctoPrintProvider(PrinterProvider):
             await self.connect()
         response = await self.client.post("/api/job", json={"command": "start"})
         response.raise_for_status()
+
+    async def get_camera_track(self) -> Tuple[Optional[MediaStreamTrack], Optional[RTCPeerConnection]]:
+        """Return a WebRTC video track from OctoPrint's camera-streamer."""
+        if not self.client:
+            await self.connect()
+        try:
+            resp = await self.client.get("/api/webcam/webcams")
+            resp.raise_for_status()
+            webcams = resp.json()
+            if not webcams:
+                logger.warning("No webcams found in OctoPrint")
+                return None, None
+            stream_url = webcams[0].get("compat", {}).get("stream", "")
+            if not stream_url:
+                logger.warning("Primary webcam has no stream URL")
+                return None, None
+            base_path = stream_url.split('?')[0].rstrip('/')
+            if base_path.startswith("/"):
+                signaling_url = f"{self.host}{base_path}/api/v1/stream/webrtc"
+            else:
+                signaling_url = f"{base_path}/api/v1/stream/webrtc"
+        except Exception as e:
+            logger.warning(f"Failed to discover OctoPrint webcam: {e}")
+            return None, None
+        # WebRTC Handshake with camera-streamer
+        pc = RTCPeerConnection()
+        self._pcs.add(pc)
+        pc.addTransceiver("video", direction="recvonly")
+        offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    signaling_url,
+                    json={"type": "offer", "sdp": pc.localDescription.sdp},
+                    timeout=10.0
+                )
+                resp.raise_for_status()
+                answer_data = resp.json()
+            answer = RTCSessionDescription(sdp=answer_data["sdp"], type=answer_data["type"])
+            await pc.setRemoteDescription(answer)
+        except Exception as e:
+            logger.warning(f"WebRTC signaling failed with camera-streamer at {signaling_url}: {e}")
+            await pc.close()
+            self._pcs.discard(pc)
+            return None, None
+        # Wait for the track to be received
+        track_event = asyncio.Event()
+        remote_track: Optional[MediaStreamTrack] = None
+
+        @pc.on("track")
+        def on_track(track):
+            nonlocal remote_track
+            if track.kind == "video":
+                remote_track = track
+                track_event.set()
+
+        try:
+            await asyncio.wait_for(track_event.wait(), timeout=10.0)
+            return remote_track, pc
+        except asyncio.TimeoutError:
+            logger.warning("Timed out waiting for OctoPrint camera track")
+            await pc.close()
+            self._pcs.discard(pc)
+            return None, None
 
     async def pause(self) -> None:
         """Pause the current job."""

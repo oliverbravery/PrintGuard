@@ -3,9 +3,13 @@
 import logging
 from fastapi import APIRouter, HTTPException
 
-from ...core.models import PrinterConfig, PrinterInfo, PrinterStatus
+from ...core.models import PrinterConfig, PrinterInfo, PrinterStatus, Session, FeedSettings
+from ...core.model import get_model
+from ...core.inference import predict
 from ...providers import list_providers as get_available_providers, get_provider
 from ...providers.base import PrinterProvider
+from ...services.webrtc import start_track_processing
+from .rtc import register_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printer", tags=["printer"])
@@ -95,6 +99,41 @@ async def get_printer(printer_id: str) -> PrinterInfo:
         status=status,
         linked_session_id=config.linked_session_id,
     )
+
+
+@router.post("/{printer_id}/stream", response_model=dict)
+async def link_printer_stream(printer_id: str, session_id: str, settings: FeedSettings = FeedSettings()) -> dict:
+    """Import the printer's camera as a PrintGuard session."""
+    if printer_id not in _printers:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    config, provider = _printers[printer_id]
+    if not provider:
+        raise HTTPException(status_code=400, detail="Printer provider not connected")
+    try:
+        track, pc = await provider.get_camera_track()
+        if not track:
+            raise HTTPException(status_code=404, detail="Printer has no camera or WebRTC not supported")
+        model_info = get_model()
+        processor = await start_track_processing(
+            track,
+            predict,
+            model_info,
+            settings,
+            session_id
+        )
+        session = Session(
+            pc=pc,
+            processor=processor,
+            device_name=f"{config.name} Camera",
+            settings=settings
+        )
+        register_session(session_id, session)
+        # Update config with linked session ID
+        config.linked_session_id = session_id
+        return {"status": "success", "session_id": session_id}
+    except Exception as e:
+        logger.error(f"Failed to link printer stream: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{printer_id}")

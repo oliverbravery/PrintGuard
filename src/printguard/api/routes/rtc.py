@@ -15,6 +15,12 @@ router = APIRouter()
 
 _sessions: dict[str, Session] = {}
 
+
+def register_session(session_id: str, session: Session):
+    """Register a session from outside."""
+    _sessions[session_id] = session
+
+
 @router.get("/streams")
 async def rtc_list_streams() -> list[StreamInfo]:
     """List active WebRTC streams."""
@@ -83,7 +89,7 @@ async def rtc_result(session_id: str) -> PredictionResult | dict:
 async def rtc_close(session_id: str) -> dict:
     """Close a WebRTC session."""
     session = _sessions.pop(session_id, None)
-    if session:
+    if session and session.pc:
         await session.pc.close()
     unsubscribe(session_id)
     return {"status": "closed"}

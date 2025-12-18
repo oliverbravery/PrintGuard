@@ -1,8 +1,7 @@
 """WebRTC video processing."""
 
 import asyncio
-import json
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Callable, Optional
 
 from aiortc import RTCDataChannel, RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaRelay
@@ -128,6 +127,21 @@ async def create_peer_connection(
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     return pc, processor
+
+
+async def start_track_processing(
+    track,
+    predict_fn: Callable,
+    model_info: dict,
+    settings: "FeedSettings",
+    session_id: Optional[str] = None
+) -> VideoProcessor:
+    """Start processing a MediaStreamTrack directly."""
+    processor = VideoProcessor(predict_fn, model_info, settings, session_id)
+    relayed_track = relay.subscribe(track)
+    processor.relayed_track = relayed_track
+    asyncio.create_task(processor.process(relayed_track))
+    return processor
 
 
 async def create_viewer_connection(

@@ -1,6 +1,10 @@
 """Base class for 3D printer providers."""
 
 from abc import ABC, abstractmethod
+from typing import Optional, TYPE_CHECKING, Tuple
+
+if TYPE_CHECKING:
+    from aiortc import MediaStreamTrack, RTCPeerConnection
 
 
 class PrinterProvider(ABC):
@@ -45,4 +49,9 @@ class PrinterProvider(ABC):
     @abstractmethod
     async def stop(self) -> None:
         """Stop/cancel the current print."""
+        ...
+
+    @abstractmethod
+    async def get_camera_track(self) -> Tuple[Optional["MediaStreamTrack"], Optional["RTCPeerConnection"]]:
+        """Return a WebRTC video track and its peer connection for the printer's camera."""
         ...

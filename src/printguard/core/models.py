@@ -48,7 +48,7 @@ class SessionSubscription(BaseModel):
 
 class Session(BaseModel):
     """WebRTC session state."""
-    pc: "RTCPeerConnection"
+    pc: Optional["RTCPeerConnection"] = None
     processor: "VideoProcessor"
     device_name: str = "Camera"
     settings: FeedSettings = FeedSettings()
