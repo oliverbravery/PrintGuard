@@ -141,6 +141,20 @@ async def pause_print(printer_id: str) -> dict:
     return {"status": "paused"}
 
 
+@router.post("/{printer_id}/resume")
+async def resume_print(printer_id: str) -> dict:
+    """Resume the current print."""
+    if printer_id not in _printers:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    _, provider = _printers[printer_id]
+    if not provider:
+        raise HTTPException(status_code=400, detail="No provider connected")
+
+    await provider.resume()
+    return {"status": "resumed"}
+
+
 @router.post("/{printer_id}/stop")
 async def stop_print(printer_id: str) -> dict:
     """Stop/cancel the current print."""

@@ -38,6 +38,11 @@ class PrinterProvider(ABC):
         ...
 
     @abstractmethod
+    async def resume(self) -> None:
+        """Resume the current print."""
+        ...
+
+    @abstractmethod
     async def stop(self) -> None:
         """Stop/cancel the current print."""
         ...
