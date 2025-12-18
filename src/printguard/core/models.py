@@ -135,3 +135,30 @@ class TunnelStatus(BaseModel):
     provider: str
     url: Optional[str] = None
     is_active: bool
+
+
+class PrinterStatus(str, Enum):
+    """Printer state."""
+    IDLE = "idle"
+    PRINTING = "printing"
+    PAUSED = "paused"
+    ERROR = "error"
+    DISCONNECTED = "disconnected"
+
+
+class PrinterConfig(BaseModel):
+    """Configuration for a printer instance."""
+    id: str
+    name: str
+    provider: str
+    config: dict = {}
+    linked_session_id: Optional[str] = None
+
+
+class PrinterInfo(BaseModel):
+    """Printer status response."""
+    id: str
+    name: str
+    provider: str
+    status: PrinterStatus
+    linked_session_id: Optional[str] = None
