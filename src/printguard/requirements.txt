@@ -14,3 +14,7 @@ cloudflare
 ngrok
 httpx
 cryptography
+paho-mqtt
+opencv-python-headless
+websockets
+av
