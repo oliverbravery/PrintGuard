@@ -1,6 +1,7 @@
 from fastapi import APIRouter
+from ..crypto_utils import EncryptedRoute
 
-router = APIRouter()
+router = APIRouter(route_class=EncryptedRoute)
 
 @router.get("/health")
 async def health() -> dict:

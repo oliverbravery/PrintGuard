@@ -3,8 +3,9 @@ from ...core.models import NgrokTunnelRequest, NgrokTunnelResponse
 from ...services.ngrok import setup_ngrok_tunnel
 from ...core.config import get_settings
 from .utils import check_ngrok, check_local_mode
+from ..crypto_utils import EncryptedRoute
 
-router = APIRouter()
+router = APIRouter(route_class=EncryptedRoute)
 
 @router.post("/tunnel", dependencies=[Depends(check_ngrok), Depends(check_local_mode)])
 async def create_ngrok_tunnel(request: NgrokTunnelRequest) -> NgrokTunnelResponse:

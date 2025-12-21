@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     )
     vapid_public_key: str = ""
     vapid_private_key: str = ""
+    crypto_private_key: str = ""
     debug: bool = False
     host: str = "0.0.0.0"
     port: int = 8000

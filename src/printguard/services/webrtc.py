@@ -1,6 +1,7 @@
 """WebRTC video processing."""
 
 import asyncio
+import logging
 from typing import Callable, Optional
 
 from aiortc import RTCDataChannel, RTCPeerConnection, RTCSessionDescription
@@ -10,6 +11,8 @@ from PIL import ImageEnhance
 
 from .notifications import notify_defect
 from ..core.models import FeedSettings, PredictionResult, PredictionStatus, PredictionClass
+
+logger = logging.getLogger(__name__)
 
 relay = MediaRelay()
 pcs: set[RTCPeerConnection] = set()
@@ -42,18 +45,30 @@ class VideoProcessor:
     
     async def _receive_frames(self, track):
         """Continuously receive frames and keep only the latest."""
+        logger.info(f"Started receiving frames for session {self.session_id}")
+        frame_count = 0
         while self._running:
             try:
+                if frame_count == 0:
+                    logger.info(f"Waiting for first frame from track for session {self.session_id}")
                 frame: VideoFrame = await track.recv()
+                if frame_count == 0:
+                    logger.info(f"Received first frame for session {self.session_id}")
                 self._latest_frame = frame
                 self._frame_ready.set()
-            except Exception:
+                frame_count += 1
+                if frame_count % 100 == 0:
+                    logger.debug(f"Received {frame_count} frames for session {self.session_id}")
+            except Exception as e:
+                logger.error(f"Error receiving frames for session {self.session_id}: {e}", exc_info=True)
                 self._running = False
                 self._frame_ready.set()
                 break
+        logger.info(f"Stopped receiving frames for session {self.session_id}")
     
     async def _run_inference(self):
         """Process the latest available frame."""
+        logger.info(f"Started inference loop for session {self.session_id}")
         while self._running:
             await self._frame_ready.wait()
             if not self._running:
@@ -62,6 +77,9 @@ class VideoProcessor:
             self._frame_ready.clear()
             if frame is None:
                 continue
+            self._inference_count = getattr(self, "_inference_count", 0) + 1
+            if self._inference_count % 100 == 0:
+                logger.debug(f"Running inference {self._inference_count} for session {self.session_id}")
             image = frame.to_image()
             if self.settings.resolution:
                 image = image.resize(self.settings.resolution)
@@ -78,7 +96,6 @@ class VideoProcessor:
                 for dc in list(self.data_channels):
                     if dc.readyState == "open":
                         dc.send(message)
-
                 if self.session_id:
                     class_name = result_model.class_name
                     if class_name and class_name != PredictionClass.NORMAL and class_name != self._last_notified_class:
@@ -160,10 +177,8 @@ async def create_viewer_connection(
 
     if processor.relayed_track:
         pc.addTrack(processor.relayed_track)
-
     dc = pc.createDataChannel("results")
     processor.add_data_channel(dc)
-
     await pc.setRemoteDescription(offer)
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)

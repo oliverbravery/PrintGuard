@@ -3,9 +3,10 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from ...core.models import CFAccount, CFZone, CFTunnelRequest, CFTunnelResponse
 from ...services.tunnel import CloudflareManager
 from .utils import check_cloudflared, check_local_mode
+from ..crypto_utils import EncryptedRoute
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(route_class=EncryptedRoute)
 
 @router.get("/accounts", dependencies=[Depends(check_cloudflared), Depends(check_local_mode)])
 async def list_cf_accounts(api_token: str = Query(...)) -> list[CFAccount]:

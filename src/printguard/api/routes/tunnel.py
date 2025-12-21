@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Request
 from ...core.models import TunnelStatus
 from ...core.config import get_settings, TunnelProvider
+from ..crypto_utils import EncryptedRoute
 
-router = APIRouter()
+router = APIRouter(route_class=EncryptedRoute)
 
 @router.get("/status")
 async def get_tunnel_status(request: Request) -> TunnelStatus:

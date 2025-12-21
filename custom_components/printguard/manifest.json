@@ -1,0 +1,12 @@
+{
+  "domain": "printguard",
+  "name": "PrintGuard",
+  "codeowners": ["@oliverbravery"],
+  "config_flow": true,
+  "documentation": "https://github.com/oliverbravery/PrintGuard",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/oliverbravery/PrintGuard/issues",
+  "requirements": ["cryptography>=42.0.0"],
+  "version": "1.0.0",
+  "dependencies": ["persistent_notification"]
+}

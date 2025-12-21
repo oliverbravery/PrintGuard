@@ -10,9 +10,10 @@ from ...providers import list_providers as get_available_providers, get_provider
 from ...providers.base import PrinterProvider
 from ...services.webrtc import start_track_processing
 from .rtc import register_session
+from ..crypto_utils import EncryptedRoute
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/printer", tags=["printer"])
+router = APIRouter(prefix="/printer", tags=["printer"], route_class=EncryptedRoute)
 
 _printers: dict[str, tuple[PrinterConfig, PrinterProvider | None]] = {}
 
@@ -27,12 +28,10 @@ async def list_providers() -> list[str]:
 async def register_printer(config: PrinterConfig) -> PrinterInfo:
     """Register a new printer."""
     if config.id in _printers:
-        raise HTTPException(status_code=400, detail="Printer ID already exists")
-
+        raise HTTPException(status_code=409, detail="Printer ID already exists")
     provider_cls = get_provider(config.provider)
     provider_instance: PrinterProvider | None = None
     status = PrinterStatus.DISCONNECTED
-
     if provider_cls:
         try:
             provider_instance = provider_cls(**config.config)
@@ -41,7 +40,6 @@ async def register_printer(config: PrinterConfig) -> PrinterInfo:
         except Exception as e:
             logger.warning(f"Failed to connect provider {config.provider}: {e}")
             status = PrinterStatus.ERROR
-
     _printers[config.id] = (config, provider_instance)
 
     return PrinterInfo(
@@ -82,7 +80,6 @@ async def get_printer(printer_id: str) -> PrinterInfo:
     """Get printer status."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
-
     config, provider = _printers[printer_id]
     status = PrinterStatus.DISCONNECTED
     if provider:
@@ -91,7 +88,6 @@ async def get_printer(printer_id: str) -> PrinterInfo:
             status = PrinterStatus.PRINTING if is_printing else PrinterStatus.IDLE
         except Exception:
             status = PrinterStatus.ERROR
-
     return PrinterInfo(
         id=printer_id,
         name=config.name,
@@ -101,18 +97,39 @@ async def get_printer(printer_id: str) -> PrinterInfo:
     )
 
 
+@router.get("/{printer_id}/health")
+async def get_printer_health(printer_id: str) -> dict:
+    """Check printer connection health."""
+    if printer_id not in _printers:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    _, provider = _printers[printer_id]
+    if not provider:
+        return {"status": "disconnected", "error": "No provider connected"}
+    try:
+        await provider.is_printing()
+        return {"status": "healthy"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 @router.post("/{printer_id}/stream", response_model=dict)
 async def link_printer_stream(printer_id: str, session_id: str, settings: FeedSettings = FeedSettings()) -> dict:
     """Import the printer's camera as a PrintGuard session."""
+    logger.info(f"Linking stream for printer {printer_id} with session {session_id}")
     if printer_id not in _printers:
+        logger.warning(f"Printer {printer_id} not found for streaming")
         raise HTTPException(status_code=404, detail="Printer not found")
     config, provider = _printers[printer_id]
     if not provider:
+        logger.warning(f"No provider for printer {printer_id}")
         raise HTTPException(status_code=400, detail="Printer provider not connected")
     try:
         track, pc = await provider.get_camera_track()
         if not track:
+            logger.warning(f"Provider for {printer_id} returned no camera track")
             raise HTTPException(status_code=404, detail="Printer has no camera or WebRTC not supported")
+        
+        logger.info(f"Successfully got camera track for {printer_id}")
         model_info = get_model()
         processor = await start_track_processing(
             track,
@@ -128,9 +145,10 @@ async def link_printer_stream(printer_id: str, session_id: str, settings: FeedSe
             settings=settings
         )
         register_session(session_id, session)
-        # Update config with linked session ID
         config.linked_session_id = session_id
         return {"status": "success", "session_id": session_id}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to link printer stream: {e}")
         raise HTTPException(status_code=500, detail=str(e))

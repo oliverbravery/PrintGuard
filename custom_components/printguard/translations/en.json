@@ -1,0 +1,150 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to PrintGuard",
+        "data": {
+          "url": "PrintGuard URL",
+          "token": "Home Assistant Long-Lived Access Token"
+        },
+        "data_description": {
+          "url": "The URL of your PrintGuard server (e.g., http://192.168.1.100:8000)",
+          "token": "Create one in Home Assistant: Settings → Profile → Long-Lived Access Tokens"
+        }
+      },
+      "printer": {
+        "title": "Add Printer",
+        "description": "Choose the camera and optional control entities for your printer.",
+        "data": {
+          "name": "Printer Name",
+          "camera": "Camera Entity",
+          "start_entity": "Start Print Entity",
+          "pause_entity": "Pause Print Entity",
+          "resume_entity": "Resume Print Entity",
+          "stop_entity": "Stop Print Entity"
+        },
+        "data_description": {
+          "name": "A friendly name for your printer",
+          "camera": "The camera entity that monitors your printer",
+          "start_entity": "Optional: Entity to start/resume printing",
+          "pause_entity": "Optional: Entity to pause printing",
+          "resume_entity": "Optional: Entity to resume printing",
+          "stop_entity": "Optional: Entity to stop/cancel printing"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to PrintGuard server. Check the URL and ensure the server is running.",
+      "printer_already_exists": "A printer with this camera is already registered",
+      "invalid_config": "Invalid printer configuration",
+      "unknown": "An unexpected error occurred"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PrintGuard Options",
+        "menu_options": {
+          "add_printer": "Add a new printer",
+          "manage_printers": "Manage existing printers",
+          "notifications": "Configure notifications"
+        }
+      },
+      "add_printer": {
+        "title": "Add Printer",
+        "description": "Configure a new printer to monitor with PrintGuard",
+        "data": {
+          "name": "Printer Name",
+          "camera": "Camera Entity",
+          "start_entity": "Start Print Entity",
+          "pause_entity": "Pause Print Entity",
+          "resume_entity": "Resume Print Entity",
+          "stop_entity": "Stop Print Entity"
+        },
+        "data_description": {
+          "name": "A friendly name for your printer",
+          "camera": "The camera entity that monitors your printer",
+          "start_entity": "Optional: Entity to start/resume printing",
+          "pause_entity": "Optional: Entity to pause printing",
+          "resume_entity": "Optional: Entity to resume printing",
+          "stop_entity": "Optional: Entity to stop/cancel printing"
+        }
+      },
+      "manage_printers": {
+        "title": "Manage Printers",
+        "description": "Select a printer to remove",
+        "data": {
+          "printer": "Select Printer"
+        }
+      },
+      "confirm_remove": {
+        "title": "Confirm Removal",
+        "description": "Are you sure you want to remove printer '{printer_id}'? This will also unregister it from the PrintGuard server."
+      },
+      "notifications": {
+        "title": "Notification Settings",
+        "description": "Configure how you want to be notified when print defects are detected",
+        "data": {
+          "enable_notifications": "Enable Notifications",
+          "notify_service": "Notification Service"
+        },
+        "data_description": {
+          "enable_notifications": "Send notifications when defects are detected",
+          "notify_service": "The notification service to use (e.g., notify.mobile_app)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to PrintGuard server",
+      "printer_already_exists": "A printer with this camera is already registered",
+      "invalid_config": "Invalid printer configuration",
+      "unknown": "An unexpected error occurred"
+    },
+    "abort": {
+      "no_printers": "No printers configured. Add a printer first."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "connection_status": {
+        "name": "Connection Status",
+        "state": {
+          "connected": "Connected",
+          "disconnected": "Disconnected",
+          "error": "Error"
+        }
+      },
+      "printer_status": {
+        "name": "{printer_name} Status"
+      }
+    },
+    "binary_sensor": {
+      "defect_detected": {
+        "name": "Defect Detected"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Refresh"
+      }
+    },
+    "camera": {
+      "camera": {
+        "name": "Camera"
+      }
+    },
+    "event": {
+      "detection": {
+        "name": "Detection",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "defect_detected": "Defect Detected",
+              "normal": "Normal"
+            }
+          }
+        }
+      }
+    }
+  }
+}

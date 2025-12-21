@@ -4,8 +4,9 @@ from fastapi import APIRouter, File, UploadFile, Query
 from ...core.inference import predict
 from ...core.model import get_model
 from ...core.models import PredictionResult
+from ..crypto_utils import EncryptedRoute
 
-router = APIRouter()
+router = APIRouter(route_class=EncryptedRoute)
 
 @router.post("/predict")
 async def predict_image(

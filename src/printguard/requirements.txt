@@ -13,3 +13,4 @@ pydantic-settings
 cloudflare
 ngrok
 httpx
+cryptography

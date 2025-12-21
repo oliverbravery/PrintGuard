@@ -1,5 +1,7 @@
 import logging
-from fastapi import APIRouter, HTTPException
+import io
+import asyncio
+from fastapi import APIRouter, HTTPException, Response
 from aiortc import RTCSessionDescription
 from ...core.inference import predict
 from ...core.model import get_model
@@ -9,9 +11,10 @@ from ...core.models import (
 )
 from ...services.webrtc import create_peer_connection, create_viewer_connection
 from ...services.notifications import unsubscribe
+from ..crypto_utils import EncryptedRoute
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(route_class=EncryptedRoute)
 
 _sessions: dict[str, Session] = {}
 
@@ -32,6 +35,43 @@ async def rtc_list_streams() -> list[StreamInfo]:
         )
         for session_id, session in _sessions.items()
     ]
+
+
+@router.get("/snapshot/{session_id}")
+async def rtc_snapshot(session_id: str) -> Response:
+    """Get a snapshot from an active stream."""
+    logger.debug(f"Snapshot requested for session {session_id}")
+    session = _sessions.get(session_id)
+    if not session:
+        logger.warning(f"Snapshot failed: Session {session_id} not found")
+        raise HTTPException(status_code=404, detail="Session not found")
+    processor = session.processor
+    if not processor:
+        logger.warning(f"Snapshot failed: No processor for session {session_id}")
+        raise HTTPException(status_code=404, detail="No processor available")
+    if processor._latest_frame is None:
+        logger.debug(f"No frame available for {session_id}, waiting...")
+        try:
+            await asyncio.wait_for(processor._frame_ready.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning(f"Snapshot failed: Timed out waiting for frame for session {session_id}")
+            raise HTTPException(status_code=404, detail="No frame available")
+    frame = processor._latest_frame
+    if frame is None:
+        logger.warning(f"Snapshot failed: Frame is still None after waiting for session {session_id}")
+        raise HTTPException(status_code=404, detail="No frame available")
+    try:
+        image = frame.to_image()
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=85)
+        return Response(
+            content=buffer.getvalue(),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-cache"}
+        )
+    except Exception as err:
+        logger.error("Failed to capture snapshot: %s", err)
+        raise HTTPException(status_code=500, detail="Failed to capture snapshot")
 
 @router.post("/view/{session_id}")
 async def rtc_view(session_id: str, offer: RTCOffer) -> RTCAnswer:
@@ -84,6 +124,7 @@ async def rtc_result(session_id: str) -> PredictionResult | dict:
     if result:
         return PredictionResult(**result, status=PredictionStatus.SUCCESS)
     return PredictionResult(status=PredictionStatus.WAITING)
+
 
 @router.delete("/{session_id}")
 async def rtc_close(session_id: str) -> dict:

@@ -4,6 +4,8 @@ import asyncio
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from .core.config import get_settings
 from .core.model import download_model, load_model
@@ -46,3 +48,17 @@ app = FastAPI(
 )
 
 app.include_router(router, prefix="/api")
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    """Handle validation errors gracefully, especially with binary/encrypted data."""
+    details = []
+    for error in exc.errors():
+        if "input" in error and isinstance(error["input"], bytes):
+            error["input"] = "<binary data>"
+        details.append(error)
+    return JSONResponse(
+        status_code=422,
+        content={"detail": details},
+    )

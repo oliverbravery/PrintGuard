@@ -1,8 +1,9 @@
 from fastapi import APIRouter
 from ...core.models import PushSubscription
 from ...services.notifications import subscribe, unsubscribe, VAPID_PUBLIC_KEY
+from ..crypto_utils import EncryptedRoute
 
-router = APIRouter()
+router = APIRouter(route_class=EncryptedRoute)
 
 @router.post("/subscribe")
 async def push_subscribe(data: PushSubscription) -> dict:

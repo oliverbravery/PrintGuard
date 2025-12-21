@@ -1,13 +1,9 @@
 """Pydantic models for API."""
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional, Any
 from enum import Enum
 
 from pydantic import BaseModel
-
-if TYPE_CHECKING:
-    from aiortc import RTCPeerConnection
-    from ..services.webrtc import VideoProcessor
 
 
 class FeedSettings(BaseModel):
@@ -48,8 +44,8 @@ class SessionSubscription(BaseModel):
 
 class Session(BaseModel):
     """WebRTC session state."""
-    pc: Optional["RTCPeerConnection"] = None
-    processor: "VideoProcessor"
+    pc: Any = None
+    processor: Any = None
     device_name: str = "Camera"
     settings: FeedSettings = FeedSettings()
 
@@ -153,6 +149,7 @@ class PrinterConfig(BaseModel):
     provider: str
     config: dict = {}
     linked_session_id: Optional[str] = None
+    client_public_key: Optional[str] = None
 
 
 class PrinterInfo(BaseModel):
