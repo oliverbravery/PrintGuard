@@ -3,13 +3,12 @@
 import typer
 import os
 import asyncio
-import secrets
-import string
 from typing import Annotated
 from ..core.config import TunnelProvider
 from ..core.database import async_session, init_db
 from ..core.db_models import User, M2MApplication
-from ..api.auth_utils import get_password_hash
+from ..core.hashing import get_password_hash
+from ..core.utils import generate_random_string
 from sqlalchemy import select
 
 app = typer.Typer(
@@ -52,8 +51,8 @@ def m2m_add(
     async def _add():
         await init_db()
         async with async_session() as session:
-            client_id = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
-            client_secret = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
+            client_id = generate_random_string(16)
+            client_secret = generate_random_string(32)
             hashed_secret = get_password_hash(client_secret)
             m2m = M2MApplication(
                 name=name,

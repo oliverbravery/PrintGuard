@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
 from ...core.db_models import User, M2MApplication
-from ..auth_utils import verify_password, create_access_token
+from ...core.hashing import verify_password
+from ..auth_utils import create_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
