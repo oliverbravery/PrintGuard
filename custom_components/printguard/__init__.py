@@ -9,8 +9,10 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from .api import PrintGuardApiClient
 from .const import (
     CONF_CAMERA,
+    CONF_CLIENT_ID,
     CONF_CLIENT_PRIVATE_KEY,
     CONF_CLIENT_PUBLIC_KEY,
+    CONF_CLIENT_SECRET,
     CONF_PAUSE_ENTITY,
     CONF_PRINTER_NAME,
     CONF_PRINTERS,
@@ -33,6 +35,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     api_client = PrintGuardApiClient(
         hass,
         entry.data[CONF_URL],
+        entry.data.get(CONF_CLIENT_ID),
+        entry.data.get(CONF_CLIENT_SECRET),
         entry.data.get(CONF_SERVER_PUBLIC_KEY),
         entry.data.get(CONF_CLIENT_PRIVATE_KEY),
         entry.data.get(CONF_CLIENT_PUBLIC_KEY),

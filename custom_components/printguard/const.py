@@ -4,6 +4,8 @@ DOMAIN = "printguard"
 
 # Server configuration
 CONF_URL = "url"
+CONF_CLIENT_ID = "client_id"
+CONF_CLIENT_SECRET = "client_secret"
 CONF_TOKEN = "token"
 
 # Printer configuration

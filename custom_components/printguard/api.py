@@ -15,8 +15,10 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_CAMERA,
+    CONF_CLIENT_ID,
     CONF_CLIENT_PRIVATE_KEY,
     CONF_CLIENT_PUBLIC_KEY,
+    CONF_CLIENT_SECRET,
     CONF_PAUSE_ENTITY,
     CONF_PRINTER_NAME,
     CONF_RESUME_ENTITY,
@@ -48,6 +50,8 @@ class PrintGuardApiClient:
         self,
         hass: HomeAssistant,
         url: str,
+        client_id: str | None = None,
+        client_secret: str | None = None,
         server_pub_key: str | None = None,
         client_priv_key: str | None = None,
         client_pub_key: str | None = None,
@@ -55,20 +59,34 @@ class PrintGuardApiClient:
         """Initialize the API client."""
         self._hass = hass
         self._url = url.rstrip("/")
+        self._client_id = client_id
+        self._client_secret = client_secret
         self._server_pub_key = server_pub_key
         self._client_priv_key = client_priv_key
         self._client_pub_key = client_pub_key
+        self._access_token: str | None = None
 
-    @property
-    def _encryption_enabled(self) -> bool:
-        """Check if encryption is enabled."""
-        return bool(self._server_pub_key and self._client_priv_key and self._client_pub_key)
-
-    def _get_crypto_handler(self) -> CryptoHandler | None:
-        """Get a crypto handler."""
-        if not self._encryption_enabled:
-            return None
-        return CryptoHandler(base64.b64decode(self._client_priv_key))
+    async def _get_access_token(self) -> str:
+        """Get an access token using M2M credentials."""
+        if self._access_token:
+            return self._access_token
+        if not self._client_id or not self._client_secret:
+            raise CannotConnect("Missing Client ID or Client Secret")
+        session = async_get_clientsession(self._hass)
+        data = {
+            "grant_type": "password",
+            "username": self._client_id,
+            "password": self._client_secret,
+            "scope": "admin printer:read printer:write rtc:stream"
+        }
+        async with session.post(f"{self._url}/api/auth/token", data=data, timeout=10) as resp:
+            if resp.status != 200:
+                detail = await resp.text()
+                _LOGGER.error("Failed to get access token: %s", detail)
+                raise CannotConnect(f"Authentication failed: {resp.status}")
+            payload = await resp.json()
+            self._access_token = payload["access_token"]
+            return self._access_token
 
     async def _request(
         self,
@@ -76,10 +94,17 @@ class PrintGuardApiClient:
         endpoint: str,
         data: Any = None,
         params: dict | None = None,
+        is_retry: bool = False,
     ) -> aiohttp.ClientResponse:
         """Make an optionally encrypted request."""
         session = async_get_clientsession(self._hass)
         headers: dict[str, str] = {}
+        try:
+            token = await self._get_access_token()
+            headers["Authorization"] = f"Bearer {token}"
+        except CannotConnect:
+            if not endpoint.startswith("/api/crypto/key"):
+                raise
         request_data = data
         if self._encryption_enabled:
             headers["X-Encrypted"] = "true"
@@ -89,9 +114,13 @@ class PrintGuardApiClient:
                 shared_key = handler.derive_shared_key(base64.b64decode(self._server_pub_key))
                 request_data = handler.encrypt(json.dumps(data).encode("utf-8"), shared_key)
                 headers["Content-Type"] = "application/octet-stream"
-        return await session.request(
+        resp = await session.request(
             method, f"{self._url}{endpoint}", data=request_data, params=params, headers=headers, timeout=10
         )
+        if resp.status == 401 and not is_retry:
+            self._access_token = None
+            return await self._request(method, endpoint, data, params, is_retry=True)  
+        return resp
 
     async def fetch_server_public_key(self) -> str:
         """Fetch the server public key (unencrypted endpoint)."""
@@ -218,25 +247,50 @@ class PrintGuardApiClient:
         return None
 
     async def register_printer(self, hass: HomeAssistant, token: str, printer_data: dict) -> dict:
-        """Register a printer."""
+        """Register a printer using the modular component structure."""
         camera_id = printer_data[CONF_CAMERA]
         printer_id = f"ha_{camera_id.replace('.', '_')}"
-        config: dict[str, Any] = {
-            "hass_url": hass.config.internal_url
+        hass_url = (
+            hass.config.internal_url
             or hass.config.external_url
-            or "http://localhost:8123",
-            "token": token,
-            "entity_id": camera_id,
-            "start_entity_id": printer_data.get(CONF_START_ENTITY),
-            "pause_entity_id": printer_data.get(CONF_PAUSE_ENTITY),
-            "resume_entity_id": printer_data.get(CONF_RESUME_ENTITY),
-            "stop_entity_id": printer_data.get(CONF_STOP_ENTITY),
+            or "http://localhost:8123"
+        )
+        components = {
+            "status": {
+                "provider": "homeassistant",
+                "config": {
+                    "hass_url": hass_url,
+                    "token": token,
+                    "entity_id": camera_id,
+                }
+            },
+            "camera": {
+                "provider": "homeassistant",
+                "config": {
+                    "hass_url": hass_url,
+                    "token": token,
+                    "entity_id": camera_id,
+                }
+            },
+            "control": {
+                "provider": "homeassistant",
+                "config": {
+                    "hass_url": hass_url,
+                    "token": token,
+                    "start_entity_id": printer_data.get(CONF_START_ENTITY),
+                    "pause_entity_id": printer_data.get(CONF_PAUSE_ENTITY),
+                    "resume_entity_id": printer_data.get(CONF_RESUME_ENTITY),
+                    "stop_entity_id": printer_data.get(CONF_STOP_ENTITY),
+                }
+            }
+        }
+        components["control"]["config"] = {
+            k: v for k, v in components["control"]["config"].items() if v
         }
         registration = {
             "id": printer_id,
             "name": printer_data[CONF_PRINTER_NAME],
-            "provider": "homeassistant",
-            "config": {k: v for k, v in config.items() if v},
+            "components": components,
             "client_public_key": self._client_pub_key,
         }
         resp = await self._request("POST", "/api/printer/", data=registration)

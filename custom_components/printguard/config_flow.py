@@ -22,8 +22,10 @@ from .api import (
 )
 from .const import (
     CONF_CAMERA,
+    CONF_CLIENT_ID,
     CONF_CLIENT_PRIVATE_KEY,
     CONF_CLIENT_PUBLIC_KEY,
+    CONF_CLIENT_SECRET,
     CONF_ENABLE_NOTIFICATIONS,
     CONF_NOTIFY_SERVICE,
     CONF_PAUSE_ENTITY,
@@ -44,6 +46,8 @@ _LOGGER = logging.getLogger(__name__)
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_URL, default="http://localhost:8000"): str,
+        vol.Required(CONF_CLIENT_ID): str,
+        vol.Required(CONF_CLIENT_SECRET): str,
         vol.Required(CONF_TOKEN): str,
     }
 )
@@ -104,6 +108,8 @@ def _build_api_client(hass: HomeAssistant, data: dict[str, Any]) -> PrintGuardAp
     return PrintGuardApiClient(
         hass,
         url,
+        data.get(CONF_CLIENT_ID),
+        data.get(CONF_CLIENT_SECRET),
         data.get(CONF_SERVER_PUBLIC_KEY),
         data.get(CONF_CLIENT_PRIVATE_KEY),
         data.get(CONF_CLIENT_PUBLIC_KEY),
@@ -163,8 +169,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 self._base_data = user_input
+                try:
+                    api_client = _build_api_client(self.hass, user_input)
+                    await api_client._get_access_token()
+                except CannotConnect:
+                    errors["base"] = "invalid_auth"
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=self.add_suggested_values_to_schema(
+                            STEP_USER_DATA_SCHEMA, user_input
+                        ),
+                        errors=errors,
+                    )
                 return await self.async_step_printer()
-
         return self.async_show_form(
             step_id="user",
             data_schema=self.add_suggested_values_to_schema(
