@@ -76,14 +76,29 @@ class CloudflareManager:
                 raise Exception(f"Cloudflare API error: {error_msg}")
             return data
 
+    async def list_paginated(self, method: str, path: str, **kwargs):
+        """Helper to list all results from a paginated Cloudflare API endpoint."""
+        page = 1
+        per_page = kwargs.setdefault("params", {}).setdefault("per_page", 50)
+        all_results = []
+        while True:
+            kwargs["params"]["page"] = page
+            data = await self._request(method, path, **kwargs)
+            all_results.extend(data.get("result", []))
+            info = data.get("result_info") or {}
+            if page >= info.get("total_pages", page):
+                break
+            page += 1
+        return all_results
+
     async def list_accounts(self) -> List[CFAccount]:
-        data = await self._request("GET", "accounts")
-        return [CFAccount(id=a["id"], name=a["name"]) for a in data["result"]]
+        results = await self.list_paginated("GET", "accounts")
+        return [CFAccount(id=a["id"], name=a["name"]) for a in results]
 
     async def list_zones(self, name: Optional[str] = None) -> List[CFZone]:
         params = {"name": name} if name else {}
-        data = await self._request("GET", "zones", params=params)
-        return [CFZone(id=z["id"], name=z["name"]) for z in data["result"]]
+        results = await self.list_paginated("GET", "zones", params=params)
+        return [CFZone(id=z["id"], name=z["name"]) for z in results]
 
     async def create_tunnel(self, account_id: str, name: str) -> CFTunnel:
         try:
@@ -96,8 +111,9 @@ class CloudflareManager:
             return CFTunnel(id=res["id"], name=res["name"], tunnel_secret=res.get("tunnel_secret", ""))
         except Exception as e:
             if "already exists" in str(e).lower():
-                data = await self._request("GET", f"accounts/{account_id}/cfd_tunnels", params={"name": name, "is_deleted": "false"})
-                for t in data["result"]:
+                params = {"name": name, "is_deleted": "false"}
+                results = await self.list_paginated("GET", f"accounts/{account_id}/cfd_tunnels", params=params)
+                for t in results:
                     if t["name"] == name:
                         return CFTunnel(id=t["id"], name=t["name"])
             raise e
@@ -114,8 +130,9 @@ class CloudflareManager:
             return await self._request("POST", f"zones/{zone_id}/dns_records", json=payload)
         except Exception as e:
             if "already exists" in str(e).lower() or "81057" in str(e):
-                data = await self._request("GET", f"zones/{zone_id}/dns_records", params={"name": name})
-                for record in data["result"]:
+                params = {"name": name}
+                results = await self.list_paginated("GET", f"zones/{zone_id}/dns_records", params=params)
+                for record in results:
                     # In some cases Cloudflare returns the full name, check if it matches
                     if record["name"].startswith(name):
                         payload = {
