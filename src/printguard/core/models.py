@@ -145,20 +145,30 @@ class PrinterStatus(str, Enum):
 
 class ComponentConfig(BaseModel):
     """Configuration for a single printer component."""
+    id: Optional[str] = None
+    name: Optional[str] = None
+    provider: Optional[str] = None
+    config: dict = {}
+
+
+class ComponentInfo(BaseModel):
+    """Full component information."""
+    id: str
+    name: Optional[str] = None
     provider: str
     config: dict = {}
 
 
 class PrinterComponents(BaseModel):
     """Modular printer components."""
-    status: Optional[ComponentConfig] = None
-    camera: Optional[ComponentConfig] = None
-    control: Optional[ComponentConfig] = None
+    status: Optional[ComponentConfig | str] = None
+    camera: Optional[ComponentConfig | str] = None
+    control: Optional[ComponentConfig | str] = None
 
 
 class PrinterConfig(BaseModel):
     """Configuration for a printer instance."""
-    id: str
+    id: Optional[str] = None
     name: str
     components: PrinterComponents
     linked_session_id: Optional[str] = None
@@ -173,3 +183,4 @@ class PrinterInfo(BaseModel):
     linked_session_id: Optional[str] = None
     has_control: bool = False
     has_camera: bool = False
+    components: Optional[dict[str, ComponentInfo]] = None
