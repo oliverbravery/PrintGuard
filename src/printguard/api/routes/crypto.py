@@ -1,8 +1,9 @@
 import base64
-from fastapi import APIRouter
+from fastapi import APIRouter, Security
 from ...core.config import get_settings
 from ...core.crypto import CryptoHandler
 from ..crypto_utils import get_crypto_handler
+from ..auth_utils import get_current_identity
 
 router = APIRouter(prefix="/crypto", tags=["crypto"])
 
@@ -17,7 +18,7 @@ async def get_public_key():
     return response
 
 @router.post("/generate")
-async def generate_keys():
+async def generate_keys(_: any = Security(get_current_identity, scopes=["admin"])):
     """Generate a new key pair for the server."""
     handler = CryptoHandler()
     return {

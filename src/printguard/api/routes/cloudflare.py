@@ -1,15 +1,16 @@
 import logging
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Security
 from ...core.models import CFAccount, CFZone, CFTunnelRequest, CFTunnelResponse
 from ...services.tunnel import CloudflareManager
 from .utils import check_cloudflared, check_local_mode
 from ..crypto_utils import EncryptedRoute
+from ..auth_utils import get_current_identity
 
 logger = logging.getLogger(__name__)
 router = APIRouter(route_class=EncryptedRoute)
 
 @router.get("/accounts", dependencies=[Depends(check_cloudflared), Depends(check_local_mode)])
-async def list_cf_accounts(api_token: str = Query(...)) -> list[CFAccount]:
+async def list_cf_accounts(api_token: str = Query(...), _: any = Security(get_current_identity, scopes=["tunnel:manage"])) -> list[CFAccount]:
     """List Cloudflare accounts."""
     try:
         manager = CloudflareManager(api_token)
@@ -19,7 +20,7 @@ async def list_cf_accounts(api_token: str = Query(...)) -> list[CFAccount]:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/zones", dependencies=[Depends(check_cloudflared), Depends(check_local_mode)])
-async def list_cf_zones(api_token: str = Query(...)) -> list[CFZone]:
+async def list_cf_zones(api_token: str = Query(...), _: any = Security(get_current_identity, scopes=["tunnel:manage"])) -> list[CFZone]:
     """List Cloudflare zones."""
     try:
         manager = CloudflareManager(api_token)
@@ -31,7 +32,8 @@ async def list_cf_zones(api_token: str = Query(...)) -> list[CFZone]:
 @router.post("/tunnel", dependencies=[Depends(check_cloudflared), Depends(check_local_mode)])
 async def create_cf_tunnel(
     request: CFTunnelRequest, 
-    api_token: str = Query(...)
+    api_token: str = Query(...),
+    _: any = Security(get_current_identity, scopes=["tunnel:manage"])
 ) -> CFTunnelResponse:
     """Create a Cloudflare tunnel and DNS record."""
     try:

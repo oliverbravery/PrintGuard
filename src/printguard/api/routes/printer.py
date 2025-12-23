@@ -1,7 +1,7 @@
 """Printer control endpoints."""
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Security
 
 from ...core.models import PrinterConfig, PrinterInfo, PrinterStatus, FeedSettings
 from ...core.model import get_model
@@ -11,6 +11,7 @@ from ...providers.base import PrinterProvider
 from ...services.webrtc import start_track_processing
 from ...services.streams import stream_manager
 from ..crypto_utils import EncryptedRoute
+from ..auth_utils import get_current_identity
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printer", tags=["printer"], route_class=EncryptedRoute)
@@ -19,13 +20,13 @@ _printers: dict[str, tuple[PrinterConfig, PrinterProvider | None]] = {}
 
 
 @router.get("/providers")
-async def list_providers() -> list[str]:
+async def list_providers(_: any = Security(get_current_identity, scopes=["printer:read"])) -> list[str]:
     """List available printer providers."""
     return get_available_providers()
 
 
 @router.post("/", response_model=PrinterInfo)
-async def register_printer(config: PrinterConfig) -> PrinterInfo:
+async def register_printer(config: PrinterConfig, _: any = Security(get_current_identity, scopes=["printer:write"])) -> PrinterInfo:
     """Register a new printer."""
     if config.id in _printers:
         raise HTTPException(status_code=409, detail="Printer ID already exists")
@@ -52,7 +53,7 @@ async def register_printer(config: PrinterConfig) -> PrinterInfo:
 
 
 @router.get("/", response_model=list[PrinterInfo])
-async def list_printers() -> list[PrinterInfo]:
+async def list_printers(_: any = Security(get_current_identity, scopes=["printer:read"])) -> list[PrinterInfo]:
     """List all registered printers."""
     results = []
     for printer_id, (config, provider) in _printers.items():
@@ -76,7 +77,7 @@ async def list_printers() -> list[PrinterInfo]:
 
 
 @router.get("/{printer_id}", response_model=PrinterInfo)
-async def get_printer(printer_id: str) -> PrinterInfo:
+async def get_printer(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:read"])) -> PrinterInfo:
     """Get printer status."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
@@ -98,7 +99,7 @@ async def get_printer(printer_id: str) -> PrinterInfo:
 
 
 @router.get("/{printer_id}/health")
-async def get_printer_health(printer_id: str) -> dict:
+async def get_printer_health(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:read"])) -> dict:
     """Check printer connection health."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
@@ -113,7 +114,7 @@ async def get_printer_health(printer_id: str) -> dict:
 
 
 @router.post("/{printer_id}/stream", response_model=dict)
-async def link_printer_stream(printer_id: str, session_id: str, settings: FeedSettings = FeedSettings()) -> dict:
+async def link_printer_stream(printer_id: str, session_id: str, settings: FeedSettings = FeedSettings(), _: any = Security(get_current_identity, scopes=["printer:write", "rtc:stream"])) -> dict:
     """Import the printer's camera as a PrintGuard session."""
     logger.info(f"Linking stream for printer {printer_id} with session {session_id}")
     if (existing_source := stream_manager.get_source(printer_id)):
@@ -161,7 +162,7 @@ async def link_printer_stream(printer_id: str, session_id: str, settings: FeedSe
 
 
 @router.delete("/{printer_id}")
-async def remove_printer(printer_id: str) -> dict:
+async def remove_printer(printer_id: str, _: any = Security(get_current_identity, scopes=["admin"])) -> dict:
     """Remove a registered printer."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
@@ -177,7 +178,7 @@ async def remove_printer(printer_id: str) -> dict:
 
 
 @router.post("/{printer_id}/start")
-async def start_print(printer_id: str) -> dict:
+async def start_print(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> dict:
     """Start/resume the print job."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
@@ -191,7 +192,7 @@ async def start_print(printer_id: str) -> dict:
 
 
 @router.post("/{printer_id}/pause")
-async def pause_print(printer_id: str) -> dict:
+async def pause_print(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> dict:
     """Pause the current print."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
@@ -205,7 +206,7 @@ async def pause_print(printer_id: str) -> dict:
 
 
 @router.post("/{printer_id}/resume")
-async def resume_print(printer_id: str) -> dict:
+async def resume_print(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> dict:
     """Resume the current print."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
@@ -219,7 +220,7 @@ async def resume_print(printer_id: str) -> dict:
 
 
 @router.post("/{printer_id}/stop")
-async def stop_print(printer_id: str) -> dict:
+async def stop_print(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> dict:
     """Stop/cancel the current print."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
@@ -233,7 +234,7 @@ async def stop_print(printer_id: str) -> dict:
 
 
 @router.post("/{printer_id}/link/{session_id}", response_model=PrinterInfo)
-async def link_stream(printer_id: str, session_id: str) -> PrinterInfo:
+async def link_stream(printer_id: str, session_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> PrinterInfo:
     """Link a WebRTC stream (session) to this printer."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
@@ -260,7 +261,7 @@ async def link_stream(printer_id: str, session_id: str) -> PrinterInfo:
 
 
 @router.delete("/{printer_id}/link", response_model=PrinterInfo)
-async def unlink_stream(printer_id: str) -> PrinterInfo:
+async def unlink_stream(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> PrinterInfo:
     """Unlink the stream from this printer."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")

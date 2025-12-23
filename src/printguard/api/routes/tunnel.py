@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Security
 from ...core.models import TunnelStatus
 from ...core.config import get_settings, TunnelProvider
 from ..crypto_utils import EncryptedRoute
+from ..auth_utils import get_current_identity
 
 router = APIRouter(route_class=EncryptedRoute)
 
 @router.get("/status")
-async def get_tunnel_status(request: Request) -> TunnelStatus:
+async def get_tunnel_status(request: Request, _: any = Security(get_current_identity, scopes=["printer:read"])) -> TunnelStatus:
     """Get current tunnel status."""
     settings = get_settings()
     tunnel_type = getattr(request.app.state, "tunnel_type", None)
@@ -18,7 +19,7 @@ async def get_tunnel_status(request: Request) -> TunnelStatus:
     )
 
 @router.post("/disable")
-async def disable_tunnel(request: Request) -> dict:
+async def disable_tunnel(request: Request, _: any = Security(get_current_identity, scopes=["admin"])) -> dict:
     """Disable any active tunnel and revert to local mode."""
     settings = get_settings()
     settings.tunnel_provider = TunnelProvider.LOCAL

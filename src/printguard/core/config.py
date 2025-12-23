@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     # Model Settings
     model_dir: Path = Path(__file__).parent / "model"
 
+    # Security Settings
+    jwt_secret_key: str = "changeme-in-production-use-a-secure-key"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24 * 7
+
+    # Database Settings
+    database_url: str = "sqlite+aiosqlite:///./printguard.db"
+
 
 @lru_cache
 def get_settings() -> Settings:

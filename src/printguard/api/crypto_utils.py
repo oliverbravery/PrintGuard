@@ -55,11 +55,12 @@ class EncryptedRoute(APIRoute):
                         shared_key = handler.derive_shared_key(client_public_key_bytes)
                         decrypted_body = handler.decrypt(body, shared_key)
                         request._body = decrypted_body
+                        decrypted_content_type = _get_header(scope_headers, "x-decrypted-content-type") or "application/json"
                         new_headers = []
                         for k, v in request.scope["headers"]:
                             if k.lower() not in (b"content-type", b"content-length"):
                                 new_headers.append((k, v))
-                        new_headers.append((b"content-type", b"application/json"))
+                        new_headers.append((b"content-type", decrypted_content_type.encode("ascii")))
                         new_headers.append((b"content-length", str(len(decrypted_body)).encode("ascii")))
                         request.scope["headers"] = new_headers
                         if hasattr(request, "_headers"):
@@ -88,12 +89,14 @@ class EncryptedRoute(APIRoute):
                         for k, v in dict(response.headers).items()
                         if k.lower() not in ("content-length", "content-type")
                     }
+                    original_content_type = response.headers.get("content-type", "application/json")
                     return Response(
                         content=encrypted_res,
                         status_code=response.status_code,
                         headers={
                             **passthrough_headers,
                             "X-Encrypted": "true",
+                            "X-Original-Content-Type": original_content_type,
                             "Content-Type": "application/octet-stream"
                         }
                     )
@@ -104,25 +107,3 @@ class EncryptedRoute(APIRoute):
             return response
 
         return custom_handler
-
-def encrypt_response(data: dict, client_public_key_b64: str, handler: CryptoHandler) -> str:
-    if not handler or not client_public_key_b64:
-        return json.dumps(data)
-    client_public_key_bytes = base64.b64decode(client_public_key_b64)
-    shared_key = handler.derive_shared_key(client_public_key_bytes)
-    return handler.encrypt_b64(json.dumps(data), shared_key)
-
-async def decrypt_request(request: Request, handler: CryptoHandler = Depends(get_crypto_handler)):
-    if request.headers.get("X-Encrypted") != "true":
-        return await request.json()
-    client_public_key_b64 = request.headers.get("X-Client-Public-Key")
-    if not client_public_key_b64:
-        raise HTTPException(status_code=400, detail="Missing X-Client-Public-Key header")
-    try:
-        client_public_key_bytes = base64.b64decode(client_public_key_b64)
-        shared_key = handler.derive_shared_key(client_public_key_bytes)
-        body = await request.body()
-        decrypted_body = handler.decrypt(body, shared_key)
-        return json.loads(decrypted_body.decode('utf-8'))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Decryption failed: {str(e)}")

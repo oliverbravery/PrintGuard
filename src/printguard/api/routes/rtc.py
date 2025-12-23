@@ -1,7 +1,7 @@
 import logging
 import io
 import asyncio
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, Security
 from aiortc import RTCSessionDescription
 from ...core.inference import predict
 from ...core.model import get_model
@@ -13,13 +13,14 @@ from ...services.webrtc import create_peer_connection, create_viewer_connection
 from ...services.streams import stream_manager
 from ...services.notifications import unsubscribe
 from ..crypto_utils import EncryptedRoute
+from ..auth_utils import get_current_identity
 
 logger = logging.getLogger(__name__)
 router = APIRouter(route_class=EncryptedRoute)
 
 
 @router.get("/streams")
-async def rtc_list_streams() -> list[StreamInfo]:
+async def rtc_list_streams(_: any = Security(get_current_identity, scopes=["rtc:stream"])) -> list[StreamInfo]:
     """List active WebRTC streams."""
     return [
         StreamInfo(
@@ -32,7 +33,7 @@ async def rtc_list_streams() -> list[StreamInfo]:
 
 
 @router.get("/snapshot/{session_id}")
-async def rtc_snapshot(session_id: str) -> Response:
+async def rtc_snapshot(session_id: str, _: any = Security(get_current_identity, scopes=["rtc:stream"])) -> Response:
     """Get a snapshot from an active stream."""
     logger.debug(f"Snapshot requested for session {session_id}")
     source = stream_manager.get_source(session_id)
@@ -68,7 +69,7 @@ async def rtc_snapshot(session_id: str) -> Response:
         raise HTTPException(status_code=500, detail="Failed to capture snapshot")
 
 @router.post("/view/{session_id}")
-async def rtc_view(session_id: str, offer: RTCOffer) -> RTCAnswer:
+async def rtc_view(session_id: str, offer: RTCOffer, _: any = Security(get_current_identity, scopes=["rtc:stream"])) -> RTCAnswer:
     """View a live stream from another session."""
     source = stream_manager.get_source(session_id)
     if not source:
@@ -82,7 +83,7 @@ async def rtc_view(session_id: str, offer: RTCOffer) -> RTCAnswer:
     )
 
 @router.post("/offer")
-async def rtc_offer(offer: RTCOffer) -> RTCAnswer:
+async def rtc_offer(offer: RTCOffer, _: any = Security(get_current_identity, scopes=["rtc:stream"])) -> RTCAnswer:
     """Accept WebRTC offer and return answer."""
     model_info = get_model()
     sdp = RTCSessionDescription(sdp=offer.sdp, type=offer.type)
@@ -104,7 +105,7 @@ async def rtc_offer(offer: RTCOffer) -> RTCAnswer:
     )
 
 @router.put("/settings/{session_id}")
-async def rtc_update_settings(session_id: str, settings: FeedSettings) -> dict:
+async def rtc_update_settings(session_id: str, settings: FeedSettings, _: any = Security(get_current_identity, scopes=["rtc:stream"])) -> dict:
     """Update settings for a session."""
     source = stream_manager.get_source(session_id)
     if not source:
@@ -114,7 +115,7 @@ async def rtc_update_settings(session_id: str, settings: FeedSettings) -> dict:
     return {"status": "updated"}
 
 @router.get("/result/{session_id}")
-async def rtc_result(session_id: str) -> PredictionResult | dict:
+async def rtc_result(session_id: str, _: any = Security(get_current_identity, scopes=["rtc:stream"])) -> PredictionResult | dict:
     """Get latest prediction result for a session."""
     source = stream_manager.get_source(session_id)
     if not source:
@@ -126,7 +127,7 @@ async def rtc_result(session_id: str) -> PredictionResult | dict:
 
 
 @router.delete("/{session_id}")
-async def rtc_close(session_id: str) -> dict:
+async def rtc_close(session_id: str, _: any = Security(get_current_identity, scopes=["rtc:stream"])) -> dict:
     """Close a WebRTC session."""
     await stream_manager.close_source(session_id)
     unsubscribe(session_id)

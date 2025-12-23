@@ -8,10 +8,12 @@ from .ngrok import router as ngrok_router
 from .tunnel import router as tunnel_router
 from .printer import router as printer_router
 from .crypto import router as crypto_router
+from .auth import router as auth_router
 from ..crypto_utils import EncryptedRoute
 
 router = APIRouter(route_class=EncryptedRoute)
 
+router.include_router(auth_router)
 router.include_router(inference_router)
 router.include_router(health_router)
 router.include_router(rtc_router, prefix="/rtc", tags=["rtc"])

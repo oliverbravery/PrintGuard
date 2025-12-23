@@ -1,18 +1,19 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Security
 from ...core.models import PushSubscription
 from ...services.notifications import subscribe, unsubscribe, VAPID_PUBLIC_KEY
 from ..crypto_utils import EncryptedRoute
+from ..auth_utils import get_current_identity
 
 router = APIRouter(route_class=EncryptedRoute)
 
 @router.post("/subscribe")
-async def push_subscribe(data: PushSubscription) -> dict:
+async def push_subscribe(data: PushSubscription, _: any = Security(get_current_identity, scopes=["rtc:stream"])) -> dict:
     """Subscribe to push notifications for a session."""
     subscribe(data.session_id, data.subscription, data.device_name)
     return {"status": "subscribed"}
 
 @router.delete("/{session_id}")
-async def push_unsubscribe(session_id: str) -> dict:
+async def push_unsubscribe(session_id: str, _: any = Security(get_current_identity, scopes=["rtc:stream"])) -> dict:
     """Unsubscribe from push notifications."""
     unsubscribe(session_id)
     return {"status": "unsubscribed"}

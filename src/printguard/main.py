@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from .core.config import get_settings
 from .core.model import download_model, load_model
+from .core.database import init_db
 from .api.routes import router
 from .services.webrtc import cleanup
 from .services.tunnels import setup_active_tunnel
@@ -18,9 +19,11 @@ from .services.tunnels import setup_active_tunnel
 async def lifespan(app: FastAPI):
     """Download model on startup if needed, then load it, sets up tunnel based on configuration and cleans up on shutdown."""
     settings = get_settings()
+    # Initialize database
+    await init_db()
+    # Download PrintGuard model
     download_model()
     load_model()
-
     # Setup tunnel (only one will be activated)
     await setup_active_tunnel(app, settings)
 

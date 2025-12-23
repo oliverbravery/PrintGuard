@@ -1,14 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Security
 from ...core.models import NgrokTunnelRequest, NgrokTunnelResponse
 from ...services.ngrok import setup_ngrok_tunnel
 from ...core.config import get_settings
 from .utils import check_ngrok, check_local_mode
 from ..crypto_utils import EncryptedRoute
+from ..auth_utils import get_current_identity
 
 router = APIRouter(route_class=EncryptedRoute)
 
 @router.post("/tunnel", dependencies=[Depends(check_ngrok), Depends(check_local_mode)])
-async def create_ngrok_tunnel(request: NgrokTunnelRequest) -> NgrokTunnelResponse:
+async def create_ngrok_tunnel(request: NgrokTunnelRequest, _: any = Security(get_current_identity, scopes=["tunnel:manage"])) -> NgrokTunnelResponse:
     """Create an ngrok tunnel."""
     settings = get_settings()
     url = await setup_ngrok_tunnel(
