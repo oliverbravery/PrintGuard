@@ -10,7 +10,6 @@ onnxruntime
 python-multipart
 pywebpush
 pydantic-settings
-cloudflare
 ngrok
 httpx
 cryptography
