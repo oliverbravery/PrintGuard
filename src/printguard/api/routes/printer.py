@@ -3,13 +3,13 @@
 import logging
 from fastapi import APIRouter, HTTPException
 
-from ...core.models import PrinterConfig, PrinterInfo, PrinterStatus, Session, FeedSettings
+from ...core.models import PrinterConfig, PrinterInfo, PrinterStatus, FeedSettings
 from ...core.model import get_model
 from ...core.inference import predict
 from ...providers import list_providers as get_available_providers, get_provider
 from ...providers.base import PrinterProvider
 from ...services.webrtc import start_track_processing
-from .rtc import register_session
+from ...services.streams import stream_manager
 from ..crypto_utils import EncryptedRoute
 
 logger = logging.getLogger(__name__)
@@ -116,6 +116,10 @@ async def get_printer_health(printer_id: str) -> dict:
 async def link_printer_stream(printer_id: str, session_id: str, settings: FeedSettings = FeedSettings()) -> dict:
     """Import the printer's camera as a PrintGuard session."""
     logger.info(f"Linking stream for printer {printer_id} with session {session_id}")
+    if (existing_source := stream_manager.get_source(printer_id)):
+        logger.info(f"Using existing multiplexed stream for printer {printer_id}")
+        stream_manager.add_alias(printer_id, session_id)
+        return {"status": "success", "session_id": session_id, "multiplexed": True}
     if printer_id not in _printers:
         logger.warning(f"Printer {printer_id} not found for streaming")
         raise HTTPException(status_code=404, detail="Printer not found")
@@ -128,7 +132,6 @@ async def link_printer_stream(printer_id: str, session_id: str, settings: FeedSe
         if not track:
             logger.warning(f"Provider for {printer_id} returned no camera track")
             raise HTTPException(status_code=404, detail="Printer has no camera or WebRTC not supported")
-        
         logger.info(f"Successfully got camera track for {printer_id}")
         model_info = get_model()
         processor = await start_track_processing(
@@ -138,13 +141,16 @@ async def link_printer_stream(printer_id: str, session_id: str, settings: FeedSe
             settings,
             session_id
         )
-        session = Session(
-            pc=pc,
-            processor=processor,
-            device_name=f"{config.name} Camera",
-            settings=settings
-        )
-        register_session(session_id, session)
+        if processor.relayed_track:
+            stream_manager.register_source(
+                printer_id, 
+                processor.relayed_track, 
+                processor,
+                pc=pc,
+                device_name=f"{config.name} Camera",
+                settings=settings
+            )
+            stream_manager.add_alias(printer_id, session_id)
         config.linked_session_id = session_id
         return {"status": "success", "session_id": session_id}
     except HTTPException:
