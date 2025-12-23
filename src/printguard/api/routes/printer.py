@@ -1,13 +1,18 @@
 """Printer control endpoints."""
 
 import logging
+from typing import Any, Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Security
 
-from ...core.models import PrinterConfig, PrinterInfo, PrinterStatus, FeedSettings
+from ...core.models import (
+    PrinterConfig, PrinterInfo, PrinterStatus, FeedSettings,
+    ComponentConfig
+)
 from ...core.model import get_model
 from ...core.inference import predict
 from ...providers import list_providers as get_available_providers, get_provider
-from ...providers.base import PrinterProvider
+from ...providers.base import StatusSource, CameraSource, ControlSink
 from ...services.webrtc import start_track_processing
 from ...services.streams import stream_manager
 from ..crypto_utils import EncryptedRoute
@@ -16,7 +21,26 @@ from ..auth_utils import get_current_identity
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printer", tags=["printer"], route_class=EncryptedRoute)
 
-_printers: dict[str, tuple[PrinterConfig, PrinterProvider | None]] = {}
+
+class PrinterInstance(BaseModel):
+    """Internal runtime state of a printer."""
+    config: PrinterConfig
+    status: Optional[StatusSource] = None
+    camera: Optional[CameraSource] = None
+    control: Optional[ControlSink] = None
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+_printers: dict[str, PrinterInstance] = {}
+
+
+def _resolve_component(comp_config: ComponentConfig) -> Any:
+    """Instantiate a provider component from config."""
+    prov_cls = get_provider(comp_config.provider)
+    if not prov_cls:
+        return None
+    return prov_cls(**comp_config.config)
 
 
 @router.get("/providers")
@@ -27,53 +51,21 @@ async def list_providers(_: any = Security(get_current_identity, scopes=["printe
 
 @router.post("/", response_model=PrinterInfo)
 async def register_printer(config: PrinterConfig, _: any = Security(get_current_identity, scopes=["printer:write"])) -> PrinterInfo:
-    """Register a new printer."""
+    """Register a new modular printer."""
     if config.id in _printers:
         raise HTTPException(status_code=409, detail="Printer ID already exists")
-    provider_cls = get_provider(config.provider)
-    provider_instance: PrinterProvider | None = None
-    status = PrinterStatus.DISCONNECTED
-    if provider_cls:
-        try:
-            provider_instance = provider_cls(**config.config)
-            await provider_instance.connect()
-            status = PrinterStatus.IDLE
-        except Exception as e:
-            logger.warning(f"Failed to connect provider {config.provider}: {e}")
-            status = PrinterStatus.ERROR
-    _printers[config.id] = (config, provider_instance)
-
-    return PrinterInfo(
-        id=config.id,
-        name=config.name,
-        provider=config.provider,
-        status=status,
-        linked_session_id=config.linked_session_id,
-    )
+    instance = PrinterInstance(config=config)
+    for role in ["status", "camera", "control"]:
+        if role_cfg := getattr(config.components, role):
+            setattr(instance, role, _resolve_component(role_cfg))
+    _printers[config.id] = instance
+    return await get_printer(config.id, _)
 
 
 @router.get("/", response_model=list[PrinterInfo])
 async def list_printers(_: any = Security(get_current_identity, scopes=["printer:read"])) -> list[PrinterInfo]:
     """List all registered printers."""
-    results = []
-    for printer_id, (config, provider) in _printers.items():
-        status = PrinterStatus.DISCONNECTED
-        if provider:
-            try:
-                is_printing = await provider.is_printing()
-                status = PrinterStatus.PRINTING if is_printing else PrinterStatus.IDLE
-            except Exception:
-                status = PrinterStatus.ERROR
-        results.append(
-            PrinterInfo(
-                id=printer_id,
-                name=config.name,
-                provider=config.provider,
-                status=status,
-                linked_session_id=config.linked_session_id,
-            )
-        )
-    return results
+    return [await get_printer(pid, _) for pid in _printers]
 
 
 @router.get("/{printer_id}", response_model=PrinterInfo)
@@ -81,207 +73,74 @@ async def get_printer(printer_id: str, _: any = Security(get_current_identity, s
     """Get printer status."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
-    config, provider = _printers[printer_id]
+    instance = _printers[printer_id]
     status = PrinterStatus.DISCONNECTED
-    if provider:
+    if instance.status:
         try:
-            is_printing = await provider.is_printing()
+            is_printing = await instance.status.is_printing()
             status = PrinterStatus.PRINTING if is_printing else PrinterStatus.IDLE
         except Exception:
             status = PrinterStatus.ERROR
     return PrinterInfo(
         id=printer_id,
-        name=config.name,
-        provider=config.provider,
+        name=instance.config.name,
         status=status,
-        linked_session_id=config.linked_session_id,
+        linked_session_id=instance.config.linked_session_id,
+        has_control=instance.control is not None,
+        has_camera=instance.camera is not None
     )
-
-
-@router.get("/{printer_id}/health")
-async def get_printer_health(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:read"])) -> dict:
-    """Check printer connection health."""
-    if printer_id not in _printers:
-        raise HTTPException(status_code=404, detail="Printer not found")
-    _, provider = _printers[printer_id]
-    if not provider:
-        return {"status": "disconnected", "error": "No provider connected"}
-    try:
-        await provider.is_printing()
-        return {"status": "healthy"}
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
 
 
 @router.post("/{printer_id}/stream", response_model=dict)
 async def link_printer_stream(printer_id: str, session_id: str, settings: FeedSettings = FeedSettings(), _: any = Security(get_current_identity, scopes=["printer:write", "rtc:stream"])) -> dict:
-    """Import the printer's camera as a PrintGuard session."""
-    logger.info(f"Linking stream for printer {printer_id} with session {session_id}")
-    if (existing_source := stream_manager.get_source(printer_id)):
-        logger.info(f"Using existing multiplexed stream for printer {printer_id}")
+    """Ensure printer camera is multiplexed and active."""
+    if printer_id not in _printers:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    instance = _printers[printer_id]
+    if not instance.camera:
+        raise HTTPException(status_code=400, detail="Printer has no camera source")
+    if stream_manager.get_source(printer_id):
         stream_manager.add_alias(printer_id, session_id)
         return {"status": "success", "session_id": session_id, "multiplexed": True}
-    if printer_id not in _printers:
-        logger.warning(f"Printer {printer_id} not found for streaming")
-        raise HTTPException(status_code=404, detail="Printer not found")
-    config, provider = _printers[printer_id]
-    if not provider:
-        logger.warning(f"No provider for printer {printer_id}")
-        raise HTTPException(status_code=400, detail="Printer provider not connected")
-    try:
-        track, pc = await provider.get_camera_track()
-        if not track:
-            logger.warning(f"Provider for {printer_id} returned no camera track")
-            raise HTTPException(status_code=404, detail="Printer has no camera or WebRTC not supported")
-        logger.info(f"Successfully got camera track for {printer_id}")
-        model_info = get_model()
-        processor = await start_track_processing(
-            track,
-            predict,
-            model_info,
-            settings,
-            session_id
+    track, pc = await instance.camera.get_camera_track()
+    if not track:
+        raise HTTPException(status_code=404, detail="Camera track not available")
+    model_info = get_model()
+    processor = await start_track_processing(track, predict, model_info, settings, session_id)
+    if processor.relayed_track:
+        stream_manager.register_source(
+            printer_id, 
+            processor.relayed_track, 
+            processor,
+            pc=pc,
+            device_name=f"{instance.config.name} Camera",
+            settings=settings
         )
-        if processor.relayed_track:
-            stream_manager.register_source(
-                printer_id, 
-                processor.relayed_track, 
-                processor,
-                pc=pc,
-                device_name=f"{config.name} Camera",
-                settings=settings
-            )
-            stream_manager.add_alias(printer_id, session_id)
-        config.linked_session_id = session_id
-        return {"status": "success", "session_id": session_id}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to link printer stream: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        stream_manager.add_alias(printer_id, session_id)
+    instance.config.linked_session_id = session_id
+    return {"status": "success", "session_id": session_id}
 
 
 @router.delete("/{printer_id}")
 async def remove_printer(printer_id: str, _: any = Security(get_current_identity, scopes=["admin"])) -> dict:
-    """Remove a registered printer."""
+    """Remove a printer."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
-
-    config, provider = _printers.pop(printer_id)
-    if provider:
-        try:
-            await provider.disconnect()
-        except Exception as e:
-            logger.warning(f"Error disconnecting printer {printer_id}: {e}")
-
+    _printers.pop(printer_id)
     return {"status": "removed", "id": printer_id}
 
 
-@router.post("/{printer_id}/start")
-async def start_print(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> dict:
-    """Start/resume the print job."""
+@router.post("/{printer_id}/{command}")
+async def printer_command(printer_id: str, command: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> dict:
+    """Send command to printer."""
     if printer_id not in _printers:
         raise HTTPException(status_code=404, detail="Printer not found")
-
-    _, provider = _printers[printer_id]
-    if not provider:
-        raise HTTPException(status_code=400, detail="No provider connected")
-
-    await provider.start()
-    return {"status": "started"}
-
-
-@router.post("/{printer_id}/pause")
-async def pause_print(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> dict:
-    """Pause the current print."""
-    if printer_id not in _printers:
-        raise HTTPException(status_code=404, detail="Printer not found")
-
-    _, provider = _printers[printer_id]
-    if not provider:
-        raise HTTPException(status_code=400, detail="No provider connected")
-
-    await provider.pause()
-    return {"status": "paused"}
-
-
-@router.post("/{printer_id}/resume")
-async def resume_print(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> dict:
-    """Resume the current print."""
-    if printer_id not in _printers:
-        raise HTTPException(status_code=404, detail="Printer not found")
-
-    _, provider = _printers[printer_id]
-    if not provider:
-        raise HTTPException(status_code=400, detail="No provider connected")
-
-    await provider.resume()
-    return {"status": "resumed"}
-
-
-@router.post("/{printer_id}/stop")
-async def stop_print(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> dict:
-    """Stop/cancel the current print."""
-    if printer_id not in _printers:
-        raise HTTPException(status_code=404, detail="Printer not found")
-
-    _, provider = _printers[printer_id]
-    if not provider:
-        raise HTTPException(status_code=400, detail="No provider connected")
-
-    await provider.stop()
-    return {"status": "stopped"}
-
-
-@router.post("/{printer_id}/link/{session_id}", response_model=PrinterInfo)
-async def link_stream(printer_id: str, session_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> PrinterInfo:
-    """Link a WebRTC stream (session) to this printer."""
-    if printer_id not in _printers:
-        raise HTTPException(status_code=404, detail="Printer not found")
-
-    config, provider = _printers[printer_id]
-    config.linked_session_id = session_id
-    _printers[printer_id] = (config, provider)
-
-    status = PrinterStatus.DISCONNECTED
-    if provider:
-        try:
-            is_printing = await provider.is_printing()
-            status = PrinterStatus.PRINTING if is_printing else PrinterStatus.IDLE
-        except Exception:
-            status = PrinterStatus.ERROR
-
-    return PrinterInfo(
-        id=printer_id,
-        name=config.name,
-        provider=config.provider,
-        status=status,
-        linked_session_id=config.linked_session_id,
-    )
-
-
-@router.delete("/{printer_id}/link", response_model=PrinterInfo)
-async def unlink_stream(printer_id: str, _: any = Security(get_current_identity, scopes=["printer:write"])) -> PrinterInfo:
-    """Unlink the stream from this printer."""
-    if printer_id not in _printers:
-        raise HTTPException(status_code=404, detail="Printer not found")
-
-    config, provider = _printers[printer_id]
-    config.linked_session_id = None
-    _printers[printer_id] = (config, provider)
-
-    status = PrinterStatus.DISCONNECTED
-    if provider:
-        try:
-            is_printing = await provider.is_printing()
-            status = PrinterStatus.PRINTING if is_printing else PrinterStatus.IDLE
-        except Exception:
-            status = PrinterStatus.ERROR
-
-    return PrinterInfo(
-        id=printer_id,
-        name=config.name,
-        provider=config.provider,
-        status=status,
-        linked_session_id=None,
-    )
+    instance = _printers[printer_id]
+    if not instance.control:
+        raise HTTPException(status_code=400, detail="Printer does not support control")
+    if command == "start": await instance.control.start()
+    elif command == "pause": await instance.control.pause()
+    elif command == "resume": await instance.control.resume()
+    elif command == "stop": await instance.control.stop()
+    else: raise HTTPException(status_code=400, detail="Invalid command")
+    return {"status": "ok", "command": command}

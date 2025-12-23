@@ -21,6 +21,7 @@ class RTCOffer(BaseModel):
     session_id: str
     settings: FeedSettings = FeedSettings()
     device_name: str = "Camera"
+    printer_id: Optional[str] = None
 
 
 class PushSubscriptionInfo(BaseModel):
@@ -142,12 +143,24 @@ class PrinterStatus(str, Enum):
     DISCONNECTED = "disconnected"
 
 
+class ComponentConfig(BaseModel):
+    """Configuration for a single printer component."""
+    provider: str
+    config: dict = {}
+
+
+class PrinterComponents(BaseModel):
+    """Modular printer components."""
+    status: Optional[ComponentConfig] = None
+    camera: Optional[ComponentConfig] = None
+    control: Optional[ComponentConfig] = None
+
+
 class PrinterConfig(BaseModel):
     """Configuration for a printer instance."""
     id: str
     name: str
-    provider: str
-    config: dict = {}
+    components: PrinterComponents
     linked_session_id: Optional[str] = None
     client_public_key: Optional[str] = None
 
@@ -156,6 +169,7 @@ class PrinterInfo(BaseModel):
     """Printer status response."""
     id: str
     name: str
-    provider: str
     status: PrinterStatus
     linked_session_id: Optional[str] = None
+    has_control: bool = False
+    has_camera: bool = False

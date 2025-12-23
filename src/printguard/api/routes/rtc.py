@@ -99,6 +99,8 @@ async def rtc_offer(offer: RTCOffer, _: any = Security(get_current_identity, sco
             device_name=offer.device_name,
             settings=offer.settings
         )
+        if offer.printer_id:
+            stream_manager.add_alias(offer.session_id, offer.printer_id)
     return RTCAnswer(
         sdp=pc.localDescription.sdp,
         type=pc.localDescription.type
