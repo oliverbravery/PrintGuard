@@ -3,7 +3,6 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import select
 import logging
 from .config import get_settings
-from .db_models import User
 from .hashing import get_password_hash
 from .utils import generate_random_string
 
@@ -21,6 +20,8 @@ async def get_db():
         yield session
 
 async def init_db():
+    from .db_models import User
+    
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     # Check if any users exist, if not, create default admin
