@@ -7,6 +7,8 @@ from .cloudflare import router as cloudflare_router
 from .ngrok import router as ngrok_router
 from .tunnel import router as tunnel_router
 from .printer import router as printer_router
+from .connections import router as connections_router
+from .components import router as components_router
 from .crypto import router as crypto_router
 from .auth import router as auth_router
 from .admin import router as admin_router
@@ -23,5 +25,7 @@ router.include_router(cloudflare_router, prefix="/cloudflare", tags=["cloudflare
 router.include_router(ngrok_router, prefix="/ngrok", tags=["ngrok"])
 router.include_router(tunnel_router, prefix="/tunnel", tags=["tunnel"])
 router.include_router(printer_router)
+router.include_router(connections_router)
+router.include_router(components_router)
 router.include_router(crypto_router)
 router.include_router(admin_router)

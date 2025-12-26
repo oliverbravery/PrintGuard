@@ -1,3 +1,12 @@
+# Stage 1: Build WebUI
+FROM node:20-slim AS webui-builder
+WORKDIR /app/webui
+COPY webui/package*.json ./
+RUN npm install
+COPY webui/ ./
+RUN npm run build
+
+# Stage 2: Runtime
 FROM python:3.13-slim
 
 # Set environment variables
@@ -30,6 +39,9 @@ COPY src/printguard/requirements.txt src/printguard/requirements.txt
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
+
+# Copy built WebUI from Stage 1
+COPY --from=webui-builder /app/webui/dist ./webui/dist
 
 # Copy the rest of the application
 COPY . .

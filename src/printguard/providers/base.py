@@ -7,7 +7,30 @@ if TYPE_CHECKING:
     from aiortc import MediaStreamTrack, RTCPeerConnection
 
 
-class StatusSource(ABC):
+class BaseProvider(ABC):
+    """Base interface for all provider types."""
+    @classmethod
+    def get_schema(cls) -> dict:
+        """Return the configuration schema for this provider."""
+        return {"connection_fields": [], "entity_fields": []}
+
+    @classmethod
+    async def validate_connection(cls, config: dict) -> bool:
+        """Test if the connection configuration is valid and reachable."""
+        return True
+
+    @classmethod
+    async def validate_component(cls, config: dict) -> bool:
+        """Test if the component configuration (including entity) is valid."""
+        return await cls.validate_connection(config)
+
+    @classmethod
+    async def list_entities(cls, config: dict) -> list[dict]:
+        """Fetch available entities from the provider."""
+        return []
+
+
+class StatusSource(BaseProvider, ABC):
     """Interface for providing printer status."""
     @abstractmethod
     async def is_printing(self) -> bool:
@@ -15,7 +38,7 @@ class StatusSource(ABC):
         ...
 
 
-class CameraSource(ABC):
+class CameraSource(BaseProvider, ABC):
     """Interface for providing a camera feed."""
     @abstractmethod
     async def get_camera_track(self) -> Tuple[Optional["MediaStreamTrack"], Optional["RTCPeerConnection"]]:
@@ -23,7 +46,7 @@ class CameraSource(ABC):
         ...
 
 
-class ControlSink(ABC):
+class ControlSink(BaseProvider, ABC):
     """Interface for printer control commands."""
     @abstractmethod
     async def start(self) -> None: ...

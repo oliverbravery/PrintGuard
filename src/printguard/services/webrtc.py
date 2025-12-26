@@ -6,6 +6,7 @@ from typing import Callable, Optional
 
 from aiortc import RTCDataChannel, RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaRelay
+from aiortc.mediastreams import MediaStreamError
 from av import VideoFrame
 from PIL import ImageEnhance
 
@@ -59,6 +60,11 @@ class VideoProcessor:
                 frame_count += 1
                 if frame_count % 100 == 0:
                     logger.debug(f"Received {frame_count} frames for session {self.session_id}")
+            except MediaStreamError:
+                logger.info(f"Track ended for session {self.session_id}")
+                self._running = False
+                self._frame_ready.set()
+                break
             except Exception as e:
                 logger.error(f"Error receiving frames for session {self.session_id}: {e}", exc_info=True)
                 self._running = False

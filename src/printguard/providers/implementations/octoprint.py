@@ -30,6 +30,34 @@ class OctoPrintProvider(PrinterProvider):
     def name(self) -> str:
         return "octoprint"
 
+    @classmethod
+    def get_schema(cls) -> dict:
+        return {
+            "connection_fields": [
+                {"name": "host", "type": "string", "required": True, "label": "OctoPrint Host"},
+                {"name": "api_key", "type": "password", "required": True, "label": "API Key"}
+            ],
+            "entity_fields": []
+        }
+
+    @classmethod
+    async def validate_connection(cls, config: dict) -> bool:
+        """Test connection to OctoPrint."""
+        host = config.get("host", "").rstrip("/")
+        api_key = config.get("api_key", "")
+        if not host or not api_key:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{host}/api/version",
+                    headers={"X-Api-Key": api_key}
+                )
+                return resp.status_code == 200
+        except Exception as e:
+            logger.error(f"OctoPrint validation failed: {e}")
+            return False
+
     async def connect(self) -> None:
         """Initialize the HTTP client and test connection."""
         if not self.client:

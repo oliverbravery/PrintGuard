@@ -40,6 +40,88 @@ class HomeAssistantProvider(PrinterProvider):
     def name(self) -> str:
         return "homeassistant"
 
+    @classmethod
+    def get_schema(cls) -> dict:
+        return {
+            "connection_fields": [
+                {"name": "hass_url", "type": "string", "required": True, "label": "HA URL"},
+                {"name": "token", "type": "password", "required": True, "label": "Access Token"}
+            ],
+            "entity_fields": [
+                {"name": "entity_id", "type": "string", "required": True, "label": "Entity ID"}
+            ]
+        }
+
+    @classmethod
+    async def validate_connection(cls, config: dict) -> bool:
+        """Test connection to HA."""
+        hass_url = config.get("hass_url", "").rstrip("/")
+        token = config.get("token", "")
+        if not hass_url or not token:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{hass_url}/api/",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                return resp.status_code == 200 and "message" in resp.json() and resp.json()["message"] == "API running."
+        except Exception as e:
+            logger.error(f"HA validation failed: {e}")
+            return False
+
+    @classmethod
+    async def validate_component(cls, config: dict) -> bool:
+        """Test if HA entity exists."""
+        hass_url = config.get("hass_url", "").rstrip("/")
+        token = config.get("token", "")
+        entity_id = config.get("entity_id", "")
+        if not all([hass_url, token, entity_id]):
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{hass_url}/api/states/{entity_id}",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                return resp.status_code == 200
+        except Exception as e:
+            logger.error(f"HA component validation failed for {entity_id}: {e}")
+            return False
+
+    @classmethod
+    async def list_entities(cls, config: dict) -> list[dict]:
+        """Fetch available camera and status entities from HA."""
+        hass_url = config.get("hass_url", "").rstrip("/")
+        token = config.get("token", "")
+        if not hass_url or not token:
+            return []
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{hass_url}/api/states",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                resp.raise_for_status()
+                states = resp.json()
+                entities = []
+                for state in states:
+                    entity_id = state["entity_id"]
+                    domain = entity_id.split(".")[0]
+                    name = state.get("attributes", {}).get("friendly_name", entity_id)
+                    
+                    if domain == "camera":
+                        entities.append({"id": entity_id, "name": name, "type": "camera"})
+                    elif domain in ["sensor", "binary_sensor", "switch", "button"]:
+                        if any(x in entity_id.lower() for x in ["status", "state", "print"]):
+                            entities.append({"id": entity_id, "name": name, "type": "status"})
+                        elif domain in ["button", "switch"]:
+                            entities.append({"id": entity_id, "name": name, "type": "control"})
+                return entities
+        except Exception as e:
+            logger.error(f"HA entity listing failed: {e}")
+            return []
+
     async def _call_service(self, domain: str, service: str, service_data: dict) -> None:
         """Call a Home Assistant service."""
         if not self.client:

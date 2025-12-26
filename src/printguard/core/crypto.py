@@ -54,13 +54,16 @@ class CryptoHandler:
 
     @staticmethod
     def encrypt_b64(data: str, shared_key: bytes) -> str:
-        handler = CryptoHandler() # Dummy for static use
-        encrypted = handler.encrypt(data.encode('utf-8'), shared_key)
-        return base64.b64encode(encrypted).decode('utf-8')
+        aesgcm = AESGCM(shared_key)
+        nonce = os.urandom(12)
+        ciphertext = aesgcm.encrypt(nonce, data.encode('utf-8'), None)
+        return base64.b64encode(nonce + ciphertext).decode('utf-8')
 
     @staticmethod
     def decrypt_b64(encrypted_b64: str, shared_key: bytes) -> str:
-        handler = CryptoHandler() # Dummy for static use
         encrypted_data = base64.b64decode(encrypted_b64)
-        decrypted = handler.decrypt(encrypted_data, shared_key)
+        nonce = encrypted_data[:12]
+        ciphertext = encrypted_data[12:]
+        aesgcm = AESGCM(shared_key)
+        decrypted = aesgcm.decrypt(nonce, ciphertext, None)
         return decrypted.decode('utf-8')

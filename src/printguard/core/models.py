@@ -100,12 +100,40 @@ class CFZone(BaseModel):
     name: str
 
 
+class CFTunnel(BaseModel):
+    """Cloudflare tunnel info."""
+    id: str
+    name: str
+    tunnel_secret: str = ""
+    account_id: str = ""
+
+
+class CFDNSRecord(BaseModel):
+    """Cloudflare DNS record info."""
+    id: str
+    name: str
+
+
 class CFTunnelRequest(BaseModel):
     """Request to create a Cloudflare tunnel."""
     account_id: str
     zone_id: str
     tunnel_name: str
     subdomain: str = "camera"
+    overwrite_tunnel: bool = False
+    overwrite_dns: bool = False
+
+
+class CFExistenceResponse(BaseModel):
+    """Response checking if Cloudflare resources exist."""
+    tunnel_exists: bool
+    dns_exists: bool
+
+
+class DependencyStatus(BaseModel):
+    """Installation status of external dependencies."""
+    ngrok_installed: bool
+    cloudflared_installed: bool
 
 
 class CFTunnelResponse(BaseModel):
@@ -155,8 +183,9 @@ class ComponentInfo(BaseModel):
     """Full component information."""
     id: str
     name: Optional[str] = None
+    type: str
     provider: str
-    config: dict = {}
+    entity_config: dict = {}
 
 
 class PrinterComponents(BaseModel):
@@ -184,3 +213,45 @@ class PrinterInfo(BaseModel):
     has_control: bool = False
     has_camera: bool = False
     components: Optional[dict[str, ComponentInfo]] = None
+
+
+class ConnectionInfo(BaseModel):
+    """Connection information."""
+    id: str
+    name: str
+    provider: str
+    config: dict
+
+
+class ConnectionCreate(BaseModel):
+    """Request to create a new connection."""
+    name: str
+    provider: str
+    config: dict
+
+
+class ConnectionUpdate(BaseModel):
+    """Request to update a connection."""
+    name: Optional[str] = None
+    config: Optional[dict] = None
+
+
+class ComponentCreate(BaseModel):
+    """Request to create a new component."""
+    name: str
+    type: str  # camera, control, status
+    provider: str
+    connection_id: Optional[str] = None
+    entity_config: dict = {}
+
+
+class ComponentUpdate(BaseModel):
+    """Request to update a component."""
+    name: Optional[str] = None
+    entity_config: Optional[dict] = None
+
+
+class PrinterUpdate(BaseModel):
+    """Request to update a printer."""
+    name: Optional[str] = None
+    components: Optional[PrinterComponents] = None

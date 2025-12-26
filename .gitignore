@@ -12,3 +12,8 @@ data/
 .vscode/
 .DS_Store
 .*
+*.db
+node_modules/
+webui/node_modules/
+webui/dist/
+.env

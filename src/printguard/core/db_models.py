@@ -28,14 +28,28 @@ class Printer(Base):
     client_public_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     component_links: Mapped[list["PrinterComponentLink"]] = relationship(back_populates="printer", cascade="all, delete-orphan")
 
+class Connection(Base):
+    __tablename__ = "connections"
+    
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(100))
+    provider: Mapped[str] = mapped_column(String(50))
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    components: Mapped[list["Component"]] = relationship(back_populates="connection", cascade="all, delete-orphan")
+
 class Component(Base):
     __tablename__ = "components"
     
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    type: Mapped[str] = mapped_column(String(20))  # camera, control, status
     provider: Mapped[str] = mapped_column(String(50))
     config: Mapped[dict] = mapped_column(JSON, default=dict)
-    printer_links: Mapped[list["PrinterComponentLink"]] = relationship(back_populates="component")
+    connection_id: Mapped[str | None] = mapped_column(ForeignKey("connections.id"), nullable=True)
+    entity_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    
+    connection: Mapped["Connection | None"] = relationship(back_populates="components")
+    printer_links: Mapped[list["PrinterComponentLink"]] = relationship(back_populates="component", cascade="all, delete-orphan")
 
 class PrinterComponentLink(Base):
     __tablename__ = "printer_component_links"

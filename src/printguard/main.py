@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+import os
 
 from .core.config import get_settings
 from .core.model import download_model, load_model
@@ -51,6 +53,10 @@ app = FastAPI(
 )
 
 app.include_router(router, prefix="/api")
+
+webui_dist = os.path.join(os.getcwd(), "webui", "dist")
+if os.path.exists(webui_dist):
+    app.mount("/", StaticFiles(directory=webui_dist, html=True), name="webui")
 
 
 @app.exception_handler(RequestValidationError)

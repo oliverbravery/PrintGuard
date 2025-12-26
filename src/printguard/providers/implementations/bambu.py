@@ -178,6 +178,52 @@ class BambuLabsProvider(PrinterProvider):
     def name(self) -> str:
         return "bambulabs"
 
+    @classmethod
+    def get_schema(cls) -> dict:
+        return {
+            "connection_fields": [
+                {"name": "host", "type": "string", "required": True, "label": "Printer IP"},
+                {"name": "access_code", "type": "password", "required": True, "label": "Access Code"},
+                {"name": "serial", "type": "string", "required": True, "label": "Serial Number"},
+                {"name": "model", "type": "string", "required": True, "label": "Model"}
+            ],
+            "entity_fields": []
+        }
+
+    @classmethod
+    async def validate_connection(cls, config: dict) -> bool:
+        """Test connection to Bambu printer via MQTT."""
+        host = config.get("host")
+        access_code = config.get("access_code")
+        serial = config.get("serial")
+        if not all([host, access_code, serial]):
+            return False
+        connected = asyncio.Event()
+        def on_connect(client, userdata, flags, rc):
+            if rc == 0:
+                connected.set()
+        
+        client = mqtt.Client()
+        client.username_pw_set("bblp", access_code)
+        client.tls_set(cert_reqs=ssl.CERT_NONE)
+        client.tls_insecure_set(True)
+        client.on_connect = on_connect
+        
+        try:
+            client.connect_async(host, port=8883)
+            client.loop_start()
+            try:
+                await asyncio.wait_for(connected.wait(), timeout=5.0)
+                return True
+            except asyncio.TimeoutError:
+                return False
+            finally:
+                client.loop_stop()
+                client.disconnect()
+        except Exception as e:
+            logger.error(f"Bambu validation failed: {e}")
+            return False
+
     def _on_connect(self, client, userdata, flags, rc):
         if rc == 0:
             client.subscribe(f"device/{self.serial}/report")

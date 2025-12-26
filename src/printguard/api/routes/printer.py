@@ -3,13 +3,13 @@
 import logging
 from typing import Any, Optional, Union
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException, Security, Depends
+from fastapi import APIRouter, HTTPException, Security, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from ...core.models import (
     PrinterConfig, PrinterInfo, PrinterStatus, FeedSettings,
-    ComponentConfig, ComponentInfo
+    ComponentConfig, ComponentInfo, PrinterUpdate
 )
 from ...core.database import get_db, AsyncSession
 from ...core.db_models import Printer, Component, PrinterComponentLink
@@ -39,19 +39,30 @@ class PrinterInstance(BaseModel):
 _printers: dict[str, PrinterInstance] = {}
 
 
-async def _resolve_component(comp_config: Union[ComponentConfig, Component], db: AsyncSession) -> Any:
-    """Instantiate a provider component from config or DB model."""
-    if isinstance(comp_config, Component):
-        provider = comp_config.provider
-        config = comp_config.config
-    else:
-        provider = comp_config.provider
-        config = comp_config.config
+async def _resolve_component(comp: Component, db: AsyncSession) -> Any:
+    """Instantiate a provider component from DB model."""
+    provider = comp.provider
+    config = {}
+    if comp.connection_id:
+        if not comp.connection:
+            from ...core.db_models import Connection
+            res = await db.execute(select(Connection).where(Connection.id == comp.connection_id))
+            comp.connection = res.scalar_one_or_none()
+            
+        if comp.connection:
+            config.update(comp.connection.config)
+            
+    config.update(comp.entity_config or {})
 
     prov_cls = get_provider(provider)
     if not prov_cls:
+        logger.warning(f"Provider class not found for: {provider}")
         return None
-    return prov_cls(**config)
+    try:
+        return prov_cls(**config)
+    except Exception as e:
+        logger.error(f"Failed to instantiate provider {provider} with config {config}: {e}")
+        return None
 
 
 async def _get_or_create_printer_instance(printer_id: str, db: AsyncSession) -> Optional[PrinterInstance]:
@@ -60,7 +71,9 @@ async def _get_or_create_printer_instance(printer_id: str, db: AsyncSession) -> 
         return _printers[printer_id]
     result = await db.execute(
         select(Printer).where(Printer.id == printer_id).options(
-            selectinload(Printer.component_links).joinedload(PrinterComponentLink.component)
+            selectinload(Printer.component_links)
+            .joinedload(PrinterComponentLink.component)
+            .selectinload(Component.connection)
         )
     )
     db_printer = result.scalar_one_or_none()
@@ -86,7 +99,19 @@ async def list_providers(_: any = Security(get_current_identity, scopes=["printe
     return get_available_providers()
 
 
-@router.post("/", response_model=PrinterInfo)
+@router.get("/providers/{provider}/schema")
+async def get_provider_schema(
+    provider: str,
+    _: any = Security(get_current_identity, scopes=["printer:read"])
+) -> dict:
+    """Return JSON schema for provider configuration fields."""
+    prov_cls = get_provider(provider)
+    if not prov_cls:
+        raise HTTPException(status_code=404, detail="Provider schema not found")
+    return prov_cls.get_schema()
+
+
+@router.post("", response_model=PrinterInfo)
 async def register_printer(
     config: PrinterConfig, 
     db: AsyncSession = Depends(get_db),
@@ -137,7 +162,53 @@ async def register_printer(
     return await get_printer(db_printer.id, db, _)
 
 
-@router.get("/", response_model=list[PrinterInfo])
+@router.put("/{printer_id}", response_model=PrinterInfo)
+async def update_printer(
+    printer_id: str,
+    config: PrinterUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: any = Security(get_current_identity, scopes=["printer:write"])
+) -> PrinterInfo:
+    """Update printer components."""
+    result = await db.execute(
+        select(Printer)
+        .where(Printer.id == printer_id)
+        .options(selectinload(Printer.component_links))
+    )
+    db_printer = result.scalar_one_or_none()
+    if not db_printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    
+    if config.name is not None:
+        db_printer.name = config.name
+        
+    if config.components is not None:
+        for link in db_printer.component_links:
+            await db.delete(link)
+        await db.flush()
+        roles = ["status", "camera", "control"]
+        for role in roles:
+            comp_id = getattr(config.components, role)
+            if not comp_id:
+                continue
+            res = await db.execute(select(Component).where(Component.id == comp_id))
+            if not res.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail=f"Component {comp_id} not found")
+                
+            link = PrinterComponentLink(
+                printer_id=db_printer.id,
+                component_id=comp_id,
+                role=role
+            )
+            db.add(link)
+            
+    await db.commit()
+    if printer_id in _printers:
+        _printers.pop(printer_id)
+    return await get_printer(printer_id, db, _)
+
+
+@router.get("", response_model=list[PrinterInfo])
 async def list_printers(
     db: AsyncSession = Depends(get_db),
     _: any = Security(get_current_identity, scopes=["printer:read"])
@@ -158,6 +229,7 @@ async def get_printer(
     instance = await _get_or_create_printer_instance(printer_id, db)
     if not instance:
         raise HTTPException(status_code=404, detail="Printer not found")
+    
     status = PrinterStatus.DISCONNECTED
     if instance.status:
         try:
@@ -165,6 +237,8 @@ async def get_printer(
             status = PrinterStatus.PRINTING if is_printing else PrinterStatus.IDLE
         except Exception:
             status = PrinterStatus.ERROR
+    elif instance.camera:
+        status = PrinterStatus.IDLE
     result = await db.execute(
         select(PrinterComponentLink).where(PrinterComponentLink.printer_id == printer_id).options(
             selectinload(PrinterComponentLink.component)
@@ -175,8 +249,9 @@ async def get_printer(
         link.role: ComponentInfo(
             id=link.component.id,
             name=link.component.name,
+            type=link.component.type,
             provider=link.component.provider,
-            config=link.component.config
+            entity_config=link.component.entity_config or {}
         ) for link in links
     }
     return PrinterInfo(
@@ -193,12 +268,15 @@ async def get_printer(
 @router.post("/{printer_id}/stream", response_model=dict)
 async def link_printer_stream(
     printer_id: str, 
-    session_id: str, 
-    settings: FeedSettings = FeedSettings(), 
+    session_id: str = Query(...), 
+    settings: Optional[FeedSettings] = None, 
     db: AsyncSession = Depends(get_db),
     _: any = Security(get_current_identity, scopes=["printer:write", "rtc:stream"])
 ) -> dict:
     """Ensure printer camera is multiplexed and active."""
+    if settings is None:
+        settings = FeedSettings()
+        
     instance = await _get_or_create_printer_instance(printer_id, db)
     if not instance:
         raise HTTPException(status_code=404, detail="Printer not found")
