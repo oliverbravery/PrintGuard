@@ -1,0 +1,5 @@
+packages = ["numpy"]
+
+[files]
+"/core.py" = "./core.py"
+"/app.py" = "./app.py"
