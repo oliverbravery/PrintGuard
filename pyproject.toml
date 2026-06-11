@@ -1,13 +1,25 @@
 [project]
 name = "printguard"
-version = "0.1.0"
-description = "Add your description here"
+version = "2.0.0"
+description = "Real-time 3D print failure detection — one engine, local or hub"
 readme = "README.md"
+license = "GPL-2.0-only"
 requires-python = ">=3.12"
 dependencies = [
     "ai-edge-litert>=2.1.5",
+    "av>=14.0",
     "fastapi>=0.136.3",
-    "numpy>=2.4.6",
-    "opencv-python>=4.13.0.92",
-    "uvicorn>=0.49.0",
+    "httpx>=0.28",
+    "numpy>=2.1",
+    "uvicorn[standard]>=0.49.0",
 ]
+
+[project.scripts]
+printguard = "printguard.server.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["printguard"]
