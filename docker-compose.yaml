@@ -1,0 +1,25 @@
+services:
+  printguard:
+    image: ghcr.io/oliverbravery/printguard:latest
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      MEDIAMTX_API: http://mediamtx:9997
+      MEDIAMTX_RTSP: rtsp://mediamtx:8554
+    volumes:
+      - ./data:/data
+    depends_on:
+      - mediamtx
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.18.2
+    restart: unless-stopped
+    ports:
+      - "8554:8554"
+      - "1935:1935"
+      - "8889:8889"
+      - "8189:8189/udp"
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml

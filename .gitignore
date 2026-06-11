@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 .DS_Store
 .pytest_cache/
+data/
+node_modules/
+web/dist/
+*.tsbuildinfo

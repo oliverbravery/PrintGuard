@@ -1,0 +1,182 @@
+import { create } from "zustand";
+import { bootLocal } from "./local";
+import type { CameraSource, EngineLink, EngineState, Mode, ScorePoint } from "./types";
+
+const HISTORY_LIMIT = 240;
+const MODE_KEY = "pg.mode";
+
+export interface Toast {
+  id: number;
+  kind: "info" | "alert" | "error";
+  text: string;
+}
+
+export type DialogKind = "cameras" | "printer" | "settings" | null;
+
+interface PgStore {
+  mode: Mode | null;
+  phase: "pick" | "booting" | "ready" | "error";
+  bootMsg: string;
+  link: EngineLink | null;
+  engine: EngineState | null;
+  history: Record<string, ScorePoint[]>;
+  discovered: CameraSource[] | null;
+  discovering: boolean;
+  deviceTest: { ok: boolean; status?: string; error?: string } | null;
+  testing: boolean;
+  toasts: Toast[];
+  detailId: string | null;
+  dialog: DialogKind;
+  chooseMode(mode: Mode): void;
+  leaveMode(): void;
+  send(cmd: Record<string, unknown>): void;
+  discover(): void;
+  openDialog(dialog: DialogKind): void;
+  openDetail(id: string | null): void;
+  testDevice(provider: string, config: Record<string, string>): void;
+  toast(kind: Toast["kind"], text: string): void;
+}
+
+let toastSeq = 0;
+
+function connectHub(onEvent: (event: any) => void, onDown: () => void): EngineLink {
+  let socket: WebSocket;
+  let closed = false;
+  const open = () => {
+    socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`);
+    socket.onmessage = (msg) => onEvent(JSON.parse(msg.data));
+    socket.onclose = () => {
+      if (!closed) {
+        onDown();
+        setTimeout(open, 1500);
+      }
+    };
+  };
+  open();
+  return {
+    send: (cmd) => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(cmd)),
+    close: () => {
+      closed = true;
+      socket.close();
+    },
+  };
+}
+
+export const useStore = create<PgStore>((set, get) => {
+  const onEvent = (event: any) => {
+    switch (event.event) {
+      case "state":
+        set({ engine: event as EngineState, phase: "ready" });
+        break;
+      case "result":
+        set((s) => {
+          const points = [...(s.history[event.printer_id] ?? []), { ts: event.ts, score: event.score }];
+          return { history: { ...s.history, [event.printer_id]: points.slice(-HISTORY_LIMIT) } };
+        });
+        break;
+      case "alert": {
+        const name = get().engine?.printers.find((p) => p.id === event.printer_id)?.name ?? "printer";
+        get().toast("alert", `Defect on ${name} — ${(event.score * 100).toFixed(0)}% (${event.action})`);
+        break;
+      }
+      case "device":
+        set((s) =>
+          s.engine
+            ? {
+                engine: {
+                  ...s.engine,
+                  printers: s.engine.printers.map((p) =>
+                    p.id === event.printer_id
+                      ? { ...p, device_state: { status: event.status, progress: event.progress, job: event.job } }
+                      : p,
+                  ),
+                },
+              }
+            : s,
+        );
+        break;
+      case "discovered":
+        set({ discovered: event.sources, discovering: false });
+        break;
+      case "device_test":
+        set({ deviceTest: event, testing: false });
+        break;
+      case "error":
+        get().toast("error", event.message);
+        set({ discovering: false, testing: false });
+        break;
+    }
+  };
+
+  const boot = async (mode: Mode) => {
+    set({ mode, phase: "booting", bootMsg: mode === "hub" ? "Connecting to hub" : "Preparing local engine" });
+    try {
+      if (mode === "hub") {
+        const link = connectHub(onEvent, () => set({ bootMsg: "Reconnecting" }));
+        set({ link });
+      } else {
+        const link = await bootLocal(onEvent, (bootMsg) => set({ bootMsg }));
+        set({ link });
+      }
+    } catch (err) {
+      set({ phase: "error", bootMsg: String(err) });
+    }
+  };
+
+  const stored = localStorage.getItem(MODE_KEY) as Mode | null;
+  if (stored === "local" || stored === "hub") queueMicrotask(() => boot(stored));
+
+  return {
+    mode: stored,
+    phase: stored ? "booting" : "pick",
+    bootMsg: "",
+    link: null,
+    engine: null,
+    history: {},
+    discovered: null,
+    discovering: false,
+    deviceTest: null,
+    testing: false,
+    toasts: [],
+    detailId: null,
+    dialog: null,
+
+    chooseMode(mode) {
+      localStorage.setItem(MODE_KEY, mode);
+      void boot(mode);
+    },
+
+    leaveMode() {
+      localStorage.removeItem(MODE_KEY);
+      location.reload();
+    },
+
+    send(cmd) {
+      get().link?.send(cmd);
+    },
+
+    discover() {
+      set({ discovered: null, discovering: true });
+      get().send({ cmd: "discover" });
+    },
+
+    openDialog(dialog) {
+      set({ dialog, discovered: null, deviceTest: null });
+    },
+
+    openDetail(detailId) {
+      set({ detailId, deviceTest: null });
+    },
+
+    testDevice(provider, config) {
+      set({ deviceTest: null, testing: true });
+      get().send({ cmd: "device.test", provider, config });
+    },
+
+    toast(kind, text) {
+      const id = ++toastSeq;
+      set((s) => ({ toasts: [...s.toasts, { id, kind, text }] }));
+      setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 6000);
+    },
+  };
+});

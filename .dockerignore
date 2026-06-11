@@ -1,0 +1,11 @@
+.git
+.venv
+.env
+data
+tests
+web/node_modules
+web/dist
+**/__pycache__
+*.tsbuildinfo
+.DS_Store
+README.md

@@ -1,0 +1,352 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-0: #0b0c0a;
+  --color-ink-1: #11130e;
+  --color-ink-2: #181b13;
+  --color-ink-3: #20241a;
+  --color-line-0: #262b20;
+  --color-line-1: #39402f;
+  --color-text-0: #eceee6;
+  --color-text-1: #a8af9c;
+  --color-text-2: #6e755f;
+  --color-accent: #ff4d00;
+  --color-ok: #8ac926;
+  --color-warn: #ffb000;
+  --color-bad: #ff3b30;
+  --font-display: "Saira Condensed", "Arial Narrow", sans-serif;
+  --font-body: "Saira", system-ui, sans-serif;
+  --font-mono: "Chivo Mono", ui-monospace, monospace;
+}
+
+html {
+  font-family: var(--font-body);
+  background: var(--color-ink-0);
+  color: var(--color-text-0);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(1100px 700px at 75% -10%, rgba(255, 77, 0, 0.06), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgba(138, 201, 38, 0.04), transparent 55%),
+    repeating-linear-gradient(0deg, transparent 0 23px, rgba(236, 238, 230, 0.022) 23px 24px),
+    repeating-linear-gradient(90deg, transparent 0 23px, rgba(236, 238, 230, 0.022) 23px 24px),
+    var(--color-ink-0);
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-ink-0);
+}
+
+.display {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  background: linear-gradient(180deg, var(--color-ink-2), var(--color-ink-1));
+  border: 1px solid var(--color-line-0);
+  border-radius: 6px;
+}
+
+.hairline {
+  border-top: 1px solid var(--color-line-0);
+}
+
+.btn {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
+  border-radius: 4px;
+  border: 1px solid var(--color-line-1);
+  color: var(--color-text-0);
+  background: var(--color-ink-3);
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms, color 120ms, transform 80ms;
+  user-select: none;
+}
+
+.btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-ink-0);
+}
+
+.btn-primary:hover {
+  background: #ff6a26;
+  color: var(--color-ink-0);
+}
+
+.btn-danger:hover {
+  border-color: var(--color-bad);
+  color: var(--color-bad);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.14rem 0.5rem;
+  border-radius: 3px;
+  border: 1px solid var(--color-line-1);
+  color: var(--color-text-1);
+  background: rgba(11, 12, 10, 0.7);
+  white-space: nowrap;
+}
+
+.chip-ok { color: var(--color-ok); border-color: color-mix(in srgb, var(--color-ok) 45%, transparent); }
+.chip-warn { color: var(--color-warn); border-color: color-mix(in srgb, var(--color-warn) 45%, transparent); }
+.chip-bad { color: var(--color-bad); border-color: color-mix(in srgb, var(--color-bad) 45%, transparent); }
+.chip-accent { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 50%, transparent); }
+
+.led {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--color-text-2);
+  flex: none;
+}
+
+.led-on {
+  background: var(--color-ok);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-ok) 80%, transparent);
+}
+
+.led-infer {
+  background: var(--color-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 90%, transparent);
+  animation: led-pulse 0.9s ease-in-out infinite;
+}
+
+.led-off { background: #3a3f33; }
+.led-bad {
+  background: var(--color-bad);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-bad) 80%, transparent);
+}
+
+@keyframes led-pulse {
+  50% { opacity: 0.35; }
+}
+
+.field {
+  width: 100%;
+  background: var(--color-ink-0);
+  border: 1px solid var(--color-line-1);
+  border-radius: 4px;
+  color: var(--color-text-0);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  padding: 0.5rem 0.65rem;
+  outline: none;
+  transition: border-color 120ms;
+}
+
+.field:focus {
+  border-color: var(--color-accent);
+}
+
+.field::placeholder {
+  color: var(--color-text-2);
+}
+
+select.field {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--color-text-1) 50%),
+    linear-gradient(135deg, var(--color-text-1) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 55%, calc(100% - 11px) 55%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.label {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: var(--color-text-2);
+}
+
+input[type="range"] {
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-line-1);
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  border: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  border: none;
+  cursor: pointer;
+}
+
+.corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: var(--color-line-1);
+  border-style: solid;
+  border-width: 0;
+  transition: border-color 150ms;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.corner-tl { top: 6px; left: 6px; border-top-width: 2px; border-left-width: 2px; }
+.corner-tr { top: 6px; right: 6px; border-top-width: 2px; border-right-width: 2px; }
+.corner-bl { bottom: 6px; left: 6px; border-bottom-width: 2px; border-left-width: 2px; }
+.corner-br { bottom: 6px; right: 6px; border-bottom-width: 2px; border-right-width: 2px; }
+
+.tile:hover .corner { border-color: var(--color-accent); }
+.tile-alert .corner { border-color: var(--color-bad); }
+
+.tile-alert {
+  border-color: color-mix(in srgb, var(--color-bad) 60%, transparent) !important;
+  animation: alert-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes alert-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0); }
+  50% { box-shadow: 0 0 22px 0 rgba(255, 59, 48, 0.28); }
+}
+
+.reveal {
+  animation: reveal 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+}
+
+.boot-cursor::after {
+  content: "▊";
+  color: var(--color-accent);
+  animation: blink 0.9s steps(1) infinite;
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+.scan {
+  position: relative;
+  overflow: hidden;
+}
+
+.scan::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(0, 0, 0, 0.07) 3px 4px);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 6, 4, 0.72);
+  backdrop-filter: blur(3px);
+  z-index: 40;
+}
+
+.slide-in {
+  animation: slide-in 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes slide-in {
+  from { transform: translateX(28px); opacity: 0; }
+}
+
+.rise-in {
+  animation: rise-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes rise-in {
+  from { transform: translateY(14px); opacity: 0; }
+}
+
+.toggle {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-line-1);
+  background: var(--color-ink-0);
+  cursor: pointer;
+  transition: background 140ms, border-color 140ms;
+  flex: none;
+}
+
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--color-text-2);
+  transition: transform 140ms, background 140ms;
+}
+
+.toggle[data-on="true"] {
+  background: color-mix(in srgb, var(--color-accent) 25%, var(--color-ink-0));
+  border-color: var(--color-accent);
+}
+
+.toggle[data-on="true"]::after {
+  transform: translateX(16px);
+  background: var(--color-accent);
+}
+
+video {
+  display: block;
+}

@@ -1,0 +1,228 @@
+import { useEffect, useState } from "react";
+import { useStore } from "../store";
+import type { CameraSource } from "../types";
+import { publishWhip, whepBase } from "../webrtc";
+import { sourceLabel } from "./CameraRail";
+import { Dialog } from "./Dialog";
+
+const publishers = new Map<string, () => void>();
+
+function slug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
+}
+
+function RegisteredList() {
+  const { engine, send } = useStore();
+  const cameras = engine?.cameras ?? [];
+  if (!cameras.length) return null;
+  return (
+    <div className="space-y-2 mb-6">
+      {cameras.map((camera) => (
+        <div key={camera.id} className="flex items-center gap-3 panel px-3 py-2">
+          <span className={`led ${camera.online ? "led-on" : "led-off"}`} />
+          <div className="flex-1 min-w-0 leading-tight">
+            <div className="text-sm font-medium truncate">{camera.name}</div>
+            <div className="mono text-[0.62rem] text-text-2 truncate">{sourceLabel(camera.source)}</div>
+          </div>
+          <span className="mono text-[0.68rem] text-text-1">{camera.max_fps.toFixed(0)} fps</span>
+          {publishers.has(camera.id) && <span className="chip chip-accent">publishing</span>}
+          <button
+            className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
+            onClick={() => {
+              publishers.get(camera.id)?.();
+              publishers.delete(camera.id);
+              send({ cmd: "camera.remove", id: camera.id });
+            }}
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DevicePicker({ onAdd, busy }: { onAdd: (name: string, source: CameraSource) => void; busy: boolean }) {
+  const { discovered, discovering, discover } = useStore();
+  const [name, setName] = useState("");
+  const [deviceId, setDeviceId] = useState("");
+  useEffect(() => {
+    discover();
+  }, []);
+  const devices = (discovered ?? []).filter((s) => s.kind === "device");
+  return (
+    <div className="space-y-3">
+      {discovering && <p className="mono text-[0.7rem] text-text-2 boot-cursor">scanning devices</p>}
+      {!discovering && !devices.length && <p className="mono text-[0.7rem] text-text-2">no unregistered cameras found</p>}
+      {devices.length > 0 && (
+        <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+          <option value="">Select a camera…</option>
+          {devices.map((d) => (
+            <option key={d.device_id} value={d.device_id}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+      )}
+      <input className="field" placeholder="Name (e.g. Ender 3 nozzle cam)" value={name} onChange={(e) => setName(e.target.value)} />
+      <button
+        className="btn btn-primary w-full"
+        disabled={!deviceId || busy}
+        onClick={() => {
+          const device = devices.find((d) => d.device_id === deviceId)!;
+          onAdd(name || device.label || "Camera", { kind: "device", device_id: deviceId, label: device.label });
+        }}
+      >
+        {busy ? "Measuring fps…" : "Register camera"}
+      </button>
+    </div>
+  );
+}
+
+function HubAdd({ onDone }: { onDone: () => void }) {
+  const { engine, send, toast, discovered, discovering, discover } = useStore();
+  const [tab, setTab] = useState<"url" | "publish" | "paths">("url");
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [deviceId, setDeviceId] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (tab === "paths") discover();
+    if (tab === "publish") {
+      navigator.mediaDevices
+        .getUserMedia({ video: true, audio: false })
+        .then((primer) => {
+          primer.getTracks().forEach((t) => t.stop());
+          return navigator.mediaDevices.enumerateDevices();
+        })
+        .then((all) => setDevices(all.filter((d) => d.kind === "videoinput")))
+        .catch((err) => toast("error", `camera access: ${err}`));
+    }
+  }, [tab]);
+
+  const publish = async () => {
+    setBusy(true);
+    try {
+      const path = `dev-${slug(name || "camera")}`;
+      const stop = await publishWhip(`${whepBase(engine?.settings.whep_base ?? "")}/${path}/whip`, deviceId);
+      publishers.set(path, stop);
+      await new Promise((r) => setTimeout(r, 800));
+      send({ cmd: "camera.add", name: name || "Published camera", source: { kind: "path", path } });
+      onDone();
+    } catch (err) {
+      toast("error", `publish failed: ${err}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const tabs: Array<["url" | "publish" | "paths", string]> = [
+    ["url", "Stream URL"],
+    ["publish", "This device"],
+    ["paths", "Discovered"],
+  ];
+  return (
+    <div>
+      <div className="flex gap-1.5 mb-4">
+        {tabs.map(([key, label]) => (
+          <button
+            key={key}
+            className={`btn !py-1.5 !px-3 !text-[0.66rem] ${tab === key ? "!border-accent !text-accent" : ""}`}
+            onClick={() => setTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "url" && (
+        <div className="space-y-3">
+          <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <input
+            className="field"
+            placeholder="rtsp:// rtmp:// or http:// stream URL"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <button
+            className="btn btn-primary w-full"
+            disabled={!url.trim()}
+            onClick={() => {
+              send({ cmd: "camera.add", name: name || "Stream", source: { kind: "url", url: url.trim() } });
+              onDone();
+            }}
+          >
+            Register stream
+          </button>
+        </div>
+      )}
+      {tab === "publish" && (
+        <div className="space-y-3">
+          <p className="text-xs text-text-1">
+            Streams this device's camera to the hub over WebRTC. Publishing stops when this tab closes.
+          </p>
+          <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+            <option value="">Select a camera…</option>
+            {devices.map((d, i) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label || `Camera ${i + 1}`}
+              </option>
+            ))}
+          </select>
+          <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <button className="btn btn-primary w-full" disabled={!deviceId || busy} onClick={publish}>
+            {busy ? "Publishing…" : "Publish & register"}
+          </button>
+        </div>
+      )}
+      {tab === "paths" && (
+        <div className="space-y-2">
+          {discovering && <p className="mono text-[0.7rem] text-text-2 boot-cursor">querying mediamtx</p>}
+          {!discovering && !(discovered ?? []).length && (
+            <p className="mono text-[0.7rem] text-text-2">no unregistered streams on the hub</p>
+          )}
+          {(discovered ?? []).map((s) => (
+            <div key={s.path} className="flex items-center gap-3 panel px-3 py-2">
+              <span className="mono text-[0.72rem] flex-1 truncate">{s.path}</span>
+              <button
+                className="btn !py-1 !px-2.5 !text-[0.62rem]"
+                onClick={() => {
+                  send({ cmd: "camera.add", name: s.path!, source: { kind: "path", path: s.path } });
+                  onDone();
+                }}
+              >
+                Register
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function CamerasDialog() {
+  const { engine, send, openDialog } = useStore();
+  const [busy, setBusy] = useState(false);
+  const close = () => openDialog(null);
+  const isLocal = engine?.mode === "local";
+  return (
+    <Dialog title="Camera registry" onClose={close}>
+      <RegisteredList />
+      <div className="label mb-3">Register new</div>
+      {isLocal ? (
+        <DevicePicker
+          busy={busy}
+          onAdd={(name, source) => {
+            setBusy(true);
+            send({ cmd: "camera.add", name, source });
+            setTimeout(() => setBusy(false), 1500);
+          }}
+        />
+      ) : (
+        <HubAdd onDone={() => {}} />
+      )}
+    </Dialog>
+  );
+}
