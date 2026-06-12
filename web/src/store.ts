@@ -28,12 +28,13 @@ interface PgStore {
   toasts: Toast[];
   detailId: string | null;
   dialog: DialogKind;
+  focusCameraId: string | null;
   chooseMode(mode: Mode): void;
   leaveMode(): void;
   send(cmd: Record<string, unknown>): void;
   isPending(cmd: string): boolean;
   discover(): void;
-  openDialog(dialog: DialogKind): void;
+  openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
   openDetail(id: string | null): void;
   testDevice(provider: string, config: Record<string, string>): void;
   toast(kind: Toast["kind"], text: string): void;
@@ -158,6 +159,7 @@ export const useStore = create<PgStore>((set, get) => {
     toasts: [],
     detailId: null,
     dialog: null,
+    focusCameraId: null,
 
     chooseMode(mode) {
       localStorage.setItem(MODE_KEY, mode);
@@ -185,8 +187,8 @@ export const useStore = create<PgStore>((set, get) => {
       get().send({ cmd: "discover" });
     },
 
-    openDialog(dialog) {
-      set({ dialog, discovered: null, deviceTest: null });
+    openDialog(dialog, focusCameraId = null) {
+      set({ dialog, discovered: null, deviceTest: null, focusCameraId });
     },
 
     openDetail(detailId) {

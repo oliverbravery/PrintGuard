@@ -17,8 +17,12 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function CameraCard({ camera }: { camera: Camera }) {
+  const { openDialog } = useStore();
   return (
-    <div className="panel flex items-center gap-4 px-3.5 py-2.5 flex-none">
+    <div
+      className="panel flex items-center gap-4 px-3.5 py-2.5 flex-none cursor-pointer hover:border-accent transition-colors"
+      onClick={() => openDialog("cameras", camera.id)}
+    >
       <span
         className={`led ${camera.inferring ? "led-infer" : camera.online ? "led-on" : "led-off"}`}
         title={camera.online ? "online" : "offline"}

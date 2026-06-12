@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
 import { publishWhip, whepBase } from "../webrtc";
@@ -37,14 +37,22 @@ function Slider({
   );
 }
 
-function CameraRow({ camera }: { camera: Camera }) {
+function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
   const { send, isPending } = useStore();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(focus);
+  const ref = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState({
     brightness: camera.brightness ?? 1,
     contrast: camera.contrast ?? 1,
     sharpness: camera.sharpness ?? 0,
   });
+
+  useEffect(() => {
+    if (focus) {
+      setOpen(true);
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [focus]);
 
   useEffect(() => {
     setDraft({
@@ -68,7 +76,7 @@ function CameraRow({ camera }: { camera: Camera }) {
     });
 
   return (
-    <div className="panel overflow-hidden">
+    <div ref={ref} className="panel overflow-hidden">
       <div className="flex items-center gap-3 px-3 py-2">
         <span className={`led ${camera.online ? "led-on" : "led-off"}`} />
         <div className="flex-1 min-w-0 leading-tight">
@@ -137,13 +145,13 @@ function CameraRow({ camera }: { camera: Camera }) {
 }
 
 function RegisteredList() {
-  const { engine } = useStore();
+  const { engine, focusCameraId } = useStore();
   const cameras = engine?.cameras ?? [];
   if (!cameras.length) return null;
   return (
     <div className="space-y-2 mb-6">
       {cameras.map((camera) => (
-        <CameraRow key={camera.id} camera={camera} />
+        <CameraRow key={camera.id} camera={camera} focus={camera.id === focusCameraId} />
       ))}
     </div>
   );
