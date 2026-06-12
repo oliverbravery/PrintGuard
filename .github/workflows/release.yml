@@ -27,6 +27,12 @@ jobs:
             echo "::error file=pyproject.toml::v${{ steps.read.outputs.version }} is already released — run 'uv version --bump patch|minor|major'"
             exit 1
           fi
+      - name: Refuse to release an undocumented version
+        run: |
+          if ! grep -q "^## \[${{ steps.read.outputs.version }}\]" CHANGELOG.md; then
+            echo "::error file=CHANGELOG.md::no '## [${{ steps.read.outputs.version }}]' section — describe the change in CHANGELOG.md; it becomes the release notes"
+            exit 1
+          fi
 
   docker:
     name: image
@@ -70,7 +76,15 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - run: gh release create "v${{ needs.version.outputs.version }}" --target "$GITHUB_SHA" --generate-notes
+      - name: Extract this version's changelog section as the release notes
+        run: |
+          awk -v ver="${{ needs.version.outputs.version }}" '
+            $0 ~ "^## \\[" ver "\\]" {hit=1; next}
+            hit && (/^## \[/ || /^\[[^]]+\]: /) {exit}
+            hit {print}
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          test -s "$RUNNER_TEMP/release-notes.md"
+      - run: gh release create "v${{ needs.version.outputs.version }}" --target "$GITHUB_SHA" --title "v${{ needs.version.outputs.version }}" --notes-file "$RUNNER_TEMP/release-notes.md"
         env:
           GH_TOKEN: ${{ github.token }}
 

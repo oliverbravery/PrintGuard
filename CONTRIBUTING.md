@@ -73,26 +73,43 @@ adapter.
 
 ## Release cycle
 
-Merging to `main` starts the release process. The release's version is derived from the [`pyproject.toml`](pyproject.toml). Bump it as part of every PR:
+Merging to `main` starts the release process, so every PR carries its own release
+metadata: a version bump and a changelog entry.
 
 ```bash
 uv version --bump patch   # or minor / major (also updates uv.lock)
 ```
+
+Then add a matching section at the top of [CHANGELOG.md](CHANGELOG.md) in
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form:
+
+```markdown
+## [X.Y.Z] - YYYY-MM-DD
+
+### Added | Changed | Fixed | Removed
+
+- What changed, written for someone deciding whether to pull the new image.
+```
+
+The section is published verbatim as the GitHub release notes, so describe the
+user-visible effect, not the implementation.
 
 A PR can only merge once three required checks pass —
 
 - **tests** — the engine simulation suite;
 - **image** — the production Docker image must build, so a change that breaks the image
   can never reach `main`;
-- **version** — the version must be bumped past the last release, so every merge ships
-  as a unique, immutable version (re-publishing an existing tag is refused).
+- **version** — the version must be bumped past the last release and have a matching
+  `CHANGELOG.md` section, so every merge ships as a unique, documented, immutable
+  version (re-publishing an existing tag is refused).
 
 On merge, the [release workflow](.github/workflows/release.yml):
 
 1. builds and pushes the multi-arch image to `ghcr.io/oliverbravery/printguard`,
    tagged `X.Y.Z`, `X.Y` and `latest`;
 2. only after the image is published, tags the merge commit `vX.Y.Z` and creates the
-   GitHub release with generated notes — a failed build never becomes a release;
+   GitHub release with the changelog section as its notes — a failed build never
+   becomes a release;
 3. deploys the in-browser demo to GitHub Pages.
 
 Docker is the only supported distribution.
