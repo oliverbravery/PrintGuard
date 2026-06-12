@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Printer } from "../types";
 import { Feed } from "./Feed";
@@ -52,9 +52,19 @@ function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange:
 }
 
 export function DetailPanel({ printer }: { printer: Printer }) {
-  const { engine, history, send, openDetail, deviceTest, testing, testDevice } = useStore();
+  const { engine, history, send, openDetail, deviceTest, testing, testDevice, isPending } = useStore();
   const [draft, setDraft] = useState(printer);
+  const actionRef = useRef<string | null>(null);
+  const saveRef = useRef<string | null>(null);
   useEffect(() => setDraft(printer), [printer.id]);
+
+  const updating = isPending("printer.update");
+  const removing = isPending("printer.remove");
+
+  useEffect(() => {
+    if (saveRef.current === "printer.update" && !updating) close();
+    if (saveRef.current === "printer.remove" && !removing) close();
+  }, [updating, removing]);
 
   const camera = engine?.cameras.find((c) => c.id === printer.camera_id);
   const points = history[printer.id] ?? [];
@@ -101,15 +111,22 @@ export function DetailPanel({ printer }: { printer: Printer }) {
         {linked && (
           <Section title="Printer control">
             <div className="grid grid-cols-3 gap-2">
-              {(["pause", "resume", "cancel"] as const).map((action) => (
-                <button
-                  key={action}
-                  className={`btn ${action === "cancel" ? "btn-danger" : ""}`}
-                  onClick={() => send({ cmd: "printer.action", id: printer.id, action })}
-                >
-                  {action}
-                </button>
-              ))}
+              {(["pause", "resume", "cancel"] as const).map((action) => {
+                const busy = isPending("printer.action");
+                return (
+                  <button
+                    key={action}
+                    className={`btn ${action === "cancel" ? "btn-danger" : ""}`}
+                    disabled={busy}
+                    onClick={() => {
+                      actionRef.current = action;
+                      send({ cmd: "printer.action", id: printer.id, action });
+                    }}
+                  >
+                    {busy && actionRef.current === action ? `${action}…` : action}
+                  </button>
+                );
+              })}
             </div>
             {printer.device_state?.job && (
               <p className="mono text-[0.68rem] text-text-2 mt-2 truncate">job: {printer.device_state.job}</p>
@@ -213,21 +230,23 @@ export function DetailPanel({ printer }: { printer: Printer }) {
         <div className="px-5 py-4 flex gap-2.5">
           <button
             className="btn btn-primary flex-1"
+            disabled={updating}
             onClick={() => {
+              saveRef.current = "printer.update";
               send({ cmd: "printer.update", id: printer.id, patch: draft });
-              close();
             }}
           >
-            Save
+            {updating ? "Saving…" : "Save"}
           </button>
           <button
             className="btn btn-danger"
+            disabled={removing}
             onClick={() => {
+              saveRef.current = "printer.remove";
               send({ cmd: "printer.remove", id: printer.id });
-              close();
             }}
           >
-            Delete
+            {removing ? "Deleting…" : "Delete"}
           </button>
         </div>
       </aside>

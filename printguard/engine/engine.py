@@ -122,10 +122,12 @@ class Engine:
         if not handler:
             self.emit({"event": "error", "message": f"unknown command {message.get('cmd')!r}"})
             return
+        req_id = message.get("req_id")
         try:
             await handler(message)
+            self._sync(req_id)
         except Exception as exc:
-            self.emit({"event": "error", "message": str(exc), "req_id": message.get("req_id")})
+            self.emit({"event": "error", "message": str(exc), "req_id": req_id})
 
     def _save(self) -> None:
         self.platform.save_state(
@@ -136,10 +138,13 @@ class Engine:
             }
         )
 
-    def _sync(self) -> None:
+    def _sync(self, req_id: Any = None) -> None:
         self.registry.sync_in_use(self.printers)
         self._save()
-        self.emit(self.state_event())
+        event = self.state_event()
+        if req_id is not None:
+            event["req_id"] = req_id
+        self.emit(event)
 
     async def _attach(self, camera: Camera) -> None:
         try:
@@ -201,7 +206,6 @@ class Engine:
         if source.fps > 0:
             camera.max_fps = source.fps
         self.registry.add(camera)
-        self._sync()
 
     async def _cmd_camera_update(self, message: dict[str, Any]) -> None:
         camera = self.registry.get(message["id"])
@@ -217,7 +221,6 @@ class Engine:
         camera.brightness = settings["brightness"]
         camera.contrast = settings["contrast"]
         camera.sharpness = settings["sharpness"]
-        self._sync()
 
     async def _cmd_camera_remove(self, message: dict[str, Any]) -> None:
         camera = self.registry.remove(message["id"])
@@ -226,23 +229,19 @@ class Engine:
         for printer in self.printers.values():
             if printer["camera_id"] == message["id"]:
                 printer["camera_id"] = ""
-        self._sync()
 
     async def _cmd_printer_add(self, message: dict[str, Any]) -> None:
         printer_id = uuid.uuid4().hex[:8]
         self.printers[printer_id] = sanitise_printer(printer_id, message.get("printer", {}))
-        self._sync()
 
     async def _cmd_printer_update(self, message: dict[str, Any]) -> None:
         existing = self.printers.get(message["id"])
         if not existing:
             raise KeyError(f"no printer {message['id']}")
         self.printers[message["id"]] = sanitise_printer(message["id"], message.get("patch", {}), existing)
-        self._sync()
 
     async def _cmd_printer_remove(self, message: dict[str, Any]) -> None:
         self.printers.pop(message["id"], None)
-        self._sync()
 
     async def _cmd_printer_action(self, message: dict[str, Any]) -> None:
         printer = self.printers[message["id"]]
@@ -267,4 +266,3 @@ class Engine:
 
     async def _cmd_settings_update(self, message: dict[str, Any]) -> None:
         self.settings = {**self.settings, **{k: v for k, v in message.get("patch", {}).items() if k in SETTINGS_DEFAULTS}}
-        self._sync()

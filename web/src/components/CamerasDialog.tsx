@@ -38,7 +38,7 @@ function Slider({
 }
 
 function CameraRow({ camera }: { camera: Camera }) {
-  const { send } = useStore();
+  const { send, isPending } = useStore();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState({
     brightness: camera.brightness ?? 1,
@@ -82,13 +82,14 @@ function CameraRow({ camera }: { camera: Camera }) {
         </button>
         <button
           className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
+          disabled={isPending("camera.remove")}
           onClick={() => {
             publishers.get(camera.id)?.();
             publishers.delete(camera.id);
             send({ cmd: "camera.remove", id: camera.id });
           }}
         >
-          Remove
+          {isPending("camera.remove") ? "Removing…" : "Remove"}
         </button>
       </div>
       {open && (
@@ -118,8 +119,12 @@ function CameraRow({ camera }: { camera: Camera }) {
             onChange={(v) => setDraft((d) => ({ ...d, sharpness: v }))}
           />
           <div className="flex gap-2">
-            <button className="btn btn-primary flex-1 !py-1.5" disabled={!dirty} onClick={save}>
-              Save
+            <button
+              className="btn btn-primary flex-1 !py-1.5"
+              disabled={!dirty || isPending("camera.update")}
+              onClick={save}
+            >
+              {isPending("camera.update") ? "Saving…" : "Save"}
             </button>
             <button className="btn !py-1.5" disabled={!dirty} onClick={reset}>
               Reset
@@ -144,8 +149,9 @@ function RegisteredList() {
   );
 }
 
-function DevicePicker({ onAdd, busy }: { onAdd: (name: string, source: CameraSource) => void; busy: boolean }) {
-  const { discovered, discovering, discover } = useStore();
+function DevicePicker({ onAdd }: { onAdd: (name: string, source: CameraSource) => void }) {
+  const { discovered, discovering, discover, isPending } = useStore();
+  const busy = isPending("camera.add");
   const [name, setName] = useState("");
   const [deviceId, setDeviceId] = useState("");
   useEffect(() => {
@@ -182,7 +188,7 @@ function DevicePicker({ onAdd, busy }: { onAdd: (name: string, source: CameraSou
 }
 
 function HubAdd({ onDone }: { onDone: () => void }) {
-  const { engine, send, toast, discovered, discovering, discover } = useStore();
+  const { engine, send, toast, discovered, discovering, discover, isPending } = useStore();
   const [tab, setTab] = useState<"url" | "publish" | "paths">("url");
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -249,13 +255,13 @@ function HubAdd({ onDone }: { onDone: () => void }) {
           />
           <button
             className="btn btn-primary w-full"
-            disabled={!url.trim()}
+            disabled={!url.trim() || isPending("camera.add")}
             onClick={() => {
               send({ cmd: "camera.add", name: name || "Stream", source: { kind: "url", url: url.trim() } });
               onDone();
             }}
           >
-            Register stream
+            {isPending("camera.add") ? "Registering…" : "Register stream"}
           </button>
         </div>
       )}
@@ -273,8 +279,8 @@ function HubAdd({ onDone }: { onDone: () => void }) {
             ))}
           </select>
           <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn btn-primary w-full" disabled={!deviceId || busy} onClick={publish}>
-            {busy ? "Publishing…" : "Publish & register"}
+          <button className="btn btn-primary w-full" disabled={!deviceId || busy || isPending("camera.add")} onClick={publish}>
+            {busy ? "Publishing…" : isPending("camera.add") ? "Registering…" : "Publish & register"}
           </button>
         </div>
       )}
@@ -289,12 +295,13 @@ function HubAdd({ onDone }: { onDone: () => void }) {
               <span className="mono text-[0.72rem] flex-1 truncate">{s.path}</span>
               <button
                 className="btn !py-1 !px-2.5 !text-[0.62rem]"
+                disabled={isPending("camera.add")}
                 onClick={() => {
                   send({ cmd: "camera.add", name: s.path!, source: { kind: "path", path: s.path } });
                   onDone();
                 }}
               >
-                Register
+                {isPending("camera.add") ? "Registering…" : "Register"}
               </button>
             </div>
           ))}
@@ -306,7 +313,6 @@ function HubAdd({ onDone }: { onDone: () => void }) {
 
 export function CamerasDialog() {
   const { engine, send, openDialog } = useStore();
-  const [busy, setBusy] = useState(false);
   const close = () => openDialog(null);
   const isLocal = engine?.mode === "local";
   return (
@@ -315,11 +321,8 @@ export function CamerasDialog() {
       <div className="label mb-3">Register new</div>
       {isLocal ? (
         <DevicePicker
-          busy={busy}
           onAdd={(name, source) => {
-            setBusy(true);
             send({ cmd: "camera.add", name, source });
-            setTimeout(() => setBusy(false), 1500);
           }}
         />
       ) : (

@@ -1,13 +1,23 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
 
 export function PrinterDialog() {
-  const { engine, send, openDialog, openDetail } = useStore();
+  const { engine, send, openDialog, openDetail, isPending } = useStore();
   const [name, setName] = useState("");
   const [cameraId, setCameraId] = useState("");
   const cameras = engine?.cameras ?? [];
+  const saving = isPending("printer.add");
+  const sent = useRef(false);
   const close = () => openDialog(null);
+
+  useEffect(() => {
+    if (sent.current && !saving) {
+      close();
+      openDetail(null);
+    }
+  }, [saving]);
+
   return (
     <Dialog title="Add printer" onClose={close}>
       <div className="space-y-3">
@@ -27,14 +37,13 @@ export function PrinterDialog() {
         )}
         <button
           className="btn btn-primary w-full"
-          disabled={!name.trim() || !cameraId}
+          disabled={!name.trim() || !cameraId || saving}
           onClick={() => {
+            sent.current = true;
             send({ cmd: "printer.add", printer: { name: name.trim(), camera_id: cameraId } });
-            close();
-            openDetail(null);
           }}
         >
-          Add printer
+          {saving ? "Adding…" : "Add printer"}
         </button>
       </div>
     </Dialog>

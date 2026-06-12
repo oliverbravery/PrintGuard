@@ -1,12 +1,19 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
 
 export function SettingsDialog() {
-  const { engine, send, openDialog, leaveMode } = useStore();
+  const { engine, send, openDialog, leaveMode, isPending } = useStore();
   const [ntfy, setNtfy] = useState(engine?.settings.ntfy_url ?? "");
   const [whep, setWhep] = useState(engine?.settings.whep_base ?? "");
+  const saving = isPending("settings.update");
+  const sent = useRef(false);
   const close = () => openDialog(null);
+
+  useEffect(() => {
+    if (sent.current && !saving) close();
+  }, [saving]);
+
   return (
     <Dialog title="Settings" onClose={close}>
       <div className="space-y-5">
@@ -38,12 +45,13 @@ export function SettingsDialog() {
         )}
         <button
           className="btn btn-primary w-full"
+          disabled={saving}
           onClick={() => {
+            sent.current = true;
             send({ cmd: "settings.update", patch: { ntfy_url: ntfy.trim(), whep_base: whep.trim() } });
-            close();
           }}
         >
-          Save
+          {saving ? "Saving…" : "Save"}
         </button>
         <div className="hairline pt-4 flex items-center justify-between">
           <span className="text-xs text-text-1">

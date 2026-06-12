@@ -24,12 +24,14 @@ interface PgStore {
   discovering: boolean;
   deviceTest: { ok: boolean; status?: string; error?: string } | null;
   testing: boolean;
+  pending: Record<string, { req_id: number; cmd: string }>;
   toasts: Toast[];
   detailId: string | null;
   dialog: DialogKind;
   chooseMode(mode: Mode): void;
   leaveMode(): void;
   send(cmd: Record<string, unknown>): void;
+  isPending(cmd: string): boolean;
   discover(): void;
   openDialog(dialog: DialogKind): void;
   openDetail(id: string | null): void;
@@ -38,6 +40,7 @@ interface PgStore {
 }
 
 let toastSeq = 0;
+let reqSeq = 0;
 
 function connectHub(onEvent: (event: any) => void, onDown: () => void): EngineLink {
   let socket: WebSocket;
@@ -63,9 +66,21 @@ function connectHub(onEvent: (event: any) => void, onDown: () => void): EngineLi
 }
 
 export const useStore = create<PgStore>((set, get) => {
+  const clearPending = (reqId?: number) => {
+    if (reqId == null) return;
+    set((s) => {
+      const next = { ...s.pending };
+      for (const [key, entry] of Object.entries(next)) {
+        if (entry.req_id === reqId) delete next[key];
+      }
+      return { pending: next };
+    });
+  };
+
   const onEvent = (event: any) => {
     switch (event.event) {
       case "state":
+        clearPending(event.req_id);
         set({ engine: event as EngineState, phase: "ready" });
         break;
       case "result":
@@ -80,6 +95,7 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       }
       case "device":
+        clearPending(event.req_id);
         set((s) =>
           s.engine
             ? {
@@ -103,6 +119,7 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       case "error":
         get().toast("error", event.message);
+        clearPending(event.req_id);
         set({ discovering: false, testing: false });
         break;
     }
@@ -137,6 +154,7 @@ export const useStore = create<PgStore>((set, get) => {
     discovering: false,
     deviceTest: null,
     testing: false,
+    pending: {},
     toasts: [],
     detailId: null,
     dialog: null,
@@ -152,7 +170,14 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     send(cmd) {
-      get().link?.send(cmd);
+      const req_id = ++reqSeq;
+      const cmdType = cmd.cmd as string;
+      set((s) => ({ pending: { ...s.pending, [cmdType]: { req_id, cmd: cmdType } } }));
+      get().link?.send({ ...cmd, req_id });
+    },
+
+    isPending(cmd) {
+      return cmd in get().pending;
     },
 
     discover() {
