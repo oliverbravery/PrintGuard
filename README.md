@@ -2,11 +2,53 @@
 
 ![GitHub stars](https://img.shields.io/github/stars/oliverbravery/PrintGuard?style=flat&color=ff4d00)
 ![Licence](https://img.shields.io/badge/licence-GPL--2.0-2ea44f)
-![Docker](https://img.shields.io/badge/deploy-docker-2496ed)
+[![Container](https://img.shields.io/badge/ghcr.io-oliverbravery%2Fprintguard-2496ed?logo=docker&logoColor=white)](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
+[![Live demo](https://img.shields.io/badge/demo-try_it_in_your_browser-ff4d00)](https://oliverbravery.github.io/PrintGuard/)
 
-Real-time FDM 3D print failure detection. One Python engine — the inference loop, camera
-registry, fair scheduler, defect monitor and printer integrations — runs unchanged in two
-places:
+**PrintGuard watches your 3D printer cameras with an on-device vision model, pauses the
+printer when a failure takes hold, and pushes a snapshot alert to your phone.** No cloud,
+no subscription — your frames never leave hardware you own.
+
+![PrintGuard dashboard: one healthy print, one detected defect that has been auto-paused](docs/assets/dashboard.png)
+
+## Try it now
+
+**[oliverbravery.github.io/PrintGuard](https://oliverbravery.github.io/PrintGuard/)** runs
+the full engine in your browser — point your webcam at a print and watch it score frames.
+Nothing is installed and no frame leaves your device.
+
+## What it does
+
+- **Detects** — a compact vision encoder ([≈5 MB](#the-model)) scores every frame for
+  print failure, shared fairly across as many cameras as your hardware can sustain.
+- **Acts** — a sustained defect pauses or cancels the print through
+  [OctoPrint](https://octoprint.org) or [Klipper (Moonraker)](https://moonraker.readthedocs.io),
+  with per-printer thresholds, consecutive-detection counts and cooldowns.
+- **Alerts** — the moment a defect holds, a snapshot lands on your phone over
+  [ntfy](https://ntfy.sh), Telegram or Discord.
+- **Rests** — printers linked to a service are only watched while they actually print;
+  inference stands by when they sit idle and resumes the moment a job starts.
+- **Fails safe** — a watchdog warns you (on the dashboard *and* through your notification
+  channels) when a camera drops, a feed freezes, or a printer service stops answering.
+  If PrintGuard cannot tell whether a printer is printing, it keeps watching — losing the
+  signal never silently stops monitoring, and a failed pause is announced, never swallowed.
+
+## Quick start
+
+Docker is the only supported way to run PrintGuard:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/mediamtx.yml
+docker compose up -d
+```
+
+Open `http://<host>:8000`, pick a mode, register a camera, add a printer. Images for
+`amd64` and `arm64` (Raspberry Pi 4/5) are published to
+[`ghcr.io/oliverbravery/printguard`](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
+on every release.
+
+## Two modes, one engine
 
 | | Local mode | Hub mode |
 |---|---|---|
@@ -16,76 +58,36 @@ places:
 | Frames leave the device | never | only to your own server |
 | Survives closing the tab | no | yes |
 
-The only mode-specific code is one `Platform` implementation per side
-([engine/platform.py](printguard/engine/platform.py) defines the contract): `infer()`,
-`open_camera()`, `http()`, JPEG encoding and persistence — identical signatures, different
-runtimes. Everything else is shared by construction, so the two modes cannot drift apart.
+Both modes are served by the same container — local mode uses it only for static files.
+The exact same Python engine runs in both places, so they cannot drift apart; how that
+works is covered in [docs/architecture.md](docs/architecture.md).
 
-## Quick start
-
-```bash
-docker compose up -d
-```
-
-Open `http://<host>:8000`, pick a mode, register a camera, add a printer. Both modes are
-served by the same container; local mode uses it only for static files, so frames never
-leave your device.
-
-## How inference is allocated
-
-When a camera is registered its native frame rate is measured once and stored in the
-registry. From then on allocation is fully dynamic — there is no benchmarking step:
-
-1. A smoothed estimate of observed inference latency continuously yields the sustainable
-   total rate (`workers / latency`).
-2. That capacity is water-filled across in-use cameras (max-min fairness): no camera is
-   allocated beyond its native fps, and surplus flows to cameras that can use it.
-3. A free worker takes the most overdue camera and grabs its **freshest** frame at dispatch
-   time. Frames carry a sequence identity, so the same frame is never inferred twice and
-   results always describe the present, not a backlog.
-
-Per-camera stats (max fps, allocated fps, achieved fps, inferring, in use) are live in the
-dashboard's camera registry rail.
-
-## Printer services and notifications
-
-Link a printer to OctoPrint or Klipper (Moonraker) and PrintGuard can pause or cancel the
-print when a defect is sustained, with a configurable threshold, consecutive-detection
-count and cooldown. Alerts push a snapshot to every enabled notification channel —
-[ntfy](https://ntfy.sh), Telegram or Discord.
-
-In local mode the browser calls the services directly — enable CORS in OctoPrint
-(Settings → API) or add `cors_domains` to `moonraker.conf`. Telegram's API sends no CORS
-headers, so that channel is hub-only. Hub mode needs no CORS anywhere.
-
-### Adding an integration or notifier
-
-Adapters are shared code: one adapter runs in both modes because it only talks through
-the platform's HTTP function.
-
-1. Create `printguard/engine/integrations/<service>.py` subclassing
-   [`IntegrationAdapter`](printguard/engine/integrations/base.py) — implement
-   `fetch_state()` and `send()`, normalising to the canonical `DeviceStatus` values — or
-   `printguard/engine/notifiers/<service>.py` subclassing
-   [`NotifierAdapter`](printguard/engine/notifiers/base.py) — implement `send()`.
-   Describe the config form as a JSON Schema (`secret: true` masks fields) and link the
-   official API docs in `docs_url` — it is required for review.
-2. Register an instance in
-   [`integrations/__init__.py`](printguard/engine/integrations/__init__.py) or
-   [`notifiers/__init__.py`](printguard/engine/notifiers/__init__.py).
-
-The configuration UI, test button, polling and alert delivery all follow from the
-adapter — no other changes in either mode.
-
-## Hub mode cameras
+### Hub mode cameras
 
 - **Stream URL** — any RTSP/RTMP/HTTP source; PrintGuard creates a MediaMTX pull path.
 - **This device** — publishes a browser camera to the hub over WebRTC (WHIP). Publishing
   stops when the tab closes.
-- **Discovered** — anything already pushed to MediaMTX (e.g.
-  `rtsp://host:8554/mycam` from a Pi) appears here.
+- **Discovered** — anything already pushed to MediaMTX (e.g. `rtsp://host:8554/mycam`
+  from a Raspberry Pi) appears automatically.
 
-Live playback in the dashboard uses WebRTC (WHEP) directly from MediaMTX on port `8889`.
+Live playback uses WebRTC (WHEP) directly from MediaMTX on port `8889`.
+
+## Printers and notifications
+
+Link a printer to OctoPrint or Klipper from its detail panel, choose what a sustained
+defect should do (alert only, pause, cancel), and test the connection in place. Linked
+printers report job, progress and state on their tiles — and gate inference, so an idle
+printer costs you nothing.
+
+Notification channels live in Settings: enable ntfy, Telegram or Discord, fill in the
+form, and send a test alert. Every enabled channel receives defect snapshots and watchdog
+warnings for printers with notifications switched on.
+
+![Printer detail panel with live risk score and printer controls](docs/assets/printer-detail.png)
+
+In local mode the browser calls the services directly — enable CORS in OctoPrint
+(Settings → API) or add `cors_domains` to `moonraker.conf`. Telegram's API sends no CORS
+headers, so that channel is hub-only. Hub mode needs no CORS anywhere.
 
 ## Exposing a hub
 
@@ -94,15 +96,21 @@ PrintGuard ships no auth: keep it on a trusted network, or front it with
 proxy HTTP/WebSocket to `printguard:8000`. WebRTC (UDP `8189`) should stay directly
 reachable for playback and publishing.
 
-## Development
+## The model
 
-```bash
-uv sync                              # Python engine + server
-uv run printguard                    # serve on :8000
-cd web && npm install && npm run dev # UI with hot reload on :5173
-uv run python tests/test_engine.py   # engine simulation tests
-```
+The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained for
+few-shot FDM fault detection in
+[Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection)
+(with an accompanying technical paper). `models/` holds the TFLite export, normalisation
+metadata and class prototypes. Sensitivity and threshold sliders per printer map straight
+onto the prototype distances, so you can tune for your camera and lighting without
+retraining.
 
-The model is a ShuffleNetV2 encoder ([Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection))
-classified by nearest prototype; `models/` holds the TFLite file, normalisation metadata
-and class prototypes.
+## For developers
+
+- [docs/architecture.md](docs/architecture.md) — how one engine runs on CPython and in
+  the browser, the platform contract, the scheduler and the fail-safe design, with
+  diagrams.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, tests, and step-by-step guides for
+  adding printer integrations and notification providers (the two easiest ways to
+  contribute).

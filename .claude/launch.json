@@ -23,6 +23,15 @@
       ],
       "port": 4731,
       "autoPort": true
+    },
+    {
+      "name": "printguard-demo",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "DATA_DIR=/tmp/pg-demo PORT=4399 MEDIAMTX_RTSP=rtsp://localhost:8556 MEDIAMTX_API=http://localhost:9999 uv run printguard"
+      ],
+      "port": 4399
     }
   ]
 }
