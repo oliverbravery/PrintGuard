@@ -6,7 +6,7 @@ ships **no authentication**: anyone who can reach `:8000` sees every camera and 
 or cancel your printers. Never port-forward these from the internet — put one of the
 following in front instead.
 
-One constraint shapes the choice: live video is WebRTC, and its UDP media can ride a VPN
+Live video is WebRTC, and its UDP media can ride a VPN
 but **cannot traverse an HTTP tunnel or reverse proxy**. So a VPN gives you everything;
 an HTTP auth layer gives you everything except remote live playback.
 
@@ -18,7 +18,7 @@ identity; nothing is reachable from the public internet.
 
 1. Install [Tailscale](https://tailscale.com/download) on the hub machine and your
    devices, and `tailscale up` on each.
-2. That's already usable: open `http://<hub-machine-name>:8000` from any device on the
+2. Open `http://<hub-machine-name>:8000` from any device on the
    tailnet. Invite others from the Tailscale admin console if they should have access.
 3. For HTTPS — which browsers require before they allow camera access, so it is needed
    for local mode and "this device" publishing from phones — serve both the app and the
