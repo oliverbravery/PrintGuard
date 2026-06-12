@@ -61,7 +61,8 @@ on every release.
 
 - **Stream URL** — any RTSP/RTMP/HTTP source; PrintGuard creates a MediaMTX pull path.
 - **This device** — publishes a browser camera to the hub over WebRTC (WHIP). Publishing
-  stops when the tab closes.
+  stops when the tab closes. Browsers only allow camera access on secure pages, so this
+  (and local mode) needs the hub served over HTTPS or opened on `localhost`.
 - **Discovered** — anything already pushed to MediaMTX (e.g. `rtsp://host:8554/mycam`
   from a Raspberry Pi) appears automatically.
 

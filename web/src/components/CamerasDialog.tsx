@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { listVideoInputs } from "../media";
 import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
 import { publishWhip, whepBase } from "../webrtc";
@@ -219,14 +220,9 @@ function HubAdd({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     if (tab === "paths") discover();
     if (tab === "publish") {
-      navigator.mediaDevices
-        .getUserMedia({ video: true, audio: false })
-        .then((primer) => {
-          primer.getTracks().forEach((t) => t.stop());
-          return navigator.mediaDevices.enumerateDevices();
-        })
-        .then((all) => setDevices(all.filter((d) => d.kind === "videoinput")))
-        .catch((err) => toast("error", `camera access: ${err}`));
+      listVideoInputs()
+        .then(setDevices)
+        .catch((err) => toast("error", `camera access: ${err instanceof Error ? err.message : err}`));
     }
   }, [tab]);
 

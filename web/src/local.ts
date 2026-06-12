@@ -1,3 +1,4 @@
+import { cameraApi, listVideoInputs } from "./media";
 import type { EngineLink } from "./types";
 
 const PYODIDE_BASE = "https://cdn.jsdelivr.net/pyodide/v0.28.3/full/";
@@ -36,17 +37,13 @@ async function ensureLitert() {
 
 export const bridge = {
   async discover() {
-    const primer = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-    primer.getTracks().forEach((t) => t.stop());
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    return devices
-      .filter((d) => d.kind === "videoinput")
-      .map((d, i) => ({ kind: "device", device_id: d.deviceId, label: d.label || `Camera ${i + 1}` }));
+    const devices = await listVideoInputs();
+    return devices.map((d, i) => ({ kind: "device", device_id: d.deviceId, label: d.label || `Camera ${i + 1}` }));
   },
 
   async openCamera(cameraId: string, deviceId: string): Promise<number> {
     bridge.closeCamera(cameraId);
-    const stream = await navigator.mediaDevices.getUserMedia({
+    const stream = await cameraApi().getUserMedia({
       video: { deviceId: { exact: deviceId } },
       audio: false,
     });

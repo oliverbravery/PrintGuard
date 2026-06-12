@@ -1,3 +1,5 @@
+import { cameraApi } from "./media";
+
 async function iceComplete(pc: RTCPeerConnection): Promise<void> {
   if (pc.iceGatheringState === "complete") return;
   await new Promise<void>((resolve) => {
@@ -40,7 +42,7 @@ export async function playWhep(video: HTMLVideoElement, url: string): Promise<()
 }
 
 export async function publishWhip(url: string, deviceId: string): Promise<() => void> {
-  const stream = await navigator.mediaDevices.getUserMedia({
+  const stream = await cameraApi().getUserMedia({
     video: { deviceId: { exact: deviceId } },
     audio: false,
   });
