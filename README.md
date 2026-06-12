@@ -85,6 +85,14 @@ In local mode the browser calls the services directly — enable CORS in OctoPri
 (Settings → API) or add `cors_domains` to `moonraker.conf`. Telegram's API sends no CORS
 headers, so that channel is hub-only.
 
+## Exposing a hub
+
+PrintGuard ships no auth, so put an identity layer in front before anything leaves your
+trusted network — never port-forward the hub's ports directly.
+[docs/deployment.md](docs/deployment.md) has step-by-step setups for **Tailscale**
+(recommended — private, live video works), **Cloudflare Tunnel + Access** (public URL,
+zero open ports) and **oauth2-proxy** on your own domain, plus a hardening checklist.
+
 ## The model
 
 The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained for
