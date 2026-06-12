@@ -37,6 +37,15 @@
       "autoPort": true
     },
     {
+      "name": "printguard-hls",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "DATA_DIR=/tmp/pg-hls PORT=4477 MEDIAMTX_API=http://localhost:19997 MEDIAMTX_RTSP=rtsp://localhost:18554 MEDIAMTX_HLS=http://localhost:18888 uv run printguard"
+      ],
+      "port": 4477
+    },
+    {
       "name": "printguard-demo",
       "runtimeExecutable": "sh",
       "runtimeArgs": [

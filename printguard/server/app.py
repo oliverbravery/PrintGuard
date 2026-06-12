@@ -10,19 +10,23 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 import printguard
 
 from ..engine.engine import Engine
 from ..pysrc import build_pysrc
 from .platform import ServerPlatform
+from .publish import ChunkStream, remux
 
 PACKAGE_ROOT = Path(printguard.__file__).parent
 REPO_ROOT = PACKAGE_ROOT.parent
@@ -34,7 +38,8 @@ def create_app() -> FastAPI:
     data_dir = Path(os.environ.get("DATA_DIR", REPO_ROOT / "data"))
     static_dir = Path(os.environ.get("STATIC_DIR", REPO_ROOT / "web" / "dist"))
     mediamtx_api = os.environ.get("MEDIAMTX_API", "http://localhost:9997")
-    mediamtx_rtsp = os.environ.get("MEDIAMTX_RTSP", "rtsp://localhost:8554")
+    mediamtx_rtsp = os.environ.get("MEDIAMTX_RTSP", "rtsp://localhost:8554").rstrip("/")
+    mediamtx_hls = os.environ.get("MEDIAMTX_HLS", "http://localhost:8888")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -42,7 +47,9 @@ def create_app() -> FastAPI:
         engine = Engine(platform)
         await engine.start()
         app.state.engine = engine
+        app.state.hls = httpx.AsyncClient(base_url=mediamtx_hls, timeout=httpx.Timeout(10.0, read=60.0))
         yield
+        await app.state.hls.aclose()
         await engine.stop()
         await platform.close()
 
@@ -85,6 +92,45 @@ def create_app() -> FastAPI:
         finally:
             engine.remove_sink(sink)
             pump_task.cancel()
+
+    @app.get("/hls/{path:path}")
+    async def hls_proxy(path: str, request: Request) -> StreamingResponse:
+        """Streams LL-HLS playlists and segments from MediaMTX through the hub's own port."""
+        client: httpx.AsyncClient = app.state.hls
+        upstream = await client.send(
+            client.build_request("GET", f"/{path}", params=request.query_params), stream=True
+        )
+        hop_by_hop = {"connection", "keep-alive", "transfer-encoding", "content-length"}
+        headers = {k: v for k, v in upstream.headers.items() if k.lower() not in hop_by_hop}
+        if headers.get("location", "").startswith("/"):
+            headers["location"] = f"/hls{headers['location']}"
+        return StreamingResponse(
+            upstream.aiter_raw(), status_code=upstream.status_code, headers=headers,
+            background=BackgroundTask(upstream.aclose),
+        )
+
+    @app.websocket("/api/publish/{path}")
+    async def publish_socket(websocket: WebSocket, path: str) -> None:
+        """Receives a browser camera recording and republishes it over RTSP."""
+        if not re.fullmatch(r"[\w-]+", path):
+            await websocket.close(code=1008, reason="invalid path")
+            return
+        await websocket.accept()
+        source = ChunkStream()
+        pusher = asyncio.create_task(asyncio.to_thread(remux, source, f"{mediamtx_rtsp}/{path}"))
+        connected = True
+        try:
+            while not pusher.done():
+                source.feed(await websocket.receive_bytes())
+        except WebSocketDisconnect:
+            connected = False
+        finally:
+            source.feed(None)
+        try:
+            await pusher
+        except Exception as err:
+            if connected:
+                await websocket.close(code=1011, reason=str(err)[:120])
 
     app.mount("/models", StaticFiles(directory=model_dir), name="models")
     if static_dir.is_dir():

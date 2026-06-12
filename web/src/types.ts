@@ -101,7 +101,7 @@ export interface EngineState {
   mode: string;
   cameras: Camera[];
   printers: Printer[];
-  settings: { notifiers: Record<string, Record<string, string>>; whep_base: string };
+  settings: { notifiers: Record<string, Record<string, string>> };
   stats: EngineStats;
   integrations: AdapterMeta[];
   notifiers: AdapterMeta[];

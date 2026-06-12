@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { renderVideoFrame, useVideoStream } from "../image";
 import type { Camera } from "../types";
 
-export function Feed({ camera, mode, whep }: { camera: Camera | undefined; mode: string; whep: string }) {
+export function Feed({ camera, mode }: { camera: Camera | undefined; mode: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const online = camera?.online ?? false;
@@ -12,7 +12,7 @@ export function Feed({ camera, mode, whep }: { camera: Camera | undefined; mode:
   const crop = camera?.crop ?? null;
   const useCanvas = sharpness > 0 || crop !== null || brightness !== 1 || contrast !== 1;
 
-  useVideoStream(videoRef, camera, mode, whep);
+  useVideoStream(videoRef, camera, mode);
 
   useEffect(() => {
     if (!useCanvas) return;

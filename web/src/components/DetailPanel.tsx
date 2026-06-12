@@ -84,7 +84,7 @@ export function DetailPanel({ printer }: { printer: Printer }) {
           </button>
         </div>
 
-        <Feed camera={camera} mode={engine?.mode ?? "local"} whep={engine?.settings.whep_base ?? ""} />
+        <Feed camera={camera} mode={engine?.mode ?? "local"} />
 
         <Section title="Live risk">
           <div className="flex items-center gap-4">

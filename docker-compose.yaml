@@ -8,6 +8,7 @@ services:
     environment:
       MEDIAMTX_API: http://mediamtx:9997
       MEDIAMTX_RTSP: rtsp://mediamtx:8554
+      MEDIAMTX_HLS: http://mediamtx:8888
     volumes:
       - ./data:/data
     depends_on:
@@ -19,7 +20,5 @@ services:
     ports:
       - "8554:8554"
       - "1935:1935"
-      - "8889:8889"
-      - "8189:8189/udp"
     volumes:
       - ./mediamtx.yml:/mediamtx.yml

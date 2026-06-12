@@ -28,13 +28,11 @@ function clampCrop(c: Crop): Crop {
 export function CropEditor({
   camera,
   mode,
-  whep,
   crop,
   onChange,
 }: {
   camera: Camera;
   mode: string;
-  whep: string;
   crop: Crop | null;
   onChange: (crop: Crop | null) => void;
 }) {
@@ -50,7 +48,7 @@ export function CropEditor({
   const sharpness = camera.sharpness ?? 0;
   const needsCanvas = brightness !== 1 || contrast !== 1 || sharpness > 0;
 
-  useVideoStream(videoRef, camera, mode, whep);
+  useVideoStream(videoRef, camera, mode);
 
   useEffect(() => {
     if (!needsCanvas) return;

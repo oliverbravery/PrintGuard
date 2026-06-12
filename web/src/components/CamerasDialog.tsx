@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listVideoInputs } from "../media";
 import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
-import { publishWhip, whepBase } from "../webrtc";
+import { publishStream } from "../stream";
 import { sourceLabel } from "./CameraRail";
 import { CropEditor } from "./CropEditor";
 import { Dialog } from "./Dialog";
@@ -135,7 +135,6 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           <CropEditor
             camera={camera}
             mode={engine?.mode ?? "local"}
-            whep={engine?.settings.whep_base ?? ""}
             crop={draft.crop}
             onChange={(crop) => setDraft((d) => ({ ...d, crop }))}
           />
@@ -209,7 +208,7 @@ function DevicePicker({ onAdd }: { onAdd: (name: string, source: CameraSource) =
 }
 
 function HubAdd({ onDone }: { onDone: () => void }) {
-  const { engine, send, toast, discovered, discovering, discover, isPending } = useStore();
+  const { send, toast, discovered, discovering, discover, isPending } = useStore();
   const [tab, setTab] = useState<"url" | "publish" | "paths">("url");
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -230,8 +229,13 @@ function HubAdd({ onDone }: { onDone: () => void }) {
     setBusy(true);
     try {
       const path = `dev-${slug(name || "camera")}`;
-      const stop = await publishWhip(`${whepBase(engine?.settings.whep_base ?? "")}/${path}/whip`, deviceId);
+      const { stop, hlsPlayable } = await publishStream(path, deviceId, (reason) =>
+        toast("error", `publishing stopped: ${reason}`),
+      );
       publishers.set(path, stop);
+      if (!hlsPlayable) {
+        toast("alert", "this browser records VP8 — monitoring works, but live playback of this camera is unavailable");
+      }
       await new Promise((r) => setTimeout(r, 800));
       send({ cmd: "camera.add", name: name || "Published camera", source: { kind: "path", path } });
       onDone();
@@ -284,7 +288,7 @@ function HubAdd({ onDone }: { onDone: () => void }) {
       {tab === "publish" && (
         <div className="space-y-3">
           <p className="text-xs text-text-1">
-            Streams this device's camera to the hub over WebRTC. Publishing stops when this tab closes.
+            Streams this device's camera to the hub. Publishing stops when this tab closes.
           </p>
           <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
             <option value="">Select a camera…</option>

@@ -38,7 +38,7 @@ export function PrinterTile({ printer, index }: { printer: Printer; index: numbe
         <DeviceChip state={printer.device_state} />
         {!printer.watching && <span className="chip">standby</span>}
       </div>
-      <Feed camera={camera} mode={engine?.mode ?? "local"} whep={engine?.settings.whep_base ?? ""} />
+      <Feed camera={camera} mode={engine?.mode ?? "local"} />
       {alerting && (
         <div className="absolute inset-x-0 top-[calc(50%-14px)] z-[4] flex justify-center">
           <span className="display bg-bad text-ink-0 text-xs font-bold tracking-[0.3em] px-4 py-1.5">

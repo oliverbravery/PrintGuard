@@ -1,13 +1,12 @@
 import { useEffect } from "react";
 import { bridge } from "./local";
+import { hlsUrl, playHls } from "./stream";
 import type { Camera } from "./types";
-import { playWhep, whepBase } from "./webrtc";
 
 export function useVideoStream(
   videoRef: React.RefObject<HTMLVideoElement | null>,
   camera: Camera | undefined,
   mode: string,
-  whep?: string,
 ): void {
   useEffect(() => {
     const video = videoRef.current;
@@ -19,21 +18,20 @@ export function useVideoStream(
         video.srcObject = null;
       };
     }
-    let stop: (() => void) | undefined;
-    let cancelled = false;
     const path = camera.source.kind === "path" ? camera.source.path! : camera.id;
-    playWhep(video, `${whepBase(whep ?? "")}/${path}/whep`)
-      .then((fn) => {
-        if (cancelled) fn();
-        else stop = fn;
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
+    let stop: (() => void) | undefined;
+    const onVisibility = () => {
       stop?.();
-      video.srcObject = null;
+      stop = undefined;
+      if (!document.hidden) stop = playHls(video, hlsUrl(path));
     };
-  }, [videoRef, camera?.id, camera?.online, mode, whep]);
+    onVisibility();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      stop?.();
+    };
+  }, [videoRef, camera?.id, camera?.online, mode]);
 }
 
 export function adjust(data: ImageData, brightness: number, contrast: number, sharpness: number): void {

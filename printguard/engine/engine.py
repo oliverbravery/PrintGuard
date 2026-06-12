@@ -26,7 +26,7 @@ from .scheduler import Scheduler
 STATE_TICK_S = 1.0
 REATTACH_EVERY_TICKS = 10
 
-SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}, "whep_base": ""}
+SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}}
 
 
 class Engine:
