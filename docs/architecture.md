@@ -1,7 +1,7 @@
 # Architecture
 
-PrintGuard is a monolith with one rule: **the engine is shared code and runs unchanged on
-CPython (hub mode) and on Pyodide in the browser (local mode)**. Everything
+PrintGuard is a monolith where the engine is shared code and runs unchanged on
+CPython (hub mode) and on Pyodide in the browser (local mode). Everything
 mode-specific is confined to one `Platform` implementation per runtime. The two modes
 cannot drift apart because there is nothing to drift — they execute the same files.
 
@@ -67,7 +67,7 @@ Events (engine → UI): a full `state` snapshot (on connect, after every command
 ## Scheduling inference
 
 When a camera is registered its native frame rate is measured once. From then on
-allocation is fully dynamic — there is no benchmarking step:
+allocation is fully dynamic:
 
 1. A smoothed estimate of observed inference latency continuously yields the sustainable
    total rate (`workers / latency`).
@@ -77,8 +77,7 @@ allocation is fully dynamic — there is no benchmarking step:
    dispatch time. Frames carry a sequence identity, so the same frame is never inferred
    twice and results always describe the present, not a backlog.
 
-Never queue frames. MediaMTX bursts the buffered GOP on RTSP connect, so stream fps is
-trusted from the SDP `average_rate`, else measured only after a warm-up.
+MediaMTX bursts the buffered GOP on RTSP connect, so stream fps istrusted from the SDP `average_rate`, else measured only after a warm-up.
 
 ## The defect pipeline
 
@@ -103,8 +102,7 @@ sequenceDiagram
     end
 ```
 
-A failed device action is retried, then reported in the alert, the UI error feed and the
-push notification — `AUTOMATIC PAUSE FAILED` is something you must hear about.
+A failed device action is retried, then reported in the alert, the UI error feed and the push notification.
 
 ## Failing safely
 
