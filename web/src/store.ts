@@ -3,7 +3,11 @@ import { bootLocal } from "./local";
 import type { CameraSource, EngineLink, EngineState, Mode, ScorePoint } from "./types";
 
 const HISTORY_LIMIT = 240;
-const MODE_KEY = "pg.mode";
+
+function modeFromUrl(): Mode | null {
+  const hash = location.hash.slice(1);
+  return hash === "local" || hash === "hub" ? hash : null;
+}
 
 export interface Toast {
   id: number;
@@ -150,8 +154,9 @@ export const useStore = create<PgStore>((set, get) => {
     }
   };
 
-  const stored = localStorage.getItem(MODE_KEY) as Mode | null;
-  if (stored === "local" || stored === "hub") queueMicrotask(() => boot(stored));
+  const stored = modeFromUrl();
+  if (stored) queueMicrotask(() => boot(stored));
+  window.addEventListener("hashchange", () => location.reload());
 
   return {
     mode: stored,
@@ -173,13 +178,12 @@ export const useStore = create<PgStore>((set, get) => {
     focusCameraId: null,
 
     chooseMode(mode) {
-      localStorage.setItem(MODE_KEY, mode);
+      history.pushState(null, "", `#${mode}`);
       void boot(mode);
     },
 
     leaveMode() {
-      localStorage.removeItem(MODE_KEY);
-      location.reload();
+      location.assign(location.pathname);
     },
 
     send(cmd) {
