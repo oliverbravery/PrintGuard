@@ -1,8 +1,8 @@
 # Contributing
 
-Read [docs/architecture.md](docs/architecture.md) first — the one rule that shapes every
-change is that the engine is shared code running unchanged on CPython and Pyodide, and
-all mode differences live behind the `Platform` contract.
+Read [docs/architecture.md](docs/architecture.md) first
+
+PrintGuard runs in two modes: local (in-browser) and hub (server). The engine is shared code running on CPython and Pyodide, all mode differences live behind the `Platform` contract.
 
 ## Development setup
 
@@ -68,11 +68,3 @@ adapter.
   `warning` event. No bare `except: pass` where a user would want to know.
 - **Minimal code.** Prefer consolidating existing code over adding parallel variants;
   no speculative abstractions or defensive defaults.
-- **UI is presentation.** The React app renders engine state and sends commands; logic
-  belongs in the engine.
-
-## Releases
-
-Tag a version (`git tag v2.x.y && git push --tags`) and the release workflow publishes
-the multi-arch image to `ghcr.io/oliverbravery/printguard` and deploys the in-browser
-demo to GitHub Pages. Docker is the only supported distribution.

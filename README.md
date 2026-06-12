@@ -25,7 +25,7 @@ Nothing is installed and no frame leaves your device.
   [OctoPrint](https://octoprint.org) or [Klipper (Moonraker)](https://moonraker.readthedocs.io),
   with per-printer thresholds, consecutive-detection counts and cooldowns.
 - **Alerts** — the moment a defect holds, a snapshot lands on your phone over
-  [ntfy](https://ntfy.sh), Telegram or Discord.
+  [ntfy](https://ntfy.sh), [Telegram](https://telegram.org) or [Discord](https://discord.com).
 - **Rests** — printers linked to a service are only watched while they actually print;
   inference stands by when they sit idle and resumes the moment a job starts.
 - **Fails safe** — a watchdog warns you (on the dashboard *and* through your notification
@@ -35,7 +35,7 @@ Nothing is installed and no frame leaves your device.
 
 ## Quick start
 
-Docker is the only supported way to run PrintGuard:
+You can deploy PrintGuard using Docker Compose:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml
@@ -53,14 +53,9 @@ on every release.
 | | Local mode | Hub mode |
 |---|---|---|
 | Engine runs | in your browser (Pyodide) | on the server (CPython) |
-| Model runs | LiteRT.js (WASM) | ai-edge-litert |
-| Cameras | this device (`getUserMedia`) | RTSP/RTMP/WebRTC via MediaMTX |
+| Model runs | [LiteRT.js (WASM)](https://developers.google.com/edge/litert) | [ai-edge-litert](https://pypi.org/project/ai-edge-litert/) |
 | Frames leave the device | never | only to your own server |
 | Survives closing the tab | no | yes |
-
-Both modes are served by the same container — local mode uses it only for static files.
-The exact same Python engine runs in both places, so they cannot drift apart; how that
-works is covered in [docs/architecture.md](docs/architecture.md).
 
 ### Hub mode cameras
 
@@ -87,14 +82,7 @@ warnings for printers with notifications switched on.
 
 In local mode the browser calls the services directly — enable CORS in OctoPrint
 (Settings → API) or add `cors_domains` to `moonraker.conf`. Telegram's API sends no CORS
-headers, so that channel is hub-only. Hub mode needs no CORS anywhere.
-
-## Exposing a hub
-
-PrintGuard ships no auth: keep it on a trusted network, or front it with
-[oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/) and/or a Cloudflare Tunnel —
-proxy HTTP/WebSocket to `printguard:8000`. WebRTC (UDP `8189`) should stay directly
-reachable for playback and publishing.
+headers, so that channel is hub-only.
 
 ## The model
 
