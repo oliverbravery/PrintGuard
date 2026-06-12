@@ -33,6 +33,7 @@ export async function playWhep(video: HTMLVideoElement, url: string): Promise<()
   pc.addTransceiver("video", { direction: "recvonly" });
   pc.ontrack = (event) => {
     video.srcObject = event.streams[0];
+    void video.play().catch(() => {});
   };
   await negotiate(pc, url);
   return () => pc.close();
