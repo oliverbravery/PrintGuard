@@ -1,5 +1,12 @@
 export type Mode = "local" | "hub";
 
+export interface Crop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface CameraSource {
   kind: string;
   device_id?: string;
@@ -22,6 +29,7 @@ export interface Camera {
   brightness: number;
   contrast: number;
   sharpness: number;
+  crop: Crop | null;
   target_fps: number;
   achieved_fps: number;
   inferring: boolean;

@@ -99,7 +99,8 @@ class Scheduler:
                 camera.next_due = time.monotonic() + STALE_RETRY_S
                 return
             camera.last_seq = frame.seq
-            rgb = vision.adjust(frame.rgb, camera.brightness, camera.contrast, camera.sharpness)
+            rgb = vision.crop_frame(frame.rgb, camera.crop)
+            rgb = vision.adjust(rgb, camera.brightness, camera.contrast, camera.sharpness)
             started = time.monotonic()
             result = await self._platform.infer(rgb)
             elapsed_ms = (time.monotonic() - started) * 1000.0

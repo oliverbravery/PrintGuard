@@ -35,6 +35,7 @@ class Camera:
     brightness: float = CAMERA_DEFAULTS["brightness"]
     contrast: float = CAMERA_DEFAULTS["contrast"]
     sharpness: float = CAMERA_DEFAULTS["sharpness"]
+    crop: dict[str, float] | None = CAMERA_DEFAULTS["crop"]
     target_fps: float = 0.0
     achieved_fps: float = 0.0
     inferring: bool = False
@@ -75,6 +76,7 @@ class Camera:
             "brightness": round(self.brightness, 2),
             "contrast": round(self.contrast, 2),
             "sharpness": round(self.sharpness, 2),
+            "crop": self.crop,
         }
 
     def persisted(self) -> dict[str, Any]:
@@ -87,6 +89,7 @@ class Camera:
             "brightness": self.brightness,
             "contrast": self.contrast,
             "sharpness": self.sharpness,
+            "crop": self.crop,
         }
 
 

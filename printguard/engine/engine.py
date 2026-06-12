@@ -69,6 +69,7 @@ class Engine:
                 brightness=settings["brightness"],
                 contrast=settings["contrast"],
                 sharpness=settings["sharpness"],
+                crop=settings["crop"],
             )
             self.registry.add(camera)
             asyncio.ensure_future(self._attach(camera))
@@ -214,13 +215,14 @@ class Engine:
         settings = sanitise_camera(
             camera.id,
             message.get("patch", {}),
-            {"brightness": camera.brightness, "contrast": camera.contrast, "sharpness": camera.sharpness},
+            {"brightness": camera.brightness, "contrast": camera.contrast, "sharpness": camera.sharpness, "crop": camera.crop},
         )
         if "name" in message.get("patch", {}):
             camera.name = settings["name"]
         camera.brightness = settings["brightness"]
         camera.contrast = settings["contrast"]
         camera.sharpness = settings["sharpness"]
+        camera.crop = settings["crop"]
 
     async def _cmd_camera_remove(self, message: dict[str, Any]) -> None:
         camera = self.registry.remove(message["id"])

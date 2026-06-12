@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
 import { publishWhip, whepBase } from "../webrtc";
 import { sourceLabel } from "./CameraRail";
+import { CropEditor } from "./CropEditor";
 import { Dialog } from "./Dialog";
 
 const publishers = new Map<string, () => void>();
@@ -38,13 +39,14 @@ function Slider({
 }
 
 function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
-  const { send, isPending } = useStore();
+  const { engine, send, isPending } = useStore();
   const [open, setOpen] = useState(focus);
   const ref = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState({
     brightness: camera.brightness ?? 1,
     contrast: camera.contrast ?? 1,
     sharpness: camera.sharpness ?? 0,
+    crop: camera.crop ?? null,
   });
 
   useEffect(() => {
@@ -59,13 +61,15 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
       brightness: camera.brightness ?? 1,
       contrast: camera.contrast ?? 1,
       sharpness: camera.sharpness ?? 0,
+      crop: camera.crop ?? null,
     });
-  }, [camera.brightness, camera.contrast, camera.sharpness]);
+  }, [camera.id]);
 
   const dirty =
     draft.brightness !== (camera.brightness ?? 1) ||
     draft.contrast !== (camera.contrast ?? 1) ||
-    draft.sharpness !== (camera.sharpness ?? 0);
+    draft.sharpness !== (camera.sharpness ?? 0) ||
+    JSON.stringify(draft.crop) !== JSON.stringify(camera.crop ?? null);
 
   const save = () => send({ cmd: "camera.update", id: camera.id, patch: draft });
   const reset = () =>
@@ -73,6 +77,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
       brightness: camera.brightness ?? 1,
       contrast: camera.contrast ?? 1,
       sharpness: camera.sharpness ?? 0,
+      crop: camera.crop ?? null,
     });
 
   return (
@@ -125,6 +130,12 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             max={2}
             step={0.1}
             onChange={(v) => setDraft((d) => ({ ...d, sharpness: v }))}
+          />
+          <CropEditor
+            camera={camera}
+            mode={engine?.mode ?? "local"}
+            crop={draft.crop}
+            onChange={(crop) => setDraft((d) => ({ ...d, crop }))}
           />
           <div className="flex gap-2">
             <button

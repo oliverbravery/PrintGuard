@@ -98,6 +98,30 @@ def classify(embedding: np.ndarray, assets: Assets) -> dict[str, Any]:
     return {"prediction": ordered[0][0], "distances": distances, "margin": margin}
 
 
+def crop_frame(rgb: np.ndarray, crop: dict[str, float] | None) -> np.ndarray:
+    """Crops an RGB frame to the given normalised region.
+
+    Args:
+        rgb: HxWx3 uint8 frame.
+        crop: Normalised crop {x, y, w, h} in 0-1 range, or None for no crop.
+
+    Returns:
+        Cropped uint8 frame, or the original if crop is None.
+    """
+    if crop is None:
+        return rgb
+    h, w = rgb.shape[:2]
+    x0 = int(crop["x"] * w)
+    y0 = int(crop["y"] * h)
+    x1 = int((crop["x"] + crop["w"]) * w)
+    y1 = int((crop["y"] + crop["h"]) * h)
+    x0 = max(0, min(w - 1, x0))
+    y0 = max(0, min(h - 1, y0))
+    x1 = max(x0 + 1, min(w, x1))
+    y1 = max(y0 + 1, min(h, y1))
+    return rgb[y0:y1, x0:x1]
+
+
 def adjust(rgb: np.ndarray, brightness: float = 1.0, contrast: float = 1.0, sharpness: float = 0.0) -> np.ndarray:
     """Applies brightness, contrast and sharpness to an RGB frame.
 
