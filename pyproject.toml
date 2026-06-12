@@ -2,7 +2,7 @@
 name = "printguard"
 version = "2.0.0"
 description = "Real-time 3D print failure detection — one engine, local or hub"
-readme = "README.md"
+
 license = "GPL-2.0-only"
 requires-python = ">=3.12"
 dependencies = [
