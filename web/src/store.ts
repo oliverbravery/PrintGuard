@@ -24,6 +24,8 @@ interface PgStore {
   discovering: boolean;
   deviceTest: { ok: boolean; status?: string; error?: string } | null;
   testing: boolean;
+  notifyTest: { provider: string; ok: boolean; error?: string } | null;
+  testingNotifier: string | null;
   pending: Record<string, { req_id: number; cmd: string }>;
   toasts: Toast[];
   detailId: string | null;
@@ -37,6 +39,7 @@ interface PgStore {
   openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
   openDetail(id: string | null): void;
   testDevice(provider: string, config: Record<string, string>): void;
+  testNotifier(provider: string, config: Record<string, string>): void;
   toast(kind: Toast["kind"], text: string): void;
 }
 
@@ -118,10 +121,13 @@ export const useStore = create<PgStore>((set, get) => {
       case "device_test":
         set({ deviceTest: event, testing: false });
         break;
+      case "notify_test":
+        set({ notifyTest: event, testingNotifier: null });
+        break;
       case "error":
         get().toast("error", event.message);
         clearPending(event.req_id);
-        set({ discovering: false, testing: false });
+        set({ discovering: false, testing: false, testingNotifier: null });
         break;
     }
   };
@@ -155,6 +161,8 @@ export const useStore = create<PgStore>((set, get) => {
     discovering: false,
     deviceTest: null,
     testing: false,
+    notifyTest: null,
+    testingNotifier: null,
     pending: {},
     toasts: [],
     detailId: null,
@@ -188,7 +196,7 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     openDialog(dialog, focusCameraId = null) {
-      set({ dialog, discovered: null, deviceTest: null, focusCameraId });
+      set({ dialog, discovered: null, deviceTest: null, notifyTest: null, focusCameraId });
     },
 
     openDetail(detailId) {
@@ -198,6 +206,11 @@ export const useStore = create<PgStore>((set, get) => {
     testDevice(provider, config) {
       set({ deviceTest: null, testing: true });
       get().send({ cmd: "device.test", provider, config });
+    },
+
+    testNotifier(provider, config) {
+      set({ notifyTest: null, testingNotifier: provider });
+      get().send({ cmd: "notify.test", provider, config });
     },
 
     toast(kind, text) {

@@ -6,6 +6,7 @@ import { DeviceChip } from "./PrinterTile";
 import { RiskGauge } from "./RiskGauge";
 import { SchemaForm } from "./SchemaForm";
 import { Sparkline } from "./Sparkline";
+import { Toggle } from "./Toggle";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -38,15 +39,6 @@ function Slider({
         <span className="mono text-[0.72rem] text-text-0">{value.toFixed(2)}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
-    </label>
-  );
-}
-
-function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex items-center justify-between cursor-pointer">
-      <span className="text-sm text-text-1">{label}</span>
-      <button type="button" className="toggle" data-on={on} onClick={() => onChange(!on)} />
     </label>
   );
 }
@@ -191,7 +183,7 @@ export function DetailPanel({ printer }: { printer: Printer }) {
                 onChange={(e) => patchDevice({ cooldown_s: Number(e.target.value) })}
               />
             </label>
-            <Toggle label="Push ntfy notification" on={draft.notify} onChange={(v) => patch({ notify: v })} />
+            <Toggle label="Push notifications" on={draft.notify} onChange={(v) => patch({ notify: v })} />
           </div>
         </Section>
 

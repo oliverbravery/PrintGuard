@@ -1,11 +1,11 @@
-import type { IntegrationMeta } from "../types";
+import type { AdapterMeta } from "../types";
 
 export function SchemaForm({
   meta,
   value,
   onChange,
 }: {
-  meta: IntegrationMeta;
+  meta: AdapterMeta;
   value: Record<string, string>;
   onChange: (next: Record<string, string>) => void;
 }) {

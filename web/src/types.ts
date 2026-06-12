@@ -79,10 +79,11 @@ export interface SchemaProperty {
   placeholder?: string;
 }
 
-export interface IntegrationMeta {
+export interface AdapterMeta {
   id: string;
   label: string;
   docs_url: string;
+  browser_ok?: boolean;
   schema: {
     properties: Record<string, SchemaProperty>;
     required?: string[];
@@ -99,9 +100,10 @@ export interface EngineState {
   mode: string;
   cameras: Camera[];
   printers: Printer[];
-  settings: { ntfy_url: string; whep_base: string };
+  settings: { notifiers: Record<string, Record<string, string>>; whep_base: string };
   stats: EngineStats;
-  integrations: IntegrationMeta[];
+  integrations: AdapterMeta[];
+  notifiers: AdapterMeta[];
 }
 
 export interface ScorePoint {

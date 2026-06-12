@@ -9,12 +9,12 @@ an instance in printguard.engine.integrations.INTEGRATIONS.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-HttpFn = Callable[..., Awaitable[tuple[int, Any]]]
+from ..adapters import Adapter, HttpFn
 
 
 class DeviceStatus(str, Enum):
@@ -55,23 +55,8 @@ class DeviceState:
         return {"status": self.status.value, "progress": round(self.progress, 1), "job": self.job}
 
 
-class IntegrationAdapter(ABC):
-    """Base class for printer service integrations.
-
-    Attributes:
-        id: Registry key and protocol identifier.
-        label: Human-readable service name.
-        docs_url: Link to the official API reference the adapter is built
-            against; mandatory so reviewers can verify behaviour.
-        schema: JSON Schema describing the configuration form. Property
-            extensions: "secret" marks sensitive fields, "placeholder"
-            provides input hints.
-    """
-
-    id: str
-    label: str
-    docs_url: str
-    schema: dict[str, Any]
+class IntegrationAdapter(Adapter):
+    """Base class for printer service integrations."""
 
     @abstractmethod
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
@@ -97,7 +82,3 @@ class IntegrationAdapter(ABC):
         Raises:
             RuntimeError: If the service rejects the command.
         """
-
-    def meta(self) -> dict[str, Any]:
-        """Serialises adapter metadata for schema-driven configuration UIs."""
-        return {"id": self.id, "label": self.label, "docs_url": self.docs_url, "schema": self.schema}

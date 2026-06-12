@@ -17,6 +17,7 @@ from . import vision
 from .cameras import sanitise_camera
 from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
 from .monitor import Monitor
+from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import Frame, Platform
 from .printers import persisted_printer, sanitise_printer
 from .registry import Camera, CameraRegistry
@@ -25,7 +26,7 @@ from .scheduler import Scheduler
 STATE_TICK_S = 1.0
 REATTACH_EVERY_TICKS = 10
 
-SETTINGS_DEFAULTS: dict[str, Any] = {"ntfy_url": "", "whep_base": ""}
+SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}, "whep_base": ""}
 
 
 class Engine:
@@ -50,13 +51,14 @@ class Engine:
             "printer.remove": self._cmd_printer_remove,
             "printer.action": self._cmd_printer_action,
             "device.test": self._cmd_device_test,
+            "notify.test": self._cmd_notify_test,
             "settings.update": self._cmd_settings_update,
         }
 
     async def start(self) -> None:
         """Restores persisted state and launches the background loops."""
         persisted = self.platform.load_state() or {}
-        self.settings = {**SETTINGS_DEFAULTS, **persisted.get("settings", {})}
+        self.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in persisted.get("settings", {}).items() if k in SETTINGS_DEFAULTS}}
         for record in persisted.get("printers", []):
             self.printers[record["id"]] = sanitise_printer(record["id"], record)
         for record in persisted.get("cameras", []):
@@ -115,6 +117,7 @@ class Engine:
             "settings": self.settings,
             "stats": self.scheduler.stats(),
             "integrations": integrations_meta(),
+            "notifiers": notifiers_meta(),
         }
 
     async def handle(self, message: dict[str, Any]) -> None:
@@ -265,6 +268,16 @@ class Engine:
             self.emit({"event": "device_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
         except Exception as exc:
             self.emit({"event": "device_test", "ok": False, "status": None, "error": str(exc), "req_id": message.get("req_id")})
+
+    async def _cmd_notify_test(self, message: dict[str, Any]) -> None:
+        adapter = NOTIFIERS.get(message.get("provider") or "")
+        if not adapter:
+            raise RuntimeError(f"unknown notifier {message.get('provider')!r}")
+        try:
+            await adapter.send(self.platform.http, message.get("config", {}), "PrintGuard test", "Notifications are working.", None)
+            self.emit({"event": "notify_test", "provider": adapter.id, "ok": True, "req_id": message.get("req_id")})
+        except Exception as exc:
+            self.emit({"event": "notify_test", "provider": adapter.id, "ok": False, "error": str(exc), "req_id": message.get("req_id")})
 
     async def _cmd_settings_update(self, message: dict[str, Any]) -> None:
         self.settings = {**self.settings, **{k: v for k, v in message.get("patch", {}).items() if k in SETTINGS_DEFAULTS}}

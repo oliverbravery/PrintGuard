@@ -120,9 +120,24 @@ async def test_defect_pipeline() -> None:
     printer_id = next(iter(engine.printers))
     await engine.handle(
         {
+            "cmd": "settings.update",
+            "patch": {
+                "notifiers": {
+                    "ntfy": {"url": "http://ntfy/topic"},
+                    "telegram": {"bot_token": "t", "chat_id": "1"},
+                    "discord": {"webhook_url": "http://disc/hook"},
+                }
+            },
+        }
+    )
+    await engine.handle(
+        {
             "cmd": "printer.update",
             "id": printer_id,
-            "patch": {"device": {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}, "on_defect": "pause"}},
+            "patch": {
+                "notify": True,
+                "device": {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}, "on_defect": "pause"},
+            },
         }
     )
     await asyncio.sleep(2.0)
@@ -135,7 +150,10 @@ async def test_defect_pipeline() -> None:
     results = [e for e in events if e.get("event") == "result"]
     assert results and all(r["prediction"] == "failure" for r in results)
     assert engine.state_event()["printers"][0]["alert"], "alert missing from state"
-    print(f"ok defect pipeline: {len(results)} results, alert score={alerts[0]['score']}, action=pause")
+    assert ("PUT", "http://ntfy/topic") in platform.http_calls, "ntfy alert was never delivered"
+    assert any("api.telegram.org" in url and url.endswith("/sendPhoto") for _, url in platform.http_calls), "Telegram alert was never delivered"
+    assert ("POST", "http://disc/hook") in platform.http_calls, "Discord alert was never delivered"
+    print(f"ok defect pipeline: {len(results)} results, alert score={alerts[0]['score']}, action=pause, 3 notifiers delivered")
 
 
 async def main() -> None:

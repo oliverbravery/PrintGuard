@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from .integrations import INTEGRATIONS, DeviceAction
+from .notifiers import NOTIFIERS
 from .platform import Frame
 
 if TYPE_CHECKING:
@@ -80,22 +81,17 @@ class Monitor:
             return "failed"
 
     async def _notify(self, printer: dict[str, Any], frame: Frame, score: float, action: str) -> None:
-        url = str(self._engine.settings.get("ntfy_url") or "").strip()
-        if not printer.get("notify") or not url:
+        configured = {nid: config for nid, config in self._engine.settings.get("notifiers", {}).items() if nid in NOTIFIERS}
+        if not printer.get("notify") or not configured:
             return
         if time.monotonic() - self._last_notified.get(printer["id"], 0.0) < NOTIFY_COOLDOWN_S:
             return
         self._last_notified[printer["id"]] = time.monotonic()
         title = f"PrintGuard: {printer['name']} defect ({score * 100:.0f}%)"
         body = f"Action taken: {action}" if action != "none" else "No automatic action configured"
-        headers = {"Title": title, "Priority": "urgent", "Tags": "rotating_light"}
-        try:
-            jpeg = await self._engine.platform.encode_jpeg(frame.rgb)
-            if jpeg:
-                headers["Filename"] = "snapshot.jpg"
-                headers["Message"] = body
-                await self._engine.platform.http("PUT", url, headers=headers, data=jpeg, timeout=15.0)
-            else:
-                await self._engine.platform.http("POST", url, headers=headers, data=body.encode(), timeout=15.0)
-        except Exception:
-            pass
+        image = await self._engine.platform.encode_jpeg(frame.rgb)
+        for notifier_id, config in configured.items():
+            try:
+                await NOTIFIERS[notifier_id].send(self._engine.platform.http, config, title, body, image)
+            except Exception:
+                pass

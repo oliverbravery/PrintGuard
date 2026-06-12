@@ -47,30 +47,34 @@ registry. From then on allocation is fully dynamic — there is no benchmarking 
 Per-camera stats (max fps, allocated fps, achieved fps, inferring, in use) are live in the
 dashboard's camera registry rail.
 
-## Printer services
+## Printer services and notifications
 
 Link a printer to OctoPrint or Klipper (Moonraker) and PrintGuard can pause or cancel the
 print when a defect is sustained, with a configurable threshold, consecutive-detection
-count and cooldown. Alerts can also push to any [ntfy](https://ntfy.sh) topic with a
-snapshot attached.
+count and cooldown. Alerts push a snapshot to every enabled notification channel —
+[ntfy](https://ntfy.sh), Telegram or Discord.
 
-In local mode the browser calls the printer service directly — enable CORS in OctoPrint
-(Settings → API) or add `cors_domains` to `moonraker.conf`. Hub mode needs no CORS.
+In local mode the browser calls the services directly — enable CORS in OctoPrint
+(Settings → API) or add `cors_domains` to `moonraker.conf`. Telegram's API sends no CORS
+headers, so that channel is hub-only. Hub mode needs no CORS anywhere.
 
-### Adding a new integration
+### Adding an integration or notifier
 
-Integrations are shared code: one adapter runs in both modes because it only talks through
+Adapters are shared code: one adapter runs in both modes because it only talks through
 the platform's HTTP function.
 
 1. Create `printguard/engine/integrations/<service>.py` subclassing
-   [`IntegrationAdapter`](printguard/engine/integrations/base.py): implement
-   `fetch_state()` and `send()`, normalising to the canonical `DeviceStatus` values, and
-   describe your config form as a JSON Schema (`secret: true` masks fields). Link the
+   [`IntegrationAdapter`](printguard/engine/integrations/base.py) — implement
+   `fetch_state()` and `send()`, normalising to the canonical `DeviceStatus` values — or
+   `printguard/engine/notifiers/<service>.py` subclassing
+   [`NotifierAdapter`](printguard/engine/notifiers/base.py) — implement `send()`.
+   Describe the config form as a JSON Schema (`secret: true` masks fields) and link the
    official API docs in `docs_url` — it is required for review.
 2. Register an instance in
-   [`integrations/__init__.py`](printguard/engine/integrations/__init__.py).
+   [`integrations/__init__.py`](printguard/engine/integrations/__init__.py) or
+   [`notifiers/__init__.py`](printguard/engine/notifiers/__init__.py).
 
-The configuration UI, connection test, polling and defect actions all follow from the
+The configuration UI, test button, polling and alert delivery all follow from the
 adapter — no other changes in either mode.
 
 ## Hub mode cameras
