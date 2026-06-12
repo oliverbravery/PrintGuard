@@ -14,6 +14,7 @@ import uuid
 from typing import Any, Callable
 
 from . import vision
+from .cameras import sanitise_camera
 from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
 from .monitor import Monitor
 from .platform import Frame, Platform
@@ -42,6 +43,7 @@ class Engine:
         self._handlers: dict[str, Any] = {
             "discover": self._cmd_discover,
             "camera.add": self._cmd_camera_add,
+            "camera.update": self._cmd_camera_update,
             "camera.remove": self._cmd_camera_remove,
             "printer.add": self._cmd_printer_add,
             "printer.update": self._cmd_printer_update,
@@ -58,7 +60,16 @@ class Engine:
         for record in persisted.get("printers", []):
             self.printers[record["id"]] = sanitise_printer(record["id"], record)
         for record in persisted.get("cameras", []):
-            camera = Camera(id=record["id"], name=record["name"], source=record["source"], max_fps=record["max_fps"])
+            settings = sanitise_camera(record["id"], record)
+            camera = Camera(
+                id=record["id"],
+                name=record["name"],
+                source=record["source"],
+                max_fps=record["max_fps"],
+                brightness=settings["brightness"],
+                contrast=settings["contrast"],
+                sharpness=settings["sharpness"],
+            )
             self.registry.add(camera)
             asyncio.ensure_future(self._attach(camera))
         self.registry.sync_in_use(self.printers)
@@ -190,6 +201,22 @@ class Engine:
         if source.fps > 0:
             camera.max_fps = source.fps
         self.registry.add(camera)
+        self._sync()
+
+    async def _cmd_camera_update(self, message: dict[str, Any]) -> None:
+        camera = self.registry.get(message["id"])
+        if not camera:
+            raise KeyError(f"no camera {message['id']}")
+        settings = sanitise_camera(
+            camera.id,
+            message.get("patch", {}),
+            {"brightness": camera.brightness, "contrast": camera.contrast, "sharpness": camera.sharpness},
+        )
+        if "name" in message.get("patch", {}):
+            camera.name = settings["name"]
+        camera.brightness = settings["brightness"]
+        camera.contrast = settings["contrast"]
+        camera.sharpness = settings["sharpness"]
         self._sync()
 
     async def _cmd_camera_remove(self, message: dict[str, Any]) -> None:

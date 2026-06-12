@@ -14,6 +14,7 @@ import asyncio
 import time
 from typing import Any, Awaitable, Callable
 
+from . import vision
 from .platform import Frame, Platform
 from .registry import Camera, CameraRegistry
 
@@ -98,8 +99,9 @@ class Scheduler:
                 camera.next_due = time.monotonic() + STALE_RETRY_S
                 return
             camera.last_seq = frame.seq
+            rgb = vision.adjust(frame.rgb, camera.brightness, camera.contrast, camera.sharpness)
             started = time.monotonic()
-            result = await self._platform.infer(frame.rgb)
+            result = await self._platform.infer(rgb)
             elapsed_ms = (time.monotonic() - started) * 1000.0
             self.infer_ms = (
                 elapsed_ms
@@ -107,7 +109,7 @@ class Scheduler:
                 else (1 - LATENCY_SMOOTHING) * self.infer_ms + LATENCY_SMOOTHING * elapsed_ms
             )
             camera.mark_inferred(result)
-            await self._on_result(camera, frame, result)
+            await self._on_result(camera, Frame(rgb=rgb, seq=frame.seq, ts=frame.ts), result)
         finally:
             camera.inferring = False
             self._slots.release()

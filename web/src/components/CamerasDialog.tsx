@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import type { CameraSource } from "../types";
+import type { Camera, CameraSource } from "../types";
 import { publishWhip, whepBase } from "../webrtc";
 import { sourceLabel } from "./CameraRail";
 import { Dialog } from "./Dialog";
@@ -11,32 +11,134 @@ function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
 }
 
+function Slider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="block">
+      <div className="flex justify-between mb-1">
+        <span className="label">{label}</span>
+        <span className="mono text-[0.68rem] text-text-0">{value.toFixed(2)}</span>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+    </label>
+  );
+}
+
+function CameraRow({ camera }: { camera: Camera }) {
+  const { send } = useStore();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState({
+    brightness: camera.brightness ?? 1,
+    contrast: camera.contrast ?? 1,
+    sharpness: camera.sharpness ?? 0,
+  });
+
+  useEffect(() => {
+    setDraft({
+      brightness: camera.brightness ?? 1,
+      contrast: camera.contrast ?? 1,
+      sharpness: camera.sharpness ?? 0,
+    });
+  }, [camera.brightness, camera.contrast, camera.sharpness]);
+
+  const dirty =
+    draft.brightness !== (camera.brightness ?? 1) ||
+    draft.contrast !== (camera.contrast ?? 1) ||
+    draft.sharpness !== (camera.sharpness ?? 0);
+
+  const save = () => send({ cmd: "camera.update", id: camera.id, patch: draft });
+  const reset = () =>
+    setDraft({
+      brightness: camera.brightness ?? 1,
+      contrast: camera.contrast ?? 1,
+      sharpness: camera.sharpness ?? 0,
+    });
+
+  return (
+    <div className="panel overflow-hidden">
+      <div className="flex items-center gap-3 px-3 py-2">
+        <span className={`led ${camera.online ? "led-on" : "led-off"}`} />
+        <div className="flex-1 min-w-0 leading-tight">
+          <div className="text-sm font-medium truncate">{camera.name}</div>
+          <div className="mono text-[0.62rem] text-text-2 truncate">{sourceLabel(camera.source)}</div>
+        </div>
+        <span className="mono text-[0.68rem] text-text-1">{camera.max_fps.toFixed(0)} fps</span>
+        {publishers.has(camera.id) && <span className="chip chip-accent">publishing</span>}
+        <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
+          {open ? "Hide" : "Adjust"}
+        </button>
+        <button
+          className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
+          onClick={() => {
+            publishers.get(camera.id)?.();
+            publishers.delete(camera.id);
+            send({ cmd: "camera.remove", id: camera.id });
+          }}
+        >
+          Remove
+        </button>
+      </div>
+      {open && (
+        <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
+          <Slider
+            label="Brightness"
+            value={draft.brightness}
+            min={0.25}
+            max={2}
+            step={0.05}
+            onChange={(v) => setDraft((d) => ({ ...d, brightness: v }))}
+          />
+          <Slider
+            label="Contrast"
+            value={draft.contrast}
+            min={0.25}
+            max={2}
+            step={0.05}
+            onChange={(v) => setDraft((d) => ({ ...d, contrast: v }))}
+          />
+          <Slider
+            label="Sharpness"
+            value={draft.sharpness}
+            min={0}
+            max={2}
+            step={0.1}
+            onChange={(v) => setDraft((d) => ({ ...d, sharpness: v }))}
+          />
+          <div className="flex gap-2">
+            <button className="btn btn-primary flex-1 !py-1.5" disabled={!dirty} onClick={save}>
+              Save
+            </button>
+            <button className="btn !py-1.5" disabled={!dirty} onClick={reset}>
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RegisteredList() {
-  const { engine, send } = useStore();
+  const { engine } = useStore();
   const cameras = engine?.cameras ?? [];
   if (!cameras.length) return null;
   return (
     <div className="space-y-2 mb-6">
       {cameras.map((camera) => (
-        <div key={camera.id} className="flex items-center gap-3 panel px-3 py-2">
-          <span className={`led ${camera.online ? "led-on" : "led-off"}`} />
-          <div className="flex-1 min-w-0 leading-tight">
-            <div className="text-sm font-medium truncate">{camera.name}</div>
-            <div className="mono text-[0.62rem] text-text-2 truncate">{sourceLabel(camera.source)}</div>
-          </div>
-          <span className="mono text-[0.68rem] text-text-1">{camera.max_fps.toFixed(0)} fps</span>
-          {publishers.has(camera.id) && <span className="chip chip-accent">publishing</span>}
-          <button
-            className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
-            onClick={() => {
-              publishers.get(camera.id)?.();
-              publishers.delete(camera.id);
-              send({ cmd: "camera.remove", id: camera.id });
-            }}
-          >
-            Remove
-          </button>
-        </div>
+        <CameraRow key={camera.id} camera={camera} />
       ))}
     </div>
   );

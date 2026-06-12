@@ -275,20 +275,6 @@ input[type="range"]::-moz-range-thumb {
   50% { opacity: 0; }
 }
 
-.scan {
-  position: relative;
-  overflow: hidden;
-}
-
-.scan::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(0, 0, 0, 0.07) 3px 4px);
-  pointer-events: none;
-  z-index: 2;
-}
-
 .backdrop {
   position: fixed;
   inset: 0;

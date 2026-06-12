@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .cameras import CAMERA_DEFAULTS
 from .platform import FrameSource
 
 
@@ -31,6 +32,9 @@ class Camera:
     name: str
     source: dict[str, Any]
     max_fps: float
+    brightness: float = CAMERA_DEFAULTS["brightness"]
+    contrast: float = CAMERA_DEFAULTS["contrast"]
+    sharpness: float = CAMERA_DEFAULTS["sharpness"]
     target_fps: float = 0.0
     achieved_fps: float = 0.0
     inferring: bool = False
@@ -68,11 +72,22 @@ class Camera:
             "in_use": self.in_use,
             "online": self.online,
             "last_result": self.last_result,
+            "brightness": round(self.brightness, 2),
+            "contrast": round(self.contrast, 2),
+            "sharpness": round(self.sharpness, 2),
         }
 
     def persisted(self) -> dict[str, Any]:
         """Serialises only what is needed to restore the camera on boot."""
-        return {"id": self.id, "name": self.name, "source": self.source, "max_fps": self.max_fps}
+        return {
+            "id": self.id,
+            "name": self.name,
+            "source": self.source,
+            "max_fps": self.max_fps,
+            "brightness": self.brightness,
+            "contrast": self.contrast,
+            "sharpness": self.sharpness,
+        }
 
 
 class CameraRegistry:

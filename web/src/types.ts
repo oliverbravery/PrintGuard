@@ -19,6 +19,9 @@ export interface Camera {
   name: string;
   source: CameraSource;
   max_fps: number;
+  brightness: number;
+  contrast: number;
+  sharpness: number;
   target_fps: number;
   achieved_fps: number;
   inferring: boolean;

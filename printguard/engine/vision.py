@@ -98,6 +98,42 @@ def classify(embedding: np.ndarray, assets: Assets) -> dict[str, Any]:
     return {"prediction": ordered[0][0], "distances": distances, "margin": margin}
 
 
+def adjust(rgb: np.ndarray, brightness: float = 1.0, contrast: float = 1.0, sharpness: float = 0.0) -> np.ndarray:
+    """Applies brightness, contrast and sharpness to an RGB frame.
+
+    Args:
+        rgb: HxWx3 uint8 frame in RGB channel order.
+        brightness: Linear multiplier on pixel values (1.0 = unchanged).
+        contrast: Scale around mid-grey (1.0 = unchanged).
+        sharpness: Unsharp-mask strength (0.0 = unchanged).
+
+    Returns:
+        Adjusted uint8 frame of the same shape.
+    """
+    if brightness == 1.0 and contrast == 1.0 and sharpness <= 0.0:
+        return rgb
+    arr = rgb.astype(np.float32)
+    if brightness != 1.0:
+        arr *= brightness
+    if contrast != 1.0:
+        arr = (arr - 128.0) * contrast + 128.0
+    if sharpness > 0.0:
+        padded = np.pad(arr, ((1, 1), (1, 1), (0, 0)), mode="edge")
+        blur = (
+            padded[:-2, :-2]
+            + padded[:-2, 1:-1]
+            + padded[:-2, 2:]
+            + padded[1:-1, :-2]
+            + padded[1:-1, 1:-1]
+            + padded[1:-1, 2:]
+            + padded[2:, :-2]
+            + padded[2:, 1:-1]
+            + padded[2:, 2:]
+        ) / 9.0
+        arr = arr + sharpness * (arr - blur)
+    return np.clip(arr, 0, 255).astype(np.uint8)
+
+
 def defect_score(result: dict[str, Any], sensitivity: float = 1.0) -> float:
     """Maps a classification result onto a 0–1 defect score.
 
