@@ -4,8 +4,24 @@
     {
       "name": "printguard",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "printguard"],
+      "runtimeArgs": [
+        "run",
+        "printguard"
+      ],
       "port": 8000,
+      "autoPort": true
+    },
+    {
+      "name": "pages-sim",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4731",
+        "-d",
+        "web/.pages-sim"
+      ],
+      "port": 4731,
       "autoPort": true
     }
   ]

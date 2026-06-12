@@ -69,8 +69,8 @@ class BrowserPlatform:
         """
         from pyodide.http import pyfetch
 
-        meta = jsonlib.loads(await (await pyfetch("/models/metadata.json")).string())
-        protos = jsonlib.loads(await (await pyfetch("/models/prototypes.json")).string())["prototypes"]
+        meta = jsonlib.loads(await (await pyfetch("models/metadata.json")).string())
+        protos = jsonlib.loads(await (await pyfetch("models/prototypes.json")).string())["prototypes"]
         return cls(bridge, vision.assets_from_dicts(meta, protos))
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:

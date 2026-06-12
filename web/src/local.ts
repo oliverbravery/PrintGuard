@@ -3,7 +3,7 @@ import type { EngineLink } from "./types";
 const PYODIDE_BASE = "https://cdn.jsdelivr.net/pyodide/v0.28.3/full/";
 const LITERT_MODULE = "https://esm.sh/@litertjs/core@2.4.0";
 const LITERT_WASM = "https://cdn.jsdelivr.net/npm/@litertjs/core@2.4.0/wasm/";
-const MODEL_URL = "/models/encoder_float32.tflite";
+const MODEL_URL = "models/encoder_float32.tflite";
 const STORAGE_KEY = "pg.local.state";
 
 interface OpenCamera {
@@ -145,7 +145,7 @@ export async function bootLocal(
   onProgress("Loading numpy");
   await pyodide.loadPackage("numpy");
   onProgress("Fetching engine source");
-  const archive = await (await fetch("/pysrc.zip")).arrayBuffer();
+  const archive = await (await fetch("pysrc.zip")).arrayBuffer();
   pyodide.unpackArchive(archive, "zip");
   onProgress("Compiling model runtime");
   await ensureLitert();

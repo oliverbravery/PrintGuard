@@ -8,10 +8,8 @@ source archive that Pyodide unpacks in the browser.
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 import os
-import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,21 +21,11 @@ from fastapi.staticfiles import StaticFiles
 import printguard
 
 from ..engine.engine import Engine
+from ..pysrc import build_pysrc
 from .platform import ServerPlatform
 
 PACKAGE_ROOT = Path(printguard.__file__).parent
 REPO_ROOT = PACKAGE_ROOT.parent
-
-
-def _build_pysrc() -> bytes:
-    """Zips the shared and browser package source for Pyodide."""
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.write(PACKAGE_ROOT / "__init__.py", "printguard/__init__.py")
-        for module_dir in ("engine", "browser"):
-            for path in sorted((PACKAGE_ROOT / module_dir).rglob("*.py")):
-                archive.write(path, f"printguard/{path.relative_to(PACKAGE_ROOT)}")
-    return buffer.getvalue()
 
 
 def create_app() -> FastAPI:
@@ -59,7 +47,7 @@ def create_app() -> FastAPI:
         await platform.close()
 
     app = FastAPI(title="PrintGuard", lifespan=lifespan)
-    pysrc = _build_pysrc()
+    pysrc = build_pysrc()
 
     @app.get("/api/health")
     def health() -> dict[str, bool]:

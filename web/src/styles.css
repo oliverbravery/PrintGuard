@@ -146,6 +146,10 @@ body {
 }
 
 .led-off { background: #3a3f33; }
+.led-warn {
+  background: var(--color-warn);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-warn) 80%, transparent);
+}
 .led-bad {
   background: var(--color-bad);
   box-shadow: 0 0 8px color-mix(in srgb, var(--color-bad) 80%, transparent);
