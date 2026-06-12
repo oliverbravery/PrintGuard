@@ -134,6 +134,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           <CropEditor
             camera={camera}
             mode={engine?.mode ?? "local"}
+            whep={engine?.settings.whep_base ?? ""}
             crop={draft.crop}
             onChange={(crop) => setDraft((d) => ({ ...d, crop }))}
           />

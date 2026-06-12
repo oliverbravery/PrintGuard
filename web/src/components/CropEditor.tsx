@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { bridge } from "../local";
+import { renderVideoFrame, useVideoStream } from "../image";
 import type { Camera, Crop } from "../types";
 
 const MIN_SIZE = 0.05;
@@ -28,31 +28,48 @@ function clampCrop(c: Crop): Crop {
 export function CropEditor({
   camera,
   mode,
+  whep,
   crop,
   onChange,
 }: {
   camera: Camera;
   mode: string;
+  whep: string;
   crop: Crop | null;
   onChange: (crop: Crop | null) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Crop>(crop ?? { x: 0, y: 0, w: 1, h: 1 });
   const dragRef = useRef<{ handle: Handle; startX: number; startY: number; startCrop: Crop } | null>(null);
 
+  const brightness = camera.brightness ?? 1;
+  const contrast = camera.contrast ?? 1;
+  const sharpness = camera.sharpness ?? 0;
+  const needsCanvas = brightness !== 1 || contrast !== 1 || sharpness > 0;
+
+  useVideoStream(videoRef, camera, mode, whep);
+
   useEffect(() => {
+    if (!needsCanvas) return;
     const video = videoRef.current;
-    if (!video) return;
-    if (mode === "local") {
-      video.srcObject = bridge.getStream(camera.id);
-      void video.play().catch(() => {});
-      return () => {
-        video.srcObject = null;
-      };
-    }
-  }, [camera.id, mode]);
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+
+    let frame = 0;
+    const tick = () => {
+      if (video.readyState >= 2 && video.videoWidth > 0) {
+        renderVideoFrame(ctx, video, canvas, { brightness, contrast, sharpness });
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(frame);
+  }, [camera.id, needsCanvas, brightness, contrast, sharpness]);
 
   useEffect(() => {
     if (!editing) setDraft(crop ?? { x: 0, y: 0, w: 1, h: 1 });
@@ -174,7 +191,8 @@ export function CropEditor({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       >
-        <video ref={videoRef} autoPlay muted playsInline className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
+        <video ref={videoRef} autoPlay muted playsInline className={`absolute inset-0 w-full h-full object-contain pointer-events-none ${needsCanvas ? "invisible" : ""}`} />
+        {needsCanvas && <canvas ref={canvasRef} className="absolute inset-0 m-auto pointer-events-none" />}
         {editing && (
           <>
             <div
