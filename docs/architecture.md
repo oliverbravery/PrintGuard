@@ -143,7 +143,7 @@ printguard/
   pysrc.py           builds the engine source archive Pyodide unpacks
 web/                 React + Tailwind UI (presentation only)
 models/              TFLite encoder, normalisation metadata, class prototypes
-tests/test_engine.py engine simulation: fairness, dedup, gating, watchdog, alerts
+tests/               engine simulation + adapter contract tests (pytest)
 ```
 
 ## The static demo

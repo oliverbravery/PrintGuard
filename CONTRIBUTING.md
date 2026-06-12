@@ -15,12 +15,14 @@ cd web && npm install && npm run dev # UI with hot reload on :5173, proxied to :
 Run the tests before and after your change:
 
 ```bash
-uv run python tests/test_engine.py   # engine simulation: fairness, gating, watchdog, alerts
+uv run pytest                        # engine simulation + adapter contract tests
 cd web && npm run typecheck          # strict TypeScript over the UI
 ```
 
-The engine tests simulate cameras and printers against a fake platform — if you touch the
-scheduler, monitor or printer state handling, extend them; they are the only gate.
+`tests/test_engine.py` simulates cameras and printers against a fake platform (fairness,
+gating, watchdog, alerts, protocol); `tests/test_adapters.py` pins the exact request
+shapes of every integration and notifier. If you touch the scheduler, monitor or printer
+state handling extend the former; a new adapter gets its payloads tested in the latter.
 
 ## Adding a printer integration
 
