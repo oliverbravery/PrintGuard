@@ -71,15 +71,13 @@ adapter.
 
 ## Release cycle
 
-Merging to `main` **is** releasing — there is no separate release step. The version in
-[`pyproject.toml`](pyproject.toml) is the single source of truth; nothing else in the
-repository carries a version. Bump it as part of every PR:
+Merging to `main` starts the release process. The release's version is derived from the [`pyproject.toml`](pyproject.toml). Bump it as part of every PR:
 
 ```bash
 uv version --bump patch   # or minor / major (also updates uv.lock)
 ```
 
-`main` is protected: a PR can only merge once three required checks pass —
+A PR can only merge once three required checks pass —
 
 - **tests** — the engine simulation suite;
 - **image** — the production Docker image must build, so a change that breaks the image
@@ -87,8 +85,7 @@ uv version --bump patch   # or minor / major (also updates uv.lock)
 - **version** — the version must be bumped past the last release, so every merge ships
   as a unique, immutable version (re-publishing an existing tag is refused).
 
-On merge, the [release workflow](.github/workflows/release.yml) reads that one version
-and, in order:
+On merge, the [release workflow](.github/workflows/release.yml):
 
 1. builds and pushes the multi-arch image to `ghcr.io/oliverbravery/printguard`,
    tagged `X.Y.Z`, `X.Y` and `latest`;
