@@ -7,7 +7,6 @@ import { Toggle } from "./Toggle";
 export function SettingsDialog() {
   const { engine, send, openDialog, leaveMode, isPending, notifyTest, testingNotifier, testNotifier } = useStore();
   const [notifiers, setNotifiers] = useState(engine?.settings.notifiers ?? {});
-  const [whep, setWhep] = useState(engine?.settings.whep_base ?? "");
   const saving = isPending("settings.update");
   const sent = useRef(false);
   const close = () => openDialog(null);
@@ -67,26 +66,12 @@ export function SettingsDialog() {
             Defect alerts (with snapshots) go to every enabled channel for printers with notifications on.
           </span>
         </div>
-        {engine?.mode === "hub" && (
-          <label className="block">
-            <span className="label block mb-1">WebRTC base URL</span>
-            <input
-              className="field"
-              placeholder={`${location.protocol}//${location.hostname}:8889`}
-              value={whep}
-              onChange={(e) => setWhep(e.target.value)}
-            />
-            <span className="text-[0.7rem] text-text-2 block mt-1">
-              Where browsers reach MediaMTX for live playback. Leave blank for the default.
-            </span>
-          </label>
-        )}
         <button
           className="btn btn-primary w-full"
           disabled={saving}
           onClick={() => {
             sent.current = true;
-            send({ cmd: "settings.update", patch: { notifiers, whep_base: whep.trim() } });
+            send({ cmd: "settings.update", patch: { notifiers } });
           }}
         >
           {saving ? "Saving…" : "Save"}
