@@ -144,10 +144,12 @@ class Engine:
         while True:
             await asyncio.sleep(STATE_TICK_S)
             tick += 1
-            if tick % REATTACH_EVERY_TICKS == 0:
-                for camera in self.registry.cameras.values():
-                    if camera.frame_source is None:
+            for camera in self.registry.cameras.values():
+                if camera.frame_source is None:
+                    if tick % REATTACH_EVERY_TICKS == 0:
                         asyncio.ensure_future(self._attach(camera))
+                elif camera.frame_source.fps > 0:
+                    camera.max_fps = camera.frame_source.fps
             self.emit(self.state_event())
 
     async def _on_result(self, camera: Camera, frame: Frame, result: dict[str, Any]) -> None:

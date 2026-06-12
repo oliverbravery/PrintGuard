@@ -22,6 +22,7 @@ from ..engine.platform import Frame
 from .mediamtx import MediaMTX
 
 FPS_SAMPLE_FRAMES = 25
+MEASURE_WARMUP_S = 1.0
 OPEN_WAIT_S = 8.0
 RECONNECT_DELAY_S = 3.0
 
@@ -44,8 +45,10 @@ class AVSource:
             try:
                 container = av.open(self._url, options={"rtsp_transport": "tcp"}, timeout=5.0)
                 stream = container.streams.video[0]
-                if not self.fps and stream.average_rate:
-                    self.fps = float(stream.average_rate)
+                declared = float(stream.average_rate or 0)
+                if not self.fps and 0 < declared <= 240:
+                    self.fps = min(60.0, declared)
+                warmup_until = time.monotonic() + MEASURE_WARMUP_S
                 samples: list[float] = []
                 for frame in container.decode(stream):
                     if self._stop:
@@ -53,7 +56,7 @@ class AVSource:
                     self._seq += 1
                     self._latest = Frame(rgb=frame.to_ndarray(format="rgb24"), seq=float(self._seq), ts=time.time())
                     self.online = True
-                    if len(samples) <= FPS_SAMPLE_FRAMES:
+                    if not self.fps and time.monotonic() >= warmup_until:
                         samples.append(time.monotonic())
                         if len(samples) == FPS_SAMPLE_FRAMES and samples[-1] > samples[0]:
                             self.fps = max(1.0, min(60.0, (len(samples) - 1) / (samples[-1] - samples[0])))

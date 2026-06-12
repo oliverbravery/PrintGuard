@@ -22,7 +22,7 @@ export function Header() {
   const stats = engine?.stats;
   return (
     <header className="sticky top-0 z-30 border-b border-line-0 bg-ink-0/90 backdrop-blur-sm">
-      <div className="mx-auto max-w-[1500px] px-4 sm:px-6 py-3 flex items-center gap-4">
+      <div className="mx-auto max-w-[1500px] px-4 sm:px-6 py-3 flex items-center flex-wrap gap-x-3 gap-y-2">
         <Wordmark />
         <button
           className="chip chip-accent cursor-pointer hover:opacity-80"

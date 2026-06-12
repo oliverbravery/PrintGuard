@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "printguard",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "printguard"],
+      "port": 8000,
+      "autoPort": true
+    }
+  ]
+}
