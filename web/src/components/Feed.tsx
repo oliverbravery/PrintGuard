@@ -71,16 +71,23 @@ export function Feed({ camera, mode, whep }: { camera: Camera | undefined; mode:
     let frame = 0;
     const tick = () => {
       if (video.readyState >= 2 && video.videoWidth > 0) {
-        const w = canvas.clientWidth || video.videoWidth;
-        const h = canvas.clientHeight || video.videoHeight;
-        if (canvas.width !== w || canvas.height !== h) {
-          canvas.width = w;
-          canvas.height = h;
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        const cw = canvas.parentElement?.clientWidth || vw;
+        const ch = canvas.parentElement?.clientHeight || vh;
+        const scale = Math.min(cw / vw, ch / vh);
+        const dw = Math.round(vw * scale);
+        const dh = Math.round(vh * scale);
+        if (canvas.width !== dw || canvas.height !== dh) {
+          canvas.width = dw;
+          canvas.height = dh;
+          canvas.style.width = `${dw}px`;
+          canvas.style.height = `${dh}px`;
         }
         ctx.filter = cssFilter ?? "none";
-        ctx.drawImage(video, 0, 0, w, h);
+        ctx.drawImage(video, 0, 0, dw, dh);
         ctx.filter = "none";
-        const image = ctx.getImageData(0, 0, w, h);
+        const image = ctx.getImageData(0, 0, dw, dh);
         sharpen(image, sharpness);
         ctx.putImageData(image, 0, 0);
       }
@@ -100,11 +107,11 @@ export function Feed({ camera, mode, whep }: { camera: Camera | undefined; mode:
         muted
         playsInline
         className={
-          sharpened ? "absolute inset-0 w-full h-full object-cover invisible" : "absolute inset-0 w-full h-full object-cover"
+          sharpened ? "absolute inset-0 w-full h-full object-contain invisible" : "absolute inset-0 w-full h-full object-contain"
         }
         style={!sharpened && cssFilter ? { filter: cssFilter } : undefined}
       />
-      {sharpened && <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-cover" />}
+      {sharpened && <canvas ref={canvasRef} className="absolute inset-0 m-auto" />}
       {(!camera || !online) && (
         <div className="absolute inset-0 grid place-items-center bg-ink-0/85 z-[2]">
           <span className="mono text-[0.65rem] tracking-[0.2em] text-text-2 uppercase">
