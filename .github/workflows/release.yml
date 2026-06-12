@@ -2,11 +2,35 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: read
+        run: echo "version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "$GITHUB_OUTPUT"
+      - name: Refuse to re-release an existing version
+        run: |
+          if git rev-parse -q --verify "refs/tags/v${{ steps.read.outputs.version }}" >/dev/null; then
+            echo "::error file=pyproject.toml::v${{ steps.read.outputs.version }} is already released — run 'uv version --bump patch|minor|major'"
+            exit 1
+          fi
+
   docker:
+    name: image
+    needs: version
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,8 +49,8 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/printguard
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=v${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.version.outputs.version }}
             type=raw,value=latest
       - uses: docker/build-push-action@v6
         with:
@@ -38,7 +62,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  release:
+    name: tag
+    needs: [version, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: gh release create "v${{ needs.version.outputs.version }}" --target "$GITHUB_SHA" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   pages:
+    name: pages
+    needs: [version, docker]
     runs-on: ubuntu-latest
     permissions:
       contents: read
