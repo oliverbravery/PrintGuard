@@ -124,6 +124,9 @@ export const useStore = create<PgStore>((set, get) => {
       case "notify_test":
         set({ notifyTest: event, testingNotifier: null });
         break;
+      case "warning":
+        get().toast(event.recovered ? "info" : "alert", event.message);
+        break;
       case "error":
         get().toast("error", event.message);
         clearPending(event.req_id);

@@ -21,17 +21,21 @@ from .registry import Camera, CameraRegistry
 LATENCY_SMOOTHING = 0.25
 IDLE_POLL_S = 0.05
 STALE_RETRY_S = 0.1
+ERROR_THROTTLE_S = 30.0
 
 ResultSink = Callable[[Camera, Frame, dict[str, Any]], Awaitable[None]]
+ErrorSink = Callable[[str], None]
 
 
 class Scheduler:
     """Allocates inference slots across registered cameras."""
 
-    def __init__(self, platform: Platform, registry: CameraRegistry, on_result: ResultSink) -> None:
+    def __init__(self, platform: Platform, registry: CameraRegistry, on_result: ResultSink, on_error: ErrorSink) -> None:
         self._platform = platform
         self._registry = registry
         self._on_result = on_result
+        self._on_error = on_error
+        self._last_error_at = 0.0
         self._slots = asyncio.Semaphore(platform.workers)
         self.infer_ms = 0.0
 
@@ -111,6 +115,11 @@ class Scheduler:
             )
             camera.mark_inferred(result)
             await self._on_result(camera, Frame(rgb=rgb, seq=frame.seq, ts=frame.ts), result)
+        except Exception as exc:
+            camera.next_due = time.monotonic() + STALE_RETRY_S
+            if time.monotonic() - self._last_error_at > ERROR_THROTTLE_S:
+                self._last_error_at = time.monotonic()
+                self._on_error(f"inference failed on '{camera.name}': {exc}")
         finally:
             camera.inferring = False
             self._slots.release()

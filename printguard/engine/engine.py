@@ -19,7 +19,7 @@ from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
 from .monitor import Monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import Frame, Platform
-from .printers import persisted_printer, sanitise_printer
+from .printers import persisted_printer, printer_watching, sanitise_printer
 from .registry import Camera, CameraRegistry
 from .scheduler import Scheduler
 
@@ -37,7 +37,7 @@ class Engine:
         self.registry = CameraRegistry()
         self.printers: dict[str, dict[str, Any]] = {}
         self.settings: dict[str, Any] = dict(SETTINGS_DEFAULTS)
-        self.scheduler = Scheduler(platform, self.registry, self._on_result)
+        self.scheduler = Scheduler(platform, self.registry, self._on_result, self._on_pipeline_error)
         self.monitor = Monitor(self)
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
         self._tasks: list[asyncio.Task] = []
@@ -79,6 +79,7 @@ class Engine:
         self._tasks = [
             asyncio.ensure_future(self.scheduler.run()),
             asyncio.ensure_future(self.monitor.poll_devices()),
+            asyncio.ensure_future(self.monitor.watch_health()),
             asyncio.ensure_future(self._ticker()),
         ]
 
@@ -113,7 +114,7 @@ class Engine:
             "event": "state",
             "mode": self.platform.mode,
             "cameras": [c.public() for c in self.registry.cameras.values()],
-            "printers": list(self.printers.values()),
+            "printers": [{**p, "watching": printer_watching(p)} for p in self.printers.values()],
             "settings": self.settings,
             "stats": self.scheduler.stats(),
             "integrations": integrations_meta(),
@@ -172,9 +173,12 @@ class Engine:
                     camera.max_fps = camera.frame_source.fps
             self.emit(self.state_event())
 
+    def _on_pipeline_error(self, message: str) -> None:
+        self.emit({"event": "error", "message": message})
+
     async def _on_result(self, camera: Camera, frame: Frame, result: dict[str, Any]) -> None:
         for printer in self.printers.values():
-            if printer["camera_id"] != camera.id or not printer["enabled"]:
+            if printer["camera_id"] != camera.id or not printer_watching(printer):
                 continue
             score = vision.defect_score(result, printer["sensitivity"])
             self.emit(
@@ -243,7 +247,10 @@ class Engine:
         existing = self.printers.get(message["id"])
         if not existing:
             raise KeyError(f"no printer {message['id']}")
-        self.printers[message["id"]] = sanitise_printer(message["id"], message.get("patch", {}), existing)
+        updated = sanitise_printer(message["id"], message.get("patch", {}), existing)
+        if updated["device"].get("provider") != existing["device"].get("provider"):
+            updated.pop("device_state", None)
+        self.printers[message["id"]] = updated
 
     async def _cmd_printer_remove(self, message: dict[str, Any]) -> None:
         self.printers.pop(message["id"], None)

@@ -76,7 +76,7 @@ export function DetailPanel({ printer }: { printer: Printer }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 z-10 bg-ink-1/95 backdrop-blur-sm flex items-center gap-2.5 px-5 py-3.5 border-b border-line-0">
-          <span className={`led ${printer.alert ? "led-bad" : camera?.inferring ? "led-infer" : printer.enabled && camera?.online ? "led-on" : "led-off"}`} />
+          <span className={`led ${printer.alert ? "led-bad" : camera?.inferring ? "led-infer" : printer.watching && camera?.online ? "led-on" : "led-off"}`} />
           <h2 className="display text-lg font-semibold flex-1 truncate">{printer.name}</h2>
           <DeviceChip state={printer.device_state} />
           <button className="text-text-2 hover:text-accent text-2xl leading-none cursor-pointer" onClick={close}>
@@ -129,6 +129,11 @@ export function DetailPanel({ printer }: { printer: Printer }) {
         <Section title="Monitoring">
           <div className="space-y-4">
             <Toggle label="Watch this printer" on={draft.enabled} onChange={(v) => patch({ enabled: v })} />
+            {printer.enabled && printer.watching === false && (
+              <p className="mono text-[0.7rem] text-text-2">
+                standby — printer is {printer.device_state?.status ?? "not printing"}; inference resumes when it prints
+              </p>
+            )}
             <label className="block">
               <span className="label block mb-1">Camera</span>
               <select className="field" value={draft.camera_id} onChange={(e) => patch({ camera_id: e.target.value })}>

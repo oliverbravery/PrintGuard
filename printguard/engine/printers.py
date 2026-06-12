@@ -20,7 +20,25 @@ PRINTER_DEFAULTS: dict[str, Any] = {
     },
 }
 
+STANDBY_STATUSES = ("idle", "paused", "error")
+
 _CLAMPS = {"threshold": (0.05, 1.0), "sensitivity": (0.2, 5.0), "consecutive": (1, 30), "cooldown_s": (0, 600)}
+
+
+def printer_watching(printer: dict[str, Any]) -> bool:
+    """Whether monitoring should run for a printer right now.
+
+    A printer is watched unless its linked service positively reports a
+    non-printing state. With no service linked, no state polled yet, or an
+    unreachable service the printer stays watched — failing towards
+    watching is the safe direction.
+    """
+    if not printer.get("enabled"):
+        return False
+    if not printer["device"].get("provider"):
+        return True
+    state = printer.get("device_state")
+    return not state or state["status"] not in STANDBY_STATUSES
 
 
 def _clamp(key: str, value: float) -> float:

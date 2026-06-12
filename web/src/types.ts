@@ -69,6 +69,7 @@ export interface Printer {
   device: DeviceConfig;
   device_state?: DeviceState;
   alert?: Alert | null;
+  watching?: boolean;
 }
 
 export interface SchemaProperty {

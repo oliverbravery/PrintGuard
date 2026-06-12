@@ -32,11 +32,11 @@ export function PrinterTile({ printer, index }: { printer: Printer; index: numbe
       <span className="corner corner-br" />
       <div className="flex items-center gap-2.5 px-4 py-2.5">
         <span
-          className={`led ${alerting ? "led-bad" : camera?.inferring ? "led-infer" : printer.enabled && camera?.online ? "led-on" : "led-off"}`}
+          className={`led ${alerting ? "led-bad" : camera?.inferring ? "led-infer" : printer.watching && camera?.online ? "led-on" : "led-off"}`}
         />
         <h3 className="display text-base font-semibold tracking-[0.08em] truncate flex-1">{printer.name}</h3>
         <DeviceChip state={printer.device_state} />
-        {!printer.enabled && <span className="chip">standby</span>}
+        {!printer.watching && <span className="chip">standby</span>}
       </div>
       <Feed camera={camera} mode={engine?.mode ?? "local"} whep={engine?.settings.whep_base ?? ""} />
       {alerting && (

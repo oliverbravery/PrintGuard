@@ -8,6 +8,7 @@ from typing import Any
 
 from .cameras import CAMERA_DEFAULTS
 from .platform import FrameSource
+from .printers import printer_watching
 
 
 @dataclass
@@ -127,7 +128,7 @@ class CameraRegistry:
         return [c for c in self.cameras.values() if c.in_use and c.online]
 
     def sync_in_use(self, printers: dict[str, dict[str, Any]]) -> None:
-        """Recomputes in_use flags from the current printer bindings."""
-        bound = {p["camera_id"] for p in printers.values() if p.get("enabled")}
+        """Recomputes in_use flags from the printers currently watched."""
+        bound = {p["camera_id"] for p in printers.values() if printer_watching(p)}
         for camera in self.cameras.values():
             camera.in_use = camera.id in bound

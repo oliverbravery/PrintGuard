@@ -11,9 +11,9 @@ from typing import Any
 
 import numpy as np
 
+from printguard.engine import monitor
 from printguard.engine.engine import Engine
 from printguard.engine.platform import Frame
-from printguard.engine.scheduler import Scheduler
 
 
 class FakeSource:
@@ -42,6 +42,8 @@ class FakePlatform:
     def __init__(self, infer_s: float = 0.05, failing: bool = False) -> None:
         self.infer_s = infer_s
         self.failing = failing
+        self.device_status = "Printing"
+        self.reject_actions = False
         self.http_calls: list[tuple[str, str]] = []
         self.state: dict[str, Any] = {}
 
@@ -61,7 +63,9 @@ class FakePlatform:
 
     async def http(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
         self.http_calls.append((method, url))
-        return 200, {"state": "Printing", "progress": {"completion": 40.0}, "job": {"file": {"name": "benchy.gcode"}}}
+        if self.reject_actions and method == "POST" and "/api/job" in url:
+            raise RuntimeError("printer refused")
+        return 200, {"state": self.device_status, "progress": {"completion": 40.0}, "job": {"file": {"name": "benchy.gcode"}}}
 
     async def encode_jpeg(self, rgb: np.ndarray) -> bytes | None:
         return b"\xff\xd8fake"
@@ -156,9 +160,79 @@ async def test_defect_pipeline() -> None:
     print(f"ok defect pipeline: {len(results)} results, alert score={alerts[0]['score']}, action=pause, 3 notifiers delivered")
 
 
+async def test_standby_gating() -> None:
+    monitor.DEVICE_POLL_S = 0.1
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    platform.device_status = "Operational"
+    engine, events = await setup_engine(platform, camera_fps=[10.0])
+    printer_id = next(iter(engine.printers))
+    await engine.handle(
+        {
+            "cmd": "printer.update",
+            "id": printer_id,
+            "patch": {"device": {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}},
+        }
+    )
+    await asyncio.sleep(1.0)
+    assert not engine.state_event()["printers"][0]["watching"], "idle printer should be in standby"
+    assert not engine.registry.schedulable(), "standby printer's camera should not be scheduled"
+    results_during_standby = len([e for e in events if e.get("event") == "result"])
+
+    platform.device_status = "Printing"
+    await asyncio.sleep(1.0)
+    assert engine.state_event()["printers"][0]["watching"], "printing printer should be watched"
+    resumed = len([e for e in events if e.get("event") == "result"]) - results_during_standby
+    await engine.stop()
+    assert resumed > 0, "inference did not resume when printing started"
+    print(f"ok standby gating: 0 results while idle, {resumed} after printing resumed")
+
+
+async def test_watchdog_and_failed_action() -> None:
+    monitor.DEVICE_POLL_S = 0.1
+    monitor.WATCH_TICK_S = 0.05
+    monitor.OFFLINE_GRACE_S = 0.2
+    monitor.ACT_RETRY_S = 0.01
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    platform.reject_actions = True
+    engine, events = await setup_engine(platform, camera_fps=[10.0])
+    printer_id = next(iter(engine.printers))
+    await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+    await engine.handle(
+        {
+            "cmd": "printer.update",
+            "id": printer_id,
+            "patch": {
+                "notify": True,
+                "device": {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}, "on_defect": "pause"},
+            },
+        }
+    )
+    await asyncio.sleep(1.0)
+    alerts = [e for e in events if e.get("event") == "alert"]
+    assert alerts and alerts[0]["action"] == "failed", f"rejected pause should surface as failed, got {alerts}"
+    errors = [e for e in events if e.get("event") == "error"]
+    assert any("pause failed" in e["message"] for e in errors), "failed action did not emit an error event"
+
+    camera = next(iter(engine.registry.cameras.values()))
+    camera.frame_source.online = False
+    await asyncio.sleep(0.6)
+    warnings = [e for e in events if e.get("event") == "warning" and not e["recovered"]]
+    assert any("offline" in w["message"] for w in warnings), "camera outage did not warn"
+    assert any(url == "http://ntfy/topic" for _, url in platform.http_calls), "outage warning was not pushed to notifiers"
+
+    camera.frame_source.online = True
+    await asyncio.sleep(0.3)
+    await engine.stop()
+    recoveries = [e for e in events if e.get("event") == "warning" and e["recovered"]]
+    assert any("back" in r["message"] for r in recoveries), "camera recovery was not announced"
+    print(f"ok watchdog: failed action surfaced, {len(warnings)} warnings, recovery announced")
+
+
 async def main() -> None:
     await test_fair_allocation_and_dedup()
     await test_defect_pipeline()
+    await test_standby_gating()
+    await test_watchdog_and_failed_action()
     print("all engine tests passed")
 
 
