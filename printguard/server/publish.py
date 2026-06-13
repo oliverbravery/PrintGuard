@@ -1,8 +1,9 @@
-"""Republishes browser camera recordings to MediaMTX over RTSP.
+"""Pushes camera video to MediaMTX over RTSP.
 
-The browser streams MediaRecorder chunks (fragmented WebM or MP4) over a
-WebSocket; packets are remuxed — never transcoded — into an RTSP push, so
-a published camera behaves like any other MediaMTX stream.
+Browser recordings (fragmented WebM/MP4 over a WebSocket) are remuxed — never
+transcoded — by remux(). Sources MediaMTX cannot pull itself, such as MJPEG
+over HTTP, are transcoded to H.264 by H264Push. Either way the result behaves
+like any other MediaMTX stream and reaches viewers as HLS.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import time
 from fractions import Fraction
 
 import av
+from av.video.frame import PictureType
 
 
 class ChunkStream:
@@ -40,6 +42,7 @@ class ChunkStream:
 
 
 RTP_CLOCK = 90000
+KEYFRAME_INTERVAL_S = 1.0
 
 
 def remux(source: ChunkStream, rtsp_url: str) -> None:
@@ -67,3 +70,55 @@ def remux(source: ChunkStream, rtsp_url: str) -> None:
                     time.sleep(lag)
                 push.mux(packet)
                 index += 1
+
+
+class H264Push:
+    """Transcodes decoded frames to H.264 and pushes them to a MediaMTX path.
+
+    Republishes sources MediaMTX cannot pull itself (e.g. MJPEG over HTTP) so
+    viewers receive them as HLS. Timestamps follow the wall clock and a
+    keyframe is forced every KEYFRAME_INTERVAL_S, keeping HLS segments short
+    regardless of the source's real, often variable, frame rate.
+    """
+
+    def __init__(self, rtsp_url: str, fps: int) -> None:
+        self._rtsp_url = rtsp_url
+        self._fps = fps
+        self._clock = Fraction(1, RTP_CLOCK)
+        self._push: av.container.OutputContainer | None = None
+        self._stream: av.video.stream.VideoStream | None = None
+        self._start = 0.0
+        self._last_key = 0.0
+
+    def send(self, frame: av.VideoFrame) -> None:
+        """Encodes and muxes one decoded frame, opening the push lazily."""
+        now = time.monotonic()
+        if self._push is None:
+            self._push = av.open(self._rtsp_url, mode="w", format="rtsp", options={"rtsp_transport": "tcp"})
+            self._stream = self._push.add_stream("libx264", rate=self._fps)
+            self._stream.width, self._stream.height = frame.width, frame.height
+            self._stream.pix_fmt = "yuv420p"
+            self._stream.codec_context.options = {"preset": "ultrafast", "tune": "zerolatency"}
+            self._stream.codec_context.time_base = self._clock
+            self._start = now
+            self._last_key = now - KEYFRAME_INTERVAL_S
+        out = frame.reformat(format="yuv420p")
+        out.pts = int((now - self._start) / self._clock)
+        out.time_base = self._clock
+        if now - self._last_key >= KEYFRAME_INTERVAL_S:
+            out.pict_type = PictureType.I
+            self._last_key = now
+        for packet in self._stream.encode(out):
+            self._push.mux(packet)
+
+    def close(self) -> None:
+        """Flushes the encoder and closes the RTSP push."""
+        if self._push is None:
+            return
+        try:
+            for packet in self._stream.encode(None):
+                self._push.mux(packet)
+        except Exception:
+            pass
+        self._push.close()
+        self._push = None

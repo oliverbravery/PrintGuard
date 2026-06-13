@@ -20,6 +20,7 @@ from ai_edge_litert.interpreter import Interpreter
 from ..engine import vision
 from ..engine.platform import Frame
 from .mediamtx import MediaMTX
+from .publish import H264Push
 
 FPS_SAMPLE_FRAMES = 25
 MEASURE_WARMUP_S = 1.0
@@ -28,10 +29,15 @@ RECONNECT_DELAY_S = 3.0
 
 
 class AVSource:
-    """Continuously decodes a stream, keeping only the freshest frame."""
+    """Continuously decodes a stream, keeping only the freshest frame.
 
-    def __init__(self, url: str) -> None:
+    When publish_url is set, each decoded frame is also transcoded to H.264 and
+    pushed there, so sources MediaMTX cannot pull itself reach viewers as HLS.
+    """
+
+    def __init__(self, url: str, publish_url: str | None = None) -> None:
         self._url = url
+        self._publish_url = publish_url
         self.fps = 0.0
         self.online = False
         self._latest: Frame | None = None
@@ -42,6 +48,7 @@ class AVSource:
 
     def _run(self) -> None:
         while not self._stop:
+            push: H264Push | None = None
             try:
                 options = {}
                 if self._url.startswith("rtsp://"):
@@ -53,6 +60,9 @@ class AVSource:
                 declared = float(stream.average_rate or 0)
                 if not self.fps and 0 < declared <= 240:
                     self.fps = min(60.0, declared)
+                if self._publish_url:
+                    rate = stream.guessed_rate or stream.average_rate
+                    push = H264Push(self._publish_url, int(rate) if rate and 0 < rate <= 60 else 15)
                 warmup_until = time.monotonic() + MEASURE_WARMUP_S
                 samples: list[float] = []
                 for frame in container.decode(stream):
@@ -61,6 +71,8 @@ class AVSource:
                     self._seq += 1
                     self._latest = Frame(rgb=frame.to_ndarray(format="rgb24"), seq=float(self._seq), ts=time.time())
                     self.online = True
+                    if push is not None:
+                        push.send(frame)
                     if not self.fps and time.monotonic() >= warmup_until:
                         samples.append(time.monotonic())
                         if len(samples) == FPS_SAMPLE_FRAMES and samples[-1] > samples[0]:
@@ -68,6 +80,9 @@ class AVSource:
                 container.close()
             except Exception:
                 pass
+            finally:
+                if push is not None:
+                    push.close()
             self.online = False
             if not self._stop:
                 time.sleep(RECONNECT_DELAY_S)
@@ -134,11 +149,18 @@ class ServerPlatform:
         return [{"kind": "path", "path": name, "label": name} for name in paths]
 
     async def open_camera(self, camera_id: str, source: dict[str, Any]) -> AVSource:
-        """Attaches to a stream, creating a MediaMTX pull path for URLs."""
+        """Attaches to a stream, getting URL sources into MediaMTX for viewers.
+
+        RTSP/RTMP URLs are pulled by MediaMTX; HTTP/MJPEG ones, which it cannot
+        pull, are read directly and transcoded back into MediaMTX so both
+        inference and viewers see them.
+        """
+        publish_url: str | None = None
         if source["kind"] == "url":
             source_url = source["url"]
             if source_url.startswith(("http://", "https://")):
                 url = source_url
+                publish_url = self.mediamtx.rtsp_url(camera_id)
             else:
                 await self.mediamtx.ensure_path(camera_id, source_url)
                 url = self.mediamtx.rtsp_url(camera_id)
@@ -146,7 +168,7 @@ class ServerPlatform:
             url = self.mediamtx.rtsp_url(source["path"])
         else:
             raise ValueError(f"hub mode cannot open source kind {source['kind']!r}")
-        av_source = AVSource(url)
+        av_source = AVSource(url, publish_url)
         deadline = time.monotonic() + OPEN_WAIT_S
         while time.monotonic() < deadline and not (av_source.online and av_source.fps > 0):
             await asyncio.sleep(0.2)
