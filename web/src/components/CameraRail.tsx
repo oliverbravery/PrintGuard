@@ -20,21 +20,23 @@ function CameraCard({ camera }: { camera: Camera }) {
   const { openDialog } = useStore();
   return (
     <div
-      className="panel flex items-center gap-4 px-3.5 py-2.5 flex-none cursor-pointer hover:border-accent transition-colors"
+      className="panel flex w-60 shrink-0 snap-start cursor-pointer flex-wrap items-center gap-x-4 gap-y-2.5 px-3.5 py-2.5 transition-colors hover:border-accent sm:w-auto"
       onClick={() => openDialog("cameras", camera.id)}
     >
       <span
         className={`led ${camera.inferring ? "led-infer" : camera.online ? "led-on" : "led-off"}`}
         title={camera.online ? "online" : "offline"}
       />
-      <div className="leading-tight min-w-0">
-        <div className="display text-sm font-semibold truncate max-w-36">{camera.name}</div>
-        <div className="mono text-[0.6rem] text-text-2 truncate max-w-36">{sourceLabel(camera.source)}</div>
+      <div className="order-1 min-w-0 flex-1 leading-tight sm:flex-none sm:w-36">
+        <div className="display text-sm font-semibold truncate">{camera.name}</div>
+        <div className="mono text-[0.6rem] text-text-2 truncate">{sourceLabel(camera.source)}</div>
       </div>
-      <Stat label="max" value={`${camera.max_fps.toFixed(0)}`} />
-      <Stat label="target" value={camera.in_use ? camera.target_fps.toFixed(1) : "—"} />
-      <Stat label="actual" value={camera.in_use ? camera.achieved_fps.toFixed(1) : "—"} />
-      <span className={`chip ${camera.in_use ? "chip-accent" : ""}`}>{camera.in_use ? "in use" : "idle"}</span>
+      <span className={`chip order-2 sm:order-last ${camera.in_use ? "chip-accent" : ""}`}>{camera.in_use ? "in use" : "idle"}</span>
+      <div className="order-3 flex w-full items-center gap-4 sm:order-2 sm:w-auto">
+        <Stat label="max" value={`${camera.max_fps.toFixed(0)}`} />
+        <Stat label="target" value={camera.in_use ? camera.target_fps.toFixed(1) : "—"} />
+        <Stat label="actual" value={camera.in_use ? camera.achieved_fps.toFixed(1) : "—"} />
+      </div>
     </div>
   );
 }
@@ -54,7 +56,7 @@ export function CameraRail() {
       {cameras.length === 0 ? (
         <p className="mono text-[0.7rem] text-text-2 py-1.5">no cameras registered</p>
       ) : (
-        <div className="flex gap-3 overflow-x-auto pb-1.5">
+        <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {cameras.map((camera) => (
             <CameraCard key={camera.id} camera={camera} />
           ))}

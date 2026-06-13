@@ -2,7 +2,7 @@ import { useStore } from "../store";
 import { CameraRail } from "./CameraRail";
 import { CamerasDialog } from "./CamerasDialog";
 import { DetailPanel } from "./DetailPanel";
-import { Header } from "./Header";
+import { Header, MobileActionBar } from "./Header";
 import { PrinterDialog } from "./PrinterDialog";
 import { PrinterTile } from "./PrinterTile";
 import { SettingsDialog } from "./SettingsDialog";
@@ -38,7 +38,7 @@ function EmptyState() {
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
   return (
-    <div className="fixed bottom-4 right-4 z-50 space-y-2 max-w-sm">
+    <div className="fixed right-4 bottom-4 z-50 space-y-2 max-w-sm max-md:left-4 max-md:bottom-[calc(4.75rem+env(safe-area-inset-bottom))]">
       {toasts.map((toast) => (
         <div
           key={toast.id}
@@ -61,7 +61,7 @@ export function Dashboard() {
     <div className="min-h-screen">
       <Header />
       <CameraRail />
-      <main className="mx-auto max-w-[1500px] px-4 sm:px-6 py-5">
+      <main className="mx-auto max-w-[1500px] px-4 sm:px-6 py-5 max-md:pb-[calc(5rem+env(safe-area-inset-bottom))]">
         {printers.length === 0 ? (
           <EmptyState />
         ) : (
@@ -77,6 +77,7 @@ export function Dashboard() {
       {dialog === "settings" && <SettingsDialog />}
       {detail && <DetailPanel printer={detail} />}
       <Toasts />
+      <MobileActionBar />
     </div>
   );
 }

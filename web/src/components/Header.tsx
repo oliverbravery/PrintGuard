@@ -8,21 +8,45 @@ export function Wordmark({ size = "text-xl" }: { size?: string }) {
   );
 }
 
-function Readout({ label, value }: { label: string; value: string }) {
+function Readout({ label, value, className = "hidden md:block" }: { label: string; value: string; className?: string }) {
   return (
-    <div className="hidden md:flex flex-col items-end leading-tight">
-      <span className="mono text-[0.78rem] text-text-0">{value}</span>
-      <span className="label">{label}</span>
+    <div className={`text-right leading-tight ${className}`}>
+      <span className="mono block text-[0.78rem] text-text-0">{value}</span>
+      <span className="label block">{label}</span>
     </div>
   );
 }
 
+export function HeaderActions({ className }: { className?: string }) {
+  const openDialog = useStore((s) => s.openDialog);
+  return (
+    <nav className={className}>
+      <button className="btn max-md:w-full max-md:py-2.5" onClick={() => openDialog("cameras")}>
+        Cameras
+      </button>
+      <button className="btn btn-primary max-md:w-full max-md:py-2.5" onClick={() => openDialog("printer")}>
+        + Printer
+      </button>
+      <button className="btn max-md:w-full max-md:py-2.5" onClick={() => openDialog("settings")} aria-label="Settings">
+        <span className="md:hidden">Settings</span>
+        <span className="hidden md:inline">⚙</span>
+      </button>
+    </nav>
+  );
+}
+
+export function MobileActionBar() {
+  return (
+    <HeaderActions className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 gap-2 border-t border-line-0 bg-ink-0/95 px-4 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden" />
+  );
+}
+
 export function Header() {
-  const { engine, mode, leaveMode, openDialog } = useStore();
+  const { engine, mode, leaveMode } = useStore();
   const stats = engine?.stats;
   return (
     <header className="sticky top-0 z-30 border-b border-line-0 bg-ink-0/90 backdrop-blur-sm">
-      <div className="mx-auto max-w-[1500px] px-4 sm:px-6 py-3 flex items-center flex-wrap gap-x-3 gap-y-2">
+      <div className="mx-auto flex max-w-[1500px] items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-6">
         <Wordmark />
         <button
           className="chip chip-accent cursor-pointer hover:opacity-80"
@@ -33,21 +57,13 @@ export function Header() {
         </button>
         <div className="flex-1" />
         {stats && (
-          <div className="flex items-center gap-5 mr-2">
-            <Readout label="capacity" value={`${stats.capacity_fps.toFixed(1)} fps`} />
+          <div className="flex items-center gap-5 md:mr-2">
+            <Readout label="capacity" value={`${stats.capacity_fps.toFixed(1)} fps`} className="hidden min-[400px]:block" />
             <Readout label="latency" value={`${stats.infer_ms.toFixed(0)} ms`} />
             <Readout label="workers" value={String(stats.workers)} />
           </div>
         )}
-        <button className="btn" onClick={() => openDialog("cameras")}>
-          Cameras
-        </button>
-        <button className="btn btn-primary" onClick={() => openDialog("printer")}>
-          + Printer
-        </button>
-        <button className="btn" onClick={() => openDialog("settings")} aria-label="Settings">
-          ⚙
-        </button>
+        <HeaderActions className="hidden md:flex md:items-center md:gap-2 lg:gap-3" />
       </div>
     </header>
   );
