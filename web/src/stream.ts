@@ -26,7 +26,10 @@ export function playHls(video: HTMLVideoElement, url: string): () => void {
   let hls: Hls | null = null;
   let retry: number | undefined;
   const start = () => {
-    hls = new Hls();
+    hls = new Hls({
+      liveSyncDuration: 5,
+      backBufferLength: 0,
+    });
     hls.on(Hls.Events.ERROR, (_event, data) => {
       if (data.fatal) {
         hls?.destroy();
