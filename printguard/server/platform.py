@@ -43,7 +43,12 @@ class AVSource:
     def _run(self) -> None:
         while not self._stop:
             try:
-                container = av.open(self._url, options={"rtsp_transport": "tcp"}, timeout=5.0)
+                options = {}
+                if self._url.startswith("rtsp://"):
+                    options["rtsp_transport"] = "tcp"
+                elif self._url.startswith(("http://", "https://")):
+                    options["timeout"] = "5000000"
+                container = av.open(self._url, options=options, timeout=5.0)
                 stream = container.streams.video[0]
                 declared = float(stream.average_rate or 0)
                 if not self.fps and 0 < declared <= 240:
@@ -131,8 +136,12 @@ class ServerPlatform:
     async def open_camera(self, camera_id: str, source: dict[str, Any]) -> AVSource:
         """Attaches to a stream, creating a MediaMTX pull path for URLs."""
         if source["kind"] == "url":
-            await self.mediamtx.ensure_path(camera_id, source["url"])
-            url = self.mediamtx.rtsp_url(camera_id)
+            source_url = source["url"]
+            if source_url.startswith(("http://", "https://")):
+                url = source_url
+            else:
+                await self.mediamtx.ensure_path(camera_id, source_url)
+                url = self.mediamtx.rtsp_url(camera_id)
         elif source["kind"] == "path":
             url = self.mediamtx.rtsp_url(source["path"])
         else:
@@ -148,7 +157,7 @@ class ServerPlatform:
 
     async def release_camera(self, camera_id: str, source: dict[str, Any]) -> None:
         """Removes the MediaMTX path created for a URL-backed camera."""
-        if source["kind"] == "url":
+        if source["kind"] == "url" and not source["url"].startswith(("http://", "https://")):
             try:
                 await self.mediamtx.remove_path(camera_id)
             except Exception:
