@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { bridge } from "./local";
-import { hlsUrl, playHls } from "./stream";
+import { hlsUrl, playHls, published } from "./stream";
 import type { Camera } from "./types";
 
 export function useVideoStream(
@@ -11,14 +11,15 @@ export function useVideoStream(
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !camera) return;
-    if (mode === "local") {
-      video.srcObject = bridge.getStream(camera.id);
+    const path = camera.source.kind === "path" ? camera.source.path! : camera.id;
+    const direct = mode === "local" ? bridge.getStream(camera.id) : published.get(path)?.stream;
+    if (direct) {
+      video.srcObject = direct;
       void video.play().catch(() => {});
       return () => {
         video.srcObject = null;
       };
     }
-    const path = camera.source.kind === "path" ? camera.source.path! : camera.id;
     let stop: (() => void) | undefined;
     const onVisibility = () => {
       stop?.();

@@ -2,12 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { listVideoInputs } from "../media";
 import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
-import { publishStream } from "../stream";
+import { publishStream, published } from "../stream";
 import { sourceLabel } from "./CameraRail";
 import { CropEditor } from "./CropEditor";
 import { Dialog } from "./Dialog";
-
-const publishers = new Map<string, () => void>();
 
 function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
@@ -90,7 +88,9 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           <div className="mono text-[0.62rem] text-text-2 truncate">{sourceLabel(camera.source)}</div>
         </div>
         <span className="mono text-[0.68rem] text-text-1">{camera.max_fps.toFixed(0)} fps</span>
-        {publishers.has(camera.id) && <span className="chip chip-accent">publishing</span>}
+        {camera.source.path && published.has(camera.source.path) && (
+          <span className="chip chip-accent">publishing</span>
+        )}
         <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
           {open ? "Hide" : "Adjust"}
         </button>
@@ -98,8 +98,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
           disabled={isPending("camera.remove")}
           onClick={() => {
-            publishers.get(camera.id)?.();
-            publishers.delete(camera.id);
+            if (camera.source.path) published.get(camera.source.path)?.stop();
             send({ cmd: "camera.remove", id: camera.id });
           }}
         >
@@ -229,12 +228,11 @@ function HubAdd({ onDone }: { onDone: () => void }) {
     setBusy(true);
     try {
       const path = `dev-${slug(name || "camera")}`;
-      const { stop, hlsPlayable } = await publishStream(path, deviceId, (reason) =>
+      const { hlsPlayable } = await publishStream(path, deviceId, (reason) =>
         toast("error", `publishing stopped: ${reason}`),
       );
-      publishers.set(path, stop);
       if (!hlsPlayable) {
-        toast("alert", "this browser records VP8 — monitoring works, but live playback of this camera is unavailable");
+        toast("alert", "this browser records VP8 — monitoring works and you can preview it here, but other devices can't view this camera");
       }
       await new Promise((r) => setTimeout(r, 800));
       send({ cmd: "camera.add", name: name || "Published camera", source: { kind: "path", path } });

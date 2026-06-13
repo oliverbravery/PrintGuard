@@ -8,6 +8,8 @@ const RECORDER_MIMES = [
   "video/webm;codecs=vp8",
 ];
 
+export const published = new Map<string, { stream: MediaStream; stop: () => void }>();
+
 export function hlsUrl(path: string): string {
   return `/hls/${path}/index.m3u8`;
 }
@@ -50,7 +52,7 @@ export async function publishStream(
   const mime = RECORDER_MIMES.find((m) => MediaRecorder.isTypeSupported(m));
   if (!mime) throw new Error("this browser cannot record video");
   const stream = await cameraApi().getUserMedia({
-    video: { deviceId: { exact: deviceId } },
+    video: { deviceId: { exact: deviceId }, frameRate: { ideal: 30, max: 30 } },
     audio: false,
   });
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/publish/${path}`);
@@ -62,16 +64,18 @@ export async function publishStream(
   recorder.ondataavailable = (event) => {
     if (event.data.size && ws.readyState === WebSocket.OPEN) ws.send(event.data);
   };
-  recorder.start(250);
+  // A small timeslice flushes frames steadily; a large one batches them, which
+  // starves the server's freshest-frame inference and jitters LL-HLS parts.
+  recorder.start(100);
   ws.onclose = (event) => {
     if (event.reason && recorder.state === "recording") onDown?.(event.reason);
   };
-  return {
-    hlsPlayable: !mime.endsWith("vp8"),
-    stop: () => {
-      recorder.stop();
-      stream.getTracks().forEach((t) => t.stop());
-      ws.close();
-    },
+  const stop = () => {
+    published.delete(path);
+    recorder.stop();
+    stream.getTracks().forEach((t) => t.stop());
+    ws.close();
   };
+  published.set(path, { stream, stop });
+  return { hlsPlayable: !mime.endsWith("vp8"), stop };
 }
