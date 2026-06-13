@@ -20,6 +20,7 @@ from .registry import Camera, CameraRegistry
 
 LATENCY_SMOOTHING = 0.25
 IDLE_POLL_S = 0.05
+DISPATCH_POLL_S = 0.005
 STALE_RETRY_S = 0.1
 ERROR_THROTTLE_S = 30.0
 
@@ -91,10 +92,11 @@ class Scheduler:
             asyncio.ensure_future(self._job(camera))
 
     def _sleep_until_due(self, now: float) -> float:
-        pending = [c.next_due - now for c in self._registry.schedulable() if not c.inferring]
-        if not pending:
+        cameras = self._registry.schedulable()
+        if not cameras:
             return IDLE_POLL_S
-        return min(max(min(pending), 0.005), 0.25)
+        waits = [c.next_due - now for c in cameras if not c.inferring]
+        return min(max(min(waits, default=0.0), DISPATCH_POLL_S), 0.25)
 
     async def _job(self, camera: Camera) -> None:
         try:

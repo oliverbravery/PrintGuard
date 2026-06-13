@@ -64,8 +64,6 @@ export async function publishStream(
   recorder.ondataavailable = (event) => {
     if (event.data.size && ws.readyState === WebSocket.OPEN) ws.send(event.data);
   };
-  // A small timeslice flushes frames steadily; a large one batches them, which
-  // starves the server's freshest-frame inference and jitters LL-HLS parts.
   recorder.start(100);
   ws.onclose = (event) => {
     if (event.reason && recorder.state === "recording") onDown?.(event.reason);
