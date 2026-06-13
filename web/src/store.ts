@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { bootLocal } from "./local";
+import { resumePublishers } from "./stream";
 import type { CameraSource, EngineLink, EngineState, Mode, ScorePoint } from "./types";
 
 const HISTORY_LIMIT = 240;
@@ -49,6 +50,7 @@ interface PgStore {
 
 let toastSeq = 0;
 let reqSeq = 0;
+let resumed = false;
 
 function connectHub(onEvent: (event: any) => void, onDown: () => void): EngineLink {
   let socket: WebSocket;
@@ -90,6 +92,10 @@ export const useStore = create<PgStore>((set, get) => {
       case "state":
         clearPending(event.req_id);
         set({ engine: event as EngineState, phase: "ready" });
+        if (!resumed && get().mode === "hub") {
+          resumed = true;
+          void resumePublishers((event as EngineState).cameras, (reason) => get().toast("error", `publishing stopped: ${reason}`));
+        }
         break;
       case "result":
         set((s) => {
@@ -227,3 +233,5 @@ export const useStore = create<PgStore>((set, get) => {
     },
   };
 });
+
+(window as any).__pg = useStore;

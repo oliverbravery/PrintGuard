@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listVideoInputs } from "../media";
 import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
-import { publishStream, published } from "../stream";
+import { publishStream, published, stopPublishing } from "../stream";
 import { sourceLabel } from "./CameraRail";
 import { CropEditor } from "./CropEditor";
 import { Dialog } from "./Dialog";
@@ -98,7 +98,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
           disabled={isPending("camera.remove")}
           onClick={() => {
-            if (camera.source.path) published.get(camera.source.path)?.();
+            if (camera.source.path) stopPublishing(camera.source.path);
             send({ cmd: "camera.remove", id: camera.id });
           }}
         >
@@ -286,7 +286,8 @@ function HubAdd({ onDone }: { onDone: () => void }) {
       {tab === "publish" && (
         <div className="space-y-3">
           <p className="text-xs text-text-1">
-            Streams this device's camera to the hub. Publishing stops when this tab closes.
+            Streams this device's camera to the hub. It reconnects if the hub restarts and resumes
+            when you reopen this page on this device.
           </p>
           <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
             <option value="">Select a camera…</option>
