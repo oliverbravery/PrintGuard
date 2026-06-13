@@ -26,7 +26,7 @@ export function playHls(video: HTMLVideoElement, url: string): () => void {
   let hls: Hls | null = null;
   let retry: number | undefined;
   const start = () => {
-    hls = new Hls({ lowLatencyMode: true });
+    hls = new Hls();
     hls.on(Hls.Events.ERROR, (_event, data) => {
       if (data.fatal) {
         hls?.destroy();
@@ -60,7 +60,7 @@ export async function publishStream(
     ws.onopen = () => resolve();
     ws.onerror = () => reject(new Error("publish socket refused"));
   });
-  const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 2_500_000 });
+  const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 1_000_000 });
   recorder.ondataavailable = (event) => {
     if (event.data.size && ws.readyState === WebSocket.OPEN) ws.send(event.data);
   };

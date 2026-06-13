@@ -17,7 +17,9 @@ rtmpAddress: :1935
 
 hls: yes
 hlsAddress: :8888
-hlsVariant: lowLatency
+hlsVariant: fmp4
+hlsSegmentCount: 3
+hlsSegmentDuration: 1s
 
 webrtc: no
 srt: no

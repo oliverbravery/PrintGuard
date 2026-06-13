@@ -25,8 +25,8 @@ contract. Nothing from 1.x is migrated: a 2.0 hub starts from a fresh configurat
 - **ntfy, Telegram and Discord notifications**, each carrying a snapshot of the defect.
 - **Live video via MediaMTX** — pull any RTSP/RTMP/HTTP source, publish this device's
   camera over a WebSocket, auto-discover streams already pushed to the server. Playback
-  is Low-Latency HLS served through the hub's own port, so a single HTTPS port — and
-  the auth proxy in front of it — covers the dashboard, control and video.
+  is HLS served through the hub's own port, so a single HTTPS port — and the auth proxy
+  in front of it — covers the dashboard, control and video.
 - **Print-aware gating** — printers linked to a service are only watched while they
   actually print; inference stands by when they sit idle.
 - **Fail-safe watchdog** — warnings on the dashboard and through notification channels

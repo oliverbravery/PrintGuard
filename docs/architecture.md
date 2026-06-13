@@ -29,7 +29,7 @@ flowchart LR
         browser["browser/platform.py<br/>Pyodide · LiteRT.js · getUserMedia · fetch"]
     end
 
-    server --- mediamtx["MediaMTX<br/>RTSP / RTMP / LL-HLS"]
+    server --- mediamtx["MediaMTX<br/>RTSP / RTMP / HLS"]
     integrations --- printersvc["OctoPrint / Moonraker"]
     notifiers --- push["ntfy / Telegram / Discord"]
 ```
