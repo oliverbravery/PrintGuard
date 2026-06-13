@@ -8,7 +8,7 @@ const RECORDER_MIMES = [
   "video/webm;codecs=vp8",
 ];
 
-export const published = new Map<string, { stream: MediaStream; stop: () => void }>();
+export const published = new Map<string, () => void>();
 
 export function hlsUrl(path: string): string {
   return `/hls/${path}/index.m3u8`;
@@ -76,6 +76,6 @@ export async function publishStream(
     stream.getTracks().forEach((t) => t.stop());
     ws.close();
   };
-  published.set(path, { stream, stop });
+  published.set(path, stop);
   return { hlsPlayable: !mime.endsWith("vp8"), stop };
 }

@@ -98,7 +98,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
           disabled={isPending("camera.remove")}
           onClick={() => {
-            if (camera.source.path) published.get(camera.source.path)?.stop();
+            if (camera.source.path) published.get(camera.source.path)?.();
             send({ cmd: "camera.remove", id: camera.id });
           }}
         >
