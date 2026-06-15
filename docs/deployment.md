@@ -80,6 +80,18 @@ PrintGuard:
 Terminate TLS in front with Caddy or nginx (or a Cloudflare Tunnel pointed at `:4180`),
 and bind PrintGuard's own port to localhost so the proxy is the only way in.
 
+The hub rejects any WebSocket whose `Origin` is not its own — the auth proxy checks the
+session cookie, which the browser also attaches to sockets opened by other sites, so this
+is what stops a logged-in user's other tabs from driving the engine. It recognises the
+dashboard automatically when the proxy preserves the `Host` or sends `X-Forwarded-Host`
+(Tailscale, Cloudflare and oauth2-proxy all do). If yours rewrites the host, list your
+public origin so the hub trusts it:
+
+```yaml
+    environment:
+      PRINTGUARD_ORIGINS: "https://hub.example.com"   # comma-separate several
+```
+
 ## Hardening checklist
 
 - No router port-forwards for `8000`, `8554` or `1935`.
@@ -90,5 +102,7 @@ and bind PrintGuard's own port to localhost so the proxy is the only way in.
   and remove streams.
 - When a proxy on the same host is the only intended client, bind ports to
   `127.0.0.1:…` in the compose file.
+- WebSocket handshakes are origin-checked, so the auth proxy is not relied on to block
+  cross-site sockets. Set `PRINTGUARD_ORIGINS` only if your proxy rewrites the host header.
 - Update with `docker compose pull && docker compose up -d` — `latest` moves on every
   release.

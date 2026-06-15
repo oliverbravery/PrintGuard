@@ -13,6 +13,7 @@ import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import uvicorn
@@ -32,6 +33,24 @@ PACKAGE_ROOT = Path(printguard.__file__).parent
 REPO_ROOT = PACKAGE_ROOT.parent
 
 
+def origin_allowed(websocket: WebSocket, allowed: set[str]) -> bool:
+    """Rejects cross-site WebSocket handshakes the auth proxy cannot screen.
+
+    Proxies in front of the hub authenticate the session cookie, which the
+    browser attaches to any socket a page opens, so a logged-in user's other
+    tabs could otherwise drive the engine and read its secrets. The browser
+    sets Origin and the forwarded host itself and forbids pages from forging
+    them, so a same-origin (or explicitly allow-listed) Origin is the gate.
+    """
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    if origin.rstrip("/") in allowed:
+        return True
+    host = websocket.headers.get("x-forwarded-host") or websocket.headers.get("host")
+    return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
+
+
 def create_app() -> FastAPI:
     """Builds the application with the engine attached to its lifespan."""
     model_dir = Path(os.environ.get("MODEL_DIR", REPO_ROOT / "models"))
@@ -40,6 +59,7 @@ def create_app() -> FastAPI:
     mediamtx_api = os.environ.get("MEDIAMTX_API", "http://localhost:9997")
     mediamtx_rtsp = os.environ.get("MEDIAMTX_RTSP", "rtsp://localhost:8554").rstrip("/")
     mediamtx_hls = os.environ.get("MEDIAMTX_HLS", "http://localhost:8888")
+    allowed_origins = {o.strip().rstrip("/") for o in os.environ.get("PRINTGUARD_ORIGINS", "").split(",") if o.strip()}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -69,6 +89,9 @@ def create_app() -> FastAPI:
     @app.websocket("/api/ws")
     async def engine_socket(websocket: WebSocket) -> None:
         """Bridges one UI connection onto the engine protocol."""
+        if not origin_allowed(websocket, allowed_origins):
+            await websocket.close(code=1008, reason="origin not allowed")
+            return
         await websocket.accept()
         engine: Engine = app.state.engine
         queue: asyncio.Queue = asyncio.Queue(maxsize=256)
@@ -112,8 +135,8 @@ def create_app() -> FastAPI:
     @app.websocket("/api/publish/{path}")
     async def publish_socket(websocket: WebSocket, path: str) -> None:
         """Receives a browser camera recording and republishes it over RTSP."""
-        if not re.fullmatch(r"[\w-]+", path):
-            await websocket.close(code=1008, reason="invalid path")
+        if not re.fullmatch(r"[\w-]+", path) or not origin_allowed(websocket, allowed_origins):
+            await websocket.close(code=1008, reason="invalid request")
             return
         await websocket.accept()
         source = ChunkStream()
