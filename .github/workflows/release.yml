@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: read
+        run: echo "version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "$GITHUB_OUTPUT"
+      - name: Refuse to re-release an existing version
+        run: |
+          if git rev-parse -q --verify "refs/tags/v${{ steps.read.outputs.version }}" >/dev/null; then
+            echo "::error file=pyproject.toml::v${{ steps.read.outputs.version }} is already released — run 'uv version --bump patch|minor|major'"
+            exit 1
+          fi
+      - name: Refuse to release an undocumented version
+        run: |
+          if ! grep -q "^## \[${{ steps.read.outputs.version }}\]" CHANGELOG.md; then
+            echo "::error file=CHANGELOG.md::no '## [${{ steps.read.outputs.version }}]' section — describe the change in CHANGELOG.md; it becomes the release notes"
+            exit 1
+          fi
+
+  docker:
+    name: image
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/printguard
+          tags: |
+            type=semver,pattern={{version}},value=v${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.version.outputs.version }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    name: tag
+    needs: [version, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract this version's changelog section as the release notes
+        run: |
+          awk -v ver="${{ needs.version.outputs.version }}" '
+            $0 ~ "^## \\[" ver "\\]" {hit=1; next}
+            hit && (/^## \[/ || /^\[[^]]+\]: /) {exit}
+            hit {print}
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          test -s "$RUNNER_TEMP/release-notes.md"
+      - run: gh release create "v${{ needs.version.outputs.version }}" --target "$GITHUB_SHA" --title "v${{ needs.version.outputs.version }}" --notes-file "$RUNNER_TEMP/release-notes.md"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  pages:
+    name: pages
+    needs: [version, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Bundle engine source and model for the static demo
+        run: |
+          python3 printguard/pysrc.py web/public/pysrc.zip
+          cp -r models web/public/models
+      - name: Build the web app
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

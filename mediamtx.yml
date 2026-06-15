@@ -1,0 +1,28 @@
+api: yes
+apiAddress: :9997
+
+authInternalUsers:
+  - user: any
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+      - action: api
+
+rtsp: yes
+rtspAddress: :8554
+
+rtmp: yes
+rtmpAddress: :1935
+
+hls: yes
+hlsAddress: :8888
+hlsVariant: fmp4
+hlsSegmentCount: 3
+hlsSegmentDuration: 1s
+
+webrtc: no
+srt: no
+
+paths:
+  all_others:

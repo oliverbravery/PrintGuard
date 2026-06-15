@@ -1,0 +1,50 @@
+{
+  "model": {
+    "architecture": "ShuffleNetV2-x1.0 (encoder / feature extractor only)",
+    "source": "https://github.com/oliverbravery/Edge-FDM-Fault-Detection",
+    "embedding_dim": 1024,
+    "tflite_file": "encoder_float32.tflite"
+  },
+  "input": {
+    "layout": "NCHW",
+    "shape": [
+      1,
+      3,
+      224,
+      224
+    ],
+    "dtype": "float32"
+  },
+  "output": {
+    "shape": [
+      1,
+      1024
+    ],
+    "dtype": "float32",
+    "description": "L2-normalisable embedding vector"
+  },
+  "preprocessing": {
+    "resize_shortest_edge_px": 256,
+    "center_crop_px": 224,
+    "channel_order": "RGB",
+    "normalise_mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "normalise_std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "note": "FDM print frames are originally grayscale \u2014 replicate to 3 identical channels before normalising"
+  },
+  "classification": {
+    "method": "nearest_prototype_euclidean",
+    "classes": [
+      "success",
+      "failure"
+    ],
+    "description": "argmin over Euclidean distances from embedding to each class prototype"
+  }
+}

@@ -1,54 +1,35 @@
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "printguard"
-version = "1.0.0b3"
-description = "PrintGuard - Real-time Defect Detection on Edge-devices"
-authors = [
-    { name = "Oliver Bravery", email = "dev@oliverbravery.uk" }
-]
-readme = "README.md"
-requires-python = ">=3.11"
+version = "2.0.0"
+description = "Real-time 3D print failure detection"
 
+license = "GPL-2.0-only"
+requires-python = ">=3.12"
 dependencies = [
-    "fastapi==0.116.1",
-    "uvicorn[standard]==0.35.0",
-    "pywebpush==2.0.3",
-    "apscheduler==3.11.0",
-    "python-dotenv==1.1.1",
-    "torch==2.7.0",
-    "torchvision==0.22.0",
-    "pillow==11.3.0",
-    "opencv-python-headless==4.12.0.88",
-    "python-multipart==0.0.20",
-    "keyring==25.6.0",
-    "trustme==1.2.1",
-    "platformdirs==4.3.8",
-    "sse-starlette==2.4.1",
-    "ngrok==1.4.0",
-    "cryptography==45.0.5",
-    "numpy==2.2.6",
-    "onnxruntime==1.22.1",
-    "huggingface_hub==0.33.4"
+    "ai-edge-litert>=2.1.5",
+    "av>=14.0",
+    "fastapi>=0.136.3",
+    "httpx>=0.28",
+    "numpy>=2.1",
+    "uvicorn[standard]>=0.49.0",
 ]
 
 [project.scripts]
-printguard = "printguard.app:run"
+printguard = "printguard.server.app:main"
 
-[tool.black]
-line-length = 88
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools]
-include-package-data = true
+[tool.hatch.build.targets.wheel]
+packages = ["printguard"]
 
-[tool.setuptools.packages.find]
-include = ["printguard", "printguard.*"]
-
-[tool.setuptools.package-data]
-"printguard" = [
-    "static/**/*",
-    "templates/**/*",
-    "model/**/*"
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

@@ -1,0 +1,58 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "web"
+      ],
+      "port": 5173,
+      "autoPort": true
+    },
+    {
+      "name": "printguard",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "printguard"
+      ],
+      "port": 8000,
+      "autoPort": true
+    },
+    {
+      "name": "pages-sim",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4731",
+        "-d",
+        "web/.pages-sim"
+      ],
+      "port": 4731,
+      "autoPort": true
+    },
+    {
+      "name": "printguard-hls",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "DATA_DIR=/tmp/pg-hls PORT=4477 MEDIAMTX_API=http://localhost:19997 MEDIAMTX_RTSP=rtsp://localhost:18554 MEDIAMTX_HLS=http://localhost:18888 uv run printguard"
+      ],
+      "port": 4477
+    },
+    {
+      "name": "printguard-demo",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "DATA_DIR=/tmp/pg-demo PORT=4399 MEDIAMTX_RTSP=rtsp://localhost:8556 MEDIAMTX_API=http://localhost:9999 uv run printguard"
+      ],
+      "port": 4399
+    }
+  ]
+}

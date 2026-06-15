@@ -1,28 +1,28 @@
-# syntax=docker/dockerfile:1.4
-FROM --platform=$BUILDPLATFORM python:3.11-slim-bookworm AS base
+FROM node:22-alpine AS web
+WORKDIR /build
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      build-essential python3-dev libffi-dev \
-      libjpeg-dev zlib1g-dev libtiff-dev \
-      libfreetype6-dev libwebp-dev libopenjp2-7-dev \
-      libgomp1 \
-      ffmpeg libgl1 \
- && rm -rf /var/lib/apt/lists/*
+FROM python:3.13-slim AS deps
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project --compile-bytecode
+COPY printguard/ printguard/
+RUN uv sync --frozen --no-dev --compile-bytecode
 
-WORKDIR /printguard
-COPY . /printguard
-
-RUN pip install --upgrade pip \
- && pip install .
-
-FROM --platform=$TARGETPLATFORM python:3.11-slim-bookworm AS runtime
-
-COPY --from=base /usr/local /usr/local
-
-WORKDIR /printguard
-COPY --from=base /printguard /printguard
-
+FROM python:3.13-slim
+WORKDIR /app
+COPY --from=deps /app/.venv .venv
+COPY printguard/ printguard/
+COPY models/ models/
+COPY --from=web /build/dist static/
+ENV PATH="/app/.venv/bin:$PATH" \
+    MODEL_DIR=/app/models \
+    DATA_DIR=/data \
+    STATIC_DIR=/app/static
+VOLUME /data
 EXPOSE 8000
-VOLUME ["/data"]
-ENTRYPOINT ["printguard"]
+CMD ["printguard"]

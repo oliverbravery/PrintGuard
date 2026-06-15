@@ -1,92 +1,126 @@
-# PrintGuard - Local 3D Printing Failure Detection and Monitoring
-[![PyPI - Version](https://img.shields.io/pypi/v/printguard?style=for-the-badge&logo=pypi&logoColor=white&logoSize=auto&color=yellow)](https://pypi.org/project/printguard/)
-[![GitHub Repo stars](https://img.shields.io/github/stars/oliverbravery/printguard?style=for-the-badge&logo=github&logoColor=white&logoSize=auto&color=yellow)](https://github.com/oliverbravery/printguard)
+# PrintGuard
 
-PrintGuard offers local, **real-time print failure detection** for **3D printing** on edge devices. A **web interface** enables users to **monitor multiple printer-facing cameras**, **connect to printers** through compatible services (i.e. [Octoprint](https://octoprint.org)) and **receive failure notifications** when the **computer vision** fault detection model designed for local edge deployment detects an issue and **automatically suspend or terminate the print job**.
+![GitHub stars](https://img.shields.io/github/stars/oliverbravery/PrintGuard?style=flat&color=ff4d00)
+![Licence](https://img.shields.io/badge/licence-GPL--2.0-2ea44f)
+[![Container](https://img.shields.io/badge/ghcr.io-oliverbravery%2Fprintguard-2496ed?logo=docker&logoColor=white)](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
+[![Live demo](https://img.shields.io/badge/demo-try_it_in_your_browser-ff4d00)](https://oliverbravery.github.io/PrintGuard/)
 
-> _The machine learning model's training code and technical research paper can be found [here](https://github.com/oliverbravery/Edge-FDM-Fault-Detection)._
+**PrintGuard watches your 3D printer cameras with an on-device vision model, pauses the
+printer when a failure takes hold, and pushes a snapshot alert to your phone.** No cloud,
+no subscription — your frames never leave hardware you own.
 
-## Features
-- **Web Interface**: A user-friendly web interface to monitor print jobs and camera feeds.
-- **Live Print Failure Detection**: Uses a custom computer vision model to detect print failures in real-time on edge devices.
-- **Multiple Inference Backends**: Supports PyTorch & ONNX Runtime for optimized performance across different deployment scenarios.
-- **Notifications**: Sends notifications subscribable on desktop and mobile devices via web push notifications to notify of detected print failures.
-- **Camera Integration**: Supports multiple camera feeds and simultaneous failure detection.
-- **Printer Integration**: Integrates with printers through services like Octoprint, allowing users to link cameras to specific printers for automatic print termination or suspension when a failure is detected.
-- **Local and Remote Access**: Can be accessed locally or remotely via secure tunnels (e.g. ngrok, Cloudflare Tunnel) or within a local network utilising the setup page for easy configuration.
+![PrintGuard dashboard: one healthy print, one detected defect that has been auto-paused](docs/assets/dashboard.png)
 
-## Table of Contents
-- [Features](#features)
-- [Installation](#installation)
-    - [PyPI Installation](#pypi-installation)
-    - [Docker Installation](#docker-installation)
-- [Initial Configuration](#initial-configuration)
-- [Usage](#usage)
-- [Technical Documentation](/docs/overview.md)
+## Try it now
 
-## Installation
+**[oliverbravery.github.io/PrintGuard](https://oliverbravery.github.io/PrintGuard/)** runs
+the full engine in your browser — point your webcam at a print and watch it score frames.
+Nothing is installed and no frame leaves your device.
 
-### PyPI Installation
-> _The project is currently in pre-release, so the `--pre` flag is required for installation._
+## What it does
 
-PrintGuard is installable via [pip](https://pypi.org/project/printguard/). The following command will install the latest version:
+- **Detects** — a compact vision encoder ([≈5 MB](#the-model)) scores every frame for
+  print failure, shared fairly across as many cameras as your hardware can sustain.
+- **Acts** — a sustained defect pauses or cancels the print through
+  [OctoPrint](https://octoprint.org) or [Klipper (Moonraker)](https://moonraker.readthedocs.io),
+  with per-printer thresholds, consecutive-detection counts and cooldowns.
+- **Alerts** — the moment a defect holds, a snapshot lands on your phone over
+  [ntfy](https://ntfy.sh), [Telegram](https://telegram.org) or [Discord](https://discord.com).
+- **Rests** — printers linked to a service are only watched while they actually print;
+  inference stands by when they sit idle and resumes the moment a job starts.
+- **Fails safe** — a watchdog warns you (on the dashboard *and* through your notification
+  channels) when a camera drops, a feed freezes, or a printer service stops answering.
+  If PrintGuard cannot tell whether a printer is printing, it keeps watching — losing the
+  signal never silently stops monitoring, and a failed pause is announced, never swallowed.
+
+## Quick start
+
+You can deploy PrintGuard using Docker Compose:
+
 ```bash
-pip install --pre printguard
-```
-To start the web interface, run:
-```bash
-printguard
-```
-
-### Docker Installation
-PrintGuard is also available as a Docker image, which can be pulled from GitHub Container Registry (GHCR):
-```bash
-docker pull ghcr.io/oliverbravery/printguard:latest
-```
-
-Alternatively, you can build the Docker image from the source, specifying the platforms you want to build for:
-```bash
-docker buildx build \
-  --platform linux/amd64,linux/arm64,linux/arm/v7 \
-  -t oliverbravery/printguard:local \
-  --load \
-  .
+curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/mediamtx.yml
+docker compose up -d
 ```
 
-To run the Docker container, use the following command. Note that the container requires a volume for persistent data storage and an environment variable for the secret key. Use the `--privileged` flag to allow access to the host's camera devices.
+Open `http://<host>:8000`, pick a mode, register a camera, add a printer. Images for
+`amd64` and `arm64` (Raspberry Pi 4/5) are published to
+[`ghcr.io/oliverbravery/printguard`](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
+on every release.
 
-To run the Docker container pulled from GHCR, use the following command:
-```bash
-docker run \
-  -p 8000:8000 \
-  -v "$(pwd)/data:/data" \
-  --privileged \
-  ghcr.io/oliverbravery/printguard:latest
-```
+## Two modes, one engine
 
-To run the Docker container built from the source, use the following command:
-```bash
-docker run \
-  -p 8000:8000 \
-  -v "$(pwd)/data:/data" \
-  --privileged \
-  oliverbravery/printguard:local
-```
+| | Local mode | Hub mode |
+|---|---|---|
+| Engine runs | in your browser (Pyodide) | on the server (CPython) |
+| Model runs | [LiteRT.js (WASM)](https://developers.google.com/edge/litert) | [ai-edge-litert](https://pypi.org/project/ai-edge-litert/) |
+| Frames leave the device | never | only to your own server |
+| Survives closing the tab | no | yes |
 
-## Initial Configuration
-After installation, you will need to configure PrintGuard. First, visit the setup page at `http://localhost:8000/setup`. The setup page allows users to configure network access to the locally hosted site, including seamless options for exposing it via popular reverse proxies for a streamlined setup. All setups require you to choose to either automatically generate or import self-signed SSL certificates for secure access, alongside VAPID keys which are required for web push notifications.
+### Hub mode cameras
 
-> [Cloudflare](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) - A secure way to expose your local web interface to the internet via reverse proxies, providing a reliable and secure connection without needing to open ports on your router. Cloudflare tunnels are free to use and offer a simple setup process however, a domain connected to your Cloudflare account is required. Restricted access to your PrintGuard site can be setup through [Cloudflare Access](https://one.dash.cloudflare.com/), configurable in the setup page. During setup, your API key is used to create a tunnel to your local server and insert a DNS record for the tunnel, allowing you to access your PrintGuard instance via your custom domain or subdomain.
+- **Stream URL** — any RTSP/RTMP/HTTP source; PrintGuard creates a MediaMTX pull path.
+- **This device** — publishes a browser camera to the hub over a WebSocket. It reconnects
+  if the hub restarts and resumes automatically when you reopen the page on that device.
+  Browsers only allow camera access on secure pages, so this (and local mode) needs the hub
+  served over HTTPS or opened on `localhost`.
+- **Discovered** — anything already pushed to MediaMTX (e.g. `rtsp://host:8554/mycam`
+  from a Raspberry Pi) appears automatically.
 
-> [Ngrok](https://ngrok.com/) - Reverse proxy tool which allows you to expose the local web interface to the internet for access outside of your local network, offering a secure tunnel to your local server with minimal configuration through both free and paid plans. The setup uses your ngrok API to create a tunnel to your local server and link it to your free static ngrok domain aquired during setup, allowing access to PrintGuard via a custom, static subdomain.
+## Printers and notifications
 
-> Local Network Access - If you prefer not to expose your web interface to the internet, you can configure PrintGuard to be accessible only within your local network.
+Link a printer to OctoPrint or Klipper from its detail panel, choose what a sustained
+defect should do (alert only, pause, cancel), and test the connection in place. Linked
+printers report job, progress and state on their tiles — and gate inference, so an idle
+printer costs you nothing.
 
-## Usage
- | | |
- | --- | --- |
- | ![PrintGuard Web Interface](docs/media/images/interface-index.png) | The main interface of PrintGuard. All cameras are selectable in the bottom left camera list. The live camera view displayed in the top right shows the feed of the currently selected camera. The current detection status, total detections and frame rate are displayed in the bottom right alongside a button to toggle live detection for the selected camera on or off. |
-  | ![PrintGuard Camera Settings](docs/media/images/interface-camera-settings.png) | The camera settings page is accessible via the settings button in the bottom right of the main interface. It allows you to configure camera settings, including camera brightness and contrast, detection thresholds, link a printer to the camera via services such as Octoprint, and configure alert and notification settings for that camera. You can also opt into web push notifications for real-time alerts here. |
-  | ![PrintGuard Setup Settings](docs/media/images/interface-setup-settings.png) | Accessible via the configure setup button in the settings menu, the setup page allows configuration of camera feed streaming settings such as resolution and frame rate, as well as polling intervals and detection rates. |
-  | ![PrintGuard Alerts and Notifications](docs/media/images/interface-alerts-notifications.png) | When a failure is detected a notification is dispatched to subscribed devices via web push notifications, allowing users to get real-time alerts and updates about their print. On the web interface, an alert modal appears showing a snapshot of the failure and buttons to dismiss the alert or suspend/cancel the print job. If the alert is not addressed within the customisable countdown time, the printer will automatically be suspended, cancelled or resumed based on user settings. |
-  | | |
+**Running in Docker?** The hub reaches printer services from *inside the container*, so
+`localhost` points at the container, not your host — connections to `http://localhost:5000`
+fail with *all connection attempts failed*. Use `host.docker.internal` instead (e.g.
+`http://host.docker.internal:5000`); the shipped `docker-compose.yaml` maps it for you. On
+a Linux host the service must also listen on `0.0.0.0`, not just loopback.
+
+Notification channels live in Settings: enable ntfy, Telegram or Discord, fill in the
+form, and send a test alert. Every enabled channel receives defect snapshots and watchdog
+warnings for printers with notifications switched on.
+
+![Printer detail panel with live risk score and printer controls](docs/assets/printer-detail.png)
+
+In local mode the browser calls the services directly, so give it a URL the *browser* can
+reach — `http://localhost:5000` when it runs on the same machine, or the host's LAN IP
+otherwise (not `host.docker.internal`, which only resolves inside the container). The
+browser also enforces CORS: enable it in OctoPrint (Settings → API) or add `cors_domains`
+to `moonraker.conf`, otherwise the request is blocked with *access control checks* and the
+test fails. And if PrintGuard itself is served over HTTPS (e.g. a Cloudflare Tunnel), the
+browser blocks calls to an `http://` printer as mixed content — Safari reports *not allowed
+to request resource* even for `http://localhost`. To control a local HTTP printer from an
+HTTPS deployment, use **hub mode** (the server makes the request, with no browser
+restrictions) or serve the printer over HTTPS. Telegram's API sends no CORS headers, so
+that channel is hub-only.
+
+## Exposing a hub
+
+PrintGuard ships no auth, so put an identity layer in front before anything leaves your
+trusted network — never port-forward the hub's ports directly.
+[docs/deployment.md](docs/deployment.md) has step-by-step setups for **Tailscale**
+(recommended — private, live video works), **Cloudflare Tunnel + Access** (public URL,
+zero open ports) and **oauth2-proxy** on your own domain, plus a hardening checklist.
+
+## The model
+
+The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained for
+few-shot FDM fault detection in
+[Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection)
+(with an accompanying technical paper). `models/` holds the TFLite export, normalisation
+metadata and class prototypes. Sensitivity and threshold sliders per printer map straight
+onto the prototype distances, so you can tune for your camera and lighting without
+retraining.
+
+## For developers
+
+- [docs/architecture.md](docs/architecture.md) — how one engine runs on CPython and in
+  the browser, the platform contract, the scheduler and the fail-safe design, with
+  diagrams.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, tests, and step-by-step guides for
+  adding printer integrations and notification providers (the two easiest ways to
+  contribute).
