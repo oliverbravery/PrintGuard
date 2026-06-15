@@ -7,6 +7,13 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-06-15
+
+### Added
+
+- `LICENSE.md` with the full GNU General Public License v2 text, matching the
+  `GPL-2.0-only` declaration in `pyproject.toml`.
+
 ## [2.0.0] - 2026-06-12
 
 A ground-up rewrite. One Python engine now runs everywhere — in your browser on Pyodide
@@ -60,4 +67,5 @@ contract. Nothing from 1.x is migrated: a 2.0 hub starts from a fresh configurat
   [docs/deployment.md](https://github.com/oliverbravery/PrintGuard/blob/main/docs/deployment.md).
 - 32-bit ARM (`arm/v7`) images — `arm64` (Raspberry Pi 4/5) remains supported.
 
+[2.0.1]: https://github.com/oliverbravery/PrintGuard/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/oliverbravery/PrintGuard/compare/v1.0.0b3...v2.0.0
