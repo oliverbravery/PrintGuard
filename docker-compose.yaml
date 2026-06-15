@@ -11,6 +11,8 @@ services:
       MEDIAMTX_HLS: http://mediamtx:8888
     volumes:
       - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - mediamtx
 

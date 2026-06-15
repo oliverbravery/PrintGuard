@@ -74,6 +74,12 @@ defect should do (alert only, pause, cancel), and test the connection in place. 
 printers report job, progress and state on their tiles — and gate inference, so an idle
 printer costs you nothing.
 
+**Running in Docker?** The hub reaches printer services from *inside the container*, so
+`localhost` points at the container, not your host — connections to `http://localhost:5000`
+fail with *all connection attempts failed*. Use `host.docker.internal` instead (e.g.
+`http://host.docker.internal:5000`); the shipped `docker-compose.yaml` maps it for you. On
+a Linux host the service must also listen on `0.0.0.0`, not just loopback.
+
 Notification channels live in Settings: enable ntfy, Telegram or Discord, fill in the
 form, and send a test alert. Every enabled channel receives defect snapshots and watchdog
 warnings for printers with notifications switched on.
