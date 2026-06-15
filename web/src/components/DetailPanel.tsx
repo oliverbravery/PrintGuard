@@ -44,7 +44,7 @@ function Slider({
 }
 
 export function DetailPanel({ printer }: { printer: Printer }) {
-  const { engine, history, send, openDetail, deviceTest, testing, testDevice, isPending } = useStore();
+  const { engine, history, send, openDetail, deviceTest, testing, testDevice, isPending, mode } = useStore();
   const [draft, setDraft] = useState(printer);
   const actionRef = useRef<string | null>(null);
   const saveRef = useRef<string | null>(null);
@@ -64,6 +64,10 @@ export function DetailPanel({ printer }: { printer: Printer }) {
   const integrations = engine?.integrations ?? [];
   const meta = integrations.find((i) => i.id === draft.device.provider);
   const linked = Boolean(printer.device.provider);
+  const httpsMixedContent =
+    mode === "local" &&
+    location.protocol === "https:" &&
+    Object.values(draft.device.config).some((v) => v.startsWith("http://"));
   const close = () => openDetail(null);
 
   const patch = (fields: Partial<Printer>) => setDraft((d) => ({ ...d, ...fields }));
@@ -209,14 +213,32 @@ export function DetailPanel({ printer }: { printer: Printer }) {
             {meta && (
               <>
                 <SchemaForm meta={meta} value={draft.device.config} onChange={(config) => patchDevice({ config })} />
-                <div className="flex items-center gap-3">
-                  <button className="btn" disabled={testing} onClick={() => testDevice(meta.id, draft.device.config)}>
-                    {testing ? "Testing…" : "Test connection"}
-                  </button>
-                  {deviceTest && (
-                    <span className={`chip ${deviceTest.ok ? "chip-ok" : "chip-bad"}`}>
-                      {deviceTest.ok ? `ok — ${deviceTest.status}` : deviceTest.error || deviceTest.status || "failed"}
-                    </span>
+                {httpsMixedContent && (
+                  <p className="text-xs leading-snug text-warn break-words">
+                    PrintGuard is served over HTTPS, so the browser blocks this http:// address as mixed content in
+                    local mode. Switch to hub mode, or use an https:// printer URL —{" "}
+                    <a
+                      href="https://github.com/oliverbravery/PrintGuard#printers-and-notifications"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline hover:text-accent"
+                    >
+                      see the docs
+                    </a>
+                    .
+                  </p>
+                )}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <button className="btn" disabled={testing} onClick={() => testDevice(meta.id, draft.device.config)}>
+                      {testing ? "Testing…" : "Test connection"}
+                    </button>
+                    {deviceTest?.ok && <span className="chip chip-ok">ok — {deviceTest.status}</span>}
+                  </div>
+                  {deviceTest && !deviceTest.ok && (
+                    <p className="text-xs leading-snug text-bad break-words">
+                      {deviceTest.error || deviceTest.status || "failed"}
+                    </p>
                   )}
                 </div>
               </>

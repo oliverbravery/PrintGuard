@@ -108,6 +108,9 @@ class BrowserPlatform:
         timeout: float = 10.0,
     ) -> tuple[int, Any]:
         """Performs an HTTP request with the browser's fetch."""
+        import asyncio
+
+        from pyodide.ffi import JsException
         from pyodide.http import pyfetch
 
         kwargs: dict[str, Any] = {"method": method, "headers": headers or {}}
@@ -116,7 +119,10 @@ class BrowserPlatform:
             kwargs["body"] = jsonlib.dumps(json)
         elif data is not None:
             kwargs["body"] = data
-        resp = await pyfetch(url, **kwargs)
+        try:
+            resp = await asyncio.wait_for(pyfetch(url, **kwargs), timeout)
+        except (JsException, asyncio.TimeoutError) as exc:
+            raise ConnectionError(f"could not reach {url} — unreachable, or CORS is not enabled on the target service") from exc
         text = await resp.string()
         try:
             return resp.status, jsonlib.loads(text)

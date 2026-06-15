@@ -86,9 +86,17 @@ warnings for printers with notifications switched on.
 
 ![Printer detail panel with live risk score and printer controls](docs/assets/printer-detail.png)
 
-In local mode the browser calls the services directly — enable CORS in OctoPrint
-(Settings → API) or add `cors_domains` to `moonraker.conf`. Telegram's API sends no CORS
-headers, so that channel is hub-only.
+In local mode the browser calls the services directly, so give it a URL the *browser* can
+reach — `http://localhost:5000` when it runs on the same machine, or the host's LAN IP
+otherwise (not `host.docker.internal`, which only resolves inside the container). The
+browser also enforces CORS: enable it in OctoPrint (Settings → API) or add `cors_domains`
+to `moonraker.conf`, otherwise the request is blocked with *access control checks* and the
+test fails. And if PrintGuard itself is served over HTTPS (e.g. a Cloudflare Tunnel), the
+browser blocks calls to an `http://` printer as mixed content — Safari reports *not allowed
+to request resource* even for `http://localhost`. To control a local HTTP printer from an
+HTTPS deployment, use **hub mode** (the server makes the request, with no browser
+restrictions) or serve the printer over HTTPS. Telegram's API sends no CORS headers, so
+that channel is hub-only.
 
 ## Exposing a hub
 
