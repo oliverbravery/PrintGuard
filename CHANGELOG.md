@@ -7,6 +7,23 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-06-16
+
+### Added
+
+- **MCP server and REST API for hub mode** — agents and developers can now drive the
+  same engine protocol the dashboard speaks. The Model Context Protocol server
+  (Streamable HTTP, at `/mcp`) lets an agent read printer and camera status, fetch the
+  current camera frame as an image, and pause, resume or cancel a print; the versioned
+  REST API at `/api/v1` exposes the same operations to any HTTP client, with the frame
+  served as `image/jpeg`. Both are thin transports over the existing engine commands, so
+  they never drift from the UI. See
+  [docs/api.md](https://github.com/oliverbravery/PrintGuard/blob/main/docs/api.md).
+- **Scoped access tokens** — capability is configurable per token through cumulative
+  `read` ⊂ `control` ⊂ `manage` scopes set in `PRINTGUARD_API_TOKENS`. With no token
+  configured the surface is read-only behind your existing auth proxy; issuing scoped
+  tokens unlocks control and management, and MCP hides any tool a token cannot use.
+
 ## [2.0.1] - 2026-06-15
 
 ### Added
@@ -67,5 +84,6 @@ contract. Nothing from 1.x is migrated: a 2.0 hub starts from a fresh configurat
   [docs/deployment.md](https://github.com/oliverbravery/PrintGuard/blob/main/docs/deployment.md).
 - 32-bit ARM (`arm/v7`) images — `arm64` (Raspberry Pi 4/5) remains supported.
 
+[2.1.0]: https://github.com/oliverbravery/PrintGuard/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/oliverbravery/PrintGuard/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/oliverbravery/PrintGuard/compare/v1.0.0b3...v2.0.0
