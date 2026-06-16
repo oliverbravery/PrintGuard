@@ -64,6 +64,24 @@ Events (engine → UI): a full `state` snapshot (on connect, after every command
 1 s ticker), plus incremental `result`, `alert`, `warning`, `device`, `discovered`,
 `device_test`, `notify_test` and `error` events.
 
+## The programmatic surface (hub only)
+
+The MCP server and REST API are thin transports over the same commands the UI sends —
+they add no logic of their own, so they cannot drift from the dashboard. Both are hub only
+(they need a server runtime, like `server/publish.py`); local mode never mounts them.
+
+- [`engine.request()`](../printguard/engine/engine.py) turns the broadcast protocol into
+  request/response by correlating a `req_id`; `engine.snapshot()` encodes a camera's
+  freshest frame as JPEG. Both are mode-agnostic engine methods.
+- [`server/api.py`](../printguard/server/api.py) is a FastAPI sub-app at `/api/v1`; each
+  route delegates to those methods and is tagged with the scope it requires.
+- [`server/mcp.py`](../printguard/server/mcp.py) derives its tools from that app with
+  `FastMCP.from_fastapi`, adds a camera-frame tool that returns native image content, and
+  enforces the route scope tags so a caller only sees the tools its token may use.
+
+Access is gated by cumulative scopes (`read` ⊂ `control` ⊂ `manage`); see
+[docs/api.md](api.md).
+
 ## Scheduling inference
 
 When a camera is registered its native frame rate is measured once. From then on
@@ -139,6 +157,8 @@ printguard/
     notifiers/       alert channel adapters (ntfy, Telegram, Discord, …)
     adapters.py      shared adapter contract (id, label, docs_url, JSON-schema config)
   server/            hub platform: FastAPI, MediaMTX, LiteRT, PyAV
+    api.py           REST API (/api/v1) over the engine protocol, scoped by token
+    mcp.py           MCP server for agents, derived from the REST API
   browser/           local platform: Pyodide bridge to LiteRT.js and getUserMedia
   pysrc.py           builds the engine source archive Pyodide unpacks
 web/                 React + Tailwind UI (presentation only)
