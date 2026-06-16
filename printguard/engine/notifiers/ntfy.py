@@ -1,6 +1,7 @@
 """ntfy notifier.
 
 API reference: https://docs.ntfy.sh/publish/
+Subscribing on a phone (how alerts are received): https://docs.ntfy.sh/subscribe/phone/
 """
 
 from __future__ import annotations
@@ -16,6 +17,11 @@ class NtfyNotifier(NotifierAdapter):
     id = "ntfy"
     label = "ntfy"
     docs_url = "https://docs.ntfy.sh/publish/"
+    setup_url = "https://docs.ntfy.sh/subscribe/phone/"
+    setup_hint = (
+        "Subscribe to your topic in the ntfy app to receive alerts. Use a hard-to-guess name — "
+        "anyone with it can read; protected topics need an access token."
+    )
     schema = {
         "type": "object",
         "properties": {

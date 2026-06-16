@@ -85,6 +85,7 @@ export interface AdapterMeta {
   label: string;
   docs_url: string;
   browser_ok?: boolean;
+  experimental?: boolean;
   setup_url?: string | null;
   setup_hint?: string | null;
   schema: {
