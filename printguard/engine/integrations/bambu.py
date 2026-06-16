@@ -5,8 +5,10 @@ travel over MQTT/TLS on port 8883, authenticated with the LAN access code.
 That needs a raw TLS socket, which the browser sandbox forbids, so this
 adapter runs in hub mode only (browser_ok is False).
 
-The user must enable LAN Only Mode on the printer (Settings > Network) and
-read the access code and serial number from the touchscreen there.
+The user must enable LAN Only Mode and then Developer Mode on the printer
+(Settings > Network) — Developer Mode is what opens the MQTT channel on
+current firmware. The access code is shown on that screen; the serial
+number is under Settings > Device.
 
 Protocol reference: https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md
 TLS and command shapes mirror the bambulabs_api client:
@@ -50,6 +52,11 @@ class BambuAdapter(IntegrationAdapter):
     id = "bambu"
     label = "Bambu Lab"
     docs_url = "https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md"
+    setup_url = "https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode"
+    setup_hint = (
+        "On the printer, enable LAN Only Mode then Developer Mode (Settings > Network) to open the MQTT "
+        "channel. The access code is shown there; the serial number is under Settings > Device."
+    )
     browser_ok = False
     schema = {
         "type": "object",
@@ -60,7 +67,7 @@ class BambuAdapter(IntegrationAdapter):
                 "type": "string",
                 "title": "Access code",
                 "secret": True,
-                "placeholder": "Settings > Network > LAN Only Mode",
+                "placeholder": "8-character access code",
             },
         },
         "required": ["host", "serial", "access_code"],

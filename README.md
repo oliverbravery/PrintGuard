@@ -76,9 +76,10 @@ Linked printers report job, progress and state on their tiles — and gate infer
 idle printer costs you nothing.
 
 Bambu Lab printers speak MQTT over TLS rather than HTTP, which a browser cannot open, so
-they are offered in **hub mode only**. Put the printer in **LAN Only Mode** (Settings →
-Network) and link it with its IP, serial number and access code — all shown on that same
-screen.
+they are offered in **hub mode only**. On the printer, enable **LAN Only Mode** then
+**Developer Mode** (Settings → Network) to open the MQTT channel, then link it with its IP,
+serial number and access code; the form links Bambu's
+[Enable LAN Mode](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode) guide.
 
 **Running in Docker?** The hub reaches printer services from *inside the container*, so
 `localhost` points at the container, not your host — connections to `http://localhost:5000`
