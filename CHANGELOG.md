@@ -11,6 +11,19 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
+- **Bambu Lab printers** — link a printer over its local MQTT API alongside the existing
+  OctoPrint and Klipper services, with the same pause/cancel-on-defect response, job and
+  progress reporting, and inference gating. Enable **LAN Only Mode** and **Developer Mode**
+  on the printer, then link it with its IP, serial number and access code — the form links
+  Bambu's official setup guide. The protocol is MQTT over TLS, which needs a raw socket the
+  browser sandbox forbids, so Bambu Lab is offered in **hub mode only** — the same
+  constraint that already makes some notifiers hub-only.
+- **Setup guides in config forms** — each printer service and notification channel now
+  shows a one-line setup hint and a link to its official setup docs, so steps taken
+  outside PrintGuard (API keys, CORS, bot tokens, webhooks, LAN mode) are spelled out
+  where you configure them.
+- **Experimental tag** — a reusable badge that flags new, not-yet-battle-tested features
+  and links to the issue tracker for reports. Bambu Lab carries it.
 - **MCP server and REST API for hub mode** — agents and developers can now drive the
   same engine protocol the dashboard speaks. The Model Context Protocol server
   (Streamable HTTP, at `/mcp`) lets an agent read printer and camera status, fetch the
@@ -23,6 +36,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   `read` ⊂ `control` ⊂ `manage` scopes set in `PRINTGUARD_API_TOKENS`. With no token
   configured the surface is read-only behind your existing auth proxy; issuing scoped
   tokens unlocks control and management, and MCP hides any tool a token cannot use.
+
+### Fixed
+
+- Klipper's API-reference link pointed at Moonraker's old `/web_api/` page, which now
+  404s; repointed to the current reference.
 
 ## [2.0.1] - 2026-06-15
 

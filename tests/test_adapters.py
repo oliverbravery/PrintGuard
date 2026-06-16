@@ -190,6 +190,49 @@ async def test_klipper_actions_and_auth() -> None:
         await INTEGRATIONS["klipper"].send(RecordingHttp(status=400), {"base_url": "http://kl"}, DeviceAction.PAUSE)
 
 
+BAMBU_CONFIG = {"host": "192.168.1.70", "serial": "01S00A", "access_code": "12345678"}
+
+
+@pytest.mark.parametrize(
+    ("gcode_state", "expected"),
+    [
+        ("RUNNING", DeviceStatus.PRINTING),
+        ("PREPARE", DeviceStatus.PRINTING),
+        ("PAUSE", DeviceStatus.PAUSED),
+        ("IDLE", DeviceStatus.IDLE),
+        ("FINISH", DeviceStatus.IDLE),
+        ("FAILED", DeviceStatus.ERROR),
+        ("", DeviceStatus.UNKNOWN),
+    ],
+)
+async def test_bambu_normalises_states(monkeypatch, gcode_state: str, expected: DeviceStatus) -> None:
+    report = {"gcode_state": gcode_state, "mc_percent": 42, "subtask_name": "z.3mf"}
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_pull_report", lambda config: report)
+    state = await INTEGRATIONS["bambu"].fetch_state(None, BAMBU_CONFIG)
+    assert state.status is expected
+    assert state.progress == 42.0
+    assert state.job == "z.3mf"
+
+
+async def test_bambu_silent_printer_is_offline(monkeypatch) -> None:
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_pull_report", lambda config: None)
+    state = await INTEGRATIONS["bambu"].fetch_state(None, BAMBU_CONFIG)
+    assert state.status is DeviceStatus.OFFLINE
+
+
+async def test_bambu_command_payloads(monkeypatch) -> None:
+    published: list[dict[str, Any]] = []
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_publish", lambda config, payload: published.append(payload))
+    for action, command in [(DeviceAction.PAUSE, "pause"), (DeviceAction.RESUME, "resume"), (DeviceAction.CANCEL, "stop")]:
+        await INTEGRATIONS["bambu"].send(None, BAMBU_CONFIG, action)
+        assert published[-1] == {"print": {"sequence_id": "0", "command": command, "param": ""}}
+
+
+def test_bambu_runs_in_hub_mode_only() -> None:
+    assert INTEGRATIONS["bambu"].browser_ok is False
+    assert INTEGRATIONS["octoprint"].browser_ok is True
+
+
 def test_sanitise_clamps_and_defaults() -> None:
     record = sanitise_printer(
         "p1",

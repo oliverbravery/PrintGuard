@@ -61,7 +61,7 @@ export function DetailPanel({ printer }: { printer: Printer }) {
   const camera = engine?.cameras.find((c) => c.id === printer.camera_id);
   const points = history[printer.id] ?? [];
   const score = points.at(-1)?.score ?? 0;
-  const integrations = engine?.integrations ?? [];
+  const integrations = (engine?.integrations ?? []).filter((i) => mode === "hub" || i.browser_ok);
   const meta = integrations.find((i) => i.id === draft.device.provider);
   const linked = Boolean(printer.device.provider);
   const httpsMixedContent =
