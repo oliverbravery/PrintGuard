@@ -23,6 +23,7 @@ from .platform import Frame, Platform
 from .printers import persisted_printer, printer_watching, sanitise_printer
 from .registry import Camera, CameraRegistry
 from .scheduler import Scheduler
+from .tokens import new_token, public_token
 
 STATE_TICK_S = 1.0
 REATTACH_EVERY_TICKS = 10
@@ -40,6 +41,7 @@ class Engine:
         self.platform = platform
         self.registry = CameraRegistry()
         self.printers: dict[str, dict[str, Any]] = {}
+        self.tokens: list[dict[str, Any]] = []
         self.settings: dict[str, Any] = dict(SETTINGS_DEFAULTS)
         self.scheduler = Scheduler(platform, self.registry, self._on_result, self._on_pipeline_error)
         self.monitor = Monitor(self)
@@ -58,12 +60,15 @@ class Engine:
             "device.test": self._cmd_device_test,
             "notify.test": self._cmd_notify_test,
             "settings.update": self._cmd_settings_update,
+            "token.create": self._cmd_token_create,
+            "token.remove": self._cmd_token_remove,
         }
 
     async def start(self) -> None:
         """Restores persisted state and launches the background loops."""
         persisted = self.platform.load_state() or {}
         self.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in persisted.get("settings", {}).items() if k in SETTINGS_DEFAULTS}}
+        self.tokens = list(persisted.get("tokens", []))
         for record in persisted.get("printers", []):
             self.printers[record["id"]] = sanitise_printer(record["id"], record)
         for record in persisted.get("cameras", []):
@@ -123,6 +128,7 @@ class Engine:
             "cameras": [c.public() for c in self.registry.cameras.values()],
             "printers": [{**p, "watching": printer_watching(p)} for p in self.printers.values()],
             "settings": self.settings,
+            "tokens": [public_token(t) for t in self.tokens],
             "stats": self.scheduler.stats(),
             "integrations": integrations_meta(),
             "notifiers": notifiers_meta(),
@@ -131,6 +137,10 @@ class Engine:
     def recent_events(self) -> list[dict[str, Any]]:
         """Returns the retained tail of alert, warning, device and error events."""
         return list(self._recent)
+
+    def token_scopes(self) -> dict[str, str]:
+        """Maps each issued token's secret hash to the scope it grants."""
+        return {token["hash"]: token["scope"] for token in self.tokens}
 
     async def handle(self, message: dict[str, Any]) -> None:
         """Executes a protocol command, emitting an error event on failure."""
@@ -187,6 +197,7 @@ class Engine:
                 "cameras": [c.persisted() for c in self.registry.cameras.values()],
                 "printers": [persisted_printer(p) for p in self.printers.values()],
                 "settings": self.settings,
+                "tokens": self.tokens,
             }
         )
 
@@ -335,3 +346,12 @@ class Engine:
 
     async def _cmd_settings_update(self, message: dict[str, Any]) -> None:
         self.settings = {**self.settings, **{k: v for k, v in message.get("patch", {}).items() if k in SETTINGS_DEFAULTS}}
+
+    async def _cmd_token_create(self, message: dict[str, Any]) -> None:
+        name = str(message.get("name") or "token").strip() or "token"
+        record, secret = new_token(name, message.get("scope") or "read")
+        self.tokens.append(record)
+        self.emit({"event": "token_created", **public_token(record), "token": secret, "req_id": message.get("req_id")})
+
+    async def _cmd_token_remove(self, message: dict[str, Any]) -> None:
+        self.tokens = [token for token in self.tokens if token["id"] != message["id"]]

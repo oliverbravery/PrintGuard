@@ -7,6 +7,26 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-06-16
+
+### Added
+
+- **API & MCP tokens managed from the UI** — issue, name, scope and revoke the bearer
+  tokens that gate the hub's REST API and MCP server directly from **Settings → API & MCP
+  access**, with no restart and nothing to edit in the environment. Generating a token
+  reveals its secret once (a `pg_…` string) and stores only a SHA-256 hash, so it can never
+  be retrieved later — revoke and reissue if one is lost; revoking takes effect
+  immediately. Tokens persist with the rest of the engine state and are managed only over
+  the UI's protocol (behind your auth proxy), never over the API itself, so an agent
+  holding a `manage` token can drive printers and cameras but cannot mint or escalate
+  tokens.
+
+### Removed
+
+- **`PRINTGUARD_API_TOKENS`** — API and MCP tokens are now issued from the dashboard rather
+  than a comma-separated environment variable, which is no longer read. Recreate any tokens
+  you had set in **Settings → API & MCP access**.
+
 ## [2.1.0] - 2026-06-16
 
 ### Added

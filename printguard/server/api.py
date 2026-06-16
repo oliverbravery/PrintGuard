@@ -16,13 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from ..engine.engine import Engine
-
-SCOPE_ORDER = ("read", "control", "manage")
-
-
-def expand_scope(scope: str) -> set[str]:
-    """Returns the cumulative set a granted scope implies."""
-    return set(SCOPE_ORDER[: SCOPE_ORDER.index(scope) + 1])
+from ..engine.tokens import SCOPE_ORDER, expand_scope, hash_secret
 
 
 def route_scope(tags: list[str] | None) -> str:
@@ -34,52 +28,40 @@ def route_scope(tags: list[str] | None) -> str:
 class ApiAuth:
     """Resolves a bearer token to the scopes it grants.
 
-    With no tokens configured the surface trusts whatever fronts it (a reverse
-    proxy or the local network) and grants read access anonymously; control and
-    management stay closed until the operator issues scoped tokens. Once any
-    token exists a valid bearer is required for every request. The internal token
-    authenticates the in-process MCP loopback and always grants full scope
-    without affecting whether operator authentication is required.
+    Tokens are issued and revoked from the UI and live in engine state, so the
+    current set is supplied per request rather than captured here. With none
+    issued the surface trusts whatever fronts it (a reverse proxy or the local
+    network) and grants read access anonymously; control and management stay
+    closed until the operator issues a token. Once any token exists a valid
+    bearer is required for every request. The internal token authenticates the
+    in-process MCP loopback and always grants full scope without affecting
+    whether operator authentication is required.
     """
 
-    def __init__(self, tokens: dict[str, str], internal_token: str | None = None) -> None:
-        self.tokens = tokens
+    def __init__(self, internal_token: str | None = None) -> None:
         self._internal = internal_token
 
-    @property
-    def enabled(self) -> bool:
-        return bool(self.tokens)
-
-    def resolve(self, header: str | None) -> set[str] | None:
+    def resolve(self, header: str | None, tokens: dict[str, str]) -> set[str] | None:
         """Returns the granted scopes, or None when a required token is missing."""
         token = ""
         if header and header.lower().startswith("bearer "):
             token = header[7:].strip()
         if self._internal and token and hmac.compare_digest(self._internal, token):
             return expand_scope("manage")
-        for known, scope in self.tokens.items():
-            if hmac.compare_digest(known, token):
-                return expand_scope(scope)
-        if not self.enabled:
+        if token:
+            digest = hash_secret(token)
+            for known, scope in tokens.items():
+                if hmac.compare_digest(known, digest):
+                    return expand_scope(scope)
+        if not tokens:
             return expand_scope("read")
         return None
-
-
-def parse_tokens(raw: str) -> dict[str, str]:
-    """Parses PRINTGUARD_API_TOKENS ("token:scope,token:scope") into a map."""
-    tokens: dict[str, str] = {}
-    for item in raw.split(","):
-        token, _, scope = item.strip().partition(":")
-        scope = scope.strip() or "read"
-        if token.strip() and scope in SCOPE_ORDER:
-            tokens[token.strip()] = scope
-    return tokens
 
 
 async def scope_guard(request: Request) -> None:
     """Rejects requests whose token does not cover the matched route's scope."""
     auth: ApiAuth = request.app.state.api_auth
-    granted = auth.resolve(request.headers.get("authorization"))
+    granted = auth.resolve(request.headers.get("authorization"), request.app.state.engine.token_scopes())
     if granted is None:
         raise HTTPException(401, "missing or invalid token", {"WWW-Authenticate": "Bearer"})
     required = route_scope(getattr(request.scope.get("route"), "tags", None))

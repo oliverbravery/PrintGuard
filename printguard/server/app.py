@@ -27,7 +27,7 @@ import printguard
 
 from ..engine.engine import Engine
 from ..pysrc import build_pysrc
-from .api import ApiAuth, build_api_app, parse_tokens
+from .api import ApiAuth, build_api_app
 from .mcp import build_mcp_app
 from .platform import ServerPlatform
 from .publish import ChunkStream, remux
@@ -63,10 +63,10 @@ def create_app() -> FastAPI:
     mediamtx_rtsp = os.environ.get("MEDIAMTX_RTSP", "rtsp://localhost:8554").rstrip("/")
     mediamtx_hls = os.environ.get("MEDIAMTX_HLS", "http://localhost:8888")
     allowed_origins = {o.strip().rstrip("/") for o in os.environ.get("PRINTGUARD_ORIGINS", "").split(",") if o.strip()}
-    api_tokens = parse_tokens(os.environ.get("PRINTGUARD_API_TOKENS", ""))
     internal_token = secrets.token_urlsafe(32)
-    api_app = build_api_app(ApiAuth(api_tokens, internal_token))
-    mcp_app = build_mcp_app(api_app, lambda: api_app.state.engine, api_tokens, internal_token)
+    api_auth = ApiAuth(internal_token)
+    api_app = build_api_app(api_auth)
+    mcp_app = build_mcp_app(api_app, lambda: api_app.state.engine, api_auth, internal_token)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
