@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections import deque
 from typing import Any, Callable
 
 from . import vision
@@ -25,6 +26,9 @@ from .scheduler import Scheduler
 
 STATE_TICK_S = 1.0
 REATTACH_EVERY_TICKS = 10
+REQUEST_TIMEOUT_S = 15.0
+RECENT_EVENTS_MAX = 100
+RECENT_EVENT_TYPES = ("alert", "warning", "device", "error")
 
 SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}}
 
@@ -40,6 +44,7 @@ class Engine:
         self.scheduler = Scheduler(platform, self.registry, self._on_result, self._on_pipeline_error)
         self.monitor = Monitor(self)
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
+        self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
         self._tasks: list[asyncio.Task] = []
         self._handlers: dict[str, Any] = {
             "discover": self._cmd_discover,
@@ -102,6 +107,8 @@ class Engine:
 
     def emit(self, event: dict[str, Any]) -> None:
         """Broadcasts an event to every connected transport."""
+        if event.get("event") in RECENT_EVENT_TYPES:
+            self._recent.append(event)
         for sink in list(self._sinks):
             try:
                 sink(event)
@@ -121,6 +128,10 @@ class Engine:
             "notifiers": notifiers_meta(),
         }
 
+    def recent_events(self) -> list[dict[str, Any]]:
+        """Returns the retained tail of alert, warning, device and error events."""
+        return list(self._recent)
+
     async def handle(self, message: dict[str, Any]) -> None:
         """Executes a protocol command, emitting an error event on failure."""
         handler = self._handlers.get(message.get("cmd", ""))
@@ -133,6 +144,42 @@ class Engine:
             self._sync(req_id)
         except Exception as exc:
             self.emit({"event": "error", "message": str(exc), "req_id": req_id})
+
+    async def request(self, message: dict[str, Any], *, timeout: float = REQUEST_TIMEOUT_S) -> list[dict[str, Any]]:
+        """Runs a command and returns the events it produced, raising on failure.
+
+        A correlating req_id is attached, a temporary sink collects every event
+        carrying it, and handle() emits the command's events (the terminal state
+        snapshot, or an error) before it returns. This turns the broadcast
+        protocol into the request/response shape the REST and MCP transports need
+        without duplicating any command logic.
+        """
+        req_id = uuid.uuid4().hex
+        collected: list[dict[str, Any]] = []
+
+        def sink(event: dict[str, Any]) -> None:
+            if event.get("req_id") == req_id:
+                collected.append(event)
+
+        self.add_sink(sink)
+        try:
+            await asyncio.wait_for(self.handle({**message, "req_id": req_id}), timeout)
+        finally:
+            self.remove_sink(sink)
+        for event in collected:
+            if event.get("event") == "error":
+                raise RuntimeError(event.get("message", "command failed"))
+        return collected
+
+    async def snapshot(self, camera_id: str) -> bytes | None:
+        """Encodes the freshest frame of a camera as JPEG, or None if unavailable."""
+        camera = self.registry.get(camera_id)
+        if camera is None or camera.frame_source is None:
+            return None
+        frame = await camera.frame_source.grab()
+        if frame is None:
+            return None
+        return await self.platform.encode_jpeg(frame.rgb)
 
     def _save(self) -> None:
         self.platform.save_state(

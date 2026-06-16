@@ -113,6 +113,25 @@ trusted network — never port-forward the hub's ports directly.
 (recommended — private, live video works), **Cloudflare Tunnel + Access** (public URL,
 zero open ports) and **oauth2-proxy** on your own domain, plus a hardening checklist.
 
+## Agents and developers (MCP & API)
+
+A PrintGuard hub exposes its engine to agents and scripts through the same protocol the
+dashboard uses, so anything the UI can do is automatable.
+
+- **MCP** — point an agent (Claude, an IDE, the
+  [MCP Inspector](https://github.com/modelcontextprotocol/inspector)) at
+  `https://<host>/mcp` (Streamable HTTP). Tools cover printer and camera status, the
+  **current camera frame as an image**, and pause/resume/cancel — plus full management
+  when allowed.
+- **REST** — the versioned API at `/api/v1` gives any HTTP client the same operations;
+  the camera frame is served as `image/jpeg`.
+
+Capability is configurable per token. Set `PRINTGUARD_API_TOKENS` to issue scoped bearer
+tokens — cumulative `read` ⊂ `control` ⊂ `manage` — so an agent only gets the abilities
+you grant it, and MCP hides any tool a token cannot use. With no token set the surface
+stays read-only behind your auth proxy. Full reference, scope matrix and client setup:
+[docs/api.md](docs/api.md).
+
 ## The model
 
 The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained for
@@ -128,6 +147,8 @@ retraining.
 - [docs/architecture.md](docs/architecture.md) — how one engine runs on CPython and in
   the browser, the platform contract, the scheduler and the fail-safe design, with
   diagrams.
+- [docs/api.md](docs/api.md) — the hub's MCP server and REST API: scoped access tokens,
+  every endpoint and tool, and agent/client setup.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, tests, and step-by-step guides for
   adding printer integrations and notification providers (the two easiest ways to
   contribute).
