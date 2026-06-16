@@ -10,6 +10,7 @@ The user must enable LAN Only Mode and then Developer Mode on the printer
 current firmware. The access code is shown on that screen; the serial
 number is under Settings > Device.
 
+Printer-side setup (LAN Only Mode, Developer Mode): https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode
 Protocol reference: https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md
 TLS and command shapes mirror the bambulabs_api client:
 https://github.com/acse-ci223/bambulabs_api/blob/main/bambulabs_api/mqtt_client.py

@@ -1,6 +1,7 @@
 """OctoPrint integration.
 
 API reference: https://docs.octoprint.org/en/master/api/
+Application keys (how the API key is obtained): https://docs.octoprint.org/en/master/bundledplugins/appkeys.html
 """
 
 from __future__ import annotations
@@ -27,6 +28,11 @@ class OctoPrintAdapter(IntegrationAdapter):
     id = "octoprint"
     label = "OctoPrint"
     docs_url = "https://docs.octoprint.org/en/master/api/"
+    setup_url = "https://docs.octoprint.org/en/master/bundledplugins/appkeys.html"
+    setup_hint = (
+        "Copy an application key from OctoPrint under Settings > Application Keys. "
+        "In local mode, also enable CORS under Settings > API."
+    )
     schema = {
         "type": "object",
         "properties": {
