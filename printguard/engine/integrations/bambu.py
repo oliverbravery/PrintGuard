@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import ssl
 import threading
 from typing import Any
 
@@ -96,6 +95,8 @@ class BambuAdapter(IntegrationAdapter):
         await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
 
     def _client(self, config: dict[str, Any]):
+        import ssl
+
         import paho.mqtt.client as mqtt
 
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv311)
