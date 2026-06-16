@@ -30,7 +30,7 @@ flowchart LR
     end
 
     server --- mediamtx["MediaMTX<br/>RTSP / RTMP / HLS"]
-    integrations --- printersvc["OctoPrint / Moonraker"]
+    integrations --- printersvc["OctoPrint / Moonraker / Bambu Lab"]
     notifiers --- push["ntfy / Telegram / Discord"]
 ```
 
@@ -135,7 +135,7 @@ silent `except: pass` anywhere in the alert path.
 ```
 printguard/
   engine/            shared engine — runs on CPython and Pyodide
-    integrations/    printer service adapters (OctoPrint, Klipper, …)
+    integrations/    printer service adapters (OctoPrint, Klipper, Bambu Lab, …)
     notifiers/       alert channel adapters (ntfy, Telegram, Discord, …)
     adapters.py      shared adapter contract (id, label, docs_url, JSON-schema config)
   server/            hub platform: FastAPI, MediaMTX, LiteRT, PyAV

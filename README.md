@@ -22,8 +22,9 @@ Nothing is installed and no frame leaves your device.
 - **Detects** — a compact vision encoder ([≈5 MB](#the-model)) scores every frame for
   print failure, shared fairly across as many cameras as your hardware can sustain.
 - **Acts** — a sustained defect pauses or cancels the print through
-  [OctoPrint](https://octoprint.org) or [Klipper (Moonraker)](https://moonraker.readthedocs.io),
-  with per-printer thresholds, consecutive-detection counts and cooldowns.
+  [OctoPrint](https://octoprint.org), [Klipper (Moonraker)](https://moonraker.readthedocs.io)
+  or [Bambu Lab](https://github.com/Doridian/OpenBambuAPI), with per-printer thresholds,
+  consecutive-detection counts and cooldowns.
 - **Alerts** — the moment a defect holds, a snapshot lands on your phone over
   [ntfy](https://ntfy.sh), [Telegram](https://telegram.org) or [Discord](https://discord.com).
 - **Rests** — printers linked to a service are only watched while they actually print;
@@ -69,10 +70,15 @@ on every release.
 
 ## Printers and notifications
 
-Link a printer to OctoPrint or Klipper from its detail panel, choose what a sustained
-defect should do (alert only, pause, cancel), and test the connection in place. Linked
-printers report job, progress and state on their tiles — and gate inference, so an idle
-printer costs you nothing.
+Link a printer to OctoPrint, Klipper or Bambu Lab from its detail panel, choose what a
+sustained defect should do (alert only, pause, cancel), and test the connection in place.
+Linked printers report job, progress and state on their tiles — and gate inference, so an
+idle printer costs you nothing.
+
+Bambu Lab printers speak MQTT over TLS rather than HTTP, which a browser cannot open, so
+they are offered in **hub mode only**. Put the printer in **LAN Only Mode** (Settings →
+Network) and link it with its IP, serial number and access code — all shown on that same
+screen.
 
 **Running in Docker?** The hub reaches printer services from *inside the container*, so
 `localhost` points at the container, not your host — connections to `http://localhost:5000`

@@ -7,6 +7,17 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-06-16
+
+### Added
+
+- **Bambu Lab printers** — link a printer over its local MQTT API alongside the existing
+  OctoPrint and Klipper services, with the same pause/cancel-on-defect response, job and
+  progress reporting, and inference gating. Put the printer in **LAN Only Mode** and link
+  it with its IP, serial number and access code. The protocol is MQTT over TLS, which
+  needs a raw socket the browser sandbox forbids, so Bambu Lab is offered in **hub mode
+  only** — the same constraint that already makes some notifiers hub-only.
+
 ## [2.0.1] - 2026-06-15
 
 ### Added
