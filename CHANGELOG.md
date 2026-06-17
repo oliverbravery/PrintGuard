@@ -11,6 +11,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
+- **Camera, printer and monitor registries** — printers (OctoPrint, Klipper, Bambu Lab) are
+  now registered once in their own registry, exactly like cameras, then picked from a list;
+  the registry is the only place to create or delete one. A **monitor** binds a registered
+  camera and an optional registered printer and carries the inference thresholds and
+  defect-response policy, so one printer connection can back several monitors and its
+  connection details are entered once instead of re-typed per printer.
 - **Bambu Lab printers** — link a printer over its local MQTT API alongside the existing
   OctoPrint and Klipper services, with the same pause/cancel-on-defect response, job and
   progress reporting, and inference gating. Enable **LAN Only Mode** and **Developer Mode**
@@ -26,8 +32,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   and links to the issue tracker for reports. Bambu Lab carries it.
 - **MCP server and REST API for hub mode** — agents and developers can now drive the
   same engine protocol the dashboard speaks. The Model Context Protocol server
-  (Streamable HTTP, at `/mcp`) lets an agent read printer and camera status, fetch the
-  current camera frame as an image, and pause, resume or cancel a print; the versioned
+  (Streamable HTTP, at `/mcp`) lets an agent read monitor, printer and camera status, fetch
+  the current camera frame as an image, and pause, resume or cancel a print; the versioned
   REST API at `/api/v1` exposes the same operations to any HTTP client, with the frame
   served as `image/jpeg`. Both are thin transports over the existing engine commands, so
   they never drift from the UI. See
@@ -39,6 +45,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   own protocol, never over the API itself. With no token issued the surface is read-only
   behind your existing auth proxy; issuing scoped tokens unlocks control and management, and
   MCP hides any tool a token cannot use.
+
+### Changed
+
+- **The dashboard entity is now a "monitor".** What 2.0 called a printer — a camera bound
+  to a service with thresholds — is a monitor; the printer is the registered service
+  connection it points at. Upgrading from 2.0 preserves registered cameras, but printers
+  must be re-registered and their monitors re-created.
 
 ### Fixed
 

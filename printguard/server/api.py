@@ -75,22 +75,23 @@ def get_engine(request: Request) -> Engine:
     return request.app.state.engine
 
 
-class DeviceConfig(BaseModel):
-    provider: str | None = None
-    config: dict[str, Any] | None = None
-    on_defect: Literal["none", "pause", "cancel"] | None = None
-    cooldown_s: int | None = None
-
-
 class PrinterFields(BaseModel):
     name: str | None = None
+    provider: str | None = None
+    config: dict[str, Any] | None = None
+
+
+class MonitorFields(BaseModel):
+    name: str | None = None
     camera_id: str | None = None
+    printer_id: str | None = None
     enabled: bool | None = None
     threshold: float | None = None
     sensitivity: float | None = None
     consecutive: int | None = None
     notify: bool | None = None
-    device: DeviceConfig | None = None
+    on_defect: Literal["none", "pause", "cancel"] | None = None
+    cooldown_s: int | None = None
 
 
 class CameraSource(BaseModel):
@@ -140,9 +141,8 @@ def _public_config(config: dict[str, Any], adapter: Any) -> dict[str, Any]:
 
 
 def _public_printer(printer: dict[str, Any]) -> dict[str, Any]:
-    device = printer["device"]
-    config = _public_config(device.get("config", {}), INTEGRATIONS.get(device.get("provider") or ""))
-    return {**printer, "device": {**device, "config": config}}
+    config = _public_config(printer.get("config", {}), INTEGRATIONS.get(printer.get("provider") or ""))
+    return {**printer, "config": config}
 
 
 def public_state(engine: Engine) -> dict[str, Any]:
@@ -186,22 +186,50 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
 
     @api.get("/state", operation_id="get_state", tags=["read"])
     async def get_state(engine: Engine = Depends(get_engine)) -> dict[str, Any]:
-        """Returns the full snapshot: cameras, printers, settings and stats."""
+        """Returns the full snapshot: cameras, printers, monitors, settings and stats."""
         return public_state(engine)
+
+    @api.get("/monitors", operation_id="list_monitors", tags=["read"])
+    async def list_monitors(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
+        """Lists every monitor with its camera, linked printer and latest alert."""
+        return public_state(engine)["monitors"]
+
+    @api.get("/monitors/{monitor_id}", operation_id="get_monitor", tags=["read"])
+    async def get_monitor(monitor_id: str, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Returns one monitor's settings, bindings and latest alert."""
+        return _find(public_state(engine)["monitors"], monitor_id, "monitor")
+
+    @api.post("/monitors", operation_id="add_monitor", tags=["manage"])
+    async def add_monitor(body: MonitorFields, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
+        """Creates a monitor binding a camera and an optional printer."""
+        await engine.request({"cmd": "monitor.add", "monitor": body.model_dump(exclude_none=True)})
+        return public_state(engine)["monitors"]
+
+    @api.patch("/monitors/{monitor_id}", operation_id="update_monitor", tags=["manage"])
+    async def update_monitor(monitor_id: str, body: MonitorFields, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Updates a monitor's bindings, thresholds or defect response."""
+        await engine.request({"cmd": "monitor.update", "id": monitor_id, "patch": body.model_dump(exclude_none=True)})
+        return _find(public_state(engine)["monitors"], monitor_id, "monitor")
+
+    @api.delete("/monitors/{monitor_id}", operation_id="remove_monitor", tags=["manage"])
+    async def remove_monitor(monitor_id: str, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
+        """Removes a monitor and returns the updated monitor list."""
+        await engine.request({"cmd": "monitor.remove", "id": monitor_id})
+        return public_state(engine)["monitors"]
 
     @api.get("/printers", operation_id="list_printers", tags=["read"])
     async def list_printers(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
-        """Lists every printer with its live status, progress and current job."""
+        """Lists every registered printer with its live status, progress and job."""
         return public_state(engine)["printers"]
 
     @api.get("/printers/{printer_id}", operation_id="get_printer", tags=["read"])
     async def get_printer(printer_id: str, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
-        """Returns one printer's status, linked camera and latest alert."""
+        """Returns one printer's connection and latest service state."""
         return _find(public_state(engine)["printers"], printer_id, "printer")
 
     @api.post("/printers/{printer_id}/action", operation_id="control_printer", tags=["control"])
     async def control_printer(printer_id: str, body: ActionBody, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
-        """Pauses, resumes or cancels the print through the linked service."""
+        """Pauses, resumes or cancels the print through the printer's service."""
         _find(public_state(engine)["printers"], printer_id, "printer")
         await engine.request({"cmd": "printer.action", "id": printer_id, "action": body.action})
         return _find(public_state(engine)["printers"], printer_id, "printer")
@@ -214,7 +242,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
 
     @api.patch("/printers/{printer_id}", operation_id="update_printer", tags=["manage"])
     async def update_printer(printer_id: str, body: PrinterFields, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
-        """Updates a printer's monitoring settings or linked service."""
+        """Updates a printer's name or connection details."""
         await engine.request({"cmd": "printer.update", "id": printer_id, "patch": body.model_dump(exclude_none=True)})
         return _find(public_state(engine)["printers"], printer_id, "printer")
 
@@ -223,6 +251,12 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         """Removes a printer and returns the updated printer list."""
         await engine.request({"cmd": "printer.remove", "id": printer_id})
         return public_state(engine)["printers"]
+
+    @api.post("/printers/test", operation_id="test_printer", tags=["manage"])
+    async def test_printer(body: ProviderTest, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Checks whether a printer service is reachable with the given config."""
+        events = await engine.request({"cmd": "printer.test", "provider": body.provider, "config": body.config})
+        return next((e for e in events if e.get("event") == "printer_test"), {"ok": False})
 
     @api.get("/cameras", operation_id="list_cameras", tags=["read"])
     async def list_cameras(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
@@ -285,12 +319,6 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         """Updates engine settings such as configured notifiers."""
         await engine.request({"cmd": "settings.update", "patch": body.model_dump(exclude_none=True)})
         return public_state(engine)["settings"]
-
-    @api.post("/integrations/test", operation_id="test_integration", tags=["manage"])
-    async def test_integration(body: ProviderTest, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
-        """Checks whether a printer service is reachable with the given config."""
-        events = await engine.request({"cmd": "device.test", "provider": body.provider, "config": body.config})
-        return next((e for e in events if e.get("event") == "device_test"), {"ok": False})
 
     @api.post("/notifiers/test", operation_id="test_notifier", tags=["manage"])
     async def test_notifier(body: ProviderTest, engine: Engine = Depends(get_engine)) -> dict[str, Any]:

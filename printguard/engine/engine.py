@@ -1,9 +1,9 @@
 """The shared application engine.
 
-Owns the camera registry, printers, scheduler and monitor, and exposes a
-JSON command/event protocol. The UI speaks this protocol over a WebSocket
-in hub mode and over an in-page bridge in local mode; the engine cannot
-tell the difference.
+Owns the camera and printer registries, the monitors, the scheduler and the
+watchdog, and exposes a JSON command/event protocol. The UI speaks this protocol
+over a WebSocket in hub mode and over an in-page bridge in local mode; the engine
+cannot tell the difference.
 """
 
 from __future__ import annotations
@@ -17,13 +17,14 @@ from typing import Any, Callable
 from . import vision
 from .cameras import sanitise_camera
 from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
-from .monitor import Monitor
+from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import Frame, Platform
-from .printers import persisted_printer, printer_watching, sanitise_printer
-from .registry import Camera, CameraRegistry
+from .printers import sanitise_printer
+from .registry import Camera, CameraRegistry, Printer, PrinterRegistry
 from .scheduler import Scheduler
 from .tokens import new_token, public_token
+from .watchdog import Watchdog
 
 STATE_TICK_S = 1.0
 REATTACH_EVERY_TICKS = 10
@@ -39,12 +40,13 @@ class Engine:
 
     def __init__(self, platform: Platform) -> None:
         self.platform = platform
-        self.registry = CameraRegistry()
-        self.printers: dict[str, dict[str, Any]] = {}
+        self.cameras = CameraRegistry()
+        self.printers = PrinterRegistry()
+        self.monitors: dict[str, dict[str, Any]] = {}
         self.tokens: list[dict[str, Any]] = []
         self.settings: dict[str, Any] = dict(SETTINGS_DEFAULTS)
-        self.scheduler = Scheduler(platform, self.registry, self._on_result, self._on_pipeline_error)
-        self.monitor = Monitor(self)
+        self.scheduler = Scheduler(platform, self.cameras, self._on_result, self._on_pipeline_error)
+        self.watchdog = Watchdog(self)
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
         self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
         self._tasks: list[asyncio.Task] = []
@@ -57,7 +59,10 @@ class Engine:
             "printer.update": self._cmd_printer_update,
             "printer.remove": self._cmd_printer_remove,
             "printer.action": self._cmd_printer_action,
-            "device.test": self._cmd_device_test,
+            "printer.test": self._cmd_printer_test,
+            "monitor.add": self._cmd_monitor_add,
+            "monitor.update": self._cmd_monitor_update,
+            "monitor.remove": self._cmd_monitor_remove,
             "notify.test": self._cmd_notify_test,
             "settings.update": self._cmd_settings_update,
             "token.create": self._cmd_token_create,
@@ -70,7 +75,13 @@ class Engine:
         self.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in persisted.get("settings", {}).items() if k in SETTINGS_DEFAULTS}}
         self.tokens = list(persisted.get("tokens", []))
         for record in persisted.get("printers", []):
-            self.printers[record["id"]] = sanitise_printer(record["id"], record)
+            try:
+                printer = sanitise_printer(record["id"], record)
+            except (KeyError, ValueError):
+                continue
+            self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=printer["config"]))
+        for record in persisted.get("monitors", []):
+            self.monitors[record["id"]] = sanitise_monitor(record["id"], record)
         for record in persisted.get("cameras", []):
             settings = sanitise_camera(record["id"], record)
             camera = Camera(
@@ -83,13 +94,13 @@ class Engine:
                 sharpness=settings["sharpness"],
                 crop=settings["crop"],
             )
-            self.registry.add(camera)
+            self.cameras.add(camera)
             asyncio.ensure_future(self._attach(camera))
-        self.registry.sync_in_use(self.printers)
+        self.cameras.sync_in_use(self.monitors, self.printers)
         self._tasks = [
             asyncio.ensure_future(self.scheduler.run()),
-            asyncio.ensure_future(self.monitor.poll_devices()),
-            asyncio.ensure_future(self.monitor.watch_health()),
+            asyncio.ensure_future(self.watchdog.poll_devices()),
+            asyncio.ensure_future(self.watchdog.watch_health()),
             asyncio.ensure_future(self._ticker()),
         ]
 
@@ -97,8 +108,8 @@ class Engine:
         """Cancels background loops and closes every frame source."""
         for task in self._tasks:
             task.cancel()
-        for camera_id in list(self.registry.cameras):
-            self.registry.remove(camera_id)
+        for camera_id in list(self.cameras.items):
+            self.cameras.remove(camera_id)
 
     def add_sink(self, sink: Callable[[dict[str, Any]], None]) -> None:
         """Subscribes a transport to engine events and sends it a snapshot."""
@@ -125,8 +136,9 @@ class Engine:
         return {
             "event": "state",
             "mode": self.platform.mode,
-            "cameras": [c.public() for c in self.registry.cameras.values()],
-            "printers": [{**p, "watching": printer_watching(p)} for p in self.printers.values()],
+            "cameras": [c.public() for c in self.cameras.values()],
+            "printers": [p.public() for p in self.printers.values()],
+            "monitors": [{**m, "watching": monitor_watching(m, self.printers)} for m in self.monitors.values()],
             "settings": self.settings,
             "tokens": [public_token(t) for t in self.tokens],
             "stats": self.scheduler.stats(),
@@ -183,7 +195,7 @@ class Engine:
 
     async def snapshot(self, camera_id: str) -> bytes | None:
         """Encodes the freshest frame of a camera as JPEG, or None if unavailable."""
-        camera = self.registry.get(camera_id)
+        camera = self.cameras.get(camera_id)
         if camera is None or camera.frame_source is None:
             return None
         frame = await camera.frame_source.grab()
@@ -194,15 +206,16 @@ class Engine:
     def _save(self) -> None:
         self.platform.save_state(
             {
-                "cameras": [c.persisted() for c in self.registry.cameras.values()],
-                "printers": [persisted_printer(p) for p in self.printers.values()],
+                "cameras": [c.persisted() for c in self.cameras.values()],
+                "printers": [p.persisted() for p in self.printers.values()],
+                "monitors": [persisted_monitor(m) for m in self.monitors.values()],
                 "settings": self.settings,
                 "tokens": self.tokens,
             }
         )
 
     def _sync(self, req_id: Any = None) -> None:
-        self.registry.sync_in_use(self.printers)
+        self.cameras.sync_in_use(self.monitors, self.printers)
         self._save()
         event = self.state_event()
         if req_id is not None:
@@ -223,7 +236,7 @@ class Engine:
         while True:
             await asyncio.sleep(STATE_TICK_S)
             tick += 1
-            for camera in self.registry.cameras.values():
+            for camera in self.cameras.values():
                 if camera.frame_source is None:
                     if tick % REATTACH_EVERY_TICKS == 0:
                         asyncio.ensure_future(self._attach(camera))
@@ -235,27 +248,27 @@ class Engine:
         self.emit({"event": "error", "message": message})
 
     async def _on_result(self, camera: Camera, frame: Frame, result: dict[str, Any]) -> None:
-        for printer in self.printers.values():
-            if printer["camera_id"] != camera.id or not printer_watching(printer):
+        for monitor in self.monitors.values():
+            if monitor["camera_id"] != camera.id or not monitor_watching(monitor, self.printers):
                 continue
-            score = vision.defect_score(result, printer["sensitivity"])
+            score = vision.defect_score(result, monitor["sensitivity"])
             self.emit(
                 {
                     "event": "result",
-                    "printer_id": printer["id"],
+                    "monitor_id": monitor["id"],
                     "camera_id": camera.id,
                     "score": round(score, 4),
-                    "prediction": "failure" if score >= printer["threshold"] else "success",
+                    "prediction": "failure" if score >= monitor["threshold"] else "success",
                     "margin": round(result.get("margin", 0.0), 4),
                     "ms": self.scheduler.stats()["infer_ms"],
                     "ts": time.time(),
                 }
             )
-            await self.monitor.on_score(printer, frame, score)
+            await self.watchdog.on_score(monitor, frame, score)
 
     async def _cmd_discover(self, message: dict[str, Any]) -> None:
         sources = await self.platform.discover_cameras()
-        registered = {c.source.get("device_id") or c.source.get("path") or c.source.get("url") for c in self.registry.cameras.values()}
+        registered = {c.source.get("device_id") or c.source.get("path") or c.source.get("url") for c in self.cameras.values()}
         fresh = [s for s in sources if (s.get("device_id") or s.get("path") or s.get("url")) not in registered]
         self.emit({"event": "discovered", "sources": fresh, "req_id": message.get("req_id")})
 
@@ -271,10 +284,10 @@ class Engine:
         camera.frame_source = source
         if source.fps > 0:
             camera.max_fps = source.fps
-        self.registry.add(camera)
+        self.cameras.add(camera)
 
     async def _cmd_camera_update(self, message: dict[str, Any]) -> None:
-        camera = self.registry.get(message["id"])
+        camera = self.cameras.get(message["id"])
         if not camera:
             raise KeyError(f"no camera {message['id']}")
         settings = sanitise_camera(
@@ -290,49 +303,70 @@ class Engine:
         camera.crop = settings["crop"]
 
     async def _cmd_camera_remove(self, message: dict[str, Any]) -> None:
-        camera = self.registry.remove(message["id"])
+        camera = self.cameras.remove(message["id"])
         if camera:
             await self.platform.release_camera(camera.id, camera.source)
-        for printer in self.printers.values():
-            if printer["camera_id"] == message["id"]:
-                printer["camera_id"] = ""
+        for monitor in self.monitors.values():
+            if monitor["camera_id"] == message["id"]:
+                monitor["camera_id"] = ""
 
     async def _cmd_printer_add(self, message: dict[str, Any]) -> None:
         printer_id = uuid.uuid4().hex[:8]
-        self.printers[printer_id] = sanitise_printer(printer_id, message.get("printer", {}))
+        record = sanitise_printer(printer_id, message.get("printer", {}))
+        self.printers.add(Printer(id=printer_id, name=record["name"], provider=record["provider"], config=record["config"]))
 
     async def _cmd_printer_update(self, message: dict[str, Any]) -> None:
         existing = self.printers.get(message["id"])
         if not existing:
             raise KeyError(f"no printer {message['id']}")
-        updated = sanitise_printer(message["id"], message.get("patch", {}), existing)
-        if updated["device"].get("provider") != existing["device"].get("provider"):
-            updated.pop("device_state", None)
-        self.printers[message["id"]] = updated
+        record = sanitise_printer(existing.id, message.get("patch", {}), existing.persisted())
+        if record["provider"] != existing.provider:
+            existing.device_state = None
+        existing.name = record["name"]
+        existing.provider = record["provider"]
+        existing.config = record["config"]
 
     async def _cmd_printer_remove(self, message: dict[str, Any]) -> None:
-        self.printers.pop(message["id"], None)
+        self.printers.remove(message["id"])
+        for monitor in self.monitors.values():
+            if monitor.get("printer_id") == message["id"]:
+                monitor["printer_id"] = ""
 
     async def _cmd_printer_action(self, message: dict[str, Any]) -> None:
-        printer = self.printers[message["id"]]
-        adapter = INTEGRATIONS.get(printer["device"].get("provider") or "")
+        printer = self.printers.get(message["id"])
+        if not printer:
+            raise KeyError(f"no printer {message['id']}")
+        adapter = INTEGRATIONS.get(printer.provider)
         if not adapter:
             raise RuntimeError("no printer service linked")
-        await adapter.send(self.platform.http, printer["device"]["config"], DeviceAction(message["action"]))
-        state = await adapter.fetch_state(self.platform.http, printer["device"]["config"])
-        printer["device_state"] = state.public()
-        self.emit({"event": "device", "printer_id": printer["id"], **printer["device_state"]})
+        await adapter.send(self.platform.http, printer.config, DeviceAction(message["action"]))
+        state = await adapter.fetch_state(self.platform.http, printer.config)
+        printer.device_state = state.public()
+        self.emit({"event": "device", "printer_id": printer.id, **printer.device_state})
 
-    async def _cmd_device_test(self, message: dict[str, Any]) -> None:
+    async def _cmd_printer_test(self, message: dict[str, Any]) -> None:
         adapter = INTEGRATIONS.get(message.get("provider") or "")
         if not adapter:
             raise RuntimeError(f"unknown provider {message.get('provider')!r}")
         try:
             state = await adapter.fetch_state(self.platform.http, message.get("config", {}))
             ok = state.status.value not in ("offline", "unknown")
-            self.emit({"event": "device_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
+            self.emit({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
         except Exception as exc:
-            self.emit({"event": "device_test", "ok": False, "status": None, "error": str(exc), "req_id": message.get("req_id")})
+            self.emit({"event": "printer_test", "ok": False, "status": None, "error": str(exc), "req_id": message.get("req_id")})
+
+    async def _cmd_monitor_add(self, message: dict[str, Any]) -> None:
+        monitor_id = uuid.uuid4().hex[:8]
+        self.monitors[monitor_id] = sanitise_monitor(monitor_id, message.get("monitor", {}))
+
+    async def _cmd_monitor_update(self, message: dict[str, Any]) -> None:
+        existing = self.monitors.get(message["id"])
+        if not existing:
+            raise KeyError(f"no monitor {message['id']}")
+        self.monitors[message["id"]] = sanitise_monitor(message["id"], message.get("patch", {}), existing)
+
+    async def _cmd_monitor_remove(self, message: dict[str, Any]) -> None:
+        self.monitors.pop(message["id"], None)
 
     async def _cmd_notify_test(self, message: dict[str, Any]) -> None:
         adapter = NOTIFIERS.get(message.get("provider") or "")

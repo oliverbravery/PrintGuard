@@ -1,14 +1,14 @@
-"""Shared fixtures: tests may shrink the monitor's timing constants
+"""Shared fixtures: tests may shrink the watchdog's timing constants
 (poll intervals, grace periods) to run fast; restore them afterwards so
 test order can never matter.
 """
 
 import pytest
 
-from printguard.engine import monitor
+from printguard.engine import watchdog
 
 _TIMING_DEFAULTS = {
-    name: getattr(monitor, name)
+    name: getattr(watchdog, name)
     for name in (
         "DEVICE_POLL_S",
         "NOTIFY_COOLDOWN_S",
@@ -25,4 +25,4 @@ _TIMING_DEFAULTS = {
 def restore_timing_constants():
     yield
     for name, value in _TIMING_DEFAULTS.items():
-        setattr(monitor, name, value)
+        setattr(watchdog, name, value)

@@ -12,14 +12,24 @@ from printguard.engine.engine import Engine
 from printguard.server.api import ApiAuth, build_api_app
 from printguard.server.mcp import build_mcp
 
-READ_TOOLS = {"get_state", "list_printers", "get_printer", "list_cameras", "get_camera", "get_camera_frame", "recent_events"}
+READ_TOOLS = {
+    "get_state",
+    "list_monitors",
+    "get_monitor",
+    "list_printers",
+    "get_printer",
+    "list_cameras",
+    "get_camera",
+    "get_camera_frame",
+    "recent_events",
+}
 
 
 async def _server():
     engine = Engine(FakePlatform())
     await engine.start()
     await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 10.0}})
-    camera_id = next(iter(engine.registry.cameras))
+    camera_id = next(iter(engine.cameras.items))
     auth = ApiAuth(internal_token="INT")
     app = build_api_app(auth)
     app.state.engine = engine
@@ -32,6 +42,7 @@ async def test_full_tool_set_is_derived_with_scope_tags() -> None:
     try:
         assert (await mcp.get_tool("control_printer")).tags == {"control"}
         assert (await mcp.get_tool("add_printer")).tags == {"manage"}
+        assert (await mcp.get_tool("add_monitor")).tags == {"manage"}
         assert (await mcp.get_tool("get_camera_frame")).tags == {"read"}
     finally:
         await engine.stop()

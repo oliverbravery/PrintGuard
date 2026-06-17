@@ -23,7 +23,7 @@ Nothing is installed and no frame leaves your device.
   print failure, shared fairly across as many cameras as your hardware can sustain.
 - **Acts** — a sustained defect pauses or cancels the print through
   [OctoPrint](https://octoprint.org), [Klipper (Moonraker)](https://moonraker.readthedocs.io)
-  or [Bambu Lab](https://github.com/Doridian/OpenBambuAPI), with per-printer thresholds,
+  or [Bambu Lab](https://github.com/Doridian/OpenBambuAPI), with per-monitor thresholds,
   consecutive-detection counts and cooldowns.
 - **Alerts** — the moment a defect holds, a snapshot lands on your phone over
   [ntfy](https://ntfy.sh), [Telegram](https://telegram.org) or [Discord](https://discord.com).
@@ -44,7 +44,8 @@ curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/medi
 docker compose up -d
 ```
 
-Open `http://<host>:8000`, pick a mode, register a camera, add a printer. Images for
+Open `http://<host>:8000`, pick a mode, register a camera, register your printer, then add
+a monitor that binds them. Images for
 `amd64` and `arm64` (Raspberry Pi 4/5) are published to
 [`ghcr.io/oliverbravery/printguard`](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
 on every release.
@@ -70,10 +71,11 @@ on every release.
 
 ## Printers and notifications
 
-Link a printer to OctoPrint, Klipper or Bambu Lab from its detail panel, choose what a
-sustained defect should do (alert only, pause, cancel), and test the connection in place.
-Linked printers report job, progress and state on their tiles — and gate inference, so an
-idle printer costs you nothing.
+Register a printer — OctoPrint, Klipper or Bambu Lab — in the printer registry and test the
+connection there, then bind it to a monitor. A monitor's detail panel chooses what a
+sustained defect should do (alert only, pause, cancel). Linked printers report job,
+progress and state on the monitors that use them — and gate inference, so an idle printer
+costs you nothing.
 
 Bambu Lab printers speak MQTT over TLS rather than HTTP, which a browser cannot open, so
 they are offered in **hub mode only**. On the printer, enable **LAN Only Mode** then
@@ -139,7 +141,7 @@ The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained 
 few-shot FDM fault detection in
 [Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection)
 (with an accompanying technical paper). `models/` holds the TFLite export, normalisation
-metadata and class prototypes. Sensitivity and threshold sliders per printer map straight
+metadata and class prototypes. Sensitivity and threshold sliders per monitor map straight
 onto the prototype distances, so you can tune for your camera and lighting without
 retraining.
 

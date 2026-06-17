@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import type { Printer } from "../types";
+import type { Monitor } from "../types";
 import { Feed } from "./Feed";
-import { DeviceChip } from "./PrinterTile";
+import { DeviceChip } from "./MonitorTile";
 import { RiskGauge } from "./RiskGauge";
-import { SchemaForm } from "./SchemaForm";
 import { Sparkline } from "./Sparkline";
 import { Toggle } from "./Toggle";
 
@@ -43,35 +42,30 @@ function Slider({
   );
 }
 
-export function DetailPanel({ printer }: { printer: Printer }) {
-  const { engine, history, send, openDetail, deviceTest, testing, testDevice, isPending, mode } = useStore();
-  const [draft, setDraft] = useState(printer);
+export function DetailPanel({ monitor }: { monitor: Monitor }) {
+  const { engine, history, send, openDetail, openDialog, isPending } = useStore();
+  const [draft, setDraft] = useState(monitor);
   const actionRef = useRef<string | null>(null);
   const saveRef = useRef<string | null>(null);
-  useEffect(() => setDraft(printer), [printer.id]);
+  useEffect(() => setDraft(monitor), [monitor.id]);
 
-  const updating = isPending("printer.update");
-  const removing = isPending("printer.remove");
+  const updating = isPending("monitor.update");
+  const removing = isPending("monitor.remove");
 
   useEffect(() => {
-    if (saveRef.current === "printer.update" && !updating) close();
-    if (saveRef.current === "printer.remove" && !removing) close();
+    if (saveRef.current === "monitor.update" && !updating) close();
+    if (saveRef.current === "monitor.remove" && !removing) close();
   }, [updating, removing]);
 
-  const camera = engine?.cameras.find((c) => c.id === printer.camera_id);
-  const points = history[printer.id] ?? [];
+  const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
+  const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
+  const printers = engine?.printers ?? [];
+  const points = history[monitor.id] ?? [];
   const score = points.at(-1)?.score ?? 0;
-  const integrations = (engine?.integrations ?? []).filter((i) => mode === "hub" || i.browser_ok);
-  const meta = integrations.find((i) => i.id === draft.device.provider);
-  const linked = Boolean(printer.device.provider);
-  const httpsMixedContent =
-    mode === "local" &&
-    location.protocol === "https:" &&
-    Object.values(draft.device.config).some((v) => v.startsWith("http://"));
+  const linked = Boolean(printer);
   const close = () => openDetail(null);
 
-  const patch = (fields: Partial<Printer>) => setDraft((d) => ({ ...d, ...fields }));
-  const patchDevice = (fields: Partial<Printer["device"]>) => setDraft((d) => ({ ...d, device: { ...d.device, ...fields } }));
+  const patch = (fields: Partial<Monitor>) => setDraft((d) => ({ ...d, ...fields }));
 
   return (
     <div className="backdrop" onClick={close}>
@@ -80,9 +74,9 @@ export function DetailPanel({ printer }: { printer: Printer }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 z-10 bg-ink-1/95 backdrop-blur-sm flex items-center gap-2.5 px-5 py-3.5 border-b border-line-0">
-          <span className={`led ${printer.alert ? "led-bad" : camera?.inferring ? "led-infer" : printer.watching && camera?.online ? "led-on" : "led-off"}`} />
-          <h2 className="display text-lg font-semibold flex-1 truncate">{printer.name}</h2>
-          <DeviceChip state={printer.device_state} />
+          <span className={`led ${monitor.alert ? "led-bad" : camera?.inferring ? "led-infer" : monitor.watching && camera?.online ? "led-on" : "led-off"}`} />
+          <h2 className="display text-lg font-semibold flex-1 truncate">{monitor.name}</h2>
+          <DeviceChip state={printer?.device_state ?? undefined} />
           <button className="text-text-2 hover:text-accent text-2xl leading-none cursor-pointer" onClick={close}>
             ×
           </button>
@@ -92,19 +86,19 @@ export function DetailPanel({ printer }: { printer: Printer }) {
 
         <Section title="Live risk">
           <div className="flex items-center gap-4">
-            <RiskGauge score={score} threshold={printer.threshold} size={84} />
+            <RiskGauge score={score} threshold={monitor.threshold} size={84} />
             <div className="flex-1">
-              <Sparkline points={points} threshold={printer.threshold} />
+              <Sparkline points={points} threshold={monitor.threshold} />
             </div>
           </div>
-          {printer.alert && (
+          {monitor.alert && (
             <p className="mono text-[0.7rem] text-bad mt-2">
-              defect at {(printer.alert.score * 100).toFixed(0)}% — action: {printer.alert.action}
+              defect at {(monitor.alert.score * 100).toFixed(0)}% — action: {monitor.alert.action}
             </p>
           )}
         </Section>
 
-        {linked && (
+        {linked && printer && (
           <Section title="Printer control">
             <div className="grid grid-cols-3 gap-2">
               {(["pause", "resume", "cancel"] as const).map((action) => {
@@ -132,10 +126,10 @@ export function DetailPanel({ printer }: { printer: Printer }) {
 
         <Section title="Monitoring">
           <div className="space-y-4">
-            <Toggle label="Watch this printer" on={draft.enabled} onChange={(v) => patch({ enabled: v })} />
-            {printer.enabled && printer.watching === false && (
+            <Toggle label="Watch this monitor" on={draft.enabled} onChange={(v) => patch({ enabled: v })} />
+            {monitor.enabled && monitor.watching === false && (
               <p className="mono text-[0.7rem] text-text-2">
-                standby — printer is {printer.device_state?.status ?? "not printing"}; inference resumes when it prints
+                standby — printer is {printer?.device_state?.status ?? "not printing"}; inference resumes when it prints
               </p>
             )}
             <label className="block">
@@ -172,7 +166,7 @@ export function DetailPanel({ printer }: { printer: Printer }) {
           <div className="space-y-4">
             <label className="block">
               <span className="label block mb-1">On sustained defect</span>
-              <select className="field" value={draft.device.on_defect} onChange={(e) => patchDevice({ on_defect: e.target.value as Printer["device"]["on_defect"] })}>
+              <select className="field" value={draft.on_defect} onChange={(e) => patch({ on_defect: e.target.value as Monitor["on_defect"] })}>
                 <option value="none">Alert only</option>
                 <option value="pause">Pause the print</option>
                 <option value="cancel">Cancel the print</option>
@@ -181,68 +175,34 @@ export function DetailPanel({ printer }: { printer: Printer }) {
             <label className="block">
               <div className="flex justify-between mb-1">
                 <span className="label">Cooldown (seconds)</span>
-                <span className="mono text-[0.72rem]">{draft.device.cooldown_s}</span>
+                <span className="mono text-[0.72rem]">{draft.cooldown_s}</span>
               </div>
               <input
                 type="range"
                 min={0}
                 max={600}
                 step={10}
-                value={draft.device.cooldown_s}
-                onChange={(e) => patchDevice({ cooldown_s: Number(e.target.value) })}
+                value={draft.cooldown_s}
+                onChange={(e) => patch({ cooldown_s: Number(e.target.value) })}
               />
             </label>
             <Toggle label="Push notifications" on={draft.notify} onChange={(v) => patch({ notify: v })} />
           </div>
         </Section>
 
-        <Section title="Printer service">
-          <div className="space-y-4">
-            <select
-              className="field"
-              value={draft.device.provider ?? ""}
-              onChange={(e) => patchDevice({ provider: e.target.value || null, config: {} })}
-            >
-              <option value="">Not linked</option>
-              {integrations.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.label}
+        <Section title="Printer">
+          <div className="space-y-3">
+            <select className="field" value={draft.printer_id} onChange={(e) => patch({ printer_id: e.target.value })}>
+              <option value="">No printer (alerts only)</option>
+              {printers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
                 </option>
               ))}
             </select>
-            {meta && (
-              <>
-                <SchemaForm meta={meta} value={draft.device.config} onChange={(config) => patchDevice({ config })} />
-                {httpsMixedContent && (
-                  <p className="text-xs leading-snug text-warn break-words">
-                    PrintGuard is served over HTTPS, so the browser blocks this http:// address as mixed content in
-                    local mode. Switch to hub mode, or use an https:// printer URL —{" "}
-                    <a
-                      href="https://github.com/oliverbravery/PrintGuard#printers-and-notifications"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline hover:text-accent"
-                    >
-                      see the docs
-                    </a>
-                    .
-                  </p>
-                )}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <button className="btn" disabled={testing} onClick={() => testDevice(meta.id, draft.device.config)}>
-                      {testing ? "Testing…" : "Test connection"}
-                    </button>
-                    {deviceTest?.ok && <span className="chip chip-ok">ok — {deviceTest.status}</span>}
-                  </div>
-                  {deviceTest && !deviceTest.ok && (
-                    <p className="text-xs leading-snug text-bad break-words">
-                      {deviceTest.error || deviceTest.status || "failed"}
-                    </p>
-                  )}
-                </div>
-              </>
-            )}
+            <button className="btn w-full !py-1.5" onClick={() => openDialog("printers")}>
+              Manage printer registry
+            </button>
           </div>
         </Section>
 
@@ -251,8 +211,8 @@ export function DetailPanel({ printer }: { printer: Printer }) {
             className="btn btn-primary flex-1"
             disabled={updating}
             onClick={() => {
-              saveRef.current = "printer.update";
-              send({ cmd: "printer.update", id: printer.id, patch: draft });
+              saveRef.current = "monitor.update";
+              send({ cmd: "monitor.update", id: monitor.id, patch: draft });
             }}
           >
             {updating ? "Saving…" : "Save"}
@@ -261,8 +221,8 @@ export function DetailPanel({ printer }: { printer: Printer }) {
             className="btn btn-danger"
             disabled={removing}
             onClick={() => {
-              saveRef.current = "printer.remove";
-              send({ cmd: "printer.remove", id: printer.id });
+              saveRef.current = "monitor.remove";
+              send({ cmd: "monitor.remove", id: monitor.id });
             }}
           >
             {removing ? "Deleting…" : "Delete"}

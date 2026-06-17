@@ -28,9 +28,9 @@ from ..engine.engine import Engine
 from .api import ApiAuth, route_scope
 
 INSTRUCTIONS = (
-    "Monitor and control 3D printers through PrintGuard. Read printer and camera "
-    "status, fetch the current camera frame as an image to judge a print, and "
-    "pause, resume or cancel a print through its linked service."
+    "Monitor and control 3D printers through PrintGuard. Read monitor, printer and "
+    "camera status, fetch the current camera frame as an image to judge a print, and "
+    "pause, resume or cancel a print through its printer service."
 )
 
 
