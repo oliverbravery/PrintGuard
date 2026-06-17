@@ -14,9 +14,10 @@ flowchart LR
     store <-- "JSON commands / events" --> engine
 
     subgraph engine["printguard/engine (shared Python)"]
-        registry["camera registry"]
+        registry["camera + printer registries"]
+        monitors["monitors (camera + printer)"]
         scheduler["fair scheduler"]
-        monitor["monitor + watchdog"]
+        watchdog["watchdog (defect response)"]
         vision["vision (preprocess / classify)"]
         integrations["integration adapters"]
         notifiers["notifier adapters"]
@@ -56,13 +57,18 @@ runtime service, extend the Platform contract on both sides.
 ## The protocol
 
 Commands (UI → engine): `discover`, `camera.add/update/remove`,
-`printer.add/update/remove`, `printer.action`, `device.test`, `notify.test`,
-`settings.update`. Every command may carry a `req_id`, echoed on the responding event so
-the UI can resolve pending requests.
+`printer.add/update/remove`, `printer.action`, `printer.test`,
+`monitor.add/update/remove`, `notify.test`, `settings.update`. Every command may carry a
+`req_id`, echoed on the responding event so the UI can resolve pending requests.
+
+A **camera** is a video source and a **printer** is a control-service connection
+(OctoPrint/Klipper/Bambu); both are registered resources, created and deleted only in
+their registry. A **monitor** binds one of each (the printer is optional) and carries the
+inference thresholds and defect-response policy.
 
 Events (engine → UI): a full `state` snapshot (on connect, after every command, and on a
 1 s ticker), plus incremental `result`, `alert`, `warning`, `device`, `discovered`,
-`device_test`, `notify_test` and `error` events.
+`printer_test`, `notify_test` and `error` events.
 
 ## The programmatic surface (hub only)
 
@@ -103,39 +109,39 @@ MediaMTX bursts the buffered GOP on RTSP connect, so stream fps istrusted from t
 sequenceDiagram
     participant S as Scheduler
     participant P as Platform
-    participant M as Monitor
+    participant W as Watchdog
     participant I as Integration adapter
     participant N as Notifier adapters
 
     S->>P: grab freshest frame, infer()
     P-->>S: classification result
-    S->>M: on_score(printer, frame, score)
+    S->>W: on_score(monitor, frame, score)
     alt score ≥ threshold for N consecutive frames
-        M->>I: pause / cancel (retried on failure)
-        I-->>M: ok, or "failed" after retries
-        M-->>M: emit alert event (action included)
-        M->>N: snapshot + outcome to every enabled channel
+        W->>I: pause / cancel the linked printer (retried on failure)
+        I-->>W: ok, or "failed" after retries
+        W-->>W: emit alert event (action included)
+        W->>N: snapshot + outcome to every enabled channel
     else score below threshold
-        M-->>M: streak and alert reset
+        W-->>W: streak and alert reset
     end
 ```
 
-A failed device action is retried, then reported in the alert, the UI error feed and the push notification.
+A failed printer action is retried, then reported in the alert, the UI error feed and the push notification.
 
 ## Failing safely
 
-A printer's **watching** state gates inference
-([`printers.printer_watching`](../printguard/engine/printers.py)):
+A monitor's **watching** state gates inference
+([`monitors.monitor_watching`](../printguard/engine/monitors.py)):
 
-| Linked service reports | Watched? | Why |
+| Linked printer reports | Watched? | Why |
 |---|---|---|
-| no service linked | yes | nothing to gate on |
+| no printer linked | yes | nothing to gate on |
 | `printing` | yes | the job needs eyes |
 | no state yet / `unknown` | yes | can't tell → watch |
 | `offline` (unreachable) | yes | losing the signal must not stop monitoring |
 | `idle` / `paused` / `error` | no (standby) | positively not printing |
 
-Only a *positive* "not printing" stands inference down. The monitor's watchdog loop then
+Only a *positive* "not printing" stands inference down. The watchdog loop then
 keeps the whole pipeline honest — each sustained condition warns exactly once (after a
 grace period, so reconnecting sources don't flap) and announces recovery:
 
@@ -153,6 +159,10 @@ silent `except: pass` anywhere in the alert path.
 ```
 printguard/
   engine/            shared engine — runs on CPython and Pyodide
+    registry.py      camera + printer registries (registered resources)
+    monitors.py      monitor config: a camera + printer pairing and its thresholds
+    printers.py      registered-printer (integration connection) validation
+    watchdog.py      defect response: streaks, printer actions, notifications, health
     integrations/    printer service adapters (OctoPrint, Klipper, Bambu Lab, …)
     notifiers/       alert channel adapters (ntfy, Telegram, Discord, …)
     adapters.py      shared adapter contract (id, label, docs_url, JSON-schema config)

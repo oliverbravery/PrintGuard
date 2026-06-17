@@ -8,25 +8,33 @@ from contextlib import asynccontextmanager
 
 from fakes import FakePlatform
 
-from printguard.engine import monitor
+from printguard.engine import watchdog
 from printguard.engine.engine import Engine
+
+OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
 
 
 @asynccontextmanager
 async def running_engine(platform: FakePlatform, camera_fps: list[float]):
-    """Starts an engine with one printer per camera and guarantees stop()."""
+    """Starts an engine with one monitor per camera and guarantees stop()."""
     engine = Engine(platform)
     events: list[dict] = []
     await engine.start()
     engine.add_sink(events.append)
     for fps in camera_fps:
         await engine.handle({"cmd": "camera.add", "name": f"cam{fps}", "source": {"kind": "fake", "fps": fps}})
-    for camera in engine.registry.cameras.values():
-        await engine.handle({"cmd": "printer.add", "printer": {"name": f"p-{camera.name}", "camera_id": camera.id}})
+    for camera in engine.cameras.values():
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": f"m-{camera.name}", "camera_id": camera.id}})
     try:
         yield engine, events
     finally:
         await engine.stop()
+
+
+async def _register_printer(engine: Engine) -> str:
+    """Registers an OctoPrint printer and returns its id."""
+    await engine.handle({"cmd": "printer.add", "printer": {"name": "P", **OCTOPRINT}})
+    return next(iter(engine.printers.items))
 
 
 async def test_fair_allocation_and_dedup() -> None:
@@ -41,7 +49,7 @@ async def test_fair_allocation_and_dedup() -> None:
 
         engine.scheduler._on_result = spy
         await asyncio.sleep(5.0)
-        names = {cid: camera.name for cid, camera in engine.registry.cameras.items()}
+        names = {camera.id: camera.name for camera in engine.cameras.values()}
         capacity = engine.scheduler.capacity_fps()
 
     # Generous bands: shared CI runners skew wall-clock timing, and a
@@ -62,7 +70,7 @@ async def test_fair_allocation_and_dedup() -> None:
 async def test_defect_pipeline() -> None:
     platform = FakePlatform(infer_s=0.02, failing=True)
     async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
-        printer_id = next(iter(engine.printers))
+        monitor_id = next(iter(engine.monitors))
         await engine.handle(
             {
                 "cmd": "settings.update",
@@ -75,18 +83,12 @@ async def test_defect_pipeline() -> None:
                 },
             }
         )
+        printer_id = await _register_printer(engine)
         await engine.handle(
-            {
-                "cmd": "printer.update",
-                "id": printer_id,
-                "patch": {
-                    "notify": True,
-                    "device": {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}, "on_defect": "pause"},
-                },
-            }
+            {"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True, "printer_id": printer_id, "on_defect": "pause"}}
         )
         await asyncio.sleep(2.0)
-        state_printers = engine.state_event()["printers"]
+        state_monitors = engine.state_event()["monitors"]
 
     alerts = [e for e in events if e.get("event") == "alert"]
     assert alerts, "no alert emitted for sustained defect"
@@ -94,56 +96,45 @@ async def test_defect_pipeline() -> None:
     assert any("/api/job" in url for _, url in platform.http_calls), "OctoPrint pause was never sent"
     results = [e for e in events if e.get("event") == "result"]
     assert results and all(r["prediction"] == "failure" for r in results)
-    assert state_printers[0]["alert"], "alert missing from state"
+    assert state_monitors[0]["alert"], "alert missing from state"
     assert ("PUT", "http://ntfy/topic") in platform.http_calls, "ntfy alert was never delivered"
     assert any("api.telegram.org" in url and url.endswith("/sendPhoto") for _, url in platform.http_calls), "Telegram alert was never delivered"
     assert ("POST", "http://disc/hook") in platform.http_calls, "Discord alert was never delivered"
 
 
 async def test_standby_gating() -> None:
-    monitor.DEVICE_POLL_S = 0.1
+    watchdog.DEVICE_POLL_S = 0.1
     platform = FakePlatform(infer_s=0.02, failing=True)
     platform.device_status = "Operational"
     async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
-        printer_id = next(iter(engine.printers))
-        await engine.handle(
-            {
-                "cmd": "printer.update",
-                "id": printer_id,
-                "patch": {"device": {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}},
-            }
-        )
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
         await asyncio.sleep(1.0)
-        assert not engine.state_event()["printers"][0]["watching"], "idle printer should be in standby"
-        assert not engine.registry.schedulable(), "standby printer's camera should not be scheduled"
+        assert not engine.state_event()["monitors"][0]["watching"], "idle printer should be in standby"
+        assert not engine.cameras.schedulable(), "standby monitor's camera should not be scheduled"
         results_during_standby = len([e for e in events if e.get("event") == "result"])
 
         platform.device_status = "Printing"
         await asyncio.sleep(1.0)
-        assert engine.state_event()["printers"][0]["watching"], "printing printer should be watched"
+        assert engine.state_event()["monitors"][0]["watching"], "printing printer should be watched"
         resumed = len([e for e in events if e.get("event") == "result"]) - results_during_standby
     assert resumed > 0, "inference did not resume when printing started"
 
 
 async def test_watchdog_and_failed_action() -> None:
-    monitor.DEVICE_POLL_S = 0.1
-    monitor.WATCH_TICK_S = 0.05
-    monitor.OFFLINE_GRACE_S = 0.2
-    monitor.ACT_RETRY_S = 0.01
+    watchdog.DEVICE_POLL_S = 0.1
+    watchdog.WATCH_TICK_S = 0.05
+    watchdog.OFFLINE_GRACE_S = 0.2
+    watchdog.ACT_RETRY_S = 0.01
     platform = FakePlatform(infer_s=0.02, failing=True)
     platform.reject_actions = True
     async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
-        printer_id = next(iter(engine.printers))
+        monitor_id = next(iter(engine.monitors))
         await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        printer_id = await _register_printer(engine)
         await engine.handle(
-            {
-                "cmd": "printer.update",
-                "id": printer_id,
-                "patch": {
-                    "notify": True,
-                    "device": {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}, "on_defect": "pause"},
-                },
-            }
+            {"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True, "printer_id": printer_id, "on_defect": "pause"}}
         )
         await asyncio.sleep(1.0)
         alerts = [e for e in events if e.get("event") == "alert"]
@@ -151,7 +142,7 @@ async def test_watchdog_and_failed_action() -> None:
         errors = [e for e in events if e.get("event") == "error"]
         assert any("pause failed" in e["message"] for e in errors), "failed action did not emit an error event"
 
-        camera = next(iter(engine.registry.cameras.values()))
+        camera = next(iter(engine.cameras.values()))
         camera.frame_source.online = False
         await asyncio.sleep(0.6)
         warnings = [e for e in events if e.get("event") == "warning" and not e["recovered"]]
@@ -170,7 +161,7 @@ async def test_protocol_surfaces_errors_and_filters_settings() -> None:
         await engine.handle({"cmd": "nope", "req_id": 7})
         assert any(e["event"] == "error" and "unknown command" in e["message"] for e in events)
 
-        await engine.handle({"cmd": "printer.update", "id": "missing", "patch": {}, "req_id": 8})
+        await engine.handle({"cmd": "monitor.update", "id": "missing", "patch": {}, "req_id": 8})
         assert any(e["event"] == "error" and e.get("req_id") == 8 for e in events)
 
         await engine.handle({"cmd": "settings.update", "patch": {"bogus": 1, "notifiers": {"ntfy": {"url": "u"}}}})
@@ -178,43 +169,34 @@ async def test_protocol_surfaces_errors_and_filters_settings() -> None:
         assert engine.settings["notifiers"] == {"ntfy": {"url": "u"}}
 
 
-async def test_provider_change_clears_stale_device_state() -> None:
+async def test_provider_change_clears_stale_printer_state() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
-        printer_id = next(iter(engine.printers))
-        await engine.handle(
-            {
-                "cmd": "printer.update",
-                "id": printer_id,
-                "patch": {"device": {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}},
-            }
-        )
-        engine.printers[printer_id]["device_state"] = {"status": "printing", "progress": 1.0, "job": None}
-        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"threshold": 0.9}})
-        assert engine.printers[printer_id]["device_state"]["status"] == "printing", "same provider must keep its state"
+        printer_id = await _register_printer(engine)
+        engine.printers.get(printer_id).device_state = {"status": "printing", "progress": 1.0, "job": None}
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"name": "Renamed"}})
+        assert engine.printers.get(printer_id).device_state["status"] == "printing", "same provider must keep its state"
 
-        await engine.handle(
-            {
-                "cmd": "printer.update",
-                "id": printer_id,
-                "patch": {"device": {"provider": "klipper", "config": {"base_url": "http://kl"}}},
-            }
-        )
-        assert "device_state" not in engine.printers[printer_id], "a new provider must not inherit the old state"
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"provider": "klipper", "config": {"base_url": "http://kl"}}})
+        assert engine.printers.get(printer_id).device_state is None, "a new provider must not inherit the old state"
 
 
 async def test_state_persists_across_restart() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
-        printer_id = next(iter(engine.printers))
-        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"name": "Resurrected", "notify": True}})
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"name": "Resurrected", "notify": True, "printer_id": printer_id}})
 
     reborn = Engine(platform)
     await reborn.start()
     try:
-        assert [c.name for c in reborn.registry.cameras.values()] == ["cam10.0"]
-        restored = reborn.printers[printer_id]
+        assert [c.name for c in reborn.cameras.values()] == ["cam10.0"]
+        restored = reborn.monitors[monitor_id]
         assert restored["name"] == "Resurrected"
         assert restored["notify"] is True
+        assert restored["printer_id"] == printer_id
+        printer = reborn.printers.get(printer_id)
+        assert printer and printer.name == "P" and printer.provider == "octoprint"
     finally:
         await reborn.stop()

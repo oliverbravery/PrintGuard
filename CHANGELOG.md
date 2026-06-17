@@ -7,6 +7,28 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Integrated printers are now a registry, and the dashboard entity is a "monitor".** A
+  printer (OctoPrint, Klipper, Bambu Lab) is registered once in its own **Printer
+  registry** — the only place to create or delete one — exactly like a camera, then picked
+  from a list. What used to be a "printer" on the dashboard is now a **monitor**: it binds a
+  registered camera and an optional registered printer and carries the inference thresholds
+  and defect-response policy. One printer connection can now back several monitors, and its
+  connection details are entered once in the registry instead of re-typed per printer.
+- **API & MCP follow the same split.** `/printers` is the printer registry
+  (`POST`/`PATCH`/`DELETE`, plus `POST /printers/{id}/action` and `POST /printers/test`);
+  the new `/monitors` collection is the camera + printer pairing. MCP gains
+  `list_monitors`, `get_monitor`, `add_monitor`, `update_monitor`, `remove_monitor` and
+  `test_printer` (renamed from `test_integration`).
+
+### Migration
+
+- Printer and monitor configuration from 2.1.0 is **not** carried over — registered cameras
+  are kept, but re-register your printers and re-create their monitors after upgrading.
+
 ## [2.1.0] - 2026-06-16
 
 ### Added

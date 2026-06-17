@@ -16,7 +16,7 @@ export interface Toast {
   text: string;
 }
 
-export type DialogKind = "cameras" | "printer" | "settings" | null;
+export type DialogKind = "cameras" | "printers" | "monitor" | "settings" | null;
 
 interface PgStore {
   mode: Mode | null;
@@ -27,7 +27,7 @@ interface PgStore {
   history: Record<string, ScorePoint[]>;
   discovered: CameraSource[] | null;
   discovering: boolean;
-  deviceTest: { ok: boolean; status?: string; error?: string } | null;
+  printerTest: { ok: boolean; status?: string; error?: string } | null;
   testing: boolean;
   notifyTest: { provider: string; ok: boolean; error?: string } | null;
   testingNotifier: string | null;
@@ -43,7 +43,7 @@ interface PgStore {
   discover(): void;
   openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
   openDetail(id: string | null): void;
-  testDevice(provider: string, config: Record<string, string>): void;
+  testPrinter(provider: string, config: Record<string, string>): void;
   testNotifier(provider: string, config: Record<string, string>): void;
   toast(kind: Toast["kind"], text: string): void;
 }
@@ -99,12 +99,12 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       case "result":
         set((s) => {
-          const points = [...(s.history[event.printer_id] ?? []), { ts: event.ts, score: event.score }];
-          return { history: { ...s.history, [event.printer_id]: points.slice(-HISTORY_LIMIT) } };
+          const points = [...(s.history[event.monitor_id] ?? []), { ts: event.ts, score: event.score }];
+          return { history: { ...s.history, [event.monitor_id]: points.slice(-HISTORY_LIMIT) } };
         });
         break;
       case "alert": {
-        const name = get().engine?.printers.find((p) => p.id === event.printer_id)?.name ?? "printer";
+        const name = get().engine?.monitors.find((m) => m.id === event.monitor_id)?.name ?? "monitor";
         get().toast("alert", `Defect on ${name} — ${(event.score * 100).toFixed(0)}% (${event.action})`);
         break;
       }
@@ -128,8 +128,8 @@ export const useStore = create<PgStore>((set, get) => {
       case "discovered":
         set({ discovered: event.sources, discovering: false });
         break;
-      case "device_test":
-        set({ deviceTest: event, testing: false });
+      case "printer_test":
+        set({ printerTest: event, testing: false });
         break;
       case "notify_test":
         set({ notifyTest: event, testingNotifier: null });
@@ -173,7 +173,7 @@ export const useStore = create<PgStore>((set, get) => {
     history: {},
     discovered: null,
     discovering: false,
-    deviceTest: null,
+    printerTest: null,
     testing: false,
     notifyTest: null,
     testingNotifier: null,
@@ -209,16 +209,16 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     openDialog(dialog, focusCameraId = null) {
-      set({ dialog, discovered: null, deviceTest: null, notifyTest: null, focusCameraId });
+      set({ dialog, discovered: null, printerTest: null, notifyTest: null, focusCameraId });
     },
 
     openDetail(detailId) {
-      set({ detailId, deviceTest: null });
+      set({ detailId, printerTest: null });
     },
 
-    testDevice(provider, config) {
-      set({ deviceTest: null, testing: true });
-      get().send({ cmd: "device.test", provider, config });
+    testPrinter(provider, config) {
+      set({ printerTest: null, testing: true });
+      get().send({ cmd: "printer.test", provider, config });
     },
 
     testNotifier(provider, config) {

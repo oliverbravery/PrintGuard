@@ -1,53 +1,18 @@
-"""Printer configuration: defaults, validation and serialisation."""
+"""Printer configuration: validation for registered integrated printers.
+
+A printer is a connection to a control service (OctoPrint, Klipper/Moonraker,
+Bambu, …) identified by an integration provider and its schema-driven config.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-PRINTER_DEFAULTS: dict[str, Any] = {
-    "name": "Printer",
-    "camera_id": "",
-    "enabled": True,
-    "threshold": 0.75,
-    "sensitivity": 1.0,
-    "consecutive": 3,
-    "notify": False,
-    "device": {
-        "provider": None,
-        "config": {},
-        "on_defect": "none",
-        "cooldown_s": 60,
-    },
-}
-
-STANDBY_STATUSES = ("idle", "paused", "error")
-
-_CLAMPS = {"threshold": (0.05, 1.0), "sensitivity": (0.2, 5.0), "consecutive": (1, 30), "cooldown_s": (0, 600)}
-
-
-def printer_watching(printer: dict[str, Any]) -> bool:
-    """Whether monitoring should run for a printer right now.
-
-    A printer is watched unless its linked service positively reports a
-    non-printing state. With no service linked, no state polled yet, or an
-    unreachable service the printer stays watched — failing towards
-    watching is the safe direction.
-    """
-    if not printer.get("enabled"):
-        return False
-    if not printer["device"].get("provider"):
-        return True
-    state = printer.get("device_state")
-    return not state or state["status"] not in STANDBY_STATUSES
-
-
-def _clamp(key: str, value: float) -> float:
-    low, high = _CLAMPS[key]
-    return max(low, min(high, value))
+from .integrations import INTEGRATIONS
 
 
 def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Merges a printer patch over defaults or an existing record.
+    """Merges a printer patch over an existing record and validates the provider.
 
     Args:
         printer_id: Stable identifier for the printer.
@@ -55,23 +20,16 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
         base: Existing record when updating, else None.
 
     Returns:
-        A complete, validated printer record.
+        A complete, validated printer record: id, name, provider and config.
+
+    Raises:
+        ValueError: If the provider is missing or not a known integration.
     """
-    record = {**(base or PRINTER_DEFAULTS), **patch, "id": printer_id}
-    device = {**PRINTER_DEFAULTS["device"], **(base or {}).get("device", {}), **patch.get("device", {})}
-    record["device"] = device
-    record["name"] = str(record["name"]).strip() or "Printer"
-    record["threshold"] = _clamp("threshold", float(record["threshold"]))
-    record["sensitivity"] = _clamp("sensitivity", float(record["sensitivity"]))
-    record["consecutive"] = int(_clamp("consecutive", int(record["consecutive"])))
-    record["enabled"] = bool(record["enabled"])
-    record["notify"] = bool(record["notify"])
-    device["cooldown_s"] = int(_clamp("cooldown_s", int(device["cooldown_s"])))
-    if device["on_defect"] not in ("none", "pause", "cancel"):
-        device["on_defect"] = "none"
+    record = {**(base or {}), **patch, "id": printer_id}
+    provider = record.get("provider")
+    if provider not in INTEGRATIONS:
+        raise ValueError(f"unknown printer provider {provider!r}")
+    record["provider"] = provider
+    record["name"] = (str(record.get("name") or "").strip()) or INTEGRATIONS[provider].label
+    record["config"] = dict(record.get("config") or {})
     return record
-
-
-def persisted_printer(record: dict[str, Any]) -> dict[str, Any]:
-    """Strips runtime-only fields before persistence."""
-    return {k: v for k, v in record.items() if k not in ("device_state", "alert")}

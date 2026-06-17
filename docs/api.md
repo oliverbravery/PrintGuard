@@ -19,9 +19,9 @@ Scopes are cumulative:
 
 | Scope | Grants |
 |---|---|
-| `read` | status of printers and cameras, the current camera frame, recent events |
+| `read` | status of monitors, printers and cameras, the current camera frame, recent events |
 | `control` | everything in `read`, plus pause / resume / cancel a print |
-| `manage` | everything in `control`, plus add/remove/edit printers and cameras, change settings, test integrations and notifiers, discover cameras |
+| `manage` | everything in `control`, plus add/remove/edit cameras, printers and monitors, change settings, test printer services and notifiers, discover cameras |
 
 Issue scoped **bearer tokens** with the `PRINTGUARD_API_TOKENS` environment variable — a
 comma-separated list of `token:scope` pairs:
@@ -51,23 +51,28 @@ Base path `/api/v1`. Requests and responses are JSON, except the camera frame, w
 
 | Method | Path | Scope | Description |
 |---|---|---|---|
-| `GET` | `/state` | read | Full snapshot: cameras, printers, settings, stats |
-| `GET` | `/printers` | read | List printers with status, progress and job |
+| `GET` | `/state` | read | Full snapshot: cameras, printers, monitors, settings, stats |
+| `GET` | `/monitors` | read | List monitors with camera, linked printer and latest alert |
+| `GET` | `/monitors/{id}` | read | One monitor |
+| `GET` | `/printers` | read | List registered printers with status, progress and job |
 | `GET` | `/printers/{id}` | read | One printer |
 | `GET` | `/cameras` | read | List cameras with rate, health and latest score |
 | `GET` | `/cameras/{id}` | read | One camera |
 | `GET` | `/cameras/{id}/frame` | read | Freshest frame as `image/jpeg` |
 | `GET` | `/events` | read | Recent alerts, warnings, device changes and errors |
 | `POST` | `/printers/{id}/action` | control | `{"action": "pause" \| "resume" \| "cancel"}` |
-| `POST` | `/printers` | manage | Add a printer |
+| `POST` | `/monitors` | manage | Add a monitor (binds a camera + optional printer) |
+| `PATCH` | `/monitors/{id}` | manage | Update a monitor |
+| `DELETE` | `/monitors/{id}` | manage | Remove a monitor |
+| `POST` | `/printers` | manage | Register a printer |
 | `PATCH` | `/printers/{id}` | manage | Update a printer |
 | `DELETE` | `/printers/{id}` | manage | Remove a printer |
+| `POST` | `/printers/test` | manage | `{"provider", "config"}` — reachability |
 | `POST` | `/cameras` | manage | Add a camera |
 | `PATCH` | `/cameras/{id}` | manage | Update a camera |
 | `DELETE` | `/cameras/{id}` | manage | Remove a camera |
 | `POST` | `/cameras/discover` | manage | List attachable, unregistered sources |
 | `PATCH` | `/settings` | manage | Update settings (e.g. notifiers) |
-| `POST` | `/integrations/test` | manage | `{"provider", "config"}` — reachability |
 | `POST` | `/notifiers/test` | manage | `{"provider", "config"}` — send a test |
 
 Interactive schema (OpenAPI) is served at `/api/v1/docs`.
@@ -92,10 +97,10 @@ list a client sees is filtered to the scopes its token holds.
 
 | Tool | Scope | |
 |---|---|---|
-| `get_state`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `recent_events` | read | status |
+| `get_state`, `list_monitors`, `get_monitor`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `recent_events` | read | status |
 | `get_camera_frame` | read | returns the frame as **image content** an agent can look at |
 | `control_printer` | control | pause / resume / cancel |
-| `add_printer`, `update_printer`, `remove_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `update_settings`, `test_integration`, `test_notifier` | manage | configuration |
+| `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `update_settings`, `test_notifier` | manage | configuration |
 
 Point a client at the endpoint with the token as a bearer header:
 
@@ -118,10 +123,16 @@ npx @modelcontextprotocol/inspector
 # Header: Authorization: Bearer YOUR_TOKEN
 ```
 
-## The printer model
+## The resource model
 
-Every integration (OctoPrint, Klipper/Moonraker, …) is normalised to one shape, so a
-printer reads and controls the same way regardless of its service.
+Cameras and printers are **registered resources** — each is created and deleted only
+through its own collection (`/cameras`, `/printers`). A **monitor** binds one camera and,
+optionally, one printer (by `camera_id` / `printer_id`) and carries the inference
+thresholds and defect-response policy; removing a resource clears it from any monitor that
+referenced it.
+
+Every printer integration (OctoPrint, Klipper/Moonraker, Bambu Lab, …) is normalised to one
+shape, so a printer reads and controls the same way regardless of its service.
 
 - **Status** — one of `printing`, `paused`, `idle`, `error`, `offline`, `unknown`.
 - **State** — `{ "status", "progress" (0–100), "job" }`, reported on printer objects as

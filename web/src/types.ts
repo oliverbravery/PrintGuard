@@ -44,11 +44,13 @@ export interface DeviceState {
   job: string | null;
 }
 
-export interface DeviceConfig {
-  provider: string | null;
+export interface Printer {
+  id: string;
+  name: string;
+  provider: string;
   config: Record<string, string>;
-  on_defect: "none" | "pause" | "cancel";
-  cooldown_s: number;
+  device_state?: DeviceState | null;
+  online: boolean;
 }
 
 export interface Alert {
@@ -57,17 +59,18 @@ export interface Alert {
   ts: number;
 }
 
-export interface Printer {
+export interface Monitor {
   id: string;
   name: string;
   camera_id: string;
+  printer_id: string;
   enabled: boolean;
   threshold: number;
   sensitivity: number;
   consecutive: number;
   notify: boolean;
-  device: DeviceConfig;
-  device_state?: DeviceState;
+  on_defect: "none" | "pause" | "cancel";
+  cooldown_s: number;
   alert?: Alert | null;
   watching?: boolean;
 }
@@ -104,6 +107,7 @@ export interface EngineState {
   mode: string;
   cameras: Camera[];
   printers: Printer[];
+  monitors: Monitor[];
   settings: { notifiers: Record<string, Record<string, string>> };
   stats: EngineStats;
   integrations: AdapterMeta[];

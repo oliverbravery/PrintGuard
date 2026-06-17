@@ -11,9 +11,11 @@ import pytest
 
 from printguard.engine import vision
 from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceStatus
+from printguard.engine.monitors import monitor_watching, sanitise_monitor
 from printguard.engine.notifiers import NOTIFIERS
 from printguard.engine.notifiers.base import multipart_form
-from printguard.engine.printers import printer_watching, sanitise_printer
+from printguard.engine.printers import sanitise_printer
+from printguard.engine.registry import Printer, PrinterRegistry
 
 JPEG = b"\xff\xd8demo-jpeg-bytes"
 
@@ -233,31 +235,46 @@ def test_bambu_runs_in_hub_mode_only() -> None:
     assert INTEGRATIONS["octoprint"].browser_ok is True
 
 
-def test_sanitise_clamps_and_defaults() -> None:
-    record = sanitise_printer(
-        "p1",
+def test_sanitise_monitor_clamps_and_defaults() -> None:
+    record = sanitise_monitor(
+        "m1",
         {
             "name": "   ",
             "threshold": 9,
             "sensitivity": 0,
             "consecutive": 99,
-            "device": {"cooldown_s": 10_000, "on_defect": "explode"},
+            "cooldown_s": 10_000,
+            "on_defect": "explode",
         },
     )
-    assert record["name"] == "Printer"
+    assert record["name"] == "Monitor"
     assert record["threshold"] == 1.0
     assert record["sensitivity"] == 0.2
     assert record["consecutive"] == 30
-    assert record["device"]["cooldown_s"] == 600
-    assert record["device"]["on_defect"] == "none"
+    assert record["cooldown_s"] == 600
+    assert record["on_defect"] == "none"
 
 
-def test_printer_watching_fails_towards_watching() -> None:
-    unlinked = sanitise_printer("p1", {})
-    assert printer_watching(unlinked), "no service linked means always watched"
+def test_sanitise_printer_validates_provider() -> None:
+    record = sanitise_printer("p1", {"provider": "octoprint", "config": {"base_url": "http://op"}})
+    assert record["provider"] == "octoprint"
+    assert record["name"] == INTEGRATIONS["octoprint"].label, "an unnamed printer defaults to its service label"
+    assert record["config"] == {"base_url": "http://op"}
+    with pytest.raises(ValueError):
+        sanitise_printer("p1", {})
+    with pytest.raises(ValueError):
+        sanitise_printer("p1", {"provider": "nope"})
 
-    linked = sanitise_printer("p1", {"device": {"provider": "octoprint"}})
-    assert printer_watching(linked), "no state polled yet means watched"
+
+def test_monitor_watching_fails_towards_watching() -> None:
+    printers = PrinterRegistry()
+    unlinked = sanitise_monitor("m1", {})
+    assert monitor_watching(unlinked, printers), "no printer linked means always watched"
+
+    printer = Printer(id="p1", name="P", provider="octoprint", config={})
+    printers.add(printer)
+    linked = sanitise_monitor("m1", {"printer_id": "p1"})
+    assert monitor_watching(linked, printers), "no state polled yet means watched"
     for status, watched in {
         "printing": True,
         "offline": True,
@@ -266,12 +283,12 @@ def test_printer_watching_fails_towards_watching() -> None:
         "paused": False,
         "error": False,
     }.items():
-        linked["device_state"] = {"status": status, "progress": 0.0, "job": None}
-        assert printer_watching(linked) is watched, f"{status} should be watched={watched}"
+        printer.device_state = {"status": status, "progress": 0.0, "job": None}
+        assert monitor_watching(linked, printers) is watched, f"{status} should be watched={watched}"
 
-    linked["device_state"] = {"status": "printing", "progress": 0.0, "job": None}
+    printer.device_state = {"status": "printing", "progress": 0.0, "job": None}
     linked["enabled"] = False
-    assert not printer_watching(linked), "disabled printers are never watched"
+    assert not monitor_watching(linked, printers), "disabled monitors are never watched"
 
 
 def test_defect_score_scales_with_sensitivity() -> None:
