@@ -32,10 +32,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   served as `image/jpeg`. Both are thin transports over the existing engine commands, so
   they never drift from the UI. See
   [docs/api.md](https://github.com/oliverbravery/PrintGuard/blob/main/docs/api.md).
-- **Scoped access tokens** — capability is configurable per token through cumulative
-  `read` ⊂ `control` ⊂ `manage` scopes set in `PRINTGUARD_API_TOKENS`. With no token
-  configured the surface is read-only behind your existing auth proxy; issuing scoped
-  tokens unlocks control and management, and MCP hides any tool a token cannot use.
+- **Scoped access tokens, managed from the UI** — capability is configurable per token
+  through cumulative `read` ⊂ `control` ⊂ `manage` scopes. Issue, name and revoke tokens
+  from the dashboard (**Settings → API & MCP access**); each secret (a `pg_…` string) is
+  shown once and stored only as a SHA-256 hash, and tokens are managed over the dashboard's
+  own protocol, never over the API itself. With no token issued the surface is read-only
+  behind your existing auth proxy; issuing scoped tokens unlocks control and management, and
+  MCP hides any tool a token cannot use.
 
 ### Fixed
 

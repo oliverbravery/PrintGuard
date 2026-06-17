@@ -126,11 +126,12 @@ dashboard uses, so anything the UI can do is automatable.
 - **REST** — the versioned API at `/api/v1` gives any HTTP client the same operations;
   the camera frame is served as `image/jpeg`.
 
-Capability is configurable per token. Set `PRINTGUARD_API_TOKENS` to issue scoped bearer
-tokens — cumulative `read` ⊂ `control` ⊂ `manage` — so an agent only gets the abilities
-you grant it, and MCP hides any tool a token cannot use. With no token set the surface
-stays read-only behind your auth proxy. Full reference, scope matrix and client setup:
-[docs/api.md](docs/api.md).
+Capability is configurable per token. Issue scoped bearer tokens from the dashboard
+(**Settings → API & MCP access**) — cumulative `read` ⊂ `control` ⊂ `manage` — naming,
+generating and revoking each one in place; the secret is shown once and stored only as a
+hash. An agent only gets the abilities you grant it, and MCP hides any tool a token cannot
+use. With no token issued the surface stays read-only behind your auth proxy. Full
+reference, scope matrix and client setup: [docs/api.md](docs/api.md).
 
 ## The model
 

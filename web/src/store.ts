@@ -36,6 +36,7 @@ interface PgStore {
   detailId: string | null;
   dialog: DialogKind;
   focusCameraId: string | null;
+  createdToken: { name: string; secret: string } | null;
   chooseMode(mode: Mode): void;
   leaveMode(): void;
   send(cmd: Record<string, unknown>): void;
@@ -43,6 +44,7 @@ interface PgStore {
   discover(): void;
   openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
   openDetail(id: string | null): void;
+  clearCreatedToken(): void;
   testDevice(provider: string, config: Record<string, string>): void;
   testNotifier(provider: string, config: Record<string, string>): void;
   toast(kind: Toast["kind"], text: string): void;
@@ -134,6 +136,9 @@ export const useStore = create<PgStore>((set, get) => {
       case "notify_test":
         set({ notifyTest: event, testingNotifier: null });
         break;
+      case "token_created":
+        set({ createdToken: { name: event.name, secret: event.token } });
+        break;
       case "warning":
         get().toast(event.recovered ? "info" : "alert", event.message);
         break;
@@ -182,6 +187,7 @@ export const useStore = create<PgStore>((set, get) => {
     detailId: null,
     dialog: null,
     focusCameraId: null,
+    createdToken: null,
 
     chooseMode(mode) {
       history.pushState(null, "", `#${mode}`);
@@ -209,11 +215,15 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     openDialog(dialog, focusCameraId = null) {
-      set({ dialog, discovered: null, deviceTest: null, notifyTest: null, focusCameraId });
+      set({ dialog, discovered: null, deviceTest: null, notifyTest: null, focusCameraId, createdToken: null });
     },
 
     openDetail(detailId) {
       set({ detailId, deviceTest: null });
+    },
+
+    clearCreatedToken() {
+      set({ createdToken: null });
     },
 
     testDevice(provider, config) {

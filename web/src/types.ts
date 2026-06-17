@@ -94,6 +94,14 @@ export interface AdapterMeta {
   };
 }
 
+export interface ApiToken {
+  id: string;
+  name: string;
+  scope: "read" | "control" | "manage";
+  hint: string;
+  created: number;
+}
+
 export interface EngineStats {
   workers: number;
   infer_ms: number;
@@ -105,6 +113,7 @@ export interface EngineState {
   cameras: Camera[];
   printers: Printer[];
   settings: { notifiers: Record<string, Record<string, string>> };
+  tokens: ApiToken[];
   stats: EngineStats;
   integrations: AdapterMeta[];
   notifiers: AdapterMeta[];

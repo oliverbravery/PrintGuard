@@ -23,26 +23,23 @@ Scopes are cumulative:
 | `control` | everything in `read`, plus pause / resume / cancel a print |
 | `manage` | everything in `control`, plus add/remove/edit printers and cameras, change settings, test integrations and notifiers, discover cameras |
 
-Issue scoped **bearer tokens** with the `PRINTGUARD_API_TOKENS` environment variable — a
-comma-separated list of `token:scope` pairs:
-
-```yaml
-# docker-compose.yaml
-environment:
-  - PRINTGUARD_API_TOKENS=Zr8...agent:read,Q5w...ops:manage
-```
+Issue scoped **bearer tokens** from the dashboard — **Settings → API & MCP access**. Name a
+token, choose its scope and **Generate**; the full secret (a `pg_…` string) is shown
+**once**, so copy it then. Only a hash is stored, so a token can never be retrieved later —
+if one is lost, revoke it and issue another. Revoking takes effect immediately.
 
 ```http
-Authorization: Bearer Zr8...agent
+Authorization: Bearer pg_Zr8...agent
 ```
 
-- **No tokens configured (default):** the surface is **read-only** and trusts whatever
+- **No tokens issued (default):** the surface is **read-only** and trusts whatever
   fronts it — control and management stay closed until you issue a token.
-- **Any token configured:** a valid bearer is required for every request; its scope
+- **Any token issued:** a valid bearer is required for every request; its scope
   decides what it can reach. MCP additionally **hides** tools a token cannot use.
 
-Use long random secrets (e.g. `openssl rand -base64 32`) and serve the hub over HTTPS so
-tokens are never sent in clear.
+Tokens are stored hashed and are managed only from the UI (behind your proxy), never over
+the API itself — an agent holding a `manage` token can drive printers and cameras but
+cannot mint or escalate tokens. Serve the hub over HTTPS so tokens are never sent in clear.
 
 ## REST API
 

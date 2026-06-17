@@ -20,9 +20,10 @@ async def _server():
     await engine.start()
     await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 10.0}})
     camera_id = next(iter(engine.registry.cameras))
-    app = build_api_app(ApiAuth({"M": "manage"}, internal_token="INT"))
+    auth = ApiAuth(internal_token="INT")
+    app = build_api_app(auth)
     app.state.engine = engine
-    mcp = build_mcp(app, lambda: engine, {"M": "manage"}, "INT")
+    mcp = build_mcp(app, lambda: engine, auth, "INT")
     return engine, mcp, camera_id
 
 

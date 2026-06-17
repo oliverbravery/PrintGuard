@@ -15,8 +15,8 @@ OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_k
 
 
 @asynccontextmanager
-async def api(tokens: dict[str, str] | None = None):
-    """Yields an HTTP client, the engine and a printer wired to one camera."""
+async def api(scopes: tuple[str, ...] = ()):
+    """Yields an HTTP client, the engine, a wired printer and minted token secrets."""
     platform = FakePlatform()
     engine = Engine(platform)
     await engine.start()
@@ -24,11 +24,15 @@ async def api(tokens: dict[str, str] | None = None):
     camera_id = next(iter(engine.registry.cameras))
     await engine.handle({"cmd": "printer.add", "printer": {"name": "P", "camera_id": camera_id, "device": OCTOPRINT}})
     printer_id = next(iter(engine.printers))
-    app = build_api_app(ApiAuth(tokens or {}, internal_token="INT"))
+    tokens = {}
+    for scope in scopes:
+        events = await engine.request({"cmd": "token.create", "name": scope, "scope": scope})
+        tokens[scope] = next(e["token"] for e in events if e.get("event") == "token_created")
+    app = build_api_app(ApiAuth(internal_token="INT"))
     app.state.engine = engine
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
     try:
-        yield client, engine, platform, printer_id, camera_id
+        yield client, engine, platform, printer_id, camera_id, tokens
     finally:
         await client.aclose()
         await engine.stop()
@@ -59,7 +63,7 @@ async def test_snapshot_returns_jpeg_or_none() -> None:
 
 
 async def test_baseline_is_read_only_without_tokens() -> None:
-    async with api() as (client, _engine, _platform, printer_id, camera_id):
+    async with api() as (client, _engine, _platform, printer_id, camera_id, _tokens):
         assert (await client.get("/state")).status_code == 200
         frame = await client.get(f"/cameras/{camera_id}/frame")
         assert frame.status_code == 200 and frame.headers["content-type"] == "image/jpeg"
@@ -69,15 +73,15 @@ async def test_baseline_is_read_only_without_tokens() -> None:
 
 
 async def test_scoped_tokens_gate_control_and_management() -> None:
-    async with api({"M": "manage", "R": "read"}) as (client, _engine, platform, printer_id, _camera_id):
+    async with api(("read", "manage")) as (client, _engine, platform, printer_id, _camera_id, tokens):
         assert (await client.get("/state")).status_code == 401
         assert (await client.get("/state", headers={"Authorization": "Bearer bad"})).status_code == 401
 
-        read = {"Authorization": "Bearer R"}
+        read = {"Authorization": f"Bearer {tokens['read']}"}
         assert (await client.get("/state", headers=read)).status_code == 200
         assert (await client.post(f"/printers/{printer_id}/action", json={"action": "pause"}, headers=read)).status_code == 403
 
-        manage = {"Authorization": "Bearer M"}
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
         acted = await client.post(f"/printers/{printer_id}/action", json={"action": "pause"}, headers=manage)
         assert acted.status_code == 200
         assert any("/api/job" in url for _, url in platform.http_calls)
@@ -85,9 +89,9 @@ async def test_scoped_tokens_gate_control_and_management() -> None:
 
 
 async def test_read_surface_strips_linked_service_secrets() -> None:
-    async with api({"R": "read"}) as (client, engine, _platform, printer_id, _camera_id):
+    async with api(("read",)) as (client, engine, _platform, printer_id, _camera_id, tokens):
         await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"telegram": {"bot_token": "T", "chat_id": "9"}}}})
-        read = {"Authorization": "Bearer R"}
+        read = {"Authorization": f"Bearer {tokens['read']}"}
 
         state = (await client.get("/state", headers=read)).json()
         printer = next(p for p in state["printers"] if p["id"] == printer_id)
@@ -105,15 +109,15 @@ async def test_read_surface_strips_linked_service_secrets() -> None:
 
 
 async def test_unknown_ids_and_events() -> None:
-    async with api() as (client, _engine, _platform, _printer_id, _camera_id):
+    async with api() as (client, _engine, _platform, _printer_id, _camera_id, _tokens):
         assert (await client.get("/printers/nope")).status_code == 404
         assert (await client.get("/cameras/nope/frame")).status_code == 404
         assert isinstance((await client.get("/events")).json(), list)
 
 
 async def test_rejected_command_is_400() -> None:
-    async with api({"M": "manage"}) as (client, engine, _platform, _printer_id, camera_id):
+    async with api(("manage",)) as (client, engine, _platform, _printer_id, camera_id, tokens):
         await engine.handle({"cmd": "printer.add", "printer": {"name": "bare", "camera_id": camera_id}})
         bare = next(p["id"] for p in engine.state_event()["printers"] if p["name"] == "bare")
-        rejected = await client.post(f"/printers/{bare}/action", json={"action": "pause"}, headers={"Authorization": "Bearer M"})
+        rejected = await client.post(f"/printers/{bare}/action", json={"action": "pause"}, headers={"Authorization": f"Bearer {tokens['manage']}"})
         assert rejected.status_code == 400
