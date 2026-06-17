@@ -84,6 +84,26 @@ async def test_scoped_tokens_gate_control_and_management() -> None:
         assert (await client.post("/printers", json={"name": "x"}, headers=manage)).status_code == 200
 
 
+async def test_read_surface_strips_linked_service_secrets() -> None:
+    async with api({"R": "read"}) as (client, engine, _platform, printer_id, _camera_id):
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"telegram": {"bot_token": "T", "chat_id": "9"}}}})
+        read = {"Authorization": "Bearer R"}
+
+        state = (await client.get("/state", headers=read)).json()
+        printer = next(p for p in state["printers"] if p["id"] == printer_id)
+        assert printer["device"]["config"] == {"base_url": "http://op"}
+        assert state["settings"]["notifiers"]["telegram"] == {"chat_id": "9"}
+
+        listed = (await client.get("/printers", headers=read)).json()
+        one = (await client.get(f"/printers/{printer_id}", headers=read)).json()
+        assert "api_key" not in listed[0]["device"]["config"]
+        assert "api_key" not in one["device"]["config"]
+
+        full = engine.state_event()
+        assert full["printers"][0]["device"]["config"]["api_key"] == "k"
+        assert full["settings"]["notifiers"]["telegram"]["bot_token"] == "T"
+
+
 async def test_unknown_ids_and_events() -> None:
     async with api() as (client, _engine, _platform, _printer_id, _camera_id):
         assert (await client.get("/printers/nope")).status_code == 404

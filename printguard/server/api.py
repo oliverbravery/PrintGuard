@@ -16,6 +16,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from ..engine.engine import Engine
+from ..engine.integrations import INTEGRATIONS
+from ..engine.notifiers import NOTIFIERS
 
 SCOPE_ORDER = ("read", "control", "manage")
 
@@ -149,6 +151,37 @@ def _find(items: list[dict[str, Any]], item_id: str, kind: str) -> dict[str, Any
     raise HTTPException(404, f"no {kind} {item_id!r}")
 
 
+def _public_config(config: dict[str, Any], adapter: Any) -> dict[str, Any]:
+    """Drops the credential values an adapter's schema marks secret."""
+    secrets = adapter.secret_keys() if adapter else set()
+    return {key: value for key, value in config.items() if key not in secrets}
+
+
+def _public_printer(printer: dict[str, Any]) -> dict[str, Any]:
+    device = printer["device"]
+    config = _public_config(device.get("config", {}), INTEGRATIONS.get(device.get("provider") or ""))
+    return {**printer, "device": {**device, "config": config}}
+
+
+def public_state(engine: Engine) -> dict[str, Any]:
+    """The engine snapshot with linked-service credentials stripped.
+
+    The dashboard reads the engine's full state over the WebSocket, where trust
+    is total; this read surface — REST and the MCP tools derived from it — must
+    report status without leaking the printer and notifier credentials those
+    configs embed. Redaction reuses the secret fields each adapter's schema
+    already declares rather than enumerating credentials here.
+    """
+    state = engine.state_event()
+    state["printers"] = [_public_printer(printer) for printer in state["printers"]]
+    notifiers = state["settings"].get("notifiers", {})
+    state["settings"] = {
+        **state["settings"],
+        "notifiers": {pid: _public_config(config, NOTIFIERS.get(pid)) for pid, config in notifiers.items()},
+    }
+    return state
+
+
 def build_api_app(auth: ApiAuth) -> FastAPI:
     """Builds the /api/v1 sub-application; the engine is attached at startup."""
     api = FastAPI(
@@ -172,52 +205,52 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
     @api.get("/state", operation_id="get_state", tags=["read"])
     async def get_state(engine: Engine = Depends(get_engine)) -> dict[str, Any]:
         """Returns the full snapshot: cameras, printers, settings and stats."""
-        return engine.state_event()
+        return public_state(engine)
 
     @api.get("/printers", operation_id="list_printers", tags=["read"])
     async def list_printers(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
         """Lists every printer with its live status, progress and current job."""
-        return engine.state_event()["printers"]
+        return public_state(engine)["printers"]
 
     @api.get("/printers/{printer_id}", operation_id="get_printer", tags=["read"])
     async def get_printer(printer_id: str, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
         """Returns one printer's status, linked camera and latest alert."""
-        return _find(engine.state_event()["printers"], printer_id, "printer")
+        return _find(public_state(engine)["printers"], printer_id, "printer")
 
     @api.post("/printers/{printer_id}/action", operation_id="control_printer", tags=["control"])
     async def control_printer(printer_id: str, body: ActionBody, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
         """Pauses, resumes or cancels the print through the linked service."""
-        _find(engine.state_event()["printers"], printer_id, "printer")
+        _find(public_state(engine)["printers"], printer_id, "printer")
         await engine.request({"cmd": "printer.action", "id": printer_id, "action": body.action})
-        return _find(engine.state_event()["printers"], printer_id, "printer")
+        return _find(public_state(engine)["printers"], printer_id, "printer")
 
     @api.post("/printers", operation_id="add_printer", tags=["manage"])
     async def add_printer(body: PrinterFields, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
         """Registers a printer and returns the updated printer list."""
         await engine.request({"cmd": "printer.add", "printer": body.model_dump(exclude_none=True)})
-        return engine.state_event()["printers"]
+        return public_state(engine)["printers"]
 
     @api.patch("/printers/{printer_id}", operation_id="update_printer", tags=["manage"])
     async def update_printer(printer_id: str, body: PrinterFields, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
         """Updates a printer's monitoring settings or linked service."""
         await engine.request({"cmd": "printer.update", "id": printer_id, "patch": body.model_dump(exclude_none=True)})
-        return _find(engine.state_event()["printers"], printer_id, "printer")
+        return _find(public_state(engine)["printers"], printer_id, "printer")
 
     @api.delete("/printers/{printer_id}", operation_id="remove_printer", tags=["manage"])
     async def remove_printer(printer_id: str, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
         """Removes a printer and returns the updated printer list."""
         await engine.request({"cmd": "printer.remove", "id": printer_id})
-        return engine.state_event()["printers"]
+        return public_state(engine)["printers"]
 
     @api.get("/cameras", operation_id="list_cameras", tags=["read"])
     async def list_cameras(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
         """Lists every camera with its rate, health and latest score."""
-        return engine.state_event()["cameras"]
+        return public_state(engine)["cameras"]
 
     @api.get("/cameras/{camera_id}", operation_id="get_camera", tags=["read"])
     async def get_camera(camera_id: str, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
         """Returns one camera's settings and live statistics."""
-        return _find(engine.state_event()["cameras"], camera_id, "camera")
+        return _find(public_state(engine)["cameras"], camera_id, "camera")
 
     @api.get(
         "/cameras/{camera_id}/frame",
@@ -240,19 +273,19 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         if body.name is not None:
             payload["name"] = body.name
         await engine.request(payload)
-        return engine.state_event()["cameras"]
+        return public_state(engine)["cameras"]
 
     @api.patch("/cameras/{camera_id}", operation_id="update_camera", tags=["manage"])
     async def update_camera(camera_id: str, body: CameraPatch, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
         """Updates a camera's name or image adjustments."""
         await engine.request({"cmd": "camera.update", "id": camera_id, "patch": body.model_dump(exclude_none=True)})
-        return _find(engine.state_event()["cameras"], camera_id, "camera")
+        return _find(public_state(engine)["cameras"], camera_id, "camera")
 
     @api.delete("/cameras/{camera_id}", operation_id="remove_camera", tags=["manage"])
     async def remove_camera(camera_id: str, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
         """Removes a camera and returns the updated camera list."""
         await engine.request({"cmd": "camera.remove", "id": camera_id})
-        return engine.state_event()["cameras"]
+        return public_state(engine)["cameras"]
 
     @api.post("/cameras/discover", operation_id="discover_cameras", tags=["manage"])
     async def discover_cameras(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
@@ -269,7 +302,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
     async def update_settings(body: SettingsPatch, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
         """Updates engine settings such as configured notifiers."""
         await engine.request({"cmd": "settings.update", "patch": body.model_dump(exclude_none=True)})
-        return engine.state_event()["settings"]
+        return public_state(engine)["settings"]
 
     @api.post("/integrations/test", operation_id="test_integration", tags=["manage"])
     async def test_integration(body: ProviderTest, engine: Engine = Depends(get_engine)) -> dict[str, Any]:

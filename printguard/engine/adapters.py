@@ -59,3 +59,7 @@ class Adapter(ABC):
             "setup_hint": self.setup_hint,
             "schema": self.schema,
         }
+
+    def secret_keys(self) -> set[str]:
+        """Config property names the schema marks secret (credentials)."""
+        return {key for key, prop in self.schema.get("properties", {}).items() if prop.get("secret")}
