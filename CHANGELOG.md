@@ -40,7 +40,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   and links to the issue tracker for reports. Bambu Lab carries it.
 - **MCP server and REST API for hub mode** — agents and developers can now drive the
   same engine protocol the dashboard speaks. The Model Context Protocol server
-  (Streamable HTTP, at `/mcp`) lets an agent read monitor, printer and camera status, fetch
+  (Streamable HTTP, at `/mcp/`) lets an agent read monitor, printer and camera status, fetch
   the current camera frame as an image, and pause, resume or cancel a print; the versioned
   REST API at `/api/v1` exposes the same operations to any HTTP client, with the frame
   served as `image/jpeg`. Both are thin transports over the existing engine commands, so

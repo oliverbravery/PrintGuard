@@ -4,7 +4,7 @@ A PrintGuard **hub** exposes its engine to agents and developers through two tra
 over one protocol — the same commands the dashboard sends, so nothing here can drift from
 the UI:
 
-- a **Model Context Protocol** server at `/mcp` (Streamable HTTP) for agents, and
+- a **Model Context Protocol** server at `/mcp/` (Streamable HTTP) for agents, and
 - a versioned **REST API** at `/api/v1` for any HTTP client.
 
 Both are hub-only. Local (in-browser) mode has no server to host them.
@@ -89,7 +89,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 
 ## MCP server
 
-Endpoint `https://<host>/mcp`, transport **Streamable HTTP**, authenticated with the same
+Endpoint `https://<host>/mcp/`, transport **Streamable HTTP**, authenticated with the same
 bearer token. Tools mirror the REST operations one-to-one (by `operation_id`); the tool
 list a client sees is filtered to the scopes its token holds.
 
@@ -106,7 +106,7 @@ Point a client at the endpoint with the token as a bearer header:
 {
   "mcpServers": {
     "printguard": {
-      "url": "https://host/mcp",
+      "url": "https://host/mcp/",
       "headers": { "Authorization": "Bearer YOUR_TOKEN" }
     }
   }
@@ -117,7 +117,7 @@ Or explore it with the [MCP Inspector](https://github.com/modelcontextprotocol/i
 
 ```bash
 npx @modelcontextprotocol/inspector
-# Transport: Streamable HTTP · URL: https://host/mcp
+# Transport: Streamable HTTP · URL: https://host/mcp/
 # Header: Authorization: Bearer YOUR_TOKEN
 ```
 

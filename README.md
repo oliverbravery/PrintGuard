@@ -129,7 +129,7 @@ dashboard uses, so anything the UI can do is automatable.
 
 - **MCP** — point an agent (Claude, an IDE, the
   [MCP Inspector](https://github.com/modelcontextprotocol/inspector)) at
-  `https://<host>/mcp` (Streamable HTTP). Tools cover printer and camera status, the
+  `https://<host>/mcp/` (Streamable HTTP). Tools cover printer and camera status, the
   **current camera frame as an image**, and pause/resume/cancel — plus full management
   when allowed.
 - **REST** — the versioned API at `/api/v1` gives any HTTP client the same operations;
