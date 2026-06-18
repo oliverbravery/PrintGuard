@@ -287,6 +287,10 @@ input[type="range"]::-moz-range-thumb {
   z-index: 40;
 }
 
+.backdrop-modal {
+  z-index: 50;
+}
+
 .slide-in {
   animation: slide-in 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
