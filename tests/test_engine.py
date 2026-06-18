@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from fakes import FakePlatform
 
@@ -99,7 +100,7 @@ async def test_defect_pipeline() -> None:
     assert results and all(r["prediction"] == "failure" for r in results)
     assert state_monitors[0]["alert"], "alert missing from state"
     assert ("PUT", "http://ntfy/topic") in platform.http_calls, "ntfy alert was never delivered"
-    assert any("api.telegram.org" in url and url.endswith("/sendPhoto") for _, url in platform.http_calls), "Telegram alert was never delivered"
+    assert any(urlparse(url).hostname == "api.telegram.org" and url.endswith("/sendPhoto") for _, url in platform.http_calls), "Telegram alert was never delivered"
     assert ("POST", "http://disc/hook") in platform.http_calls, "Discord alert was never delivered"
 
 
