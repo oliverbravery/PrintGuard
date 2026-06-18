@@ -78,6 +78,7 @@ class BambuJpegStream:
 def open_bambu_jpeg_stream(host: str, access_code: str) -> BambuJpegStream:
     """Connects, authenticates and returns the chamber camera's JPEG stream."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     raw = socket.create_connection((host, PORT), timeout=CONNECT_TIMEOUT_S)

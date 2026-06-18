@@ -124,6 +124,7 @@ class BambuAdapter(IntegrationAdapter):
         import ssl
 
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
         try:
@@ -148,11 +149,15 @@ class BambuAdapter(IntegrationAdapter):
 
         import paho.mqtt.client as mqtt
 
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv311)
         client.connect_timeout = _CONNECT_TIMEOUT_S
         client.username_pw_set(_USERNAME, str(config.get("access_code", "")))
-        client.tls_set(tls_version=ssl.PROTOCOL_TLS, cert_reqs=ssl.CERT_NONE)
-        client.tls_insecure_set(True)
+        client.tls_set_context(context)
         client.connect(str(config["host"]), _PORT, keepalive=_KEEPALIVE_S)
         return client
 
