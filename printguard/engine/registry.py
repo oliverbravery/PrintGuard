@@ -1,5 +1,6 @@
-"""Resource registries: cameras and integrated printers, keyed by id, holding
-identity, access details and live runtime state."""
+"""Resource registries — cameras, integrated printers and API tokens — each an
+id-keyed collection of records carrying identity, access details and any live
+runtime state."""
 
 from __future__ import annotations
 
@@ -164,6 +165,45 @@ class Printer:
         return {"id": self.id, "name": self.name, "provider": self.provider, "config": self.config}
 
 
+@dataclass
+class Token:
+    """A scoped bearer token gating the hub's REST and MCP transports.
+
+    Only the secret's hash is retained; the secret itself is surfaced once at
+    creation and is unrecoverable thereafter.
+
+    Attributes:
+        id: Stable identifier used to name and revoke the token.
+        name: Display name.
+        scope: Granted capability — one of read, control or manage.
+        hash: SHA-256 of the bearer secret, matched at auth time.
+        hint: Short non-secret prefix shown in the UI.
+        created: Unix timestamp the token was minted.
+    """
+
+    id: str
+    name: str
+    scope: str
+    hash: str
+    hint: str
+    created: float
+
+    def public(self) -> dict[str, Any]:
+        """Serialises the token without its secret hash for the state event."""
+        return {"id": self.id, "name": self.name, "scope": self.scope, "hint": self.hint, "created": self.created}
+
+    def persisted(self) -> dict[str, Any]:
+        """Serialises the token, hash included, to restore it on boot."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "scope": self.scope,
+            "hash": self.hash,
+            "hint": self.hint,
+            "created": self.created,
+        }
+
+
 class CameraRegistry(Registry[Camera]):
     """Holds all registered cameras keyed by id."""
 
@@ -188,3 +228,7 @@ class CameraRegistry(Registry[Camera]):
 
 class PrinterRegistry(Registry[Printer]):
     """Holds all registered integrated printers keyed by id."""
+
+
+class TokenRegistry(Registry[Token]):
+    """Holds all issued API tokens keyed by id."""

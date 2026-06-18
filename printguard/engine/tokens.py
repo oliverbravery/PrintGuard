@@ -46,8 +46,3 @@ def new_token(name: str, scope: str) -> tuple[dict[str, Any], str]:
         "created": time.time(),
     }
     return record, secret
-
-
-def public_token(record: dict[str, Any]) -> dict[str, Any]:
-    """Serialises a token record without its secret hash."""
-    return {key: record[key] for key in ("id", "name", "scope", "hint", "created")}
