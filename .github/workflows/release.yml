@@ -9,10 +9,15 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   version:
     name: version
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.read.outputs.version }}
     steps:
