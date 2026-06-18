@@ -69,6 +69,7 @@ Base path `/api/v1`. Requests and responses are JSON, except the camera frame, w
 | `PATCH` | `/cameras/{id}` | manage | Update a camera |
 | `DELETE` | `/cameras/{id}` | manage | Remove a camera |
 | `POST` | `/cameras/discover` | manage | List attachable, unregistered sources |
+| `POST` | `/cameras/refresh-printers` | manage | Register cameras newly exposed by registered printers |
 | `PATCH` | `/settings` | manage | Update settings (e.g. notifiers) |
 | `POST` | `/notifiers/test` | manage | `{"provider", "config"}` — send a test |
 
@@ -97,7 +98,7 @@ list a client sees is filtered to the scopes its token holds.
 | `get_state`, `list_monitors`, `get_monitor`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `recent_events` | read | status |
 | `get_camera_frame` | read | returns the frame as **image content** an agent can look at |
 | `control_printer` | control | pause / resume / cancel |
-| `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `update_settings`, `test_notifier` | manage | configuration |
+| `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_settings`, `test_notifier` | manage | configuration |
 
 Point a client at the endpoint with the token as a bearer header:
 

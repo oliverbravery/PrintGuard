@@ -9,6 +9,7 @@ import pytest
 
 from fakes import FakePlatform
 from printguard.engine.engine import Engine
+from printguard.engine.registry import Camera
 from printguard.server.api import ApiAuth, build_api_app
 
 OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
@@ -112,6 +113,68 @@ async def test_read_surface_strips_linked_service_secrets() -> None:
         full = engine.state_event()
         assert full["printers"][0]["config"]["api_key"] == "k"
         assert full["settings"]["notifiers"]["telegram"]["bot_token"] == "T"
+
+
+async def test_refresh_printer_cameras_registers_exposed_cameras(monkeypatch) -> None:
+    from printguard.engine.integrations import INTEGRATIONS
+
+    async with api(("read", "manage")) as (client, _engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        async def fake_cameras(http, config):
+            return [{"key": "webcam", "name": "Shop cam", "source": {"kind": "fake", "fps": 10.0}}]
+
+        monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", fake_cameras)
+        read = {"Authorization": f"Bearer {tokens['read']}"}
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        assert (await client.post("/cameras/refresh-printers", headers=read)).status_code == 403, "refresh needs a manage token"
+
+        cameras = (await client.post("/cameras/refresh-printers", headers=manage)).json()
+        registered = {c["id"]: c for c in cameras}
+        assert f"{printer_id}-webcam" in registered
+        assert registered[f"{printer_id}-webcam"]["printer_id"] == printer_id
+
+
+async def test_read_surface_strips_camera_source_credentials() -> None:
+    async with api(("read",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        engine.cameras.add(
+            Camera(id="x1", name="X1 cam", source={"kind": "url", "url": "rtsps://bblp:SECRET@host:322/streaming/live/1", "fingerprint": "FP"}, max_fps=15.0)
+        )
+        engine.cameras.add(Camera(id="a1", name="A1 cam", source={"kind": "bambu", "host": "host", "access_code": "SECRET"}, max_fps=15.0))
+        read = {"Authorization": f"Bearer {tokens['read']}"}
+
+        cameras = {c["id"]: c for c in (await client.get("/cameras", headers=read)).json()}
+        assert cameras["x1"]["source"]["url"] == "rtsps://host:322/streaming/live/1", "rtsps credentials are stripped"
+        assert "access_code" not in cameras["a1"]["source"], "the port-6000 access code is dropped"
+        assert cameras["a1"]["source"]["host"] == "host"
+
+        full = {c.id: c for c in engine.cameras.values()}
+        assert "SECRET" in full["x1"].source["url"], "the engine keeps the working URL for itself"
+        assert full["a1"].source["access_code"] == "SECRET"
+
+
+def test_bambu_jpeg_stream_strips_frame_headers() -> None:
+    import struct
+
+    from printguard.server.bambu_camera import BambuJpegStream
+
+    jpegs = [b"\xff\xd8\xff\xe0AAA\xff\xd9", b"\xff\xd8\xff\xe0BBBB\xff\xd9"]
+    wire = b"".join(struct.pack("<IIII", len(j), 0, 1, 0) + j for j in jpegs)
+
+    class FakeSock:
+        def __init__(self, data: bytes) -> None:
+            self.data = data
+
+        def recv(self, count: int) -> bytes:
+            out, self.data = self.data[:count], self.data[count:]
+            return out
+
+        def close(self) -> None:
+            pass
+
+    stream = BambuJpegStream(FakeSock(wire))
+    out = b""
+    while chunk := stream.read(4096):
+        out += chunk
+    assert out == b"".join(jpegs), "the 16-byte frame headers are stripped, leaving concatenated JPEGs"
 
 
 async def test_unknown_ids_and_events() -> None:

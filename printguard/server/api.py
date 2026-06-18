@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hmac
 from typing import Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -145,17 +146,38 @@ def _public_printer(printer: dict[str, Any]) -> dict[str, Any]:
     return {**printer, "config": config}
 
 
+def _strip_url_credentials(url: str) -> str:
+    """Removes any user:password@ prefix from a stream URL."""
+    parts = urlsplit(url)
+    if not (parts.username or parts.password):
+        return url
+    netloc = parts.hostname or ""
+    if parts.port:
+        netloc = f"{netloc}:{parts.port}"
+    return urlunsplit(parts._replace(netloc=netloc))
+
+
+def _public_camera(camera: dict[str, Any]) -> dict[str, Any]:
+    """Drops camera-source credentials a printer integration embedded."""
+    source = {key: value for key, value in (camera.get("source") or {}).items() if key != "access_code"}
+    if source.get("url"):
+        source["url"] = _strip_url_credentials(source["url"])
+    return {**camera, "source": source}
+
+
 def public_state(engine: Engine) -> dict[str, Any]:
     """The engine snapshot with linked-service credentials stripped.
 
     The dashboard reads the engine's full state over the WebSocket, where trust
     is total; this read surface — REST and the MCP tools derived from it — must
     report status without leaking the printer and notifier credentials those
-    configs embed. Redaction reuses the secret fields each adapter's schema
-    already declares rather than enumerating credentials here.
+    configs embed, nor the access codes a printer-exposed camera source carries.
+    Redaction reuses the secret fields each adapter's schema already declares
+    rather than enumerating credentials here.
     """
     state = engine.state_event()
     state["printers"] = [_public_printer(printer) for printer in state["printers"]]
+    state["cameras"] = [_public_camera(camera) for camera in state["cameras"]]
     notifiers = state["settings"].get("notifiers", {})
     state["settings"] = {
         **state["settings"],
@@ -308,6 +330,12 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         """Lists attachable camera sources that are not yet registered."""
         events = await engine.request({"cmd": "discover"})
         return next((e["sources"] for e in events if e.get("event") == "discovered"), [])
+
+    @api.post("/cameras/refresh-printers", operation_id="refresh_printer_cameras", tags=["manage"])
+    async def refresh_printer_cameras(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
+        """Re-checks every registered printer and registers any newly exposed cameras."""
+        await engine.request({"cmd": "printer.cameras.refresh"})
+        return public_state(engine)["cameras"]
 
     @api.get("/events", operation_id="recent_events", tags=["read"])
     async def recent_events(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:

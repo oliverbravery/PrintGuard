@@ -41,6 +41,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
   const { engine, send, isPending } = useStore();
   const [open, setOpen] = useState(focus);
   const ref = useRef<HTMLDivElement>(null);
+  const owner = camera.printer_id ? engine?.printers.find((p) => p.id === camera.printer_id) : null;
   const [draft, setDraft] = useState({
     brightness: camera.brightness ?? 1,
     contrast: camera.contrast ?? 1,
@@ -91,19 +92,22 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
         {camera.source.path && published.has(camera.source.path) && (
           <span className="chip chip-accent">publishing</span>
         )}
+        {owner && <span className="chip" title="Managed by its printer integration — remove the printer to remove this camera">via {owner.name}</span>}
         <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
           {open ? "Hide" : "Adjust"}
         </button>
-        <button
-          className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
-          disabled={isPending("camera.remove")}
-          onClick={() => {
-            if (camera.source.path) stopPublishing(camera.source.path);
-            send({ cmd: "camera.remove", id: camera.id });
-          }}
-        >
-          {isPending("camera.remove") ? "Removing…" : "Remove"}
-        </button>
+        {!owner && (
+          <button
+            className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
+            disabled={isPending("camera.remove")}
+            onClick={() => {
+              if (camera.source.path) stopPublishing(camera.source.path);
+              send({ cmd: "camera.remove", id: camera.id });
+            }}
+          >
+            {isPending("camera.remove") ? "Removing…" : "Remove"}
+          </button>
+        )}
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
@@ -155,15 +159,42 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
   );
 }
 
-function RegisteredList() {
-  const { engine, focusCameraId } = useStore();
-  const cameras = engine?.cameras ?? [];
+function CameraList({ cameras }: { cameras: Camera[] }) {
+  const { focusCameraId } = useStore();
   if (!cameras.length) return null;
   return (
     <div className="space-y-2 mb-6">
       {cameras.map((camera) => (
         <CameraRow key={camera.id} camera={camera} focus={camera.id === focusCameraId} />
       ))}
+    </div>
+  );
+}
+
+function PrinterCameras() {
+  const { engine, send, isPending } = useStore();
+  const cameras = (engine?.cameras ?? []).filter((c) => c.printer_id);
+  const hasPrinters = (engine?.printers ?? []).length > 0;
+  const busy = isPending("printer.cameras.refresh");
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <p className="flex-1 text-xs text-text-1">
+          Cameras connected to your registered printers. Refresh to register any added since.
+        </p>
+        <button
+          className="btn btn-primary !py-1.5"
+          disabled={!hasPrinters || busy}
+          onClick={() => send({ cmd: "printer.cameras.refresh" })}
+        >
+          {busy ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+      {!hasPrinters && <p className="mono text-[0.7rem] text-text-2">register a printer first</p>}
+      {hasPrinters && !cameras.length && (
+        <p className="mono text-[0.7rem] text-text-2">no printer cameras found — refresh after connecting one</p>
+      )}
+      <CameraList cameras={cameras} />
     </div>
   );
 }
@@ -331,21 +362,41 @@ function HubAdd({ onDone }: { onDone: () => void }) {
 }
 
 export function CamerasDialog() {
-  const { engine, send, openDialog } = useStore();
+  const { engine, send, openDialog, focusCameraId } = useStore();
   const close = () => openDialog(null);
   const isLocal = engine?.mode === "local";
+  const cameras = engine?.cameras ?? [];
+  const focusIsPrinter = cameras.some((c) => c.id === focusCameraId && c.printer_id);
+  const [tab, setTab] = useState<"cameras" | "printers">(focusIsPrinter ? "printers" : "cameras");
+  const tabs: Array<["cameras" | "printers", string]> = [
+    ["cameras", "Cameras"],
+    ["printers", "Printer cameras"],
+  ];
   return (
     <Dialog title="Camera registry" onClose={close}>
-      <RegisteredList />
-      <div className="label mb-3">Register new</div>
-      {isLocal ? (
-        <DevicePicker
-          onAdd={(name, source) => {
-            send({ cmd: "camera.add", name, source });
-          }}
-        />
+      <div className="flex gap-1.5 mb-4">
+        {tabs.map(([key, label]) => (
+          <button
+            key={key}
+            className={`btn !py-1.5 !px-3 !text-[0.66rem] ${tab === key ? "!border-accent !text-accent" : ""}`}
+            onClick={() => setTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "cameras" ? (
+        <>
+          <CameraList cameras={cameras.filter((c) => !c.printer_id)} />
+          <div className="label mb-3">Register new</div>
+          {isLocal ? (
+            <DevicePicker onAdd={(name, source) => send({ cmd: "camera.add", name, source })} />
+          ) : (
+            <HubAdd onDone={() => {}} />
+          )}
+        </>
       ) : (
-        <HubAdd onDone={() => {}} />
+        <PrinterCameras />
       )}
     </Dialog>
   );

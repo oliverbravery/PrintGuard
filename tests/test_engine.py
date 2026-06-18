@@ -10,6 +10,7 @@ from fakes import FakePlatform
 
 from printguard.engine import watchdog
 from printguard.engine.engine import Engine
+from printguard.engine.integrations import INTEGRATIONS
 
 OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
 
@@ -179,6 +180,60 @@ async def test_provider_change_clears_stale_printer_state() -> None:
 
         await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"provider": "klipper", "config": {"base_url": "http://kl"}}})
         assert engine.printers.get(printer_id).device_state is None, "a new provider must not inherit the old state"
+
+
+async def test_printer_camera_registers_cascades_and_is_managed(monkeypatch) -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        async def fake_cameras(http, config):
+            return [{"key": "webcam", "name": "Shop cam", "source": {"kind": "fake", "fps": 20.0}}]
+
+        monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", fake_cameras)
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.1)  # printer.add reconciles its cameras in the background
+
+        cameras = engine.cameras.values()
+        assert [c.name for c in cameras] == ["Shop cam"], "the printer's camera was registered on add"
+        camera = cameras[0]
+        assert camera.id == f"{printer_id}-webcam" and camera.printer_id == printer_id
+
+        await engine.reconcile_printer_cameras(engine.printers.get(printer_id))
+        assert len(engine.cameras.values()) == 1, "reconciling again must not duplicate the camera"
+
+        await engine.handle({"cmd": "camera.remove", "id": camera.id, "req_id": 99})
+        assert engine.cameras.get(camera.id) is not None, "a managed camera cannot be removed on its own"
+        assert any(e["event"] == "error" and e.get("req_id") == 99 for e in events)
+
+        await engine.handle({"cmd": "printer.remove", "id": printer_id})
+        assert engine.cameras.get(camera.id) is None, "removing the printer drops its camera"
+
+
+async def test_orphaned_managed_camera_can_be_removed() -> None:
+    from printguard.engine.registry import Camera
+
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        engine.cameras.add(Camera(id="ghost", name="Ghost", source={"kind": "fake", "fps": 5.0}, printer_id="gone", max_fps=5.0))
+        await engine.handle({"cmd": "camera.remove", "id": "ghost"})
+        assert engine.cameras.get("ghost") is None, "a managed camera whose printer no longer exists is removable"
+
+
+async def test_camera_attached_later_is_picked_up_on_refresh(monkeypatch) -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        exposed: list[dict] = []
+
+        async def fake_cameras(http, config):
+            return list(exposed)
+
+        monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", fake_cameras)
+        await _register_printer(engine)
+        await asyncio.sleep(0.1)
+        assert not engine.cameras.values(), "no camera while the service exposes none"
+
+        exposed.append({"key": "webcam", "name": "Late cam", "source": {"kind": "fake", "fps": 15.0}})
+        await engine.handle({"cmd": "printer.cameras.refresh"})
+        assert [c.name for c in engine.cameras.values()] == ["Late cam"], "refresh picks up a camera added later"
 
 
 async def test_state_persists_across_restart() -> None:

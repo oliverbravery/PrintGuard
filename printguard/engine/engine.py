@@ -60,6 +60,7 @@ class Engine:
             "printer.remove": self._cmd_printer_remove,
             "printer.action": self._cmd_printer_action,
             "printer.test": self._cmd_printer_test,
+            "printer.cameras.refresh": self._cmd_refresh_printer_cameras,
             "monitor.add": self._cmd_monitor_add,
             "monitor.update": self._cmd_monitor_update,
             "monitor.remove": self._cmd_monitor_remove,
@@ -89,6 +90,7 @@ class Engine:
                 id=record["id"],
                 name=record["name"],
                 source=record["source"],
+                printer_id=record.get("printer_id"),
                 max_fps=record["max_fps"],
                 brightness=settings["brightness"],
                 contrast=settings["contrast"],
@@ -304,17 +306,69 @@ class Engine:
         camera.crop = settings["crop"]
 
     async def _cmd_camera_remove(self, message: dict[str, Any]) -> None:
-        camera = self.cameras.remove(message["id"])
+        camera = self.cameras.get(message["id"])
+        if camera and camera.printer_id and self.printers.get(camera.printer_id):
+            raise RuntimeError("camera is managed by its printer integration; remove the printer instead")
+        await self._drop_camera(message["id"])
+
+    async def _drop_camera(self, camera_id: str) -> None:
+        camera = self.cameras.remove(camera_id)
         if camera:
             await self.platform.release_camera(camera.id, camera.source)
         for monitor in self.monitors.values():
-            if monitor["camera_id"] == message["id"]:
+            if monitor["camera_id"] == camera_id:
                 monitor["camera_id"] = ""
+
+    async def _cmd_refresh_printer_cameras(self, message: dict[str, Any]) -> None:
+        """Re-checks every printer and registers any newly exposed cameras.
+
+        This is the manual counterpart to the automatic reconcile on printer
+        add/update: the user triggers it from the camera registry to pick up a
+        camera attached to a printer's service after it was registered.
+        """
+        await asyncio.gather(*(self.reconcile_printer_cameras(printer) for printer in self.printers.values()))
+
+    async def reconcile_printer_cameras(self, printer: Printer) -> None:
+        """Registers any cameras a printer's service exposes that are not known yet.
+
+        Runs when a printer is added or updated, and on demand via
+        printer.cameras.refresh. A deterministic id keyed by the adapter's camera
+        key makes this idempotent; cameras the service stops exposing are left in
+        place and go only when the printer does.
+        """
+        adapter = INTEGRATIONS.get(printer.provider)
+        if not adapter:
+            return
+        try:
+            exposed = await adapter.cameras(self.platform.http, printer.config)
+        except Exception:
+            return
+        if self.printers.get(printer.id) is None:
+            return
+        added = False
+        for descriptor in exposed:
+            camera_id = f"{printer.id}-{descriptor['key']}"
+            if self.cameras.get(camera_id):
+                continue
+            camera = Camera(id=camera_id, name=descriptor["name"], source=dict(descriptor["source"]), printer_id=printer.id, max_fps=15.0)
+            try:
+                source = await self.platform.open_camera(camera_id, camera.source)
+            except Exception:
+                continue
+            camera.frame_source = source
+            if source.fps > 0:
+                camera.max_fps = source.fps
+            self.cameras.add(camera)
+            added = True
+        if added:
+            self._sync()
 
     async def _cmd_printer_add(self, message: dict[str, Any]) -> None:
         printer_id = uuid.uuid4().hex[:8]
         record = sanitise_printer(printer_id, message.get("printer", {}))
-        self.printers.add(Printer(id=printer_id, name=record["name"], provider=record["provider"], config=record["config"]))
+        printer = Printer(id=printer_id, name=record["name"], provider=record["provider"], config=record["config"])
+        self.printers.add(printer)
+        asyncio.ensure_future(self.reconcile_printer_cameras(printer))
 
     async def _cmd_printer_update(self, message: dict[str, Any]) -> None:
         existing = self.printers.get(message["id"])
@@ -323,12 +377,17 @@ class Engine:
         record = sanitise_printer(existing.id, message.get("patch", {}), existing.persisted())
         if record["provider"] != existing.provider:
             existing.device_state = None
+            for camera in [c for c in self.cameras.values() if c.printer_id == existing.id]:
+                await self._drop_camera(camera.id)
         existing.name = record["name"]
         existing.provider = record["provider"]
         existing.config = record["config"]
+        asyncio.ensure_future(self.reconcile_printer_cameras(existing))
 
     async def _cmd_printer_remove(self, message: dict[str, Any]) -> None:
         self.printers.remove(message["id"])
+        for camera in [c for c in self.cameras.values() if c.printer_id == message["id"]]:
+            await self._drop_camera(camera.id)
         for monitor in self.monitors.values():
             if monitor.get("printer_id") == message["id"]:
                 monitor["printer_id"] = ""

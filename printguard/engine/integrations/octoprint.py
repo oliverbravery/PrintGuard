@@ -7,6 +7,7 @@ Application keys (how the API key is obtained): https://docs.octoprint.org/en/ma
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urljoin
 
 from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
 
@@ -76,3 +77,19 @@ class OctoPrintAdapter(IntegrationAdapter):
         )
         if status >= 400:
             raise RuntimeError(f"OctoPrint rejected {action.value}: HTTP {status}")
+
+    async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
+        """Reads the configured webcam stream from /api/settings.
+
+        OctoPrint 1.9 moved the stream URL into the bundled Classic Webcam
+        plugin and deprecated ``webcam.streamUrl``, so the plugin location is
+        preferred and the legacy field is the fallback. The URL may be relative
+        to the OctoPrint host and is resolved against it.
+        """
+        status, body = await http("GET", f"{config['base_url'].rstrip('/')}/api/settings", headers=self._headers(config))
+        if status != 200 or not isinstance(body, dict):
+            return []
+        stream = ((body.get("plugins") or {}).get("classicwebcam") or {}).get("stream") or (body.get("webcam") or {}).get("streamUrl")
+        if not stream:
+            return []
+        return [{"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": urljoin(config["base_url"], stream)}}]

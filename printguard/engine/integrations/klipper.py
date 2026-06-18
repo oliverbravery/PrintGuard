@@ -7,6 +7,7 @@ Authorization and CORS (trusted_clients, cors_domains): https://moonraker.readth
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urljoin
 
 from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
 
@@ -70,3 +71,25 @@ class KlipperAdapter(IntegrationAdapter):
         )
         if status >= 400:
             raise RuntimeError(f"Moonraker rejected {action.value}: HTTP {status}")
+
+    async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
+        """Lists Moonraker's registered webcams via /server/webcams/list.
+
+        Each webcam's stream_url may be relative to the Moonraker host and is
+        resolved against it; its stable uid keys the registered camera.
+        """
+        status, body = await http("GET", f"{config['base_url'].rstrip('/')}/server/webcams/list", headers=self._headers(config))
+        if status != 200 or not isinstance(body, dict):
+            return []
+        found: list[dict[str, Any]] = []
+        for webcam in (body.get("result") or {}).get("webcams") or []:
+            if not webcam.get("enabled", True) or not webcam.get("stream_url"):
+                continue
+            found.append(
+                {
+                    "key": str(webcam.get("uid") or webcam.get("name") or len(found)),
+                    "name": webcam.get("name") or "Webcam",
+                    "source": {"kind": "url", "url": urljoin(config["base_url"], webcam["stream_url"])},
+                }
+            )
+        return found

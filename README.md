@@ -77,6 +77,13 @@ sustained defect should do (alert only, pause, cancel). Linked printers report j
 progress and state on the monitors that use them — and gate inference, so an idle printer
 costs you nothing.
 
+If a registered printer exposes a webcam, PrintGuard registers it as a camera automatically
+— no stream URL to copy. The camera registry's **Printer cameras** tab lists them and a
+**Refresh** button picks up any camera attached to a printer after it was registered. This
+covers OctoPrint and Moonraker webcam streams and the Bambu chamber camera (over RTSP on
+the X1/H2 series, or the proprietary port-6000 protocol on the A1/P1 series, hub mode only).
+These cameras are managed by their printer and removed with it.
+
 Bambu Lab printers speak MQTT over TLS rather than HTTP, which a browser cannot open, so
 they are offered in **hub mode only**. On the printer, enable **LAN Only Mode** then
 **Developer Mode** (Settings → Network) to open the MQTT channel, then link it with its IP,

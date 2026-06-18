@@ -24,6 +24,14 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   Bambu's official setup guide. The protocol is MQTT over TLS, which needs a raw socket the
   browser sandbox forbids, so Bambu Lab is offered in **hub mode only** — the same
   constraint that already makes some notifiers hub-only.
+- **Printer-exposed cameras** — when a registered printer's service exposes a webcam,
+  PrintGuard registers it as a camera automatically (no stream URL to copy). A camera
+  attached to the printer later is picked up from the camera registry's new **Printer
+  cameras** tab with a **Refresh** button. Covers OctoPrint and Klipper (Moonraker) webcam
+  streams and the Bambu Lab chamber camera — RTSP on the X1/H2 series and the proprietary
+  port-6000 JPEG protocol on the A1/P1 series (hub mode). These cameras are managed by their
+  printer: they cannot be removed on their own and are dropped with it, and the REST and MCP
+  read surface strips the access codes their sources carry.
 - **Setup guides in config forms** — each printer service and notification channel now
   shows a one-line setup hint and a link to its official setup docs, so steps taken
   outside PrintGuard (API keys, CORS, bot tokens, webhooks, LAN mode) are spelled out

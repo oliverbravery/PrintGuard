@@ -147,6 +147,28 @@ async def test_octoprint_unreachable_is_offline() -> None:
     assert state.status is DeviceStatus.OFFLINE
 
 
+async def test_octoprint_exposes_webcam_stream() -> None:
+    http = RecordingHttp(body={"webcam": {"streamUrl": "/webcam/?action=stream"}})
+    cams = await INTEGRATIONS["octoprint"].cameras(http, {"base_url": "http://op:5000", "api_key": "k"})
+    assert http.last["url"] == "http://op:5000/api/settings"
+    assert http.last["headers"] == {"X-Api-Key": "k"}
+    assert cams == [
+        {"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": "http://op:5000/webcam/?action=stream"}}
+    ]
+
+
+async def test_octoprint_reads_19_plus_classicwebcam_location() -> None:
+    http = RecordingHttp(body={"webcam": {}, "plugins": {"classicwebcam": {"stream": "http://cam.lan:8080/stream"}}})
+    cams = await INTEGRATIONS["octoprint"].cameras(http, {"base_url": "http://op", "api_key": "k"})
+    assert cams[0]["source"]["url"] == "http://cam.lan:8080/stream", "an absolute stream URL is used as-is"
+
+
+async def test_octoprint_without_a_webcam_exposes_nothing() -> None:
+    http = RecordingHttp(body={"webcam": {"streamUrl": ""}})
+    assert await INTEGRATIONS["octoprint"].cameras(http, {"base_url": "http://op", "api_key": "k"}) == []
+    assert await INTEGRATIONS["octoprint"].cameras(RecordingHttp(status=502), {"base_url": "http://op"}) == []
+
+
 async def test_octoprint_action_payloads() -> None:
     http = RecordingHttp(status=204)
     await INTEGRATIONS["octoprint"].send(http, {"base_url": "http://op"}, DeviceAction.PAUSE)
@@ -192,6 +214,26 @@ async def test_klipper_actions_and_auth() -> None:
         await INTEGRATIONS["klipper"].send(RecordingHttp(status=400), {"base_url": "http://kl"}, DeviceAction.PAUSE)
 
 
+async def test_klipper_lists_enabled_webcams() -> None:
+    body = {
+        "result": {
+            "webcams": [
+                {"name": "Nozzle", "uid": "u1", "stream_url": "/webcam/?action=stream", "enabled": True},
+                {"name": "Disabled", "uid": "u2", "stream_url": "/webcam2/?action=stream", "enabled": False},
+                {"name": "No stream", "uid": "u3", "stream_url": "", "enabled": True},
+            ]
+        }
+    }
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl:7125"})
+    assert cams == [
+        {"key": "u1", "name": "Nozzle", "source": {"kind": "url", "url": "http://kl:7125/webcam/?action=stream"}}
+    ], "only enabled webcams with a stream are exposed, keyed by their stable uid"
+
+
+async def test_klipper_without_webcams_api_exposes_nothing() -> None:
+    assert await INTEGRATIONS["klipper"].cameras(RecordingHttp(status=404, body={}), {"base_url": "http://kl"}) == []
+
+
 BAMBU_CONFIG = {"host": "192.168.1.70", "serial": "01S00A", "access_code": "12345678"}
 
 
@@ -228,6 +270,41 @@ async def test_bambu_command_payloads(monkeypatch) -> None:
     for action, command in [(DeviceAction.PAUSE, "pause"), (DeviceAction.RESUME, "resume"), (DeviceAction.CANCEL, "stop")]:
         await INTEGRATIONS["bambu"].send(None, BAMBU_CONFIG, action)
         assert published[-1] == {"print": {"sequence_id": "0", "command": command, "param": ""}}
+
+
+async def test_bambu_exposes_rtsps_camera_for_x1_h2(monkeypatch) -> None:
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_rtsps_fingerprint", lambda host: "ABCDEF")
+    cams = await INTEGRATIONS["bambu"].cameras(None, BAMBU_CONFIG)
+    assert cams == [
+        {
+            "key": "chamber",
+            "name": "Chamber camera",
+            "source": {
+                "kind": "url",
+                "url": "rtsps://bblp:12345678@192.168.1.70:322/streaming/live/1",
+                "fingerprint": "ABCDEF",
+            },
+        }
+    ]
+
+
+async def test_bambu_exposes_port6000_camera_for_a1_p1(monkeypatch) -> None:
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_rtsps_fingerprint", lambda host: None)
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_port_open", lambda host, port: port == 6000)
+    cams = await INTEGRATIONS["bambu"].cameras(None, BAMBU_CONFIG)
+    assert cams == [
+        {
+            "key": "chamber",
+            "name": "Chamber camera",
+            "source": {"kind": "bambu", "host": "192.168.1.70", "access_code": "12345678"},
+        }
+    ], "A1/P1 have no RTSP, so the camera is read over the proprietary port-6000 protocol"
+
+
+async def test_bambu_without_a_camera_exposes_nothing(monkeypatch) -> None:
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_rtsps_fingerprint", lambda host: None)
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_port_open", lambda host, port: False)
+    assert await INTEGRATIONS["bambu"].cameras(None, BAMBU_CONFIG) == []
 
 
 def test_bambu_runs_in_hub_mode_only() -> None:

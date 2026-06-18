@@ -57,7 +57,7 @@ runtime service, extend the Platform contract on both sides.
 ## The protocol
 
 Commands (UI → engine): `discover`, `camera.add/update/remove`,
-`printer.add/update/remove`, `printer.action`, `printer.test`,
+`printer.add/update/remove`, `printer.action`, `printer.test`, `printer.cameras.refresh`,
 `monitor.add/update/remove`, `notify.test`, `settings.update`. Every command may carry a
 `req_id`, echoed on the responding event so the UI can resolve pending requests.
 
@@ -65,6 +65,14 @@ A **camera** is a video source and a **printer** is a control-service connection
 (OctoPrint/Klipper/Bambu); both are registered resources, created and deleted only in
 their registry. A **monitor** binds one of each (the printer is optional) and carries the
 inference thresholds and defect-response policy.
+
+A printer integration that exposes a webcam registers it automatically as a camera owned
+by that printer (`Camera.printer_id`): the OctoPrint and Moonraker stream URLs, and the
+Bambu chamber camera (RTSP for X1/H2, the proprietary port-6000 protocol for A1/P1). The
+adapter's optional `cameras()` declares them and the engine reconciles them on printer
+add/update, and on demand via `printer.cameras.refresh` (the camera registry's Printer
+cameras tab) to pick up a camera attached later. Such cameras can't be removed on their
+own and are dropped with their printer.
 
 Events (engine → UI): a full `state` snapshot (on connect, after every command, and on a
 1 s ticker), plus incremental `result`, `alert`, `warning`, `device`, `discovered`,
@@ -169,6 +177,7 @@ printguard/
   server/            hub platform: FastAPI, MediaMTX, LiteRT, PyAV
     api.py           REST API (/api/v1) over the engine protocol, scoped by token
     mcp.py           MCP server for agents, derived from the REST API
+    bambu_camera.py  Bambu A1/P1 chamber-camera reader (proprietary port-6000 protocol)
   browser/           local platform: Pyodide bridge to LiteRT.js and getUserMedia
   pysrc.py           builds the engine source archive Pyodide unpacks
 web/                 React + Tailwind UI (presentation only)

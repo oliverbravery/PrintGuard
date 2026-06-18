@@ -4,7 +4,8 @@ import type { Camera, CameraSource } from "../types";
 export function sourceLabel(source: CameraSource): string {
   if (source.kind === "device") return source.label || "device camera";
   if (source.kind === "path") return `path://${source.path}`;
-  return source.url ?? source.kind;
+  if (source.kind === "bambu") return `bambu://${source.host ?? ""}`;
+  return source.url ? source.url.replace(/\/\/[^/@]+@/, "//") : source.kind;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

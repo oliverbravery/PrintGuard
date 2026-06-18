@@ -5,6 +5,8 @@ API reference: https://bluenviron.github.io/mediamtx/
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 
 
@@ -26,9 +28,15 @@ class MediaMTX:
         resp.raise_for_status()
         return [item["name"] for item in resp.json().get("items", [])]
 
-    async def ensure_path(self, name: str, source_url: str) -> None:
-        """Creates or updates a path that pulls from an external URL."""
-        payload = {"source": source_url, "sourceOnDemand": False}
+    async def ensure_path(self, name: str, source_url: str, fingerprint: str | None = None) -> None:
+        """Creates or updates a path that pulls from an external URL.
+
+        A fingerprint is the SHA-256 of a self-signed source certificate (hex,
+        no colons), letting MediaMTX validate an otherwise-untrusted RTSPS feed.
+        """
+        payload: dict[str, Any] = {"source": source_url, "sourceOnDemand": False}
+        if fingerprint:
+            payload["sourceFingerprint"] = fingerprint
         resp = await self._client.post(f"{self._api}/v3/config/paths/add/{name}", json=payload, timeout=5.0)
         if resp.status_code == 400:
             resp = await self._client.patch(f"{self._api}/v3/config/paths/patch/{name}", json=payload, timeout=5.0)

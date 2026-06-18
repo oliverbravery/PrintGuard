@@ -12,6 +12,7 @@ export interface CameraSource {
   device_id?: string;
   path?: string;
   url?: string;
+  host?: string;
   label?: string;
 }
 
@@ -25,6 +26,7 @@ export interface Camera {
   id: string;
   name: string;
   source: CameraSource;
+  printer_id?: string | null;
   max_fps: number;
   brightness: number;
   contrast: number;
