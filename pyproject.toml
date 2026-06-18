@@ -13,6 +13,7 @@ dependencies = [
     "httpx>=0.28",
     "numpy>=2.1",
     "paho-mqtt>=2.1",
+    "starlette>=1.3.1",
     "uvicorn[standard]>=0.49.0",
 ]
 
