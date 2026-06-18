@@ -33,6 +33,8 @@ class FakePlatform:
 
     mode = "test"
     workers = 1
+    version = "2.1.0"
+    update_repo: str | None = None
 
     def __init__(self, infer_s: float = 0.05, failing: bool = False) -> None:
         self.infer_s = infer_s
@@ -40,6 +42,7 @@ class FakePlatform:
         self.device_status = "Printing"
         self.reject_actions = False
         self.http_calls: list[tuple[str, str]] = []
+        self.releases: list[dict[str, Any]] = []
         self.state: dict[str, Any] = {}
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
@@ -58,6 +61,8 @@ class FakePlatform:
 
     async def http(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
         self.http_calls.append((method, url))
+        if "api.github.com" in url:
+            return 200, self.releases
         if self.reject_actions and method == "POST" and "/api/job" in url:
             raise RuntimeError("printer refused")
         return 200, {"state": self.device_status, "progress": {"completion": 40.0}, "job": {"file": {"name": "benchy.gcode"}}}

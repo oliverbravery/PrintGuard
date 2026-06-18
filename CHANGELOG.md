@@ -53,6 +53,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   own protocol, never over the API itself. With no token issued the surface is read-only
   behind your existing auth proxy; issuing scoped tokens unlocks control and management, and
   MCP hides any tool a token cannot use.
+- **Update notifications** — the hub checks the public GitHub releases once a day for a newer
+  version and flags it in the header. A dialog shows the changelog for every version above
+  the one you run and the `docker compose pull && docker compose up -d` command to upgrade.
+  The check runs server-side with no telemetry and can be switched off in **Settings →
+  Software updates**; local mode, which is always the latest deployed build, never calls out.
 
 ### Changed
 

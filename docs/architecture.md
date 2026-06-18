@@ -58,8 +58,8 @@ runtime service, extend the Platform contract on both sides.
 
 Commands (UI → engine): `discover`, `camera.add/update/remove`,
 `printer.add/update/remove`, `printer.action`, `printer.test`, `printer.cameras.refresh`,
-`monitor.add/update/remove`, `notify.test`, `settings.update`. Every command may carry a
-`req_id`, echoed on the responding event so the UI can resolve pending requests.
+`monitor.add/update/remove`, `notify.test`, `settings.update`, `update.check`. Every command
+may carry a `req_id`, echoed on the responding event so the UI can resolve pending requests.
 
 A **camera** is a video source and a **printer** is a control-service connection
 (OctoPrint/Klipper/Bambu); both are registered resources, created and deleted only in
@@ -75,8 +75,9 @@ cameras tab) to pick up a camera attached later. Such cameras can't be removed o
 own and are dropped with their printer.
 
 Events (engine → UI): a full `state` snapshot (on connect, after every command, and on a
-1 s ticker), plus incremental `result`, `alert`, `warning`, `device`, `discovered`,
-`printer_test`, `notify_test` and `error` events.
+1 s ticker; it carries the running version and any available update), plus incremental
+`result`, `alert`, `warning`, `device`, `discovered`, `printer_test`, `notify_test` and
+`error` events.
 
 ## The programmatic surface (hub only)
 

@@ -48,6 +48,10 @@ class Platform(Protocol):
 
     mode: str
     workers: int
+    version: str
+    update_repo: str | None
+    """GitHub ``owner/name`` to check for updates, or None to never call out
+    (local mode is always the latest deployed build)."""
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
         """Runs the model on an RGB frame and returns a classify() result."""

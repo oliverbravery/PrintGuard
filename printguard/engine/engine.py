@@ -14,7 +14,7 @@ import uuid
 from collections import deque
 from typing import Any, Callable
 
-from . import vision
+from . import updates, vision
 from .cameras import sanitise_camera
 from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
 from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
@@ -31,8 +31,9 @@ REATTACH_EVERY_TICKS = 10
 REQUEST_TIMEOUT_S = 15.0
 RECENT_EVENTS_MAX = 100
 RECENT_EVENT_TYPES = ("alert", "warning", "device", "error")
+UPDATE_CHECK_INTERVAL_S = 86400.0
 
-SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}}
+SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}, "update_check": True}
 
 
 class Engine:
@@ -45,6 +46,7 @@ class Engine:
         self.monitors: dict[str, dict[str, Any]] = {}
         self.tokens = TokenRegistry()
         self.settings: dict[str, Any] = dict(SETTINGS_DEFAULTS)
+        self.update: dict[str, Any] | None = None
         self.scheduler = Scheduler(platform, self.cameras, self._on_result, self._on_pipeline_error)
         self.watchdog = Watchdog(self)
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
@@ -68,6 +70,7 @@ class Engine:
             "settings.update": self._cmd_settings_update,
             "token.create": self._cmd_token_create,
             "token.remove": self._cmd_token_remove,
+            "update.check": self._cmd_update_check,
         }
 
     async def start(self) -> None:
@@ -106,6 +109,8 @@ class Engine:
             asyncio.ensure_future(self.watchdog.watch_health()),
             asyncio.ensure_future(self._ticker()),
         ]
+        if self.platform.update_repo:
+            self._tasks.append(asyncio.ensure_future(self._update_loop()))
 
     async def stop(self) -> None:
         """Cancels background loops and closes every frame source."""
@@ -139,6 +144,8 @@ class Engine:
         return {
             "event": "state",
             "mode": self.platform.mode,
+            "version": self.platform.version,
+            "update": self.update,
             "cameras": [c.public() for c in self.cameras.values()],
             "printers": [p.public() for p in self.printers.values()],
             "monitors": [{**m, "watching": monitor_watching(m, self.printers)} for m in self.monitors.values()],
@@ -246,6 +253,23 @@ class Engine:
                 elif camera.frame_source.fps > 0:
                     camera.max_fps = camera.frame_source.fps
             self.emit(self.state_event())
+
+    async def _update_loop(self) -> None:
+        """Refreshes the update status daily while the auto-check is enabled."""
+        while True:
+            if self.settings.get("update_check", True):
+                try:
+                    await self._check_updates()
+                    self.emit(self.state_event())
+                except Exception:
+                    pass
+            await asyncio.sleep(UPDATE_CHECK_INTERVAL_S)
+
+    async def _check_updates(self) -> None:
+        """Fetches and stores the update status, raising if it cannot."""
+        if not self.platform.update_repo:
+            raise RuntimeError("update checks are not available in this mode")
+        self.update = await updates.fetch_updates(self.platform.http, self.platform.update_repo, self.platform.version)
 
     def _on_pipeline_error(self, message: str) -> None:
         self.emit({"event": "error", "message": message})
@@ -450,3 +474,6 @@ class Engine:
 
     async def _cmd_token_remove(self, message: dict[str, Any]) -> None:
         self.tokens.remove(message["id"])
+
+    async def _cmd_update_check(self, message: dict[str, Any]) -> None:
+        await self._check_updates()

@@ -7,6 +7,7 @@ import { MonitorDialog } from "./MonitorDialog";
 import { MonitorTile } from "./MonitorTile";
 import { PrintersDialog } from "./PrintersDialog";
 import { SettingsDialog } from "./SettingsDialog";
+import { UpdateDialog } from "./UpdateDialog";
 
 function EmptyState() {
   const openDialog = useStore((s) => s.openDialog);
@@ -80,6 +81,7 @@ export function Dashboard() {
       {dialog === "printers" && <PrintersDialog />}
       {dialog === "monitor" && <MonitorDialog />}
       {dialog === "settings" && <SettingsDialog />}
+      {dialog === "update" && <UpdateDialog />}
       {detail && <DetailPanel monitor={detail} />}
       <Toasts />
       <MobileActionBar />

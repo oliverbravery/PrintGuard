@@ -9,6 +9,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
+from importlib import metadata
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable
@@ -116,8 +117,10 @@ class ServerPlatform:
     """Hub mode platform: LiteRT on CPU threads, frames via MediaMTX."""
 
     mode = "hub"
+    update_repo = "oliverbravery/PrintGuard"
 
     def __init__(self, model_dir: Path, data_dir: Path, mediamtx_api: str, mediamtx_rtsp: str) -> None:
+        self.version = metadata.version("printguard")
         self.workers = max(1, (os.cpu_count() or 2) - 1)
         self._executor = ThreadPoolExecutor(max_workers=self.workers)
         self._thread_local = threading.local()

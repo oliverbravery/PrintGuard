@@ -8,6 +8,7 @@ import { Toggle } from "./Toggle";
 export function SettingsDialog() {
   const { engine, send, openDialog, leaveMode, isPending, notifyTest, testingNotifier, testNotifier, createdToken, clearCreatedToken } = useStore();
   const [notifiers, setNotifiers] = useState(engine?.settings.notifiers ?? {});
+  const [updateCheck, setUpdateCheck] = useState(engine?.settings.update_check ?? true);
   const [tokenName, setTokenName] = useState("");
   const [tokenScope, setTokenScope] = useState<ApiToken["scope"]>("read");
   const saving = isPending("settings.update");
@@ -70,12 +71,42 @@ export function SettingsDialog() {
             Defect alerts (with snapshots) go to every enabled channel for printers with notifications on.
           </span>
         </div>
+        {engine?.mode === "hub" && (
+          <div className="space-y-3">
+            <span className="label block">Software updates</span>
+            <Toggle
+              label="Automatically check for updates"
+              on={updateCheck}
+              onChange={(on) => {
+                setUpdateCheck(on);
+                if (on && !engine?.update) send({ cmd: "update.check" });
+              }}
+            />
+            <span className="text-[0.7rem] text-text-2 block">
+              Checks the public GitHub releases once a day, from the hub. No telemetry is sent.
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button className="btn" disabled={isPending("update.check")} onClick={() => send({ cmd: "update.check" })}>
+                {isPending("update.check") ? "Checking…" : "Check now"}
+              </button>
+              {engine?.update?.available && (
+                <button className="btn btn-primary" onClick={() => openDialog("update")}>
+                  Update to v{engine.update.latest}
+                </button>
+              )}
+              <span className="text-[0.7rem] text-text-2">
+                {engine?.version && `v${engine.version}`}
+                {engine?.update && !engine.update.available && " · up to date"}
+              </span>
+            </div>
+          </div>
+        )}
         <button
           className="btn btn-primary w-full"
           disabled={saving}
           onClick={() => {
             sent.current = true;
-            send({ cmd: "settings.update", patch: { notifiers } });
+            send({ cmd: "settings.update", patch: { notifiers, update_check: updateCheck } });
           }}
         >
           {saving ? "Saving…" : "Save"}

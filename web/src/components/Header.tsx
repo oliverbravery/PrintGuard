@@ -44,6 +44,23 @@ export function MobileActionBar() {
   );
 }
 
+function VersionChip() {
+  const version = useStore((s) => s.engine?.version);
+  const update = useStore((s) => s.engine?.update);
+  const openDialog = useStore((s) => s.openDialog);
+  if (!version) return null;
+  const available = update?.available;
+  return (
+    <button
+      className={`chip cursor-pointer hover:opacity-80 ${available ? "chip-accent" : ""}`}
+      title={available ? `Update available: v${update!.latest}` : `PrintGuard v${version}`}
+      onClick={() => openDialog("update")}
+    >
+      {available ? `↑ v${update!.latest}` : `v${version}`}
+    </button>
+  );
+}
+
 export function Header() {
   const { engine, mode, leaveMode } = useStore();
   const stats = engine?.stats;
@@ -58,6 +75,7 @@ export function Header() {
         >
           {mode === "hub" ? "hub" : "local"} ▾
         </button>
+        <VersionChip />
         <div className="flex-1" />
         {stats && (
           <div className="flex items-center gap-5 md:mr-2">

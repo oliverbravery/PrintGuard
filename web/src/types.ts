@@ -113,12 +113,31 @@ export interface EngineStats {
   capacity_fps: number;
 }
 
+export interface UpdateRelease {
+  version: string;
+  name: string;
+  notes: string;
+  url: string;
+  published_at: string | null;
+}
+
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  available: boolean;
+  releases: UpdateRelease[];
+  checked_at: number;
+  releases_url: string;
+}
+
 export interface EngineState {
   mode: string;
+  version: string;
+  update: UpdateInfo | null;
   cameras: Camera[];
   printers: Printer[];
   monitors: Monitor[];
-  settings: { notifiers: Record<string, Record<string, string>> };
+  settings: { notifiers: Record<string, Record<string, string>>; update_check: boolean };
   tokens: ApiToken[];
   stats: EngineStats;
   integrations: AdapterMeta[];
