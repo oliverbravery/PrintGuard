@@ -9,8 +9,10 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
+from importlib import metadata
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import av
 import httpx
@@ -19,6 +21,7 @@ from ai_edge_litert.interpreter import Interpreter
 
 from ..engine import vision
 from ..engine.platform import Frame
+from .bambu_camera import open_bambu_jpeg_stream
 from .mediamtx import MediaMTX
 from .publish import H264Push
 
@@ -31,12 +34,15 @@ RECONNECT_DELAY_S = 3.0
 class AVSource:
     """Continuously decodes a stream, keeping only the freshest frame.
 
-    When publish_url is set, each decoded frame is also transcoded to H.264 and
-    pushed there, so sources MediaMTX cannot pull itself reach viewers as HLS.
+    The source is either a URL string MediaMTX or ffmpeg can open, or a factory
+    returning a fresh readable MJPEG byte stream (used for sources that speak a
+    bespoke protocol, e.g. Bambu's chamber camera). When publish_url is set,
+    each decoded frame is also transcoded to H.264 and pushed there, so sources
+    MediaMTX cannot pull itself reach viewers as HLS.
     """
 
-    def __init__(self, url: str, publish_url: str | None = None) -> None:
-        self._url = url
+    def __init__(self, source: str | Callable[[], Any], publish_url: str | None = None) -> None:
+        self._source = source
         self._publish_url = publish_url
         self.fps = 0.0
         self.online = False
@@ -46,16 +52,24 @@ class AVSource:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
+    def _open(self) -> tuple[Any, Any]:
+        """Opens the container, returning it and any pipe to close afterwards."""
+        if not isinstance(self._source, str):
+            pipe = self._source()
+            return av.open(pipe, format="mjpeg", options={"analyzeduration": "0"}), pipe
+        options = {}
+        if self._source.startswith("rtsp://"):
+            options["rtsp_transport"] = "tcp"
+        elif self._source.startswith(("http://", "https://")):
+            options["timeout"] = "5000000"
+        return av.open(self._source, options=options, timeout=5.0), None
+
     def _run(self) -> None:
         while not self._stop:
             push: H264Push | None = None
+            pipe: Any = None
             try:
-                options = {}
-                if self._url.startswith("rtsp://"):
-                    options["rtsp_transport"] = "tcp"
-                elif self._url.startswith(("http://", "https://")):
-                    options["timeout"] = "5000000"
-                container = av.open(self._url, options=options, timeout=5.0)
+                container, pipe = self._open()
                 stream = container.streams.video[0]
                 declared = float(stream.average_rate or 0)
                 if not self.fps and 0 < declared <= 240:
@@ -83,6 +97,8 @@ class AVSource:
             finally:
                 if push is not None:
                     push.close()
+                if pipe is not None:
+                    pipe.close()
             self.online = False
             if not self._stop:
                 time.sleep(RECONNECT_DELAY_S)
@@ -101,8 +117,10 @@ class ServerPlatform:
     """Hub mode platform: LiteRT on CPU threads, frames via MediaMTX."""
 
     mode = "hub"
+    update_repo = "oliverbravery/PrintGuard"
 
     def __init__(self, model_dir: Path, data_dir: Path, mediamtx_api: str, mediamtx_rtsp: str) -> None:
+        self.version = metadata.version("printguard")
         self.workers = max(1, (os.cpu_count() or 2) - 1)
         self._executor = ThreadPoolExecutor(max_workers=self.workers)
         self._thread_local = threading.local()
@@ -156,25 +174,30 @@ class ServerPlatform:
         inference and viewers see them.
         """
         publish_url: str | None = None
+        target: str | Callable[[], Any]
         if source["kind"] == "url":
             source_url = source["url"]
             if source_url.startswith(("http://", "https://")):
-                url = source_url
+                target = source_url
                 publish_url = self.mediamtx.rtsp_url(camera_id)
             else:
-                await self.mediamtx.ensure_path(camera_id, source_url)
-                url = self.mediamtx.rtsp_url(camera_id)
+                await self.mediamtx.ensure_path(camera_id, source_url, source.get("fingerprint"))
+                target = self.mediamtx.rtsp_url(camera_id)
         elif source["kind"] == "path":
-            url = self.mediamtx.rtsp_url(source["path"])
+            target = self.mediamtx.rtsp_url(source["path"])
+        elif source["kind"] == "bambu":
+            target = partial(open_bambu_jpeg_stream, source["host"], source["access_code"])
+            publish_url = self.mediamtx.rtsp_url(camera_id)
         else:
             raise ValueError(f"hub mode cannot open source kind {source['kind']!r}")
-        av_source = AVSource(url, publish_url)
+        av_source = AVSource(target, publish_url)
         deadline = time.monotonic() + OPEN_WAIT_S
         while time.monotonic() < deadline and not (av_source.online and av_source.fps > 0):
             await asyncio.sleep(0.2)
         if not av_source.online:
             av_source.close()
-            raise RuntimeError(f"no frames from {url}")
+            await self.release_camera(camera_id, source)
+            raise RuntimeError(f"no frames from camera {camera_id}")
         return av_source
 
     async def release_camera(self, camera_id: str, source: dict[str, Any]) -> None:

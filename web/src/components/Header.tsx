@@ -24,8 +24,11 @@ export function HeaderActions({ className }: { className?: string }) {
       <button className="btn max-md:w-full max-md:py-2.5" onClick={() => openDialog("cameras")}>
         Cameras
       </button>
-      <button className="btn btn-primary max-md:w-full max-md:py-2.5" onClick={() => openDialog("printer")}>
-        + Printer
+      <button className="btn max-md:w-full max-md:py-2.5" onClick={() => openDialog("printers")}>
+        Printers
+      </button>
+      <button className="btn btn-primary max-md:w-full max-md:py-2.5" onClick={() => openDialog("monitor")}>
+        + Monitor
       </button>
       <button className="btn max-md:w-full max-md:py-2.5" onClick={() => openDialog("settings")} aria-label="Settings">
         <span className="md:hidden">Settings</span>
@@ -37,7 +40,24 @@ export function HeaderActions({ className }: { className?: string }) {
 
 export function MobileActionBar() {
   return (
-    <HeaderActions className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 gap-2 border-t border-line-0 bg-ink-0/95 px-4 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden" />
+    <HeaderActions className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 gap-2 border-t border-line-0 bg-ink-0/95 px-4 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden" />
+  );
+}
+
+function VersionChip() {
+  const version = useStore((s) => s.engine?.version);
+  const update = useStore((s) => s.engine?.update);
+  const openDialog = useStore((s) => s.openDialog);
+  if (!version) return null;
+  const available = update?.available;
+  return (
+    <button
+      className={`chip cursor-pointer hover:opacity-80 ${available ? "chip-accent" : ""}`}
+      title={available ? `Update available: v${update!.latest}` : `PrintGuard v${version}`}
+      onClick={() => openDialog("update")}
+    >
+      {available ? `↑ v${update!.latest}` : `v${version}`}
+    </button>
   );
 }
 
@@ -55,6 +75,7 @@ export function Header() {
         >
           {mode === "hub" ? "hub" : "local"} ▾
         </button>
+        <VersionChip />
         <div className="flex-1" />
         {stats && (
           <div className="flex items-center gap-5 md:mr-2">

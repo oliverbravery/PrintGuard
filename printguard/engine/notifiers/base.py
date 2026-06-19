@@ -17,19 +17,7 @@ from ..adapters import Adapter, HttpFn
 
 
 class NotifierAdapter(Adapter):
-    """Base class for alert notifiers.
-
-    Attributes:
-        browser_ok: Whether the service sends CORS headers; services that
-            do not can only be reached from hub mode, never from the
-            browser in local mode.
-    """
-
-    browser_ok: bool = True
-
-    def meta(self) -> dict[str, Any]:
-        """Serialises adapter metadata including browser reachability."""
-        return {**super().meta(), "browser_ok": self.browser_ok}
+    """Base class for alert notifiers."""
 
     @abstractmethod
     async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:

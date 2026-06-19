@@ -82,3 +82,20 @@ class IntegrationAdapter(Adapter):
         Raises:
             RuntimeError: If the service rejects the command.
         """
+
+    async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
+        """Lists the cameras the printer service currently exposes.
+
+        Args:
+            http: Platform HTTP function.
+            config: User-supplied values matching the adapter schema.
+
+        Returns:
+            One descriptor per camera, each a dict of ``key`` (a stable
+            identifier for the camera within this printer), ``name`` and
+            ``source`` (an engine camera source dict). The default is empty,
+            for services without a camera. The engine re-queries this, so a
+            camera attached to the service after the printer was registered is
+            picked up automatically.
+        """
+        return []

@@ -10,12 +10,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from .bambu import BambuAdapter
 from .base import DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
 from .klipper import KlipperAdapter
 from .octoprint import OctoPrintAdapter
 
 INTEGRATIONS: dict[str, IntegrationAdapter] = {
-    adapter.id: adapter for adapter in (OctoPrintAdapter(), KlipperAdapter())
+    adapter.id: adapter for adapter in (OctoPrintAdapter(), KlipperAdapter(), BambuAdapter())
 }
 
 

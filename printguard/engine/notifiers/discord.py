@@ -1,6 +1,7 @@
 """Discord notifier via channel webhooks.
 
 API reference: https://discord.com/developers/docs/resources/webhook#execute-webhook
+Creating a webhook: https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ class DiscordNotifier(NotifierAdapter):
     id = "discord"
     label = "Discord"
     docs_url = "https://discord.com/developers/docs/resources/webhook#execute-webhook"
+    setup_url = "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks"
+    setup_hint = "Create a webhook under Server Settings > Integrations > Webhooks and copy its URL."
     schema = {
         "type": "object",
         "properties": {

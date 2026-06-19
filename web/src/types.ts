@@ -12,6 +12,7 @@ export interface CameraSource {
   device_id?: string;
   path?: string;
   url?: string;
+  host?: string;
   label?: string;
 }
 
@@ -25,6 +26,7 @@ export interface Camera {
   id: string;
   name: string;
   source: CameraSource;
+  printer_id?: string | null;
   max_fps: number;
   brightness: number;
   contrast: number;
@@ -44,11 +46,13 @@ export interface DeviceState {
   job: string | null;
 }
 
-export interface DeviceConfig {
-  provider: string | null;
+export interface Printer {
+  id: string;
+  name: string;
+  provider: string;
   config: Record<string, string>;
-  on_defect: "none" | "pause" | "cancel";
-  cooldown_s: number;
+  device_state?: DeviceState | null;
+  online: boolean;
 }
 
 export interface Alert {
@@ -57,17 +61,18 @@ export interface Alert {
   ts: number;
 }
 
-export interface Printer {
+export interface Monitor {
   id: string;
   name: string;
   camera_id: string;
+  printer_id: string;
   enabled: boolean;
   threshold: number;
   sensitivity: number;
   consecutive: number;
   notify: boolean;
-  device: DeviceConfig;
-  device_state?: DeviceState;
+  on_defect: "none" | "pause" | "cancel";
+  cooldown_s: number;
   alert?: Alert | null;
   watching?: boolean;
 }
@@ -85,10 +90,21 @@ export interface AdapterMeta {
   label: string;
   docs_url: string;
   browser_ok?: boolean;
+  experimental?: boolean;
+  setup_url?: string | null;
+  setup_hint?: string | null;
   schema: {
     properties: Record<string, SchemaProperty>;
     required?: string[];
   };
+}
+
+export interface ApiToken {
+  id: string;
+  name: string;
+  scope: "read" | "control" | "manage";
+  hint: string;
+  created: number;
 }
 
 export interface EngineStats {
@@ -97,11 +113,32 @@ export interface EngineStats {
   capacity_fps: number;
 }
 
+export interface UpdateRelease {
+  version: string;
+  name: string;
+  notes: string;
+  url: string;
+  published_at: string | null;
+}
+
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  available: boolean;
+  releases: UpdateRelease[];
+  checked_at: number;
+  releases_url: string;
+}
+
 export interface EngineState {
   mode: string;
+  version: string;
+  update: UpdateInfo | null;
   cameras: Camera[];
   printers: Printer[];
-  settings: { notifiers: Record<string, Record<string, string>> };
+  monitors: Monitor[];
+  settings: { notifiers: Record<string, Record<string, string>>; update_check: boolean };
+  tokens: ApiToken[];
   stats: EngineStats;
   integrations: AdapterMeta[];
   notifiers: AdapterMeta[];

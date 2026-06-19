@@ -1,6 +1,7 @@
 """Telegram notifier via the Bot API.
 
 API reference: https://core.telegram.org/bots/api
+Creating a bot with BotFather: https://core.telegram.org/bots/tutorial
 
 api.telegram.org sends no CORS headers, so this adapter is hub-only.
 """
@@ -18,6 +19,11 @@ class TelegramNotifier(NotifierAdapter):
     id = "telegram"
     label = "Telegram"
     docs_url = "https://core.telegram.org/bots/api"
+    setup_url = "https://core.telegram.org/bots/tutorial"
+    setup_hint = (
+        "Create a bot with @BotFather to get its token, then message the bot and read your "
+        "chat ID from @userinfobot."
+    )
     browser_ok = False
     schema = {
         "type": "object",

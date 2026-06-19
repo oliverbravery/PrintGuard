@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 export function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
-    <div className="backdrop flex items-end sm:items-center justify-center p-0 sm:p-6" onClick={onClose}>
+    <div className="backdrop backdrop-modal flex items-end sm:items-center justify-center p-0 sm:p-6" onClick={onClose}>
       <div
         className="panel rise-in w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-b-none sm:rounded-md"
         onClick={(e) => e.stopPropagation()}

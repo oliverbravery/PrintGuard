@@ -11,9 +11,11 @@ import pytest
 
 from printguard.engine import vision
 from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceStatus
+from printguard.engine.monitors import monitor_watching, sanitise_monitor
 from printguard.engine.notifiers import NOTIFIERS
 from printguard.engine.notifiers.base import multipart_form
-from printguard.engine.printers import printer_watching, sanitise_printer
+from printguard.engine.printers import sanitise_printer
+from printguard.engine.registry import Printer, PrinterRegistry
 
 JPEG = b"\xff\xd8demo-jpeg-bytes"
 
@@ -145,6 +147,28 @@ async def test_octoprint_unreachable_is_offline() -> None:
     assert state.status is DeviceStatus.OFFLINE
 
 
+async def test_octoprint_exposes_webcam_stream() -> None:
+    http = RecordingHttp(body={"webcam": {"streamUrl": "/webcam/?action=stream"}})
+    cams = await INTEGRATIONS["octoprint"].cameras(http, {"base_url": "http://op:5000", "api_key": "k"})
+    assert http.last["url"] == "http://op:5000/api/settings"
+    assert http.last["headers"] == {"X-Api-Key": "k"}
+    assert cams == [
+        {"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": "http://op:5000/webcam/?action=stream"}}
+    ]
+
+
+async def test_octoprint_reads_19_plus_classicwebcam_location() -> None:
+    http = RecordingHttp(body={"webcam": {}, "plugins": {"classicwebcam": {"stream": "http://cam.lan:8080/stream"}}})
+    cams = await INTEGRATIONS["octoprint"].cameras(http, {"base_url": "http://op", "api_key": "k"})
+    assert cams[0]["source"]["url"] == "http://cam.lan:8080/stream", "an absolute stream URL is used as-is"
+
+
+async def test_octoprint_without_a_webcam_exposes_nothing() -> None:
+    http = RecordingHttp(body={"webcam": {"streamUrl": ""}})
+    assert await INTEGRATIONS["octoprint"].cameras(http, {"base_url": "http://op", "api_key": "k"}) == []
+    assert await INTEGRATIONS["octoprint"].cameras(RecordingHttp(status=502), {"base_url": "http://op"}) == []
+
+
 async def test_octoprint_action_payloads() -> None:
     http = RecordingHttp(status=204)
     await INTEGRATIONS["octoprint"].send(http, {"base_url": "http://op"}, DeviceAction.PAUSE)
@@ -190,31 +214,144 @@ async def test_klipper_actions_and_auth() -> None:
         await INTEGRATIONS["klipper"].send(RecordingHttp(status=400), {"base_url": "http://kl"}, DeviceAction.PAUSE)
 
 
-def test_sanitise_clamps_and_defaults() -> None:
-    record = sanitise_printer(
-        "p1",
+async def test_klipper_lists_enabled_webcams() -> None:
+    body = {
+        "result": {
+            "webcams": [
+                {"name": "Nozzle", "uid": "u1", "stream_url": "/webcam/?action=stream", "enabled": True},
+                {"name": "Disabled", "uid": "u2", "stream_url": "/webcam2/?action=stream", "enabled": False},
+                {"name": "No stream", "uid": "u3", "stream_url": "", "enabled": True},
+            ]
+        }
+    }
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl:7125"})
+    assert cams == [
+        {"key": "u1", "name": "Nozzle", "source": {"kind": "url", "url": "http://kl:7125/webcam/?action=stream"}}
+    ], "only enabled webcams with a stream are exposed, keyed by their stable uid"
+
+
+async def test_klipper_without_webcams_api_exposes_nothing() -> None:
+    assert await INTEGRATIONS["klipper"].cameras(RecordingHttp(status=404, body={}), {"base_url": "http://kl"}) == []
+
+
+BAMBU_CONFIG = {"host": "192.168.1.70", "serial": "01S00A", "access_code": "12345678"}
+
+
+@pytest.mark.parametrize(
+    ("gcode_state", "expected"),
+    [
+        ("RUNNING", DeviceStatus.PRINTING),
+        ("PREPARE", DeviceStatus.PRINTING),
+        ("PAUSE", DeviceStatus.PAUSED),
+        ("IDLE", DeviceStatus.IDLE),
+        ("FINISH", DeviceStatus.IDLE),
+        ("FAILED", DeviceStatus.ERROR),
+        ("", DeviceStatus.UNKNOWN),
+    ],
+)
+async def test_bambu_normalises_states(monkeypatch, gcode_state: str, expected: DeviceStatus) -> None:
+    report = {"gcode_state": gcode_state, "mc_percent": 42, "subtask_name": "z.3mf"}
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_pull_report", lambda config: report)
+    state = await INTEGRATIONS["bambu"].fetch_state(None, BAMBU_CONFIG)
+    assert state.status is expected
+    assert state.progress == 42.0
+    assert state.job == "z.3mf"
+
+
+async def test_bambu_silent_printer_is_offline(monkeypatch) -> None:
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_pull_report", lambda config: None)
+    state = await INTEGRATIONS["bambu"].fetch_state(None, BAMBU_CONFIG)
+    assert state.status is DeviceStatus.OFFLINE
+
+
+async def test_bambu_command_payloads(monkeypatch) -> None:
+    published: list[dict[str, Any]] = []
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_publish", lambda config, payload: published.append(payload))
+    for action, command in [(DeviceAction.PAUSE, "pause"), (DeviceAction.RESUME, "resume"), (DeviceAction.CANCEL, "stop")]:
+        await INTEGRATIONS["bambu"].send(None, BAMBU_CONFIG, action)
+        assert published[-1] == {"print": {"sequence_id": "0", "command": command, "param": ""}}
+
+
+async def test_bambu_exposes_rtsps_camera_for_x1_h2(monkeypatch) -> None:
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_rtsps_fingerprint", lambda host: "ABCDEF")
+    cams = await INTEGRATIONS["bambu"].cameras(None, BAMBU_CONFIG)
+    assert cams == [
+        {
+            "key": "chamber",
+            "name": "Chamber camera",
+            "source": {
+                "kind": "url",
+                "url": "rtsps://bblp:12345678@192.168.1.70:322/streaming/live/1",
+                "fingerprint": "ABCDEF",
+            },
+        }
+    ]
+
+
+async def test_bambu_exposes_port6000_camera_for_a1_p1(monkeypatch) -> None:
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_rtsps_fingerprint", lambda host: None)
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_port_open", lambda host, port: port == 6000)
+    cams = await INTEGRATIONS["bambu"].cameras(None, BAMBU_CONFIG)
+    assert cams == [
+        {
+            "key": "chamber",
+            "name": "Chamber camera",
+            "source": {"kind": "bambu", "host": "192.168.1.70", "access_code": "12345678"},
+        }
+    ], "A1/P1 have no RTSP, so the camera is read over the proprietary port-6000 protocol"
+
+
+async def test_bambu_without_a_camera_exposes_nothing(monkeypatch) -> None:
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_rtsps_fingerprint", lambda host: None)
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_port_open", lambda host, port: False)
+    assert await INTEGRATIONS["bambu"].cameras(None, BAMBU_CONFIG) == []
+
+
+def test_bambu_runs_in_hub_mode_only() -> None:
+    assert INTEGRATIONS["bambu"].browser_ok is False
+    assert INTEGRATIONS["octoprint"].browser_ok is True
+
+
+def test_sanitise_monitor_clamps_and_defaults() -> None:
+    record = sanitise_monitor(
+        "m1",
         {
             "name": "   ",
             "threshold": 9,
             "sensitivity": 0,
             "consecutive": 99,
-            "device": {"cooldown_s": 10_000, "on_defect": "explode"},
+            "cooldown_s": 10_000,
+            "on_defect": "explode",
         },
     )
-    assert record["name"] == "Printer"
+    assert record["name"] == "Monitor"
     assert record["threshold"] == 1.0
     assert record["sensitivity"] == 0.2
     assert record["consecutive"] == 30
-    assert record["device"]["cooldown_s"] == 600
-    assert record["device"]["on_defect"] == "none"
+    assert record["cooldown_s"] == 600
+    assert record["on_defect"] == "none"
 
 
-def test_printer_watching_fails_towards_watching() -> None:
-    unlinked = sanitise_printer("p1", {})
-    assert printer_watching(unlinked), "no service linked means always watched"
+def test_sanitise_printer_validates_provider() -> None:
+    record = sanitise_printer("p1", {"provider": "octoprint", "config": {"base_url": "http://op"}})
+    assert record["provider"] == "octoprint"
+    assert record["name"] == INTEGRATIONS["octoprint"].label, "an unnamed printer defaults to its service label"
+    assert record["config"] == {"base_url": "http://op"}
+    with pytest.raises(ValueError):
+        sanitise_printer("p1", {})
+    with pytest.raises(ValueError):
+        sanitise_printer("p1", {"provider": "nope"})
 
-    linked = sanitise_printer("p1", {"device": {"provider": "octoprint"}})
-    assert printer_watching(linked), "no state polled yet means watched"
+
+def test_monitor_watching_fails_towards_watching() -> None:
+    printers = PrinterRegistry()
+    unlinked = sanitise_monitor("m1", {})
+    assert monitor_watching(unlinked, printers), "no printer linked means always watched"
+
+    printer = Printer(id="p1", name="P", provider="octoprint", config={})
+    printers.add(printer)
+    linked = sanitise_monitor("m1", {"printer_id": "p1"})
+    assert monitor_watching(linked, printers), "no state polled yet means watched"
     for status, watched in {
         "printing": True,
         "offline": True,
@@ -223,12 +360,12 @@ def test_printer_watching_fails_towards_watching() -> None:
         "paused": False,
         "error": False,
     }.items():
-        linked["device_state"] = {"status": status, "progress": 0.0, "job": None}
-        assert printer_watching(linked) is watched, f"{status} should be watched={watched}"
+        printer.device_state = {"status": status, "progress": 0.0, "job": None}
+        assert monitor_watching(linked, printers) is watched, f"{status} should be watched={watched}"
 
-    linked["device_state"] = {"status": "printing", "progress": 0.0, "job": None}
+    printer.device_state = {"status": "printing", "progress": 0.0, "job": None}
     linked["enabled"] = False
-    assert not printer_watching(linked), "disabled printers are never watched"
+    assert not monitor_watching(linked, printers), "disabled monitors are never watched"
 
 
 def test_defect_score_scales_with_sensitivity() -> None:

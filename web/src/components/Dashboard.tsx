@@ -3,9 +3,11 @@ import { CameraRail } from "./CameraRail";
 import { CamerasDialog } from "./CamerasDialog";
 import { DetailPanel } from "./DetailPanel";
 import { Header, MobileActionBar } from "./Header";
-import { PrinterDialog } from "./PrinterDialog";
-import { PrinterTile } from "./PrinterTile";
+import { MonitorDialog } from "./MonitorDialog";
+import { MonitorTile } from "./MonitorTile";
+import { PrintersDialog } from "./PrintersDialog";
 import { SettingsDialog } from "./SettingsDialog";
+import { UpdateDialog } from "./UpdateDialog";
 
 function EmptyState() {
   const openDialog = useStore((s) => s.openDialog);
@@ -17,17 +19,20 @@ function EmptyState() {
         <span className="corner corner-bl !border-text-2" />
         <span className="corner corner-br !border-text-2" />
         <div className="led led-infer mx-auto mb-6" />
-        <h2 className="display text-2xl font-bold mb-2">NO PRINTERS ON WATCH</h2>
+        <h2 className="display text-2xl font-bold mb-2">NO MONITORS ON WATCH</h2>
         <p className="text-sm text-text-1 max-w-sm mx-auto mb-7">
-          Register a camera, bind it to a printer, and PrintGuard will share inference fairly across
-          everything it watches.
+          Register a camera, register your printer, then add a monitor to bind them — PrintGuard
+          shares inference fairly across everything it watches.
         </p>
-        <div className="flex gap-3 justify-center">
+        <div className="flex flex-wrap gap-3 justify-center">
           <button className="btn" onClick={() => openDialog("cameras")}>
             1 · Register camera
           </button>
-          <button className="btn btn-primary" onClick={() => openDialog("printer")}>
-            2 · Add printer
+          <button className="btn" onClick={() => openDialog("printers")}>
+            2 · Register printer
+          </button>
+          <button className="btn btn-primary" onClick={() => openDialog("monitor")}>
+            3 · Add monitor
           </button>
         </div>
       </div>
@@ -55,27 +60,29 @@ function Toasts() {
 
 export function Dashboard() {
   const { engine, dialog, detailId } = useStore();
-  const printers = engine?.printers ?? [];
-  const detail = printers.find((p) => p.id === detailId);
+  const monitors = engine?.monitors ?? [];
+  const detail = monitors.find((m) => m.id === detailId);
   return (
     <div className="min-h-screen">
       <Header />
       <CameraRail />
       <main className="mx-auto max-w-[1500px] px-4 sm:px-6 py-5 max-md:pb-[calc(5rem+env(safe-area-inset-bottom))]">
-        {printers.length === 0 ? (
+        {monitors.length === 0 ? (
           <EmptyState />
         ) : (
           <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr))]">
-            {printers.map((printer, index) => (
-              <PrinterTile key={printer.id} printer={printer} index={index} />
+            {monitors.map((monitor, index) => (
+              <MonitorTile key={monitor.id} monitor={monitor} index={index} />
             ))}
           </div>
         )}
       </main>
       {dialog === "cameras" && <CamerasDialog />}
-      {dialog === "printer" && <PrinterDialog />}
+      {dialog === "printers" && <PrintersDialog />}
+      {dialog === "monitor" && <MonitorDialog />}
       {dialog === "settings" && <SettingsDialog />}
-      {detail && <DetailPanel printer={detail} />}
+      {dialog === "update" && <UpdateDialog />}
+      {detail && <DetailPanel monitor={detail} />}
       <Toasts />
       <MobileActionBar />
     </div>

@@ -22,8 +22,9 @@ Nothing is installed and no frame leaves your device.
 - **Detects** — a compact vision encoder ([≈5 MB](#the-model)) scores every frame for
   print failure, shared fairly across as many cameras as your hardware can sustain.
 - **Acts** — a sustained defect pauses or cancels the print through
-  [OctoPrint](https://octoprint.org) or [Klipper (Moonraker)](https://moonraker.readthedocs.io),
-  with per-printer thresholds, consecutive-detection counts and cooldowns.
+  [OctoPrint](https://octoprint.org), [Klipper (Moonraker)](https://moonraker.readthedocs.io)
+  or [Bambu Lab](https://github.com/Doridian/OpenBambuAPI), with per-monitor thresholds,
+  consecutive-detection counts and cooldowns.
 - **Alerts** — the moment a defect holds, a snapshot lands on your phone over
   [ntfy](https://ntfy.sh), [Telegram](https://telegram.org) or [Discord](https://discord.com).
 - **Rests** — printers linked to a service are only watched while they actually print;
@@ -43,7 +44,8 @@ curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/medi
 docker compose up -d
 ```
 
-Open `http://<host>:8000`, pick a mode, register a camera, add a printer. Images for
+Open `http://<host>:8000`, pick a mode, register a camera, register your printer, then add
+a monitor that binds them. Images for
 `amd64` and `arm64` (Raspberry Pi 4/5) are published to
 [`ghcr.io/oliverbravery/printguard`](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
 on every release.
@@ -69,10 +71,24 @@ on every release.
 
 ## Printers and notifications
 
-Link a printer to OctoPrint or Klipper from its detail panel, choose what a sustained
-defect should do (alert only, pause, cancel), and test the connection in place. Linked
-printers report job, progress and state on their tiles — and gate inference, so an idle
-printer costs you nothing.
+Register a printer — OctoPrint, Klipper or Bambu Lab — in the printer registry and test the
+connection there, then bind it to a monitor. A monitor's detail panel chooses what a
+sustained defect should do (alert only, pause, cancel). Linked printers report job,
+progress and state on the monitors that use them — and gate inference, so an idle printer
+costs you nothing.
+
+If a registered printer exposes a webcam, PrintGuard registers it as a camera automatically
+— no stream URL to copy. The camera registry's **Printer cameras** tab lists them and a
+**Refresh** button picks up any camera attached to a printer after it was registered. This
+covers OctoPrint and Moonraker webcam streams and the Bambu chamber camera (over RTSP on
+the X1/H2 series, or the proprietary port-6000 protocol on the A1/P1 series, hub mode only).
+These cameras are managed by their printer and removed with it.
+
+Bambu Lab printers speak MQTT over TLS rather than HTTP, which a browser cannot open, so
+they are offered in **hub mode only**. On the printer, enable **LAN Only Mode** then
+**Developer Mode** (Settings → Network) to open the MQTT channel, then link it with its IP,
+serial number and access code; the form links Bambu's
+[Enable LAN Mode](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode) guide.
 
 **Running in Docker?** The hub reaches printer services from *inside the container*, so
 `localhost` points at the container, not your host — connections to `http://localhost:5000`
@@ -106,13 +122,33 @@ trusted network — never port-forward the hub's ports directly.
 (recommended — private, live video works), **Cloudflare Tunnel + Access** (public URL,
 zero open ports) and **oauth2-proxy** on your own domain, plus a hardening checklist.
 
+## Agents and developers (MCP & API)
+
+A PrintGuard hub exposes its engine to agents and scripts through the same protocol the
+dashboard uses, so anything the UI can do is automatable.
+
+- **MCP** — point an agent (Claude, an IDE, the
+  [MCP Inspector](https://github.com/modelcontextprotocol/inspector)) at
+  `https://<host>/mcp/` (Streamable HTTP). Tools cover printer and camera status, the
+  **current camera frame as an image**, and pause/resume/cancel — plus full management
+  when allowed.
+- **REST** — the versioned API at `/api/v1` gives any HTTP client the same operations;
+  the camera frame is served as `image/jpeg`.
+
+Capability is configurable per token. Issue scoped bearer tokens from the dashboard
+(**Settings → API & MCP access**) — cumulative `read` ⊂ `control` ⊂ `manage` — naming,
+generating and revoking each one in place; the secret is shown once and stored only as a
+hash. An agent only gets the abilities you grant it, and MCP hides any tool a token cannot
+use. With no token issued the surface stays read-only behind your auth proxy. Full
+reference, scope matrix and client setup: [docs/api.md](docs/api.md).
+
 ## The model
 
 The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained for
 few-shot FDM fault detection in
 [Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection)
 (with an accompanying technical paper). `models/` holds the TFLite export, normalisation
-metadata and class prototypes. Sensitivity and threshold sliders per printer map straight
+metadata and class prototypes. Sensitivity and threshold sliders per monitor map straight
 onto the prototype distances, so you can tune for your camera and lighting without
 retraining.
 
@@ -121,6 +157,8 @@ retraining.
 - [docs/architecture.md](docs/architecture.md) — how one engine runs on CPython and in
   the browser, the platform contract, the scheduler and the fail-safe design, with
   diagrams.
+- [docs/api.md](docs/api.md) — the hub's MCP server and REST API: scoped access tokens,
+  every endpoint and tool, and agent/client setup.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, tests, and step-by-step guides for
   adding printer integrations and notification providers (the two easiest ways to
   contribute).

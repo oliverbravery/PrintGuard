@@ -287,6 +287,10 @@ input[type="range"]::-moz-range-thumb {
   z-index: 40;
 }
 
+.backdrop-modal {
+  z-index: 50;
+}
+
 .slide-in {
   animation: slide-in 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
@@ -339,4 +343,70 @@ input[type="range"]::-moz-range-thumb {
 
 video {
   display: block;
+}
+
+.changelog {
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--color-text-1);
+}
+
+.changelog > :first-child {
+  margin-top: 0;
+}
+
+.changelog h1,
+.changelog h2,
+.changelog h3 {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-2);
+  margin: 0.9rem 0 0.4rem;
+}
+
+.changelog p {
+  margin: 0.4rem 0;
+}
+
+.changelog ul {
+  list-style: none;
+  margin: 0.3rem 0;
+  padding: 0;
+}
+
+.changelog li {
+  position: relative;
+  padding-left: 0.9rem;
+  margin: 0.25rem 0;
+}
+
+.changelog li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--color-accent);
+}
+
+.changelog a {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.changelog a:hover {
+  opacity: 0.8;
+}
+
+.changelog strong {
+  color: var(--color-text-0);
+  font-weight: 600;
+}
+
+.changelog code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--color-ink-3);
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  color: var(--color-text-0);
 }
