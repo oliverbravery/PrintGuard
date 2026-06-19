@@ -99,6 +99,7 @@ class Engine:
                 contrast=settings["contrast"],
                 sharpness=settings["sharpness"],
                 crop=settings["crop"],
+                rotation=settings["rotation"],
             )
             self.cameras.add(camera)
             asyncio.ensure_future(self._attach(camera))
@@ -204,14 +205,26 @@ class Engine:
         return collected
 
     async def snapshot(self, camera_id: str) -> bytes | None:
-        """Encodes the freshest frame of a camera as JPEG, or None if unavailable."""
+        """Encodes the freshest frame of a camera as JPEG, or None if unavailable.
+
+        Applies the camera's image pipeline (rotation, crop, adjustments) so the
+        snapshot matches the live view and the frame the model infers on.
+        """
         camera = self.cameras.get(camera_id)
         if camera is None or camera.frame_source is None:
             return None
         frame = await camera.frame_source.grab()
         if frame is None:
             return None
-        return await self.platform.encode_jpeg(frame.rgb)
+        rgb = vision.transform(
+            frame.rgb,
+            rotation=camera.rotation,
+            crop=camera.crop,
+            brightness=camera.brightness,
+            contrast=camera.contrast,
+            sharpness=camera.sharpness,
+        )
+        return await self.platform.encode_jpeg(rgb)
 
     def _save(self) -> None:
         self.platform.save_state(
@@ -320,7 +333,13 @@ class Engine:
         settings = sanitise_camera(
             camera.id,
             message.get("patch", {}),
-            {"brightness": camera.brightness, "contrast": camera.contrast, "sharpness": camera.sharpness, "crop": camera.crop},
+            {
+                "brightness": camera.brightness,
+                "contrast": camera.contrast,
+                "sharpness": camera.sharpness,
+                "crop": camera.crop,
+                "rotation": camera.rotation,
+            },
         )
         if "name" in message.get("patch", {}):
             camera.name = settings["name"]
@@ -328,6 +347,7 @@ class Engine:
         camera.contrast = settings["contrast"]
         camera.sharpness = settings["sharpness"]
         camera.crop = settings["crop"]
+        camera.rotation = settings["rotation"]
 
     async def _cmd_camera_remove(self, message: dict[str, Any]) -> None:
         camera = self.cameras.get(message["id"])

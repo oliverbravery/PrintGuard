@@ -98,6 +98,20 @@ def classify(embedding: np.ndarray, assets: Assets) -> dict[str, Any]:
     return {"prediction": ordered[0][0], "distances": distances, "margin": margin}
 
 
+def rotate_frame(rgb: np.ndarray, rotation: int) -> np.ndarray:
+    """Rotates an RGB frame clockwise by a multiple of 90 degrees.
+
+    Args:
+        rgb: HxWx3 uint8 frame.
+        rotation: Clockwise rotation in degrees; one of 0, 90, 180, 270.
+
+    Returns:
+        The rotated frame, or the original when rotation is 0.
+    """
+    k = (4 - rotation // 90) % 4
+    return rgb if k == 0 else np.rot90(rgb, k)
+
+
 def crop_frame(rgb: np.ndarray, crop: dict[str, float] | None) -> np.ndarray:
     """Crops an RGB frame to the given normalised region.
 
@@ -156,6 +170,36 @@ def adjust(rgb: np.ndarray, brightness: float = 1.0, contrast: float = 1.0, shar
         ) / 9.0
         arr = arr + sharpness * (arr - blur)
     return np.clip(arr, 0, 255).astype(np.uint8)
+
+
+def transform(
+    rgb: np.ndarray,
+    *,
+    rotation: int = 0,
+    crop: dict[str, float] | None = None,
+    brightness: float = 1.0,
+    contrast: float = 1.0,
+    sharpness: float = 0.0,
+) -> np.ndarray:
+    """Applies a camera's full image pipeline: rotate, then crop, then adjust.
+
+    The crop is interpreted in the rotated frame's coordinates, so the result
+    matches exactly what the live view shows and what the model infers on.
+
+    Args:
+        rgb: HxWx3 uint8 frame in RGB channel order.
+        rotation: Clockwise rotation in degrees (0, 90, 180, 270).
+        crop: Normalised crop region on the rotated frame, or None.
+        brightness: Linear brightness multiplier.
+        contrast: Contrast scale around mid-grey.
+        sharpness: Unsharp-mask strength.
+
+    Returns:
+        The transformed uint8 frame.
+    """
+    rgb = rotate_frame(rgb, rotation)
+    rgb = crop_frame(rgb, crop)
+    return adjust(rgb, brightness, contrast, sharpness)
 
 
 def defect_score(result: dict[str, Any], sensitivity: float = 1.0) -> float:

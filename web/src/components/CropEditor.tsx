@@ -29,11 +29,13 @@ export function CropEditor({
   camera,
   mode,
   crop,
+  rotation,
   onChange,
 }: {
   camera: Camera;
   mode: string;
   crop: Crop | null;
+  rotation: number;
   onChange: (crop: Crop | null) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -41,12 +43,15 @@ export function CropEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Crop>(crop ?? { x: 0, y: 0, w: 1, h: 1 });
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const dragRef = useRef<{ handle: Handle; startX: number; startY: number; startCrop: Crop } | null>(null);
 
   const brightness = camera.brightness ?? 1;
   const contrast = camera.contrast ?? 1;
   const sharpness = camera.sharpness ?? 0;
-  const needsCanvas = brightness !== 1 || contrast !== 1 || sharpness > 0;
+  const needsCanvas = brightness !== 1 || contrast !== 1 || sharpness > 0 || rotation !== 0;
+  const swap = rotation === 90 || rotation === 270;
+  const frameAspect = dims ? (swap ? dims.h / dims.w : dims.w / dims.h) : 16 / 9;
 
   useVideoStream(videoRef, camera, mode);
 
@@ -61,13 +66,13 @@ export function CropEditor({
     let frame = 0;
     const tick = () => {
       if (video.readyState >= 2 && video.videoWidth > 0) {
-        renderVideoFrame(ctx, video, canvas, { brightness, contrast, sharpness });
+        renderVideoFrame(ctx, video, canvas, { brightness, contrast, sharpness, rotation });
       }
       frame = requestAnimationFrame(tick);
     };
     tick();
     return () => cancelAnimationFrame(frame);
-  }, [camera.id, needsCanvas, brightness, contrast, sharpness]);
+  }, [camera.id, needsCanvas, brightness, contrast, sharpness, rotation]);
 
   useEffect(() => {
     if (!editing) setDraft(crop ?? { x: 0, y: 0, w: 1, h: 1 });
@@ -185,11 +190,18 @@ export function CropEditor({
       <div
         ref={containerRef}
         className="relative bg-ink-0 overflow-hidden select-none touch-none"
-        style={{ aspectRatio: "16 / 9" }}
+        style={{ aspectRatio: frameAspect }}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       >
-        <video ref={videoRef} autoPlay muted playsInline className={`absolute inset-0 w-full h-full object-contain pointer-events-none ${needsCanvas ? "invisible" : ""}`} />
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          onLoadedMetadata={(e) => setDims({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })}
+          className={`absolute inset-0 w-full h-full object-contain pointer-events-none ${needsCanvas ? "invisible" : ""}`}
+        />
         {needsCanvas && <canvas ref={canvasRef} className="absolute inset-0 m-auto pointer-events-none" />}
         {editing && (
           <>

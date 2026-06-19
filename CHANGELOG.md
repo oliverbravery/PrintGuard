@@ -7,6 +7,23 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-06-19
+
+### Added
+
+- **Camera rotation** — every camera now has a rotation control (0°, 90°, 180°, 270°) in the
+  camera registry. The rotation is applied to **both** the live view and the frames the
+  on-device model runs on, so a camera mounted sideways or upside down can be set upright
+  once and everything follows: monitoring, the crop region, REST/MCP snapshots and the
+  images attached to defect alerts. Crops are defined on the rotated image, so what you see
+  is what the model sees.
+
+### Fixed
+
+- Camera snapshots returned over the REST API and MCP now apply the same image pipeline as
+  the live view and alert images (rotation, crop, brightness/contrast/sharpness) instead of
+  returning the raw frame.
+
 ## [2.1.0] - 2026-06-16
 
 ### Added
