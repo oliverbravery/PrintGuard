@@ -32,6 +32,7 @@ export interface Camera {
   contrast: number;
   sharpness: number;
   crop: Crop | null;
+  rotation: number;
   target_fps: number;
   achieved_fps: number;
   inferring: boolean;

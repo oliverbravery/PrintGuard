@@ -7,9 +7,10 @@ import asyncio
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
+import numpy as np
 from fakes import FakePlatform
 
-from printguard.engine import watchdog
+from printguard.engine import vision, watchdog
 from printguard.engine.engine import Engine
 from printguard.engine.integrations import INTEGRATIONS
 
@@ -254,5 +255,40 @@ async def test_state_persists_across_restart() -> None:
         assert restored["printer_id"] == printer_id
         printer = reborn.printers.get(printer_id)
         assert printer and printer.name == "P" and printer.provider == "octoprint"
+    finally:
+        await reborn.stop()
+
+
+def test_rotate_frame_and_transform_compose() -> None:
+    frame = np.zeros((48, 64, 3), dtype=np.uint8)
+    frame[0, 0] = (255, 0, 0)
+
+    assert vision.rotate_frame(frame, 0).shape == (48, 64, 3)
+    assert vision.rotate_frame(frame, 180).shape == (48, 64, 3)
+    assert vision.rotate_frame(frame, 90).shape == (64, 48, 3)
+    assert vision.rotate_frame(frame, 270).shape == (64, 48, 3)
+
+    rotated = vision.rotate_frame(frame, 90)
+    assert tuple(rotated[0, -1]) == (255, 0, 0), "90 deg clockwise sends top-left to top-right"
+
+    cropped = vision.transform(frame, rotation=90, crop={"x": 0.0, "y": 0.0, "w": 0.5, "h": 1.0})
+    assert cropped.shape == (64, 24, 3), "crop is applied on the rotated frame"
+
+
+async def test_camera_rotation_persists_and_rejects_off_axis() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        camera = engine.cameras.values()[0]
+        await engine.handle({"cmd": "camera.update", "id": camera.id, "patch": {"rotation": 90}})
+        assert camera.rotation == 90
+        assert camera.public()["rotation"] == 90
+        await engine.handle({"cmd": "camera.update", "id": camera.id, "patch": {"rotation": 45}})
+        assert camera.rotation == 0, "off-axis rotation falls back to 0"
+        await engine.handle({"cmd": "camera.update", "id": camera.id, "patch": {"rotation": 270}})
+
+    reborn = Engine(platform)
+    await reborn.start()
+    try:
+        assert reborn.cameras.values()[0].rotation == 270, "rotation survives a restart"
     finally:
         await reborn.stop()

@@ -9,9 +9,11 @@ CAMERA_DEFAULTS: dict[str, Any] = {
     "contrast": 1.0,
     "sharpness": 0.0,
     "crop": None,
+    "rotation": 0,
 }
 
 _CLAMP = {"brightness": (0.25, 2.0), "contrast": (0.25, 2.0), "sharpness": (0.0, 2.0)}
+_ROTATIONS = (0, 90, 180, 270)
 
 
 def _clamp(key: str, value: float) -> float:
@@ -36,6 +38,14 @@ def _sanitise_crop(raw: Any) -> dict[str, float] | None:
     return {"x": x, "y": y, "w": w, "h": h}
 
 
+def _sanitise_rotation(raw: Any) -> int:
+    try:
+        rotation = int(raw) % 360
+    except (TypeError, ValueError):
+        return 0
+    return rotation if rotation in _ROTATIONS else 0
+
+
 def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] | None = None) -> dict[str, Any]:
     """Merges a camera patch over defaults or an existing record.
 
@@ -54,4 +64,5 @@ def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] 
     record["contrast"] = _clamp("contrast", float(record["contrast"]))
     record["sharpness"] = _clamp("sharpness", float(record["sharpness"]))
     record["crop"] = _sanitise_crop(record.get("crop"))
+    record["rotation"] = _sanitise_rotation(record.get("rotation"))
     return record

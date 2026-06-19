@@ -113,6 +113,7 @@ class CameraPatch(BaseModel):
     contrast: float | None = None
     sharpness: float | None = None
     crop: dict[str, float] | None = None
+    rotation: int | None = None
 
 
 class ProviderTest(BaseModel):

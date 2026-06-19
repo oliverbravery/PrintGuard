@@ -47,6 +47,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
     contrast: camera.contrast ?? 1,
     sharpness: camera.sharpness ?? 0,
     crop: camera.crop ?? null,
+    rotation: camera.rotation ?? 0,
   });
 
   useEffect(() => {
@@ -62,6 +63,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
       contrast: camera.contrast ?? 1,
       sharpness: camera.sharpness ?? 0,
       crop: camera.crop ?? null,
+      rotation: camera.rotation ?? 0,
     });
   }, [camera.id]);
 
@@ -69,6 +71,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
     draft.brightness !== (camera.brightness ?? 1) ||
     draft.contrast !== (camera.contrast ?? 1) ||
     draft.sharpness !== (camera.sharpness ?? 0) ||
+    draft.rotation !== (camera.rotation ?? 0) ||
     JSON.stringify(draft.crop) !== JSON.stringify(camera.crop ?? null);
 
   const save = () => send({ cmd: "camera.update", id: camera.id, patch: draft });
@@ -78,6 +81,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
       contrast: camera.contrast ?? 1,
       sharpness: camera.sharpness ?? 0,
       crop: camera.crop ?? null,
+      rotation: camera.rotation ?? 0,
     });
 
   return (
@@ -135,10 +139,25 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             step={0.1}
             onChange={(v) => setDraft((d) => ({ ...d, sharpness: v }))}
           />
+          <div className="space-y-1.5">
+            <span className="label">Rotation</span>
+            <div className="flex gap-1.5">
+              {[0, 90, 180, 270].map((deg) => (
+                <button
+                  key={deg}
+                  className={`btn flex-1 !py-1.5 !text-[0.66rem] ${draft.rotation === deg ? "!border-accent !text-accent" : ""}`}
+                  onClick={() => setDraft((d) => ({ ...d, rotation: deg }))}
+                >
+                  {deg}°
+                </button>
+              ))}
+            </div>
+          </div>
           <CropEditor
             camera={camera}
             mode={engine?.mode ?? "local"}
             crop={draft.crop}
+            rotation={draft.rotation}
             onChange={(crop) => setDraft((d) => ({ ...d, crop }))}
           />
           <div className="flex gap-2">

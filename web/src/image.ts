@@ -76,26 +76,45 @@ export function renderVideoFrame(
     contrast: number;
     sharpness: number;
     crop?: { x: number; y: number; w: number; h: number } | null;
+    rotation?: number;
   },
 ): void {
   const vw = video.videoWidth;
   const vh = video.videoHeight;
-  const sx = opts.crop ? opts.crop.x * vw : 0;
-  const sy = opts.crop ? opts.crop.y * vh : 0;
-  const sw = opts.crop ? opts.crop.w * vw : vw;
-  const sh = opts.crop ? opts.crop.h * vh : vh;
-  const cw = canvas.parentElement?.clientWidth || sw;
-  const ch = canvas.parentElement?.clientHeight || sh;
-  const scale = Math.min(cw / sw, ch / sh);
-  const dw = Math.round(sw * scale);
-  const dh = Math.round(sh * scale);
+  const rotation = ((((opts.rotation ?? 0) % 360) + 360) % 360);
+  const swap = rotation === 90 || rotation === 270;
+  const rw = swap ? vh : vw;
+  const rh = swap ? vw : vh;
+  const cx = opts.crop ? opts.crop.x * rw : 0;
+  const cy = opts.crop ? opts.crop.y * rh : 0;
+  const cropW = opts.crop ? opts.crop.w * rw : rw;
+  const cropH = opts.crop ? opts.crop.h * rh : rh;
+  const cw = canvas.parentElement?.clientWidth || cropW;
+  const ch = canvas.parentElement?.clientHeight || cropH;
+  const scale = Math.min(cw / cropW, ch / cropH);
+  const dw = Math.round(cropW * scale);
+  const dh = Math.round(cropH * scale);
   if (canvas.width !== dw || canvas.height !== dh) {
     canvas.width = dw;
     canvas.height = dh;
     canvas.style.width = `${dw}px`;
     canvas.style.height = `${dh}px`;
   }
-  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(scale, scale);
+  ctx.translate(-cx, -cy);
+  if (rotation === 90) {
+    ctx.translate(rw, 0);
+    ctx.rotate(Math.PI / 2);
+  } else if (rotation === 180) {
+    ctx.translate(rw, rh);
+    ctx.rotate(Math.PI);
+  } else if (rotation === 270) {
+    ctx.translate(0, rh);
+    ctx.rotate((3 * Math.PI) / 2);
+  }
+  ctx.drawImage(video, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   const image = ctx.getImageData(0, 0, dw, dh);
   adjust(image, opts.brightness, opts.contrast, opts.sharpness);
   ctx.putImageData(image, 0, 0);
