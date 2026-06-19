@@ -33,7 +33,7 @@ RECENT_EVENTS_MAX = 100
 RECENT_EVENT_TYPES = ("alert", "warning", "device", "error")
 UPDATE_CHECK_INTERVAL_S = 86400.0
 
-SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}, "update_check": True}
+SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}, "update_check": True, "mqtt": {}}
 
 
 class Engine:

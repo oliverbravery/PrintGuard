@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import type { ApiToken } from "../types";
+import type { ApiToken, MqttConfig } from "../types";
 import { Dialog } from "./Dialog";
 import { SchemaForm } from "./SchemaForm";
 import { Toggle } from "./Toggle";
@@ -9,6 +9,8 @@ export function SettingsDialog() {
   const { engine, send, openDialog, leaveMode, isPending, notifyTest, testingNotifier, testNotifier, createdToken, clearCreatedToken } = useStore();
   const [notifiers, setNotifiers] = useState(engine?.settings.notifiers ?? {});
   const [updateCheck, setUpdateCheck] = useState(engine?.settings.update_check ?? true);
+  const [mqtt, setMqtt] = useState<MqttConfig>(engine?.settings.mqtt ?? {});
+  const setMqttField = (key: keyof MqttConfig, value: MqttConfig[keyof MqttConfig]) => setMqtt({ ...mqtt, [key]: value });
   const [tokenName, setTokenName] = useState("");
   const [tokenScope, setTokenScope] = useState<ApiToken["scope"]>("read");
   const saving = isPending("settings.update");
@@ -73,6 +75,66 @@ export function SettingsDialog() {
         </div>
         {engine?.mode === "hub" && (
           <div className="space-y-3">
+            <span className="label block">Home Assistant (MQTT)</span>
+            <Toggle label="Publish to an MQTT broker" on={!!mqtt.enabled} onChange={(on) => setMqttField("enabled", on)} />
+            {mqtt.enabled && (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    className="field flex-1"
+                    placeholder="Broker host (e.g. 192.168.1.10)"
+                    value={mqtt.host ?? ""}
+                    onChange={(e) => setMqttField("host", e.target.value)}
+                  />
+                  <input
+                    className="field shrink-0"
+                    style={{ width: "5rem" }}
+                    type="number"
+                    placeholder={mqtt.tls ? "8883" : "1883"}
+                    value={mqtt.port ?? ""}
+                    onChange={(e) => setMqttField("port", e.target.value ? Number(e.target.value) : undefined)}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    className="field flex-1"
+                    placeholder="Username (optional)"
+                    value={mqtt.username ?? ""}
+                    onChange={(e) => setMqttField("username", e.target.value)}
+                  />
+                  <input
+                    className="field flex-1"
+                    type="password"
+                    placeholder="Password (optional)"
+                    value={mqtt.password ?? ""}
+                    onChange={(e) => setMqttField("password", e.target.value)}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    className="field flex-1"
+                    placeholder="Base topic (printguard)"
+                    value={mqtt.base_topic ?? ""}
+                    onChange={(e) => setMqttField("base_topic", e.target.value)}
+                  />
+                  <input
+                    className="field flex-1"
+                    placeholder="Discovery prefix (homeassistant)"
+                    value={mqtt.discovery_prefix ?? ""}
+                    onChange={(e) => setMqttField("discovery_prefix", e.target.value)}
+                  />
+                </div>
+                <Toggle label="Use TLS" on={!!mqtt.tls} onChange={(on) => setMqttField("tls", on)} />
+                <span className="text-[0.7rem] text-text-2 block">
+                  Each monitor becomes a Home Assistant device — defect, score, state and snapshot, with an enable switch and
+                  printer pause/resume/cancel — via MQTT discovery. Anyone with broker access can control PrintGuard.
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+        {engine?.mode === "hub" && (
+          <div className="space-y-3">
             <span className="label block">Software updates</span>
             <Toggle
               label="Automatically check for updates"
@@ -106,7 +168,7 @@ export function SettingsDialog() {
           disabled={saving}
           onClick={() => {
             sent.current = true;
-            send({ cmd: "settings.update", patch: { notifiers, update_check: updateCheck } });
+            send({ cmd: "settings.update", patch: { notifiers, update_check: updateCheck, mqtt } });
           }}
         >
           {saving ? "Saving…" : "Save"}

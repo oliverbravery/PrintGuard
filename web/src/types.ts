@@ -100,6 +100,17 @@ export interface AdapterMeta {
   };
 }
 
+export interface MqttConfig {
+  enabled?: boolean;
+  host?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+  tls?: boolean;
+  base_topic?: string;
+  discovery_prefix?: string;
+}
+
 export interface ApiToken {
   id: string;
   name: string;
@@ -138,7 +149,7 @@ export interface EngineState {
   cameras: Camera[];
   printers: Printer[];
   monitors: Monitor[];
-  settings: { notifiers: Record<string, Record<string, string>>; update_check: boolean };
+  settings: { notifiers: Record<string, Record<string, string>>; update_check: boolean; mqtt?: MqttConfig };
   tokens: ApiToken[];
   stats: EngineStats;
   integrations: AdapterMeta[];

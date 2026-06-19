@@ -62,8 +62,11 @@ essentials a change must respect:
 
 - **Programmatic surface is hub-only.** The REST API (`server/api.py`, `/api/v1`) and MCP
   server (`server/mcp.py`, `/mcp`) are thin transports over `engine.request()`, scoped by
-  cumulative `read ⊂ control ⊂ manage` tokens. They add no logic, so they cannot drift from
-  the dashboard. Local mode never mounts them.
+  cumulative `read ⊂ control ⊂ manage` tokens. The Home Assistant MQTT bridge
+  (`server/mqtt.py`) is a third such transport: it consumes engine events via `add_sink` and
+  routes inbound commands through `engine.request()`, publishing one Home Assistant device
+  per monitor via MQTT discovery (config in `settings.mqtt`, gated by broker access). None
+  add logic, so they cannot drift from the dashboard. Local mode never mounts them.
 
 - **Fail safe, fail loud.** A monitor's `watching` state gates inference; only a *positive*
   "not printing" stands it down (losing the signal keeps watching). Nothing on the alert

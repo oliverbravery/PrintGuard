@@ -142,6 +142,23 @@ hash. An agent only gets the abilities you grant it, and MCP hides any tool a to
 use. With no token issued the surface stays read-only behind your auth proxy. Full
 reference, scope matrix and client setup: [docs/api.md](docs/api.md).
 
+## Home Assistant
+
+Point the hub at your MQTT broker (**Settings → Home Assistant (MQTT)**) and every monitor
+shows up in Home Assistant automatically through MQTT discovery, each as its own device:
+
+- a **Defect** problem sensor, a defect-score gauge and a state sensor;
+- the latest failure **snapshot**;
+- an **Enabled** switch to arm or stand down the monitor; and
+- when the monitor is linked to a printer, its live status and progress plus **Pause**,
+  **Resume** and **Cancel** buttons.
+
+Control is two-way, so automations and dashboards can drive PrintGuard, and the hub
+publishes an availability signal so entities go unavailable if it stops. The broker is
+yours and the bridge runs on the hub, so no frames leave your hardware; TLS,
+username/password and custom topic prefixes are optional. Anyone with broker access can
+control PrintGuard, so treat the broker as you would the dashboard.
+
 ## The model
 
 The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained for

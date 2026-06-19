@@ -7,6 +7,22 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-06-19
+
+### Added
+
+- **Home Assistant integration over MQTT** — point the hub at your MQTT broker (**Settings →
+  Home Assistant (MQTT)**) and every monitor appears in Home Assistant automatically through
+  MQTT discovery, each as its own device: a **Defect** problem sensor, defect-score and state
+  sensors, the latest failure **snapshot**, an **Enabled** switch, and — when the monitor is
+  linked to a printer — live status and progress with **Pause / Resume / Cancel** buttons.
+  Control is two-way, so Home Assistant dashboards and automations can arm a monitor or stop
+  a print, and the hub publishes an availability signal so entities show as unavailable if it
+  goes offline. The broker is yours and the bridge runs on the hub, so no frames leave your
+  hardware. Optional TLS, username/password and custom topic prefixes are supported. Anyone
+  with access to the broker can control PrintGuard, so treat broker access as you would the
+  dashboard.
+
 ## [2.1.1] - 2026-06-19
 
 ### Added
