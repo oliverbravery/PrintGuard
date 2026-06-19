@@ -5,6 +5,8 @@ import { Dialog } from "./Dialog";
 import { SchemaForm } from "./SchemaForm";
 import { Toggle } from "./Toggle";
 
+type TabId = "alerts" | "mqtt" | "updates" | "api";
+
 export function SettingsDialog() {
   const { engine, send, openDialog, leaveMode, isPending, notifyTest, testingNotifier, testNotifier, createdToken, clearCreatedToken } = useStore();
   const [notifiers, setNotifiers] = useState(engine?.settings.notifiers ?? {});
@@ -13,6 +15,7 @@ export function SettingsDialog() {
   const setMqttField = (key: keyof MqttConfig, value: MqttConfig[keyof MqttConfig]) => setMqtt({ ...mqtt, [key]: value });
   const [tokenName, setTokenName] = useState("");
   const [tokenScope, setTokenScope] = useState<ApiToken["scope"]>("read");
+  const [tab, setTab] = useState<TabId>("alerts");
   const saving = isPending("settings.update");
   const sent = useRef(false);
   const close = () => openDialog(null);
@@ -24,56 +27,86 @@ export function SettingsDialog() {
 
   const channels = (engine?.notifiers ?? []).filter((n) => engine?.mode === "hub" || n.browser_ok);
 
+  const tabs: { id: TabId; label: string }[] = [
+    { id: "alerts", label: "Alerts" },
+    ...(engine?.mode === "hub"
+      ? ([
+          { id: "mqtt", label: "Home Assistant" },
+          { id: "updates", label: "Updates" },
+          { id: "api", label: "API" },
+        ] as const)
+      : []),
+  ];
+
   return (
     <Dialog title="Settings" onClose={close}>
       <div className="space-y-5">
-        <div className="space-y-4">
-          <span className="label block">Notification channels</span>
-          {channels.map((meta) => {
-            const enabled = meta.id in notifiers;
-            return (
-              <div key={meta.id} className="space-y-3">
-                <Toggle
-                  label={meta.label}
-                  on={enabled}
-                  onChange={(on) => {
-                    const next = { ...notifiers };
-                    if (on) next[meta.id] = next[meta.id] ?? {};
-                    else delete next[meta.id];
-                    setNotifiers(next);
-                  }}
-                />
-                {enabled && (
-                  <>
-                    <SchemaForm
-                      meta={meta}
-                      value={notifiers[meta.id]}
-                      onChange={(config) => setNotifiers({ ...notifiers, [meta.id]: config })}
-                    />
-                    <div className="flex items-center gap-3">
-                      <button
-                        className="btn"
-                        disabled={testingNotifier !== null}
-                        onClick={() => testNotifier(meta.id, notifiers[meta.id])}
-                      >
-                        {testingNotifier === meta.id ? "Sending…" : "Send test alert"}
-                      </button>
-                      {notifyTest?.provider === meta.id && (
-                        <span className={`chip ${notifyTest.ok ? "chip-ok" : "chip-bad"}`}>
-                          {notifyTest.ok ? "sent" : notifyTest.error || "failed"}
-                        </span>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })}
-          <span className="text-[0.7rem] text-text-2 block">
-            Defect alerts (with snapshots) go to every enabled channel for printers with notifications on.
-          </span>
-        </div>
-        {engine?.mode === "hub" && (
+        {tabs.length > 1 && (
+          <div className="flex gap-1 border-b border-line-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-xs transition-colors cursor-pointer ${
+                  tab === t.id ? "border-accent text-text-0" : "border-transparent text-text-2 hover:text-text-1"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {tab === "alerts" && (
+          <div className="space-y-4">
+            <span className="label block">Notification channels</span>
+            {channels.map((meta) => {
+              const enabled = meta.id in notifiers;
+              return (
+                <div key={meta.id} className="space-y-3">
+                  <Toggle
+                    label={meta.label}
+                    on={enabled}
+                    onChange={(on) => {
+                      const next = { ...notifiers };
+                      if (on) next[meta.id] = next[meta.id] ?? {};
+                      else delete next[meta.id];
+                      setNotifiers(next);
+                    }}
+                  />
+                  {enabled && (
+                    <>
+                      <SchemaForm
+                        meta={meta}
+                        value={notifiers[meta.id]}
+                        onChange={(config) => setNotifiers({ ...notifiers, [meta.id]: config })}
+                      />
+                      <div className="flex items-center gap-3">
+                        <button
+                          className="btn"
+                          disabled={testingNotifier !== null}
+                          onClick={() => testNotifier(meta.id, notifiers[meta.id])}
+                        >
+                          {testingNotifier === meta.id ? "Sending…" : "Send test alert"}
+                        </button>
+                        {notifyTest?.provider === meta.id && (
+                          <span className={`chip ${notifyTest.ok ? "chip-ok" : "chip-bad"}`}>
+                            {notifyTest.ok ? "sent" : notifyTest.error || "failed"}
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            <span className="text-[0.7rem] text-text-2 block">
+              Defect alerts (with snapshots) go to every enabled channel for printers with notifications on.
+            </span>
+          </div>
+        )}
+
+        {tab === "mqtt" && (
           <div className="space-y-3">
             <span className="label block">Home Assistant (MQTT)</span>
             <Toggle label="Publish to an MQTT broker" on={!!mqtt.enabled} onChange={(on) => setMqttField("enabled", on)} />
@@ -133,7 +166,8 @@ export function SettingsDialog() {
             )}
           </div>
         )}
-        {engine?.mode === "hub" && (
+
+        {tab === "updates" && (
           <div className="space-y-3">
             <span className="label block">Software updates</span>
             <Toggle
@@ -163,18 +197,9 @@ export function SettingsDialog() {
             </div>
           </div>
         )}
-        <button
-          className="btn btn-primary w-full"
-          disabled={saving}
-          onClick={() => {
-            sent.current = true;
-            send({ cmd: "settings.update", patch: { notifiers, update_check: updateCheck, mqtt } });
-          }}
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-        {engine?.mode === "hub" && (
-          <div className="hairline pt-4 space-y-3">
+
+        {tab === "api" && (
+          <div className="space-y-3">
             <div>
               <span className="label block">API &amp; MCP access</span>
               <span className="text-[0.7rem] text-text-2 block mt-1">
@@ -253,6 +278,20 @@ export function SettingsDialog() {
             </div>
           </div>
         )}
+
+        {tab !== "api" && (
+          <button
+            className="btn btn-primary w-full"
+            disabled={saving}
+            onClick={() => {
+              sent.current = true;
+              send({ cmd: "settings.update", patch: { notifiers, update_check: updateCheck, mqtt } });
+            }}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        )}
+
         <div className="hairline pt-4 flex items-center justify-between">
           <span className="text-xs text-text-1">
             Mode: <span className="mono text-accent">{engine?.mode}</span>
