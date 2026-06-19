@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import numpy as np
 
@@ -61,7 +62,7 @@ class FakePlatform:
 
     async def http(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
         self.http_calls.append((method, url))
-        if "api.github.com" in url:
+        if urlparse(url).hostname == "api.github.com":
             return 200, self.releases
         if self.reject_actions and method == "POST" and "/api/job" in url:
             raise RuntimeError("printer refused")
