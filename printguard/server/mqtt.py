@@ -36,6 +36,8 @@ if TYPE_CHECKING:
 RECONNECT_DELAY_S = 5.0
 KEEPALIVE_S = 30
 QUEUE_MAX = 512
+STATE_DEADBAND = 5.0
+CONTINUOUS_FIELDS = ("score", "progress")
 MANUFACTURER = "PrintGuard"
 MODEL = "Print monitor"
 SUPPORT_URL = "https://github.com/oliverbravery/PrintGuard"
@@ -114,6 +116,25 @@ def monitor_state(monitor: dict[str, Any], printer: dict[str, Any] | None, score
         payload["progress"] = round(float(device.get("progress") or 0.0), 1)
         payload["job"] = device.get("job")
     return payload
+
+
+def state_changed(previous: dict[str, Any] | None, current: dict[str, Any], deadband: float = STATE_DEADBAND) -> bool:
+    """Whether a new state blob is worth publishing under report-by-exception.
+
+    Any categorical field flips immediately; a continuous reading (``score``,
+    ``progress``) counts only once it has moved past ``deadband`` percentage
+    points, so a defect score that drifts every inference frame never floods the
+    broker while a genuine transition still publishes at once.
+    """
+    if previous is None:
+        return True
+    for field in previous.keys() | current.keys():
+        if field in CONTINUOUS_FIELDS:
+            if abs(float(current.get(field) or 0.0) - float(previous.get(field) or 0.0)) >= deadband:
+                return True
+        elif previous.get(field) != current.get(field):
+            return True
+    return False
 
 
 def discovery_config(monitor: dict[str, Any], printer: dict[str, Any] | None, version: str, base: str) -> dict[str, Any]:
@@ -258,6 +279,7 @@ class MqttBridge:
         self._get_config = get_config
         self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=QUEUE_MAX)
         self._scores: dict[str, float] = {}
+        self._reported: dict[str, dict[str, Any]] = {}
         self._published: dict[str, str] = {}
         self._devices: set[str] = set()
         self._state: dict[str, Any] = {}
@@ -308,6 +330,7 @@ class MqttBridge:
             keepalive=KEEPALIVE_S,
         ) as client:
             self._published.clear()
+            self._reported.clear()
             self._devices.clear()
             self._state = {}
             await client.publish(status_topic(base), "online", qos=1, retain=True)
@@ -368,7 +391,7 @@ class MqttBridge:
         for monitor_id in self._devices - desired:
             await client.publish(device_config_topic(prefix, monitor_id), "", qos=1, retain=True)
             self._published.pop(device_config_topic(prefix, monitor_id), None)
-            self._published.pop(state_topic(base, monitor_id), None)
+            self._reported.pop(monitor_id, None)
         self._devices = desired
 
     async def _publish_state(self, client: aiomqtt.Client, monitor_id: str, base: str) -> None:
@@ -377,7 +400,10 @@ class MqttBridge:
             return
         printer = next((p for p in self._state.get("printers", []) if p["id"] == monitor.get("printer_id")), None)
         payload = monitor_state(monitor, printer, self._scores.get(monitor_id))
-        await self._publish(client, state_topic(base, monitor_id), json.dumps(payload))
+        if not state_changed(self._reported.get(monitor_id), payload):
+            return
+        self._reported[monitor_id] = payload
+        await client.publish(state_topic(base, monitor_id), json.dumps(payload), qos=1, retain=True)
 
     async def _publish_snapshot(self, client: aiomqtt.Client, monitor_id: str, base: str) -> None:
         monitor = next((m for m in self._state.get("monitors", []) if m["id"] == monitor_id), None)

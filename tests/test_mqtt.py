@@ -88,6 +88,19 @@ def test_monitor_state_includes_linked_printer_fields() -> None:
     assert "printer_status" not in mqtt.monitor_state(_monitor(), None, 0.1)
 
 
+def test_state_changed_damps_score_drift_but_not_transitions() -> None:
+    watching = mqtt.monitor_state(_monitor(), None, 0.40)
+    assert mqtt.state_changed(None, watching)
+    assert not mqtt.state_changed(watching, watching)
+    assert not mqtt.state_changed(watching, mqtt.monitor_state(_monitor(), None, 0.43))
+    assert mqtt.state_changed(watching, mqtt.monitor_state(_monitor(), None, 0.46))
+    triggered = mqtt.monitor_state(_monitor(alert={"score": 0.41, "action": "none", "ts": 1.0}), None, 0.41)
+    assert mqtt.state_changed(watching, triggered)
+    printing = mqtt.monitor_state(_monitor(printer_id="prn1"), _printer(), 0.1)
+    paused = mqtt.monitor_state(_monitor(printer_id="prn1"), _printer(device_state={"status": "paused", "progress": 42.6, "job": "boat.gcode"}), 0.1)
+    assert mqtt.state_changed(printing, paused)
+
+
 def test_route_command_maps_enabled_switch() -> None:
     monitors = [_monitor()]
     on = mqtt.route_command("printguard/monitor/abc12345/enabled/set", "ON", monitors)

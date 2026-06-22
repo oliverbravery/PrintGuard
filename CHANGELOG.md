@@ -18,8 +18,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   linked to a printer — live status and progress with **Pause / Resume / Cancel** buttons.
   Control is two-way, so Home Assistant dashboards and automations can arm a monitor or stop
   a print, and the hub publishes an availability signal so entities show as unavailable if it
-  goes offline. The broker is yours and the bridge runs on the hub, so no frames leave your
-  hardware. Optional TLS, username/password and custom topic prefixes are supported. Anyone
+  goes offline. Monitor state is published on change rather than on every inference frame — a
+  defect or printer-status transition appears at once while the live score updates in steps —
+  so monitors never flood Home Assistant's history. The broker is yours and the bridge runs on
+  the hub, so no frames leave your hardware. Optional TLS, username/password and custom topic
+  prefixes are supported. Anyone
   with access to the broker can control PrintGuard, so treat broker access as you would the
   dashboard.
 
