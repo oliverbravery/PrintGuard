@@ -7,8 +7,9 @@ Authorization and CORS (trusted_clients, cors_domains): https://moonraker.readth
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
+from ..cameras import webrtc_endpoint
 from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
 
 _STATUS_MAP = {
@@ -75,21 +76,58 @@ class KlipperAdapter(IntegrationAdapter):
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Lists Moonraker's registered webcams via /server/webcams/list.
 
-        Each webcam's stream_url may be relative to the Moonraker host and is
-        resolved against it; its stable uid keys the registered camera.
+        Each webcam's stream_url may be relative, resolved against the host's web
+        port (see ``_resolve``); its stable uid keys the registered camera.
+        Webcams whose service advertises only a WebRTC stream — camera-streamer,
+        the Crowsnest V5 default — are redirected to their MJPEG endpoint, which
+        FFmpeg can read, and skipped if no such endpoint can be derived.
         """
         status, body = await http("GET", f"{config['base_url'].rstrip('/')}/server/webcams/list", headers=self._headers(config))
         if status != 200 or not isinstance(body, dict):
             return []
         found: list[dict[str, Any]] = []
         for webcam in (body.get("result") or {}).get("webcams") or []:
-            if not webcam.get("enabled", True) or not webcam.get("stream_url"):
+            if not webcam.get("enabled", True):
+                continue
+            stream = str(webcam.get("stream_url") or "")
+            if "webrtc" in str(webcam.get("service") or "").lower() or webrtc_endpoint(stream):
+                stream = _mjpeg_endpoint(webcam)
+            if not stream or webrtc_endpoint(stream):
                 continue
             found.append(
                 {
                     "key": str(webcam.get("uid") or webcam.get("name") or len(found)),
                     "name": webcam.get("name") or "Webcam",
-                    "source": {"kind": "url", "url": urljoin(config["base_url"], webcam["stream_url"])},
+                    "source": {"kind": "url", "url": _resolve(config["base_url"], stream)},
                 }
             )
         return found
+
+
+def _resolve(base_url: str, stream: str) -> str:
+    """Resolves a webcam URL against the Moonraker host.
+
+    Moonraker reports a relative path (e.g. ``/webcam/?action=stream``) as served
+    on its host's web port, not the API port carried by the base URL — its own
+    documented example resolves ``/webcam/…`` to port 80. The API port (7125)
+    routes no webcam paths, so a relative URL is joined to the bare host; an
+    absolute URL is honoured verbatim.
+    """
+    if urlsplit(stream).scheme:
+        return stream
+    host = urlsplit(base_url)
+    return urljoin(urlunsplit((host.scheme, host.hostname or "", "", "", "")), stream)
+
+
+def _mjpeg_endpoint(webcam: dict[str, Any]) -> str:
+    """Derives camera-streamer's MJPEG endpoint for a WebRTC-advertised webcam.
+
+    camera-streamer serves the same feed as MJPEG alongside WebRTC, at the
+    sibling of its snapshot (``…/?action=snapshot`` → ``…/?action=stream``) or of
+    its WebRTC path (``…/webrtc`` → ``…/stream``). The snapshot is preferred as
+    Moonraker reports it verbatim; an empty string means none could be derived.
+    """
+    snapshot = str(webcam.get("snapshot_url") or "")
+    if snapshot:
+        return snapshot.replace("snapshot", "stream")
+    return str(webcam.get("stream_url") or "").replace("webrtc", "stream")

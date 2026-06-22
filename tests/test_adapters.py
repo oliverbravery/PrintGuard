@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from printguard.engine import vision
+from printguard.engine.cameras import webrtc_endpoint
 from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceStatus
 from printguard.engine.monitors import monitor_watching, sanitise_monitor
 from printguard.engine.notifiers import NOTIFIERS
@@ -226,12 +227,85 @@ async def test_klipper_lists_enabled_webcams() -> None:
     }
     cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl:7125"})
     assert cams == [
-        {"key": "u1", "name": "Nozzle", "source": {"kind": "url", "url": "http://kl:7125/webcam/?action=stream"}}
-    ], "only enabled webcams with a stream are exposed, keyed by their stable uid"
+        {"key": "u1", "name": "Nozzle", "source": {"kind": "url", "url": "http://kl/webcam/?action=stream"}}
+    ], "only enabled webcams with a stream are exposed, keyed by uid and resolved to the host's web port not the API port"
+
+
+async def test_klipper_camera_streamer_webrtc_falls_back_to_mjpeg() -> None:
+    body = {
+        "result": {
+            "webcams": [
+                {
+                    "name": "Chamber",
+                    "uid": "u1",
+                    "service": "webrtc-camerastreamer",
+                    "stream_url": "/webcam/webrtc",
+                    "snapshot_url": "/webcam/?action=snapshot",
+                    "enabled": True,
+                }
+            ]
+        }
+    }
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl:7125"})
+    assert cams == [
+        {"key": "u1", "name": "Chamber", "source": {"kind": "url", "url": "http://kl/webcam/?action=stream"}}
+    ], "a WebRTC-only camera-streamer feed is registered via the MJPEG endpoint derived from its snapshot URL"
+
+
+async def test_klipper_resolves_crowsnest_v5_webcams_to_mjpeg() -> None:
+    """Real /server/webcams/list from a Crowsnest V5 / camera-streamer setup (issue #64)."""
+    body = {"result": {"webcams": [
+        {"name": "mjpeg", "enabled": True, "service": "uv4l-mjpeg",
+         "stream_url": "/webcam/?action=stream", "snapshot_url": "/webcam/?action=snapshot",
+         "uid": "9765408a-3251-40b1-836a-890c4db37aca"},
+        {"name": "rtc", "enabled": True, "service": "webrtc-camerastreamer",
+         "stream_url": "/webcam/webrtc", "snapshot_url": "/webcam/?action=snapshot",
+         "uid": "e61f80ed-5eb9-4838-8579-4d8a38b061da"},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://printer.local:7125"})
+    assert cams == [
+        {"key": "9765408a-3251-40b1-836a-890c4db37aca", "name": "mjpeg",
+         "source": {"kind": "url", "url": "http://printer.local/webcam/?action=stream"}},
+        {"key": "e61f80ed-5eb9-4838-8579-4d8a38b061da", "name": "rtc",
+         "source": {"kind": "url", "url": "http://printer.local/webcam/?action=stream"}},
+    ], "the WebRTC entry is redirected to MJPEG and both resolve to the host's web port, where camera-streamer actually serves frames"
+
+
+async def test_klipper_webrtc_without_snapshot_derives_mjpeg_from_stream_path() -> None:
+    body = {"result": {"webcams": [
+        {"name": "Cam", "uid": "u1", "service": "webrtc-camerastreamer", "stream_url": "/webcam/webrtc", "enabled": True},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl"})
+    assert cams[0]["source"]["url"] == "http://kl/webcam/stream", "absent a snapshot URL the MJPEG path is derived from the WebRTC path"
+
+
+async def test_klipper_skips_webrtc_with_no_ingestible_endpoint() -> None:
+    body = {"result": {"webcams": [
+        {"name": "WHEP", "uid": "u1", "stream_url": "whep://kl/webcam", "enabled": True},
+    ]}}
+    assert await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl"}) == [], \
+        "a feed that stays WebRTC with no derivable MJPEG is skipped, never registered as a dead camera"
 
 
 async def test_klipper_without_webcams_api_exposes_nothing() -> None:
     assert await INTEGRATIONS["klipper"].cameras(RecordingHttp(status=404, body={}), {"base_url": "http://kl"}) == []
+
+
+@pytest.mark.parametrize(
+    "url, is_webrtc",
+    [
+        ("http://pi/webcam/webrtc", True),
+        ("webrtc://pi/stream", True),
+        ("whep://pi/whep", True),
+        ("/webcam/webrtc", True),
+        ("http://pi/webcam/?action=stream", False),
+        ("http://pi/webcam/?action=snapshot", False),
+        ("rtsp://pi:8554/stream.h264", False),
+        ("http://pi:8080/stream", False),
+    ],
+)
+def test_webrtc_endpoint_flags_only_uningestible_streams(url: str, is_webrtc: bool) -> None:
+    assert webrtc_endpoint(url) is is_webrtc
 
 
 BAMBU_CONFIG = {"host": "192.168.1.70", "serial": "01S00A", "access_code": "12345678"}

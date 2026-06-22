@@ -7,6 +7,26 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2026-06-20
+
+### Fixed
+
+- **WebRTC camera feeds no longer fail silently.** PrintGuard reads cameras with FFmpeg,
+  which cannot ingest WebRTC (WHEP/WHIP) streams. A camera that only offered WebRTC — most
+  often a Klipper/Crowsnest setup on **camera-streamer**, the Crowsnest V5 default — was
+  registered but produced no frames, with nothing to say why. Such streams are now detected
+  up front: adding one by hand is rejected with a clear message pointing at the MJPEG
+  (`…?action=stream`) or RTSP URL to use instead, and a printer that exposes only a WebRTC
+  webcam raises a visible warning rather than quietly skipping it.
+- **Klipper webcams on camera-streamer fix.** When Moonraker advertises a webcam as
+  WebRTC, PrintGuard automatically attaches to the same feed's MJPEG endpoint (derived from
+  the webcam's snapshot URL) instead of the unreadable WebRTC one, so no manual reconfiguration
+  is needed. Webcams already served as MJPEG/HLS are unaffected.
+- **Klipper webcam URLs resolve to the right port.** A webcam advertised by a relative path
+  (e.g. `/webcam/?action=stream`) is now fetched from the printer's web port, where the stream
+  is actually served, rather than Moonraker's API port (7125) — which carries no webcam routes
+  and silently produced no frames when the printer was added with its `…:7125` base URL.
+
 ## [2.1.1] - 2026-06-19
 
 ### Added
