@@ -1,11 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import type { ApiToken, MqttConfig } from "../types";
+import { applyTheme, beginPreview, endPreview, PALETTES } from "../theme";
+import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
 import { Dialog } from "./Dialog";
 import { SchemaForm } from "./SchemaForm";
+import { ThemeEditor } from "./ThemeEditor";
 import { Toggle } from "./Toggle";
 
-type TabId = "alerts" | "mqtt" | "updates" | "api";
+type TabId = "appearance" | "alerts" | "mqtt" | "updates" | "api";
+
+const SCHEMES: { id: string; name: string; glyph: string }[] = [
+  { id: "system", name: "System", glyph: "◐" },
+  { id: "light", name: "Light", glyph: "☀" },
+  { id: "dark", name: "Dark", glyph: "☾" },
+];
+
+function Swatch({ colors }: { colors: CustomTheme["colors"] }) {
+  return (
+    <span className="flex overflow-hidden rounded border border-line-1">
+      {(["ink0", "accent", "ok", "bad"] as ThemeTokenKey[]).map((k) => (
+        <span key={k} className="h-4 w-4" style={{ background: colors[k] }} />
+      ))}
+    </span>
+  );
+}
 
 export function SettingsDialog() {
   const { engine, send, openDialog, leaveMode, isPending, notifyTest, testingNotifier, testNotifier, createdToken, clearCreatedToken } = useStore();
@@ -21,13 +39,52 @@ export function SettingsDialog() {
   const close = () => openDialog(null);
   const tokens = engine?.tokens ?? [];
 
+  const theme = engine?.settings.theme ?? "system";
+  const themes = engine?.settings.themes ?? [];
+  const [editing, setEditing] = useState<CustomTheme | null>(null);
+
+  const upsertTheme = (list: CustomTheme[], t: CustomTheme) =>
+    list.some((x) => x.id === t.id) ? list.map((x) => (x.id === t.id ? t : x)) : [...list, t];
+  const selectTheme = (id: string) => {
+    applyTheme(id, themes, true);
+    send({ cmd: "settings.update", patch: { theme: id } });
+  };
+  const newTheme = (base: ThemeBase) =>
+    setEditing({ id: "t" + Date.now().toString(36), name: "", base, colors: { ...PALETTES[base] } });
+  const cancelEdit = () => {
+    endPreview();
+    setEditing(null);
+    applyTheme(theme, themes, true);
+  };
+  const saveTheme = () => {
+    if (!editing) return;
+    const next = upsertTheme(themes, { ...editing, name: editing.name.trim() || "Custom" });
+    endPreview();
+    applyTheme(editing.id, next, true);
+    send({ cmd: "settings.update", patch: { themes: next, theme: editing.id } });
+    setEditing(null);
+  };
+  const deleteTheme = (id: string) => {
+    const next = themes.filter((t) => t.id !== id);
+    const selection = theme === id ? "system" : theme;
+    applyTheme(selection, next, true);
+    send({ cmd: "settings.update", patch: { themes: next, theme: selection } });
+  };
+
   useEffect(() => {
     if (sent.current && !saving) close();
   }, [saving]);
 
+  useEffect(() => {
+    if (!editing) return;
+    beginPreview();
+    applyTheme(editing.id, upsertTheme(themes, editing), true);
+  }, [editing]);
+
   const channels = (engine?.notifiers ?? []).filter((n) => engine?.mode === "hub" || n.browser_ok);
 
   const tabs: { id: TabId; label: string }[] = [
+    { id: "appearance", label: "Appearance" },
     { id: "alerts", label: "Alerts" },
     ...(engine?.mode === "hub"
       ? ([
@@ -56,6 +113,67 @@ export function SettingsDialog() {
             ))}
           </div>
         )}
+
+        {tab === "appearance" &&
+          (editing ? (
+            <ThemeEditor
+              value={editing}
+              onChange={setEditing}
+              onSave={saveTheme}
+              onCancel={cancelEdit}
+              canSave={!!editing.name.trim()}
+            />
+          ) : (
+            <div className="space-y-4">
+              <span className="label block">Theme</span>
+              <div className="grid grid-cols-3 gap-2">
+                {SCHEMES.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => selectTheme(opt.id)}
+                    className={`flex flex-col items-center gap-1 rounded border px-2 py-3 transition-colors cursor-pointer ${
+                      theme === opt.id ? "border-accent bg-accent/5 text-text-0" : "border-line-0 text-text-1 hover:border-line-1"
+                    }`}
+                  >
+                    <span className="text-base leading-none">{opt.glyph}</span>
+                    <span className="text-xs">{opt.name}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="label block">Custom themes</span>
+                <button className="btn" onClick={() => newTheme(theme === "light" ? "light" : "dark")}>
+                  + New
+                </button>
+              </div>
+              {themes.length === 0 && (
+                <span className="block text-[0.7rem] text-text-2">No custom themes yet. Create one to tailor every colour.</span>
+              )}
+              <div className="space-y-2">
+                {themes.map((t) => (
+                  <div key={t.id} className="flex items-center gap-2">
+                    <button
+                      onClick={() => selectTheme(t.id)}
+                      className={`flex flex-1 items-center gap-2 overflow-hidden rounded border px-3 py-2 text-left transition-colors cursor-pointer ${
+                        theme === t.id ? "border-accent bg-accent/5" : "border-line-0 hover:border-line-1"
+                      }`}
+                    >
+                      <Swatch colors={t.colors} />
+                      <span className="flex-1 truncate text-xs text-text-0">{t.name}</span>
+                      <span className="chip">{t.base}</span>
+                    </button>
+                    <button className="btn" onClick={() => setEditing({ ...t, colors: { ...t.colors } })}>
+                      Edit
+                    </button>
+                    <button className="btn btn-danger" onClick={() => deleteTheme(t.id)}>
+                      Delete
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
 
         {tab === "alerts" && (
           <div className="space-y-4">
@@ -279,7 +397,7 @@ export function SettingsDialog() {
           </div>
         )}
 
-        {tab !== "api" && (
+        {tab !== "api" && tab !== "appearance" && (
           <button
             className="btn btn-primary w-full"
             disabled={saving}

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { bootLocal } from "./local";
 import { resumePublishers } from "./stream";
+import { applyTheme } from "./theme";
 import type { CameraSource, EngineLink, EngineState, Mode, ScorePoint } from "./types";
 
 const HISTORY_LIMIT = 240;
@@ -91,14 +92,17 @@ export const useStore = create<PgStore>((set, get) => {
 
   const onEvent = (event: any) => {
     switch (event.event) {
-      case "state":
+      case "state": {
         clearPending(event.req_id);
+        const settings = (event as EngineState).settings;
+        applyTheme(settings?.theme ?? "system", settings?.themes ?? []);
         set({ engine: event as EngineState, phase: "ready" });
         if (!resumed && get().mode === "hub") {
           resumed = true;
           void resumePublishers((event as EngineState).cameras, (reason) => get().toast("error", `publishing stopped: ${reason}`));
         }
         break;
+      }
       case "result":
         set((s) => {
           const points = [...(s.history[event.monitor_id] ?? []), { ts: event.ts, score: event.score }];

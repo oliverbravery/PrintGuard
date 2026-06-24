@@ -167,9 +167,16 @@ async def test_protocol_surfaces_errors_and_filters_settings() -> None:
         await engine.handle({"cmd": "monitor.update", "id": "missing", "patch": {}, "req_id": 8})
         assert any(e["event"] == "error" and e.get("req_id") == 8 for e in events)
 
-        await engine.handle({"cmd": "settings.update", "patch": {"bogus": 1, "notifiers": {"ntfy": {"url": "u"}}}})
+        assert engine.settings["theme"] == "system" and engine.settings["themes"] == [], "theme settings default"
+
+        custom = {"id": "t1", "name": "Mine", "base": "dark", "colors": {"accent": "#123456"}}
+        await engine.handle(
+            {"cmd": "settings.update", "patch": {"bogus": 1, "notifiers": {"ntfy": {"url": "u"}}, "theme": "light", "themes": [custom]}}
+        )
         assert "bogus" not in engine.settings
         assert engine.settings["notifiers"] == {"ntfy": {"url": "u"}}
+        assert engine.settings["theme"] == "light"
+        assert engine.settings["themes"] == [custom]
 
 
 async def test_provider_change_clears_stale_printer_state() -> None:
@@ -244,10 +251,12 @@ async def test_state_persists_across_restart() -> None:
         monitor_id = next(iter(engine.monitors))
         printer_id = await _register_printer(engine)
         await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"name": "Resurrected", "notify": True, "printer_id": printer_id}})
+        await engine.handle({"cmd": "settings.update", "patch": {"theme": "light"}})
 
     reborn = Engine(platform)
     await reborn.start()
     try:
+        assert reborn.settings["theme"] == "light", "theme survives a restart"
         assert [c.name for c in reborn.cameras.values()] == ["cam10.0"]
         restored = reborn.monitors[monitor_id]
         assert restored["name"] == "Resurrected"

@@ -1,4 +1,5 @@
 import { useStore } from "../store";
+import { applyTheme, nextScheme } from "../theme";
 
 export function Wordmark({ size = "text-xl" }: { size?: string }) {
   return (
@@ -61,6 +62,27 @@ function VersionChip() {
   );
 }
 
+function ThemeToggle() {
+  const theme = useStore((s) => s.engine?.settings.theme ?? "system");
+  const themes = useStore((s) => s.engine?.settings.themes ?? []);
+  const send = useStore((s) => s.send);
+  const glyph = theme === "light" ? "☀" : theme === "dark" ? "☾" : themes.some((t) => t.id === theme) ? "✦" : "◐";
+  return (
+    <button
+      className="chip cursor-pointer hover:opacity-80"
+      title={`Theme: ${theme} — tap to switch`}
+      aria-label="Switch theme"
+      onClick={() => {
+        const next = nextScheme(theme);
+        applyTheme(next, themes);
+        send({ cmd: "settings.update", patch: { theme: next } });
+      }}
+    >
+      {glyph}
+    </button>
+  );
+}
+
 export function Header() {
   const { engine, mode, leaveMode } = useStore();
   const stats = engine?.stats;
@@ -76,6 +98,7 @@ export function Header() {
           {mode === "hub" ? "hub" : "local"} ▾
         </button>
         <VersionChip />
+        <ThemeToggle />
         <div className="flex-1" />
         {stats && (
           <div className="flex items-center gap-5 md:mr-2">

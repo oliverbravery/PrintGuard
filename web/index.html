@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#0b0c0a" />
     <title>PrintGuard — FDM print failure detection</title>
     <meta
@@ -23,6 +23,22 @@
     />
   </head>
   <body>
+    <script>
+      (function () {
+        try {
+          var c = JSON.parse(localStorage.getItem("pg.theme") || "null");
+          var explicit = c && c.id !== "system" && c.base;
+          var base = explicit ? c.base : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          var root = document.documentElement;
+          root.dataset.theme = base;
+          root.style.colorScheme = base;
+          if (c && c.vars) for (var k in c.vars) root.style.setProperty(k, c.vars[k]);
+          var bg = explicit && c.bg ? c.bg : base === "dark" ? "#0b0c0a" : "#e7e8e0";
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute("content", bg);
+        } catch (e) {}
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

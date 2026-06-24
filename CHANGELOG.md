@@ -7,10 +7,17 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.2.0] - 2026-06-19
+## [2.2.0] - 2026-06-24
 
 ### Added
 
+- **Light, dark and custom themes** — pick **System** (follows your device), **Light** or
+  **Dark** from the new header toggle or **Settings → Appearance**, or design your own. The
+  theme editor lets you set every colour — surfaces, text, lines and the accent/ok/warn/bad
+  status colours — with a live preview as you go, and your themes are saved and synced to every
+  browser that opens the hub. The selection defaults to System, so each device follows its own
+  light/dark preference until you choose one, and the correct theme paints on load with no
+  flash. Works the same in local (in-browser) mode.
 - **Home Assistant integration over MQTT** — point the hub at your MQTT broker (**Settings →
   Home Assistant (MQTT)**) and every monitor appears in Home Assistant automatically through
   MQTT discovery, each as its own device: a **Defect** problem sensor, defect-score and state

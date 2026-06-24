@@ -119,6 +119,21 @@ export interface ApiToken {
   created: number;
 }
 
+export type ThemeBase = "dark" | "light";
+
+export type ThemeTokenKey =
+  | "ink0" | "ink1" | "ink2" | "ink3"
+  | "line0" | "line1"
+  | "text0" | "text1" | "text2"
+  | "accent" | "ok" | "warn" | "bad";
+
+export interface CustomTheme {
+  id: string;
+  name: string;
+  base: ThemeBase;
+  colors: Record<ThemeTokenKey, string>;
+}
+
 export interface EngineStats {
   workers: number;
   infer_ms: number;
@@ -149,7 +164,13 @@ export interface EngineState {
   cameras: Camera[];
   printers: Printer[];
   monitors: Monitor[];
-  settings: { notifiers: Record<string, Record<string, string>>; update_check: boolean; mqtt?: MqttConfig };
+  settings: {
+    notifiers: Record<string, Record<string, string>>;
+    update_check: boolean;
+    mqtt?: MqttConfig;
+    theme: string;
+    themes: CustomTheme[];
+  };
   tokens: ApiToken[];
   stats: EngineStats;
   integrations: AdapterMeta[];

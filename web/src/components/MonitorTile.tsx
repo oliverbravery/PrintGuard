@@ -42,7 +42,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
       <Feed camera={camera} mode={engine?.mode ?? "local"} />
       {alerting && (
         <div className="absolute inset-x-0 top-[calc(50%-14px)] z-[4] flex justify-center">
-          <span className="display bg-bad text-ink-0 text-xs font-bold tracking-[0.3em] px-4 py-1.5">
+          <span className="display bg-bad text-on-accent text-xs font-bold tracking-[0.3em] px-4 py-1.5">
             DEFECT DETECTED
           </span>
         </div>

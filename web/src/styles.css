@@ -14,9 +14,29 @@
   --color-ok: #8ac926;
   --color-warn: #ffb000;
   --color-bad: #ff3b30;
+  --color-on-accent: #0b0c0a;
   --font-display: "Saira Condensed", "Arial Narrow", sans-serif;
   --font-body: "Saira", system-ui, sans-serif;
   --font-mono: "Chivo Mono", ui-monospace, monospace;
+}
+
+/* Light theme: overrides the @theme dark base. Custom themes set these inline
+   on :root from theme.ts; structural colours derive from the tokens via
+   color-mix(), so every theme adapts without per-theme rules. */
+:root[data-theme="light"] {
+  --color-ink-0: #e7e8e0;
+  --color-ink-1: #f2f3ec;
+  --color-ink-2: #fbfcf6;
+  --color-ink-3: #dfe1d6;
+  --color-line-0: #d3d5c8;
+  --color-line-1: #c2c5b4;
+  --color-text-0: #1b1d16;
+  --color-text-1: #4a4f40;
+  --color-text-2: #6b7160;
+  --color-accent: #db410a;
+  --color-ok: #4f7d14;
+  --color-warn: #a86f00;
+  --color-bad: #cf2b22;
 }
 
 html {
@@ -31,14 +51,14 @@ body {
   background:
     radial-gradient(1100px 700px at 75% -10%, rgba(255, 77, 0, 0.06), transparent 60%),
     radial-gradient(900px 600px at -10% 110%, rgba(138, 201, 38, 0.04), transparent 55%),
-    repeating-linear-gradient(0deg, transparent 0 23px, rgba(236, 238, 230, 0.022) 23px 24px),
-    repeating-linear-gradient(90deg, transparent 0 23px, rgba(236, 238, 230, 0.022) 23px 24px),
+    repeating-linear-gradient(0deg, transparent 0 23px, color-mix(in srgb, var(--color-text-0) 2.2%, transparent) 23px 24px),
+    repeating-linear-gradient(90deg, transparent 0 23px, color-mix(in srgb, var(--color-text-0) 2.2%, transparent) 23px 24px),
     var(--color-ink-0);
 }
 
 ::selection {
   background: var(--color-accent);
-  color: var(--color-ink-0);
+  color: var(--color-on-accent);
 }
 
 .display {
@@ -90,12 +110,12 @@ body {
 .btn-primary {
   background: var(--color-accent);
   border-color: var(--color-accent);
-  color: var(--color-ink-0);
+  color: var(--color-on-accent);
 }
 
 .btn-primary:hover {
-  background: #ff6a26;
-  color: var(--color-ink-0);
+  background: color-mix(in srgb, var(--color-accent) 88%, white);
+  color: var(--color-on-accent);
 }
 
 .btn-danger:hover {
@@ -117,7 +137,7 @@ body {
   border-radius: 3px;
   border: 1px solid var(--color-line-1);
   color: var(--color-text-1);
-  background: rgba(11, 12, 10, 0.7);
+  background: color-mix(in srgb, var(--color-ink-0) 72%, transparent);
   white-space: nowrap;
 }
 
@@ -145,7 +165,7 @@ body {
   animation: led-pulse 0.9s ease-in-out infinite;
 }
 
-.led-off { background: #3a3f33; }
+.led-off { background: color-mix(in srgb, var(--color-text-2) 55%, transparent); }
 .led-warn {
   background: var(--color-warn);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-warn) 80%, transparent);
