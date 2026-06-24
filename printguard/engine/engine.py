@@ -15,7 +15,7 @@ from collections import deque
 from typing import Any, Callable
 
 from . import updates, vision
-from .cameras import sanitise_camera
+from .cameras import sanitise_camera, webrtc_endpoint
 from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
 from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
@@ -32,6 +32,7 @@ REQUEST_TIMEOUT_S = 15.0
 RECENT_EVENTS_MAX = 100
 RECENT_EVENT_TYPES = ("alert", "warning", "device", "error")
 UPDATE_CHECK_INTERVAL_S = 86400.0
+WEBRTC_UNSUPPORTED = "WebRTC streams (WHEP/WHIP) can't be read — use the MJPEG (…?action=stream) or RTSP URL instead."
 
 SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}, "update_check": True, "mqtt": {}, "theme": "system", "themes": []}
 
@@ -313,11 +314,14 @@ class Engine:
         self.emit({"event": "discovered", "sources": fresh, "req_id": message.get("req_id")})
 
     async def _cmd_camera_add(self, message: dict[str, Any]) -> None:
+        source = dict(message["source"])
+        if source.get("kind") == "url" and webrtc_endpoint(str(source.get("url") or "")):
+            raise ValueError(WEBRTC_UNSUPPORTED)
         camera_id = uuid.uuid4().hex[:8]
         camera = Camera(
             id=camera_id,
             name=str(message.get("name") or "Camera").strip() or "Camera",
-            source=dict(message["source"]),
+            source=source,
             max_fps=15.0,
         )
         source = await self.platform.open_camera(camera_id, camera.source)
@@ -394,7 +398,11 @@ class Engine:
             camera_id = f"{printer.id}-{descriptor['key']}"
             if self.cameras.get(camera_id):
                 continue
-            camera = Camera(id=camera_id, name=descriptor["name"], source=dict(descriptor["source"]), printer_id=printer.id, max_fps=15.0)
+            source = dict(descriptor["source"])
+            if source.get("kind") == "url" and webrtc_endpoint(str(source.get("url") or "")):
+                self.emit({"event": "warning", "printer_id": printer.id, "message": f"{descriptor['name']}: {WEBRTC_UNSUPPORTED}"})
+                continue
+            camera = Camera(id=camera_id, name=descriptor["name"], source=source, printer_id=printer.id, max_fps=15.0)
             try:
                 source = await self.platform.open_camera(camera_id, camera.source)
             except Exception:
