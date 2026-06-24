@@ -32,6 +32,14 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   prefixes are supported. Anyone
   with access to the broker can control PrintGuard, so treat broker access as you would the
   dashboard.
+- **Accessibility pass** — the dashboard is now fully keyboard-operable and screen-reader
+  friendly. Every control, camera and monitor tile is reachable by Tab with a clear focus
+  outline; dialogs and the monitor panel trap focus while open, close on **Esc** or a click
+  outside, lock the page behind them and return focus to wherever you left off; the
+  **Settings** tabs follow the standard arrow-key pattern. Switches, tabs and icon buttons
+  carry proper labels, defect alerts are announced aloud, and a "skip to monitors" link
+  starts the page. Text, status colours and the light theme were tuned to meet **WCAG 2.2 AA**
+  contrast, and all motion respects your system's reduced-motion setting.
 
 ## [2.1.2] - 2026-06-20
 

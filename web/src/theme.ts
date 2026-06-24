@@ -53,14 +53,14 @@ export const PALETTES: Record<ThemeBase, Palette> = {
   dark: {
     ink0: "#0b0c0a", ink1: "#11130e", ink2: "#181b13", ink3: "#20241a",
     line0: "#262b20", line1: "#39402f",
-    text0: "#eceee6", text1: "#a8af9c", text2: "#6e755f",
+    text0: "#eceee6", text1: "#a8af9c", text2: "#7e866d",
     accent: "#ff4d00", ok: "#8ac926", warn: "#ffb000", bad: "#ff3b30",
   },
   light: {
     ink0: "#e7e8e0", ink1: "#f2f3ec", ink2: "#fbfcf6", ink3: "#dfe1d6",
     line0: "#d3d5c8", line1: "#c2c5b4",
-    text0: "#1b1d16", text1: "#4a4f40", text2: "#6b7160",
-    accent: "#db410a", ok: "#4f7d14", warn: "#a86f00", bad: "#cf2b22",
+    text0: "#1b1d16", text1: "#4a4f40", text2: "#646959",
+    accent: "#bc3809", ok: "#487212", warn: "#8d5d00", bad: "#c42920",
   },
 };
 

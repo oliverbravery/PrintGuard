@@ -95,14 +95,38 @@ export function SettingsDialog() {
       : []),
   ];
 
+  const onTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const delta = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    const i = tabs.findIndex((t) => t.id === tab);
+    let next = i;
+    if (delta) next = (i + delta + tabs.length) % tabs.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    setTab(tabs[next].id);
+    document.getElementById(`settings-tab-${tabs[next].id}`)?.focus();
+  };
+
   return (
     <Dialog title="Settings" onClose={close}>
       <div className="space-y-5">
         {tabs.length > 1 && (
-          <div className="flex gap-1 border-b border-line-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div
+            role="tablist"
+            aria-label="Settings sections"
+            onKeyDown={onTabKeyDown}
+            className="flex gap-1 border-b border-line-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
             {tabs.map((t) => (
               <button
                 key={t.id}
+                id={`settings-tab-${t.id}`}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                aria-controls={`settings-panel-${t.id}`}
+                tabIndex={tab === t.id ? 0 : -1}
                 onClick={() => setTab(t.id)}
                 className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-xs transition-colors cursor-pointer ${
                   tab === t.id ? "border-accent text-text-0" : "border-transparent text-text-2 hover:text-text-1"
@@ -114,8 +138,9 @@ export function SettingsDialog() {
           </div>
         )}
 
-        {tab === "appearance" &&
-          (editing ? (
+        {tab === "appearance" && (
+          <div role="tabpanel" id="settings-panel-appearance" aria-labelledby="settings-tab-appearance" tabIndex={0}>
+            {editing ? (
             <ThemeEditor
               value={editing}
               onChange={setEditing}
@@ -173,10 +198,12 @@ export function SettingsDialog() {
                 ))}
               </div>
             </div>
-          ))}
+            )}
+          </div>
+        )}
 
         {tab === "alerts" && (
-          <div className="space-y-4">
+          <div role="tabpanel" id="settings-panel-alerts" aria-labelledby="settings-tab-alerts" tabIndex={0} className="space-y-4">
             <span className="label block">Notification channels</span>
             {channels.map((meta) => {
               const enabled = meta.id in notifiers;
@@ -225,7 +252,7 @@ export function SettingsDialog() {
         )}
 
         {tab === "mqtt" && (
-          <div className="space-y-3">
+          <div role="tabpanel" id="settings-panel-mqtt" aria-labelledby="settings-tab-mqtt" tabIndex={0} className="space-y-3">
             <span className="label block">Home Assistant (MQTT)</span>
             <Toggle label="Publish to an MQTT broker" on={!!mqtt.enabled} onChange={(on) => setMqttField("enabled", on)} />
             {mqtt.enabled && (
@@ -286,7 +313,7 @@ export function SettingsDialog() {
         )}
 
         {tab === "updates" && (
-          <div className="space-y-3">
+          <div role="tabpanel" id="settings-panel-updates" aria-labelledby="settings-tab-updates" tabIndex={0} className="space-y-3">
             <span className="label block">Software updates</span>
             <Toggle
               label="Automatically check for updates"
@@ -317,7 +344,7 @@ export function SettingsDialog() {
         )}
 
         {tab === "api" && (
-          <div className="space-y-3">
+          <div role="tabpanel" id="settings-panel-api" aria-labelledby="settings-tab-api" tabIndex={0} className="space-y-3">
             <div>
               <span className="label block">API &amp; MCP access</span>
               <span className="text-[0.7rem] text-text-2 block mt-1">

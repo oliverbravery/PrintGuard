@@ -1,3 +1,4 @@
+import { cardButton } from "../a11y";
 import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
 
@@ -21,10 +22,11 @@ function CameraCard({ camera }: { camera: Camera }) {
   const { openDialog } = useStore();
   return (
     <div
+      {...cardButton(() => openDialog("cameras", camera.id), `Edit camera ${camera.name}`)}
       className="panel flex w-60 shrink-0 snap-start cursor-pointer flex-wrap items-center gap-x-4 gap-y-2.5 px-3.5 py-2.5 transition-colors hover:border-accent sm:w-auto"
-      onClick={() => openDialog("cameras", camera.id)}
     >
       <span
+        aria-hidden
         className={`led ${camera.inferring ? "led-infer" : camera.online ? "led-on" : "led-off"}`}
         title={camera.online ? "online" : "offline"}
       />

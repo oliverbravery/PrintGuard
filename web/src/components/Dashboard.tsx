@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useStore } from "../store";
 import { CameraRail } from "./CameraRail";
 import { CamerasDialog } from "./CamerasDialog";
@@ -42,11 +43,35 @@ function EmptyState() {
 
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
+  const ref = useRef<HTMLDivElement>(null);
+  const prevLen = useRef(0);
+
+  // Promote the toast layer into the top layer so defect alerts stay visible above an open
+  // <dialog>; re-show on each new toast to re-stack above a dialog opened after it.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof el.showPopover !== "function") return;
+    const grew = toasts.length > prevLen.current;
+    prevLen.current = toasts.length;
+    if (toasts.length === 0) {
+      if (el.matches(":popover-open")) el.hidePopover();
+    } else if (grew || !el.matches(":popover-open")) {
+      if (el.matches(":popover-open")) el.hidePopover();
+      el.showPopover();
+    }
+  }, [toasts.length]);
+
   return (
-    <div className="fixed right-4 bottom-4 z-50 space-y-2 max-w-sm max-md:left-4 max-md:bottom-[calc(4.75rem+env(safe-area-inset-bottom))]">
+    <div
+      ref={ref}
+      popover="manual"
+      aria-label="Notifications"
+      className="fixed inset-auto right-4 bottom-4 z-50 m-0 w-fit max-w-sm space-y-2 border-0 bg-transparent p-0 max-md:left-4 max-md:bottom-[calc(4.75rem+env(safe-area-inset-bottom))]"
+    >
       {toasts.map((toast) => (
         <div
           key={toast.id}
+          role={toast.kind === "alert" ? "alert" : "status"}
           className={`panel rise-in px-4 py-2.5 text-sm border-l-2 ${
             toast.kind === "alert" ? "!border-l-bad text-bad" : toast.kind === "error" ? "!border-l-warn" : "!border-l-accent"
           }`}
@@ -64,9 +89,16 @@ export function Dashboard() {
   const detail = monitors.find((m) => m.id === detailId);
   return (
     <div className="min-h-screen">
+      <a href="#main" className="skip-link">
+        Skip to monitors
+      </a>
       <Header />
       <CameraRail />
-      <main className="mx-auto max-w-[1500px] px-4 sm:px-6 py-5 max-md:pb-[calc(5rem+env(safe-area-inset-bottom))]">
+      <main
+        id="main"
+        tabIndex={-1}
+        className="mx-auto max-w-[1500px] px-4 sm:px-6 py-5 max-md:pb-[calc(5rem+env(safe-area-inset-bottom))]"
+      >
         {monitors.length === 0 ? (
           <EmptyState />
         ) : (

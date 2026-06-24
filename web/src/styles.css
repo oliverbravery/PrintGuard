@@ -9,7 +9,7 @@
   --color-line-1: #39402f;
   --color-text-0: #eceee6;
   --color-text-1: #a8af9c;
-  --color-text-2: #6e755f;
+  --color-text-2: #7e866d;
   --color-accent: #ff4d00;
   --color-ok: #8ac926;
   --color-warn: #ffb000;
@@ -32,11 +32,12 @@
   --color-line-1: #c2c5b4;
   --color-text-0: #1b1d16;
   --color-text-1: #4a4f40;
-  --color-text-2: #6b7160;
-  --color-accent: #db410a;
-  --color-ok: #4f7d14;
-  --color-warn: #a86f00;
-  --color-bad: #cf2b22;
+  --color-text-2: #646959;
+  --color-accent: #bc3809;
+  --color-ok: #487212;
+  --color-warn: #8d5d00;
+  --color-bad: #c42920;
+  --color-on-accent: #f3f4ed;
 }
 
 html {
@@ -59,6 +60,38 @@ body {
 ::selection {
   background: var(--color-accent);
   color: var(--color-on-accent);
+}
+
+/* One consistent keyboard-focus indicator across every interactive surface. The 2px
+   offset places the ring on the page colour, so it stays visible even on accent fills. */
+:where(a, button, [role="button"], [role="switch"], [role="tab"], input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+:where(a, button, [role="button"], [role="switch"], [role="tab"], input, select, textarea, [tabindex]):focus:not(:focus-visible) {
+  outline: none;
+}
+
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 60;
+  padding: 0.5rem 0.9rem;
+  border-radius: 4px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.78rem;
+  transform: translateY(-150%);
+  transition: transform 120ms;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
 }
 
 .display {
@@ -188,7 +221,6 @@ body {
   font-family: var(--font-mono);
   font-size: 0.8rem;
   padding: 0.5rem 0.65rem;
-  outline: none;
   transition: border-color 120ms;
 }
 
@@ -224,7 +256,6 @@ input[type="range"] {
   height: 3px;
   border-radius: 2px;
   background: var(--color-line-1);
-  outline: none;
 }
 
 input[type="range"]::-webkit-slider-thumb {
@@ -299,16 +330,45 @@ input[type="range"]::-moz-range-thumb {
   50% { opacity: 0; }
 }
 
-.backdrop {
+dialog.modal {
   position: fixed;
   inset: 0;
-  background: rgba(5, 6, 4, 0.72);
-  backdrop-filter: blur(3px);
-  z-index: 40;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow: hidden;
 }
 
-.backdrop-modal {
-  z-index: 50;
+dialog.modal[open] {
+  display: flex;
+}
+
+dialog.modal::backdrop {
+  background: rgba(5, 6, 4, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.modal-center {
+  align-items: flex-end;
+  justify-content: center;
+}
+
+@media (min-width: 640px) {
+  .modal-center {
+    align-items: center;
+    padding: 1.5rem;
+  }
+}
+
+.modal-sheet {
+  align-items: stretch;
+  justify-content: flex-end;
 }
 
 .slide-in {
@@ -429,4 +489,15 @@ video {
   padding: 0.05rem 0.3rem;
   border-radius: 3px;
   color: var(--color-text-0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,3 +1,4 @@
+import { cardButton } from "../a11y";
 import { useStore } from "../store";
 import type { DeviceState, Monitor } from "../types";
 import { Feed } from "./Feed";
@@ -23,9 +24,9 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
   const alerting = Boolean(monitor.alert);
   return (
     <article
+      {...cardButton(() => openDetail(monitor.id), `Open ${monitor.name} monitor details`)}
       className={`panel tile reveal relative cursor-pointer transition-colors hover:border-line-1 ${alerting ? "tile-alert" : ""}`}
       style={{ "--i": index } as React.CSSProperties}
-      onClick={() => openDetail(monitor.id)}
     >
       <span className="corner corner-tl" />
       <span className="corner corner-tr" />
@@ -33,6 +34,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
       <span className="corner corner-br" />
       <div className="flex items-center gap-2.5 px-4 py-2.5">
         <span
+          aria-hidden
           className={`led ${alerting ? "led-bad" : camera?.inferring ? "led-infer" : monitor.watching && camera?.online ? "led-on" : "led-off"}`}
         />
         <h3 className="display text-base font-semibold tracking-[0.08em] truncate flex-1">{monitor.name}</h3>
