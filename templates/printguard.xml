@@ -12,7 +12,7 @@
   <Overview>PrintGuard watches your 3D-printer cameras with an on-device vision model, pauses or cancels the print the moment it starts to fail, and sends a snapshot to your phone over ntfy, Telegram or Discord. No cloud, no account &#8212; camera frames never leave your server. Works with OctoPrint, Klipper (Moonraker) and Bambu Lab, and publishes every monitor to Home Assistant over MQTT.&#13;&#10;&#13;&#10;Everything is in this one image &#8212; the streaming server is built in, so there is no second container to install. Open the WebUI, pick a mode, add a camera and printer, then create a monitor that binds them.&#13;&#10;&#13;&#10;PrintGuard ships no authentication: anyone who can reach the WebUI can control your printers. Keep it on your LAN, or put Tailscale / Cloudflare Access / an auth proxy in front before exposing it. See the deployment guide: https://github.com/oliverbravery/PrintGuard/blob/main/docs/deployment.md</Overview>
   <Category>HomeAutomation: Tools:</Category>
   <WebUI>http://[IP]:[PORT:8000]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/unraid/printguard.xml</TemplateURL>
+  <TemplateURL>https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/templates/printguard.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/web/public/apple-touch-icon.png</Icon>
   <ExtraParams>--add-host host.docker.internal:host-gateway</ExtraParams>
   <PostArgs/>

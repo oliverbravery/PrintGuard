@@ -69,7 +69,7 @@ Open `http://<host>:8000`, pick a mode, register a camera and your printer, then
 that binds them.
 
 - **Unraid** — add **PrintGuard** from Community Applications (or import the
-  [template](unraid/printguard.xml)) and install from the UI; no terminal needed.
+  [template](templates/printguard.xml)) and install from the UI; no terminal needed.
 - **Docker Compose** — prefer a file? [`docker-compose.yaml`](docker-compose.yaml): `curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml && docker compose up -d`.
 
 Ports `8554`/`1935` only matter for cameras that *push* a stream into PrintGuard — most setups
