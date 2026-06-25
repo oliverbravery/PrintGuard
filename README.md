@@ -6,37 +6,57 @@
 [![Live demo](https://img.shields.io/badge/demo-try_it_in_your_browser-ff4d00)](https://oliverbravery.github.io/PrintGuard/)
 
 **PrintGuard watches your 3D printer cameras with an on-device vision model, pauses the
-printer when a failure takes hold, and pushes a snapshot alert to your phone.** No cloud,
-no subscription — your frames never leave hardware you own.
+printer the moment a print starts to fail, and sends a snapshot to your phone.** No cloud, no
+subscription, no account — your camera frames never leave hardware you own.
 
-![PrintGuard dashboard: one healthy print, one detected defect that has been auto-paused](docs/assets/dashboard.png)
+![PrintGuard dashboard: three cameras at a glance, one print mid-failure and auto-paused](docs/assets/dashboard.png)
 
-## Try it now
+## Try it now — nothing to install
 
-**[oliverbravery.github.io/PrintGuard](https://oliverbravery.github.io/PrintGuard/)** runs
-the full engine in your browser — point your webcam at a print and watch it score frames.
-Nothing is installed and no frame leaves your device.
+**[oliverbravery.github.io/PrintGuard](https://oliverbravery.github.io/PrintGuard/)** runs the
+*entire* engine in your browser. Point your webcam at a print and watch it score each frame
+live. Nothing is installed and no frame leaves your device. When you're ready to run it for
+real, [jump to Quick start](#quick-start).
 
-## What it does
+## What you get
 
-- **Detects** — a compact vision encoder ([≈5 MB](#the-model)) scores every frame for
-  print failure, shared fairly across as many cameras as your hardware can sustain.
-- **Acts** — a sustained defect pauses or cancels the print through
-  [OctoPrint](https://octoprint.org), [Klipper (Moonraker)](https://moonraker.readthedocs.io)
-  or [Bambu Lab](https://github.com/Doridian/OpenBambuAPI), with per-monitor thresholds,
-  consecutive-detection counts and cooldowns.
-- **Alerts** — the moment a defect holds, a snapshot lands on your phone over
-  [ntfy](https://ntfy.sh), [Telegram](https://telegram.org) or [Discord](https://discord.com).
-- **Rests** — printers linked to a service are only watched while they actually print;
-  inference stands by when they sit idle and resumes the moment a job starts.
-- **Fails safe** — a watchdog warns you (on the dashboard *and* through your notification
-  channels) when a camera drops, a feed freezes, or a printer service stops answering.
-  If PrintGuard cannot tell whether a printer is printing, it keeps watching — losing the
-  signal never silently stops monitoring, and a failed pause is announced, never swallowed.
+- **Failures caught early** — a compact vision model scores every frame and acts the moment a
+  defect holds, so spaghetti and detachments don't run for hours (or burn through a spool).
+- **Damage stopped for you** — a sustained defect can pause or cancel the print through
+  OctoPrint, Klipper or Bambu Lab, with sensitivity, thresholds and cooldowns you set per
+  monitor.
+- **A heads-up on your phone** — the instant a defect holds, a snapshot lands over ntfy,
+  Telegram or Discord.
+- **Quiet when nothing's wrong** — printers linked to a service are only watched while they
+  actually print; inference rests when they're idle and wakes when a job starts.
+- **Loud when something is** — a dropped camera, frozen feed or unresponsive printer warns you
+  on the dashboard *and* your phone. If PrintGuard can't tell whether a printer is printing,
+  it keeps watching — losing the signal never silently stops monitoring.
+- **Every printer on one screen** — one machine shares inference fairly across as many cameras
+  as your hardware can sustain.
+
+## Make it yours
+
+Choose a look — **System**, **Light**, **Dark**, or design your own in the built-in theme
+editor — from the header. Your themes are saved and synced to every browser that opens the hub.
+
+| Dark | Light |
+|:---:|:---:|
+| ![Dark theme](docs/assets/dashboard.png) | ![Light theme](docs/assets/dashboard-light.png) |
+
+Tap **Customise** to arrange the dashboard around how *you* work: drag monitors into any
+order, **pin** the ones that matter to the front, and **hide** the rest — with a tray to bring
+them back. The camera rail rearranges the same way.
+
+![Customise mode: drag to reorder, pin and hide monitors and cameras](docs/assets/customise.png)
+
+Open any monitor for its live risk score, score history and one-tap printer controls.
+
+![Monitor detail with live risk score and printer controls](docs/assets/printer-detail.png)
 
 ## Quick start
 
-You can deploy PrintGuard using Docker Compose:
+Deploy with Docker Compose:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml
@@ -44,13 +64,15 @@ curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/medi
 docker compose up -d
 ```
 
-Open `http://<host>:8000`, pick a mode, register a camera, register your printer, then add
-a monitor that binds them. Images for
-`amd64` and `arm64` (Raspberry Pi 4/5) are published to
+Open `http://<host>:8000`, pick a mode, register a camera and your printer, then add a monitor
+that binds them. Images for `amd64` and `arm64` (Raspberry Pi 4/5) are published to
 [`ghcr.io/oliverbravery/printguard`](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
 on every release.
 
 ## Two modes, one engine
+
+The same detection engine runs in two places — try it instantly in the browser, then self-host
+it when you're ready.
 
 | | Local mode | Hub mode |
 |---|---|---|
@@ -59,123 +81,55 @@ on every release.
 | Frames leave the device | never | only to your own server |
 | Survives closing the tab | no | yes |
 
-### Hub mode cameras
+## Printers, cameras and alerts
 
-- **Stream URL** — any RTSP/RTMP/HTTP source; PrintGuard creates a MediaMTX pull path.
-- **This device** — publishes a browser camera to the hub over a WebSocket. It reconnects
-  if the hub restarts and resumes automatically when you reopen the page on that device.
-  Browsers only allow camera access on secure pages, so this (and local mode) needs the hub
-  served over HTTPS or opened on `localhost`.
-- **Discovered** — anything already pushed to MediaMTX (e.g. `rtsp://host:8554/mycam`
-  from a Raspberry Pi) appears automatically.
+Register your printer — OctoPrint, Klipper (Moonraker) or Bambu Lab — bind it to a monitor,
+and choose what a sustained defect does: alert, pause or cancel. If a printer exposes a webcam,
+PrintGuard adds it as a camera for you. Turn on ntfy, Telegram or Discord in **Settings** to
+get snapshot alerts and watchdog warnings.
 
-## Printers and notifications
+Connecting over Docker or HTTPS, or linking a Bambu printer, has a few gotchas — the full
+walk-through (and webcam/camera options) lives in **[docs/printers.md](docs/printers.md)**.
 
-Register a printer — OctoPrint, Klipper or Bambu Lab — in the printer registry and test the
-connection there, then bind it to a monitor. A monitor's detail panel chooses what a
-sustained defect should do (alert only, pause, cancel). Linked printers report job,
-progress and state on the monitors that use them — and gate inference, so an idle printer
-costs you nothing.
+## Exposing a hub safely
 
-If a registered printer exposes a webcam, PrintGuard registers it as a camera automatically
-— no stream URL to copy. The camera registry's **Printer cameras** tab lists them and a
-**Refresh** button picks up any camera attached to a printer after it was registered. This
-covers OctoPrint and Moonraker webcam streams and the Bambu chamber camera (over RTSP on
-the X1/H2 series, or the proprietary port-6000 protocol on the A1/P1 series, hub mode only).
-These cameras are managed by their printer and removed with it.
-
-Bambu Lab printers speak MQTT over TLS rather than HTTP, which a browser cannot open, so
-they are offered in **hub mode only**. On the printer, enable **LAN Only Mode** then
-**Developer Mode** (Settings → Network) to open the MQTT channel, then link it with its IP,
-serial number and access code; the form links Bambu's
-[Enable LAN Mode](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode) guide.
-
-**Running in Docker?** The hub reaches printer services from *inside the container*, so
-`localhost` points at the container, not your host — connections to `http://localhost:5000`
-fail with *all connection attempts failed*. Use `host.docker.internal` instead (e.g.
-`http://host.docker.internal:5000`); the shipped `docker-compose.yaml` maps it for you. On
-a Linux host the service must also listen on `0.0.0.0`, not just loopback.
-
-Notification channels live in Settings: enable ntfy, Telegram or Discord, fill in the
-form, and send a test alert. Every enabled channel receives defect snapshots and watchdog
-warnings for printers with notifications switched on.
-
-![Printer detail panel with live risk score and printer controls](docs/assets/printer-detail.png)
-
-In local mode the browser calls the services directly, so give it a URL the *browser* can
-reach — `http://localhost:5000` when it runs on the same machine, or the host's LAN IP
-otherwise (not `host.docker.internal`, which only resolves inside the container). The
-browser also enforces CORS: enable it in OctoPrint (Settings → API) or add `cors_domains`
-to `moonraker.conf`, otherwise the request is blocked with *access control checks* and the
-test fails. And if PrintGuard itself is served over HTTPS (e.g. a Cloudflare Tunnel), the
-browser blocks calls to an `http://` printer as mixed content — Safari reports *not allowed
-to request resource* even for `http://localhost`. To control a local HTTP printer from an
-HTTPS deployment, use **hub mode** (the server makes the request, with no browser
-restrictions) or serve the printer over HTTPS. Telegram's API sends no CORS headers, so
-that channel is hub-only.
-
-## Exposing a hub
-
-PrintGuard ships no auth, so put an identity layer in front before anything leaves your
-trusted network — never port-forward the hub's ports directly.
-[docs/deployment.md](docs/deployment.md) has step-by-step setups for **Tailscale**
-(recommended — private, live video works), **Cloudflare Tunnel + Access** (public URL,
-zero open ports) and **oauth2-proxy** on your own domain, plus a hardening checklist.
-
-## Agents and developers (MCP & API)
-
-A PrintGuard hub exposes its engine to agents and scripts through the same protocol the
-dashboard uses, so anything the UI can do is automatable.
-
-- **MCP** — point an agent (Claude, an IDE, the
-  [MCP Inspector](https://github.com/modelcontextprotocol/inspector)) at
-  `https://<host>/mcp/` (Streamable HTTP). Tools cover printer and camera status, the
-  **current camera frame as an image**, and pause/resume/cancel — plus full management
-  when allowed.
-- **REST** — the versioned API at `/api/v1` gives any HTTP client the same operations;
-  the camera frame is served as `image/jpeg`.
-
-Capability is configurable per token. Issue scoped bearer tokens from the dashboard
-(**Settings → API & MCP access**) — cumulative `read` ⊂ `control` ⊂ `manage` — naming,
-generating and revoking each one in place; the secret is shown once and stored only as a
-hash. An agent only gets the abilities you grant it, and MCP hides any tool a token cannot
-use. With no token issued the surface stays read-only behind your auth proxy. Full
-reference, scope matrix and client setup: [docs/api.md](docs/api.md).
+PrintGuard ships no auth, so put an identity layer in front before anything leaves your trusted
+network — never port-forward the hub's ports directly.
+**[docs/deployment.md](docs/deployment.md)** has step-by-step setups for **Tailscale**
+(recommended), **Cloudflare Tunnel + Access** and **oauth2-proxy**, plus a hardening checklist.
 
 ## Home Assistant
 
-Point the hub at your MQTT broker (**Settings → Home Assistant (MQTT)**) and every monitor
-shows up in Home Assistant automatically through MQTT discovery, each as its own device:
+Point the hub at your MQTT broker (**Settings → Home Assistant**) and every monitor appears in
+Home Assistant automatically through MQTT discovery — a defect sensor, defect score, the latest
+failure snapshot, an **Enabled** switch, and, for linked printers, live status with **Pause**,
+**Resume** and **Cancel**. Control is two-way, so your automations can drive PrintGuard. The
+broker is yours and the bridge runs on the hub, so no frames leave your hardware.
 
-- a **Defect** problem sensor, a defect-score gauge and a state sensor;
-- the latest failure **snapshot**;
-- an **Enabled** switch to arm or stand down the monitor; and
-- when the monitor is linked to a printer, its live status and progress plus **Pause**,
-  **Resume** and **Cancel** buttons.
+## Automate it — MCP and API
 
-Control is two-way, so automations and dashboards can drive PrintGuard, and the hub
-publishes an availability signal so entities go unavailable if it stops. The broker is
-yours and the bridge runs on the hub, so no frames leave your hardware; TLS,
-username/password and custom topic prefixes are optional. Anyone with broker access can
-control PrintGuard, so treat the broker as you would the dashboard.
+A hub exposes its engine to agents and scripts through the same protocol the dashboard uses, so
+anything the UI can do is automatable. Point an MCP client (Claude, an IDE) at
+`https://<host>/mcp/`, or use the REST API at `/api/v1` — both can read printer and camera
+status, fetch the **current camera frame as an image**, and pause/resume/cancel. Capability is
+per token: issue scoped bearer tokens (**read** ⊂ **control** ⊂ **manage**) from **Settings**,
+and an agent only gets what you grant. Full reference: **[docs/api.md](docs/api.md)**.
 
-## The model
+## How it works
 
-The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained for
-few-shot FDM fault detection in
-[Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection)
-(with an accompanying technical paper). `models/` holds the TFLite export, normalisation
-metadata and class prototypes. Sensitivity and threshold sliders per monitor map straight
-onto the prototype distances, so you can tune for your camera and lighting without
-retraining.
+The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained for few-shot
+FDM fault detection in
+[Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection) (with an
+accompanying technical paper). The sensitivity and threshold sliders map straight onto the
+prototype distances, so you can tune for your camera and lighting without retraining.
 
 ## For developers
 
-- [docs/architecture.md](docs/architecture.md) — how one engine runs on CPython and in
-  the browser, the platform contract, the scheduler and the fail-safe design, with
-  diagrams.
-- [docs/api.md](docs/api.md) — the hub's MCP server and REST API: scoped access tokens,
-  every endpoint and tool, and agent/client setup.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, tests, and step-by-step guides for
-  adding printer integrations and notification providers (the two easiest ways to
-  contribute).
+- [docs/architecture.md](docs/architecture.md) — how one engine runs on CPython and in the
+  browser, the platform contract, the scheduler and the fail-safe design, with diagrams.
+- [docs/printers.md](docs/printers.md) — connecting printers and cameras, and the networking
+  gotchas (Docker, CORS, HTTPS, Bambu).
+- [docs/api.md](docs/api.md) — the hub's MCP server and REST API: scoped access tokens, every
+  endpoint and tool, and client setup.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, tests, and step-by-step guides for adding
+  printer integrations and notification providers.

@@ -24,6 +24,20 @@ gating, watchdog, alerts, protocol); `tests/test_adapters.py` pins the exact req
 shapes of every integration and notifier. If you touch the scheduler, monitor or printer
 state handling extend the former; a new adapter gets its payloads tested in the latter.
 
+## Regenerating the docs screenshots
+
+The images in `docs/assets/` are rendered from fake data (no backend, broker or video feed)
+by a Playwright script — regenerate them whenever the UI changes:
+
+```bash
+cd web
+npx playwright install chromium      # one-time: fetch the browser binary
+npm run screenshots                  # renders docs/assets/*.png from web/screenshots/
+```
+
+Each image is one entry in `SCENES` in `web/screenshots/capture.spec.ts`; add a scene there
+to capture a new screen.
+
 ## Adding a printer integration
 
 Integrations talk to print servers (OctoPrint, Moonraker, …) to read state and
