@@ -22,6 +22,7 @@ COPY --from=mediamtx /mediamtx /usr/local/bin/mediamtx
 COPY printguard/ printguard/
 COPY models/ models/
 COPY mediamtx.yml mediamtx.yml
+COPY THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
 COPY --from=web /build/dist static/
 ENV PATH="/app/.venv/bin:$PATH" \
     MODEL_DIR=/app/models \
