@@ -9,14 +9,35 @@
   --color-line-1: #39402f;
   --color-text-0: #eceee6;
   --color-text-1: #a8af9c;
-  --color-text-2: #6e755f;
+  --color-text-2: #7e866d;
   --color-accent: #ff4d00;
   --color-ok: #8ac926;
   --color-warn: #ffb000;
   --color-bad: #ff3b30;
+  --color-on-accent: #0b0c0a;
   --font-display: "Saira Condensed", "Arial Narrow", sans-serif;
   --font-body: "Saira", system-ui, sans-serif;
   --font-mono: "Chivo Mono", ui-monospace, monospace;
+}
+
+/* Light theme: overrides the @theme dark base. Custom themes set these inline
+   on :root from theme.ts; structural colours derive from the tokens via
+   color-mix(), so every theme adapts without per-theme rules. */
+:root[data-theme="light"] {
+  --color-ink-0: #e7e8e0;
+  --color-ink-1: #f2f3ec;
+  --color-ink-2: #fbfcf6;
+  --color-ink-3: #dfe1d6;
+  --color-line-0: #d3d5c8;
+  --color-line-1: #c2c5b4;
+  --color-text-0: #1b1d16;
+  --color-text-1: #4a4f40;
+  --color-text-2: #646959;
+  --color-accent: #bc3809;
+  --color-ok: #487212;
+  --color-warn: #8d5d00;
+  --color-bad: #c42920;
+  --color-on-accent: #f3f4ed;
 }
 
 html {
@@ -31,14 +52,46 @@ body {
   background:
     radial-gradient(1100px 700px at 75% -10%, rgba(255, 77, 0, 0.06), transparent 60%),
     radial-gradient(900px 600px at -10% 110%, rgba(138, 201, 38, 0.04), transparent 55%),
-    repeating-linear-gradient(0deg, transparent 0 23px, rgba(236, 238, 230, 0.022) 23px 24px),
-    repeating-linear-gradient(90deg, transparent 0 23px, rgba(236, 238, 230, 0.022) 23px 24px),
+    repeating-linear-gradient(0deg, transparent 0 23px, color-mix(in srgb, var(--color-text-0) 2.2%, transparent) 23px 24px),
+    repeating-linear-gradient(90deg, transparent 0 23px, color-mix(in srgb, var(--color-text-0) 2.2%, transparent) 23px 24px),
     var(--color-ink-0);
 }
 
 ::selection {
   background: var(--color-accent);
-  color: var(--color-ink-0);
+  color: var(--color-on-accent);
+}
+
+/* One consistent keyboard-focus indicator across every interactive surface. The 2px
+   offset places the ring on the page colour, so it stays visible even on accent fills. */
+:where(a, button, [role="button"], [role="switch"], [role="tab"], input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+:where(a, button, [role="button"], [role="switch"], [role="tab"], input, select, textarea, [tabindex]):focus:not(:focus-visible) {
+  outline: none;
+}
+
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 60;
+  padding: 0.5rem 0.9rem;
+  border-radius: 4px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.78rem;
+  transform: translateY(-150%);
+  transition: transform 120ms;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
 }
 
 .display {
@@ -90,12 +143,12 @@ body {
 .btn-primary {
   background: var(--color-accent);
   border-color: var(--color-accent);
-  color: var(--color-ink-0);
+  color: var(--color-on-accent);
 }
 
 .btn-primary:hover {
-  background: #ff6a26;
-  color: var(--color-ink-0);
+  background: color-mix(in srgb, var(--color-accent) 88%, white);
+  color: var(--color-on-accent);
 }
 
 .btn-danger:hover {
@@ -117,7 +170,7 @@ body {
   border-radius: 3px;
   border: 1px solid var(--color-line-1);
   color: var(--color-text-1);
-  background: rgba(11, 12, 10, 0.7);
+  background: color-mix(in srgb, var(--color-ink-0) 72%, transparent);
   white-space: nowrap;
 }
 
@@ -145,7 +198,7 @@ body {
   animation: led-pulse 0.9s ease-in-out infinite;
 }
 
-.led-off { background: #3a3f33; }
+.led-off { background: color-mix(in srgb, var(--color-text-2) 55%, transparent); }
 .led-warn {
   background: var(--color-warn);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-warn) 80%, transparent);
@@ -168,7 +221,6 @@ body {
   font-family: var(--font-mono);
   font-size: 0.8rem;
   padding: 0.5rem 0.65rem;
-  outline: none;
   transition: border-color 120ms;
 }
 
@@ -204,7 +256,6 @@ input[type="range"] {
   height: 3px;
   border-radius: 2px;
   background: var(--color-line-1);
-  outline: none;
 }
 
 input[type="range"]::-webkit-slider-thumb {
@@ -279,16 +330,45 @@ input[type="range"]::-moz-range-thumb {
   50% { opacity: 0; }
 }
 
-.backdrop {
+dialog.modal {
   position: fixed;
   inset: 0;
-  background: rgba(5, 6, 4, 0.72);
-  backdrop-filter: blur(3px);
-  z-index: 40;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow: hidden;
 }
 
-.backdrop-modal {
-  z-index: 50;
+dialog.modal[open] {
+  display: flex;
+}
+
+dialog.modal::backdrop {
+  background: rgba(5, 6, 4, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.modal-center {
+  align-items: flex-end;
+  justify-content: center;
+}
+
+@media (min-width: 640px) {
+  .modal-center {
+    align-items: center;
+    padding: 1.5rem;
+  }
+}
+
+.modal-sheet {
+  align-items: stretch;
+  justify-content: flex-end;
 }
 
 .slide-in {
@@ -409,4 +489,15 @@ video {
   padding: 0.05rem 0.3rem;
   border-radius: 3px;
   color: var(--color-text-0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

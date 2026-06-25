@@ -11,3 +11,5 @@ web/dist/
 web/public/models/
 web/public/pysrc.zip
 web/.pages-sim/
+web/test-results/
+web/playwright-report/

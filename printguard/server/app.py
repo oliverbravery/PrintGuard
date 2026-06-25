@@ -29,6 +29,7 @@ from ..engine.engine import Engine
 from ..pysrc import build_pysrc
 from .api import ApiAuth, build_api_app
 from .mcp import build_mcp_app
+from .mqtt import MqttBridge
 from .platform import ServerPlatform
 from .publish import ChunkStream, remux
 
@@ -76,8 +77,11 @@ def create_app() -> FastAPI:
         app.state.engine = engine
         api_app.state.engine = engine
         app.state.hls = httpx.AsyncClient(base_url=mediamtx_hls, timeout=httpx.Timeout(10.0, read=60.0))
+        bridge = MqttBridge(engine, lambda: engine.settings.get("mqtt", {}))
+        bridge.start()
         async with mcp_app.lifespan(app):
             yield
+        await bridge.stop()
         await app.state.hls.aclose()
         await engine.stop()
         await platform.close()

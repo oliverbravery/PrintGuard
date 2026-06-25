@@ -100,12 +100,49 @@ export interface AdapterMeta {
   };
 }
 
+export interface MqttConfig {
+  enabled?: boolean;
+  host?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+  tls?: boolean;
+  base_topic?: string;
+  discovery_prefix?: string;
+}
+
 export interface ApiToken {
   id: string;
   name: string;
   scope: "read" | "control" | "manage";
   hint: string;
   created: number;
+}
+
+export type ThemeBase = "dark" | "light";
+
+export type ThemeTokenKey =
+  | "ink0" | "ink1" | "ink2" | "ink3"
+  | "line0" | "line1"
+  | "text0" | "text1" | "text2"
+  | "accent" | "ok" | "warn" | "bad";
+
+export interface CustomTheme {
+  id: string;
+  name: string;
+  base: ThemeBase;
+  colors: Record<ThemeTokenKey, string>;
+}
+
+export interface LayoutSection {
+  order: string[];
+  pinned: string[];
+  hidden: string[];
+}
+
+export interface Layout {
+  monitors: LayoutSection;
+  cameras: LayoutSection;
 }
 
 export interface EngineStats {
@@ -138,7 +175,14 @@ export interface EngineState {
   cameras: Camera[];
   printers: Printer[];
   monitors: Monitor[];
-  settings: { notifiers: Record<string, Record<string, string>>; update_check: boolean };
+  settings: {
+    notifiers: Record<string, Record<string, string>>;
+    update_check: boolean;
+    mqtt?: MqttConfig;
+    theme: string;
+    themes: CustomTheme[];
+    layout?: Layout;
+  };
   tokens: ApiToken[];
   stats: EngineStats;
   integrations: AdapterMeta[];

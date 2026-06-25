@@ -62,8 +62,11 @@ essentials a change must respect:
 
 - **Programmatic surface is hub-only.** The REST API (`server/api.py`, `/api/v1`) and MCP
   server (`server/mcp.py`, `/mcp`) are thin transports over `engine.request()`, scoped by
-  cumulative `read ⊂ control ⊂ manage` tokens. They add no logic, so they cannot drift from
-  the dashboard. Local mode never mounts them.
+  cumulative `read ⊂ control ⊂ manage` tokens. The Home Assistant MQTT bridge
+  (`server/mqtt.py`) is a third such transport: it consumes engine events via `add_sink` and
+  routes inbound commands through `engine.request()`, publishing one Home Assistant device
+  per monitor via MQTT discovery (config in `settings.mqtt`, gated by broker access). None
+  add logic, so they cannot drift from the dashboard. Local mode never mounts them.
 
 - **Fail safe, fail loud.** A monitor's `watching` state gates inference; only a *positive*
   "not printing" stands it down (losing the signal keeps watching). Nothing on the alert
@@ -75,9 +78,10 @@ essentials a change must respect:
 
 ## Conventions
 
-- **Docstrings, not comments.** Every module, class and public method gets a docstring;
-  inline comments only when the *why* is non-obvious — never narrate what the code does. Let
-  descriptive names document intent.
+- **No comments; let names document intent.** The TypeScript/React UI carries **no** comments
+  or JSDoc — never narrate what the code does. In the Python engine/server, every module, class
+  and public method gets a docstring, but still no inline comments unless the *why* is genuinely
+  non-obvious.
 - **Minimal and consolidated.** No fallbacks, defensive guards or speculative abstractions
   unless asked. Prefer extending/refactoring existing code over adding parallel variants;
   delete code a change makes dead.

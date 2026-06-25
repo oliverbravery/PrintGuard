@@ -123,6 +123,7 @@ class ProviderTest(BaseModel):
 
 class SettingsPatch(BaseModel):
     notifiers: dict[str, dict[str, Any]] | None = None
+    mqtt: dict[str, Any] | None = None
 
 
 class ActionBody(BaseModel):
@@ -180,9 +181,11 @@ def public_state(engine: Engine) -> dict[str, Any]:
     state["printers"] = [_public_printer(printer) for printer in state["printers"]]
     state["cameras"] = [_public_camera(camera) for camera in state["cameras"]]
     notifiers = state["settings"].get("notifiers", {})
+    mqtt = state["settings"].get("mqtt") or {}
     state["settings"] = {
         **state["settings"],
         "notifiers": {pid: _public_config(config, NOTIFIERS.get(pid)) for pid, config in notifiers.items()},
+        "mqtt": {**mqtt, "password": ""} if mqtt.get("password") else mqtt,
     }
     return state
 

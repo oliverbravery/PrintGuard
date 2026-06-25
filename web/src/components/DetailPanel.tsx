@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
+import { Modal } from "./Dialog";
 import { Feed } from "./Feed";
 import { DeviceChip } from "./MonitorTile";
 import { RiskGauge } from "./RiskGauge";
@@ -45,6 +46,7 @@ function Slider({
 export function DetailPanel({ monitor }: { monitor: Monitor }) {
   const { engine, history, send, openDetail, openDialog, isPending } = useStore();
   const [draft, setDraft] = useState(monitor);
+  const titleId = useId();
   const actionRef = useRef<string | null>(null);
   const saveRef = useRef<string | null>(null);
   useEffect(() => setDraft(monitor), [monitor.id]);
@@ -68,16 +70,23 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
   const patch = (fields: Partial<Monitor>) => setDraft((d) => ({ ...d, ...fields }));
 
   return (
-    <div className="backdrop" onClick={close}>
-      <aside
-        className="slide-in fixed right-0 top-0 h-full w-full sm:w-[460px] bg-ink-1 border-l border-line-0 overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal onClose={close} variant="sheet" labelledBy={titleId}>
+      <aside className="slide-in h-full w-full sm:w-[460px] bg-ink-1 border-l border-line-0 overflow-y-auto">
         <div className="sticky top-0 z-10 bg-ink-1/95 backdrop-blur-sm flex items-center gap-2.5 px-5 py-3.5 border-b border-line-0">
-          <span className={`led ${monitor.alert ? "led-bad" : camera?.inferring ? "led-infer" : monitor.watching && camera?.online ? "led-on" : "led-off"}`} />
-          <h2 className="display text-lg font-semibold flex-1 truncate">{monitor.name}</h2>
+          <span
+            aria-hidden
+            className={`led ${monitor.alert ? "led-bad" : camera?.inferring ? "led-infer" : monitor.watching && camera?.online ? "led-on" : "led-off"}`}
+          />
+          <h2 id={titleId} className="display text-lg font-semibold flex-1 truncate">
+            {monitor.name}
+          </h2>
           <DeviceChip state={printer?.device_state ?? undefined} />
-          <button className="text-text-2 hover:text-accent text-2xl leading-none cursor-pointer" onClick={close}>
+          <button
+            type="button"
+            className="text-text-2 hover:text-accent text-2xl leading-none cursor-pointer"
+            onClick={close}
+            aria-label="Close monitor details"
+          >
             ×
           </button>
         </div>
@@ -229,6 +238,6 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
           </button>
         </div>
       </aside>
-    </div>
+    </Modal>
   );
 }
