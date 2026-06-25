@@ -1,12 +1,13 @@
 # Deploying a hub securely
 
 A hub exposes everything a browser needs — dashboard, engine socket, live video and
-device publishing — on a single HTTP port, `:8000`. MediaMTX listens on `:8554`/`:1935`
-only so LAN cameras can push streams in; nothing else needs to be reachable. PrintGuard
-ships **no authentication**: anyone who can reach `:8000` sees every camera and can pause
-or cancel your printers. Never port-forward it from the internet — put one of the
-following in front instead. Each one carries full functionality, live video included,
-because video is plain HTTP through the same port.
+device publishing — on a single HTTP port, `:8000`. The streaming server is built into the
+same image and listens on `:8554`/`:1935` only so LAN cameras can push streams in (its
+control API and HLS muxer bind to localhost inside the container); nothing else needs to be
+reachable. PrintGuard ships **no authentication**: anyone who can reach `:8000` sees every
+camera and can pause or cancel your printers. Never port-forward it from the internet — put
+one of the following in front instead. Each one carries full functionality, live video
+included, because video is plain HTTP through the same port.
 
 ## Option 1 — Tailscale (recommended for private hubs)
 
@@ -97,9 +98,9 @@ public origin so the hub trusts it:
 - No router port-forwards for `8000`, `8554` or `1935`.
 - There are no per-user roles: anyone who authenticates sees every camera and can control
   every printer. Only let in people you would hand the printer to.
-- The MediaMTX API (`:9997`) and HLS muxer (`:8888`) are deliberately not published by
-  the compose file — the hub reaches them on the compose network, and the API can add
-  and remove streams.
+- The streaming server's control API (`:9997`) and HLS muxer (`:8888`) bind to `127.0.0.1`
+  inside the container, so they stay unreachable from outside even if a port is published —
+  the hub talks to them over loopback and proxies HLS out through `:8000`.
 - When a proxy on the same host is the only intended client, bind ports to
   `127.0.0.1:…` in the compose file.
 - WebSocket handshakes are origin-checked, so the auth proxy is not relied on to block

@@ -56,16 +56,27 @@ Open any monitor for its live risk score, score history and one-tap printer cont
 
 ## Quick start
 
-Deploy with Docker Compose:
+PrintGuard is a **single container** — the streaming server is built in, so there is no second
+image to install. One command, nothing to download:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml
-curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/mediamtx.yml
-docker compose up -d
+docker run -d --name printguard --restart unless-stopped \
+  -p 8000:8000 -p 8554:8554 -p 1935:1935 \
+  -v printguard:/data \
+  ghcr.io/oliverbravery/printguard
 ```
 
 Open `http://<host>:8000`, pick a mode, register a camera and your printer, then add a monitor
-that binds them. Images for `amd64` and `arm64` (Raspberry Pi 4/5) are published to
+that binds them.
+
+- **Unraid** — add **PrintGuard** from Community Applications (or import the
+  [template](unraid/printguard.xml)) and install from the UI; no terminal needed.
+- **Docker Compose** — prefer a file? [`docker-compose.yaml`](docker-compose.yaml) is now a single
+  service: `curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml && docker compose up -d`.
+
+Ports `8554`/`1935` only matter for cameras that *push* a stream into PrintGuard — most setups
+(URL pull, Bambu, or "this device") can leave them off. Images for `amd64` and `arm64`
+(Raspberry Pi 4/5) are published to
 [`ghcr.io/oliverbravery/printguard`](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
 on every release.
 

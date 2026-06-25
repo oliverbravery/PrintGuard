@@ -11,7 +11,7 @@ Pyodide). No frames leave hardware the user owns.
 
 ```bash
 uv sync                                   # Python engine + hub server (use uv, never pip)
-uv run printguard                         # hub on :8000 (MediaMTX optional: docker compose up mediamtx)
+uv run printguard                         # hub on :8000 (MediaMTX is bundled into the image; for video in dev: brew install mediamtx && MEDIAMTX_BINARY=$(which mediamtx) uv run printguard)
 cd web && npm install && npm run dev      # UI hot-reload on :5173, proxied to :8000
 
 uv run pytest                             # engine simulation + adapter contract tests
