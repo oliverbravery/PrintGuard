@@ -5,6 +5,8 @@ import { CameraRail } from "./CameraRail";
 import { CamerasDialog } from "./CamerasDialog";
 import { CustomiseBar } from "./CustomiseBar";
 import { DetailPanel } from "./DetailPanel";
+import { GettingStarted } from "./GettingStarted";
+import { GuideDialog } from "./GuideDialog";
 import { Header, MobileActionBar } from "./Header";
 import { MonitorDialog } from "./MonitorDialog";
 import { MonitorTile } from "./MonitorTile";
@@ -12,37 +14,6 @@ import { PrintersDialog } from "./PrintersDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { rectSortingStrategy, Sortable } from "./Sortable";
 import { UpdateDialog } from "./UpdateDialog";
-
-function EmptyState() {
-  const openDialog = useStore((s) => s.openDialog);
-  return (
-    <div className="reveal grid place-items-center py-24 text-center">
-      <div className="relative p-12">
-        <span className="corner corner-tl !border-text-2" />
-        <span className="corner corner-tr !border-text-2" />
-        <span className="corner corner-bl !border-text-2" />
-        <span className="corner corner-br !border-text-2" />
-        <div className="led led-infer mx-auto mb-6" />
-        <h2 className="display text-2xl font-bold mb-2">NO MONITORS ON WATCH</h2>
-        <p className="text-sm text-text-1 max-w-sm mx-auto mb-7">
-          Register a camera, register your printer, then add a monitor to bind them — PrintGuard
-          shares inference fairly across everything it watches.
-        </p>
-        <div className="flex flex-wrap gap-3 justify-center">
-          <button className="btn" onClick={() => openDialog("cameras")}>
-            1 · Register camera
-          </button>
-          <button className="btn" onClick={() => openDialog("printers")}>
-            2 · Register printer
-          </button>
-          <button className="btn btn-primary" onClick={() => openDialog("monitor")}>
-            3 · Add monitor
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
@@ -105,7 +76,7 @@ export function Dashboard() {
         className="mx-auto max-w-[1500px] px-4 sm:px-6 py-5 max-md:pb-[calc(5rem+env(safe-area-inset-bottom))]"
       >
         {monitors.length === 0 ? (
-          <EmptyState />
+          <GettingStarted />
         ) : (
           <Sortable
             ids={visible.map((m) => m.id)}
@@ -126,6 +97,7 @@ export function Dashboard() {
       {dialog === "monitor" && <MonitorDialog />}
       {dialog === "settings" && <SettingsDialog />}
       {dialog === "update" && <UpdateDialog />}
+      {dialog === "guide" && <GuideDialog />}
       {detail && <DetailPanel monitor={detail} />}
       <Toasts />
       <MobileActionBar />

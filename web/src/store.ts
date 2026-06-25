@@ -18,7 +18,7 @@ export interface Toast {
   text: string;
 }
 
-export type DialogKind = "cameras" | "printers" | "monitor" | "settings" | "update" | null;
+export type DialogKind = "cameras" | "printers" | "monitor" | "settings" | "update" | "guide" | null;
 
 interface PgStore {
   mode: Mode | null;

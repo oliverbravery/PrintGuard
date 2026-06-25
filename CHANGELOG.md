@@ -11,6 +11,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
+- **Built-in guide and a setup checklist** — a new **?** in the header opens a Guide that explains
+  every part of PrintGuard — cameras, printers, monitors, how detection and alerts work, and what
+  you can automate — each with a shortcut that jumps straight to the right place. Until your first
+  monitor is watching, the dashboard shows a **Getting started** checklist that tracks your progress
+  from camera to printer to alerts to monitor, so you always know what to do next. Works the same in
+  local (in-browser) mode.
 - **Light, dark and custom themes** — pick **System** (follows your device), **Light** or
   **Dark** from the new header toggle or **Settings → Appearance**, or design your own. The
   theme editor lets you set every colour — surfaces, text, lines and the accent/ok/warn/bad

@@ -101,6 +101,20 @@ function CustomiseToggle() {
   );
 }
 
+function GuideChip() {
+  const openDialog = useStore((s) => s.openDialog);
+  return (
+    <button
+      className="chip cursor-pointer hover:opacity-80"
+      title="Open the guide"
+      aria-label="Open the guide"
+      onClick={() => openDialog("guide")}
+    >
+      ?
+    </button>
+  );
+}
+
 export function Header() {
   const { engine, mode, leaveMode } = useStore();
   const stats = engine?.stats;
@@ -118,6 +132,7 @@ export function Header() {
         <VersionChip />
         <ThemeToggle />
         <CustomiseToggle />
+        <GuideChip />
         <div className="flex-1" />
         {stats && (
           <div className="flex items-center gap-5 md:mr-2">

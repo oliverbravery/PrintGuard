@@ -58,11 +58,23 @@ export function Modal({
   );
 }
 
-export function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Dialog({
+  title,
+  onClose,
+  size = "default",
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  size?: "default" | "wide";
+  children: ReactNode;
+}) {
   const titleId = useId();
   return (
     <Modal onClose={onClose} labelledBy={titleId}>
-      <div className="panel rise-in w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-b-none sm:rounded-md">
+      <div
+        className={`panel rise-in w-full ${size === "wide" ? "sm:max-w-2xl" : "sm:max-w-lg"} max-h-[92vh] overflow-y-auto rounded-b-none sm:rounded-md`}
+      >
         <div className="flex items-center justify-between px-5 py-3 border-b border-line-0">
           <h2 id={titleId} className="display text-sm font-semibold text-text-1">
             {title}
