@@ -7,7 +7,7 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.2.0] - 2026-06-24
+## [2.2.0] - 2026-06-25
 
 ### Added
 
