@@ -56,8 +56,7 @@ Open any monitor for its live risk score, score history and one-tap printer cont
 
 ## Quick start
 
-PrintGuard is a **single container** — the streaming server is built in, so there is no second
-image to install. One command, nothing to download:
+PrintGuard is a **single container** - Install with one command:
 
 ```bash
 docker run -d --name printguard --restart unless-stopped \
@@ -71,8 +70,7 @@ that binds them.
 
 - **Unraid** — add **PrintGuard** from Community Applications (or import the
   [template](unraid/printguard.xml)) and install from the UI; no terminal needed.
-- **Docker Compose** — prefer a file? [`docker-compose.yaml`](docker-compose.yaml) is now a single
-  service: `curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml && docker compose up -d`.
+- **Docker Compose** — prefer a file? [`docker-compose.yaml`](docker-compose.yaml): `curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml && docker compose up -d`.
 
 Ports `8554`/`1935` only matter for cameras that *push* a stream into PrintGuard — most setups
 (URL pull, Bambu, or "this device") can leave them off. Images for `amd64` and `arm64`
