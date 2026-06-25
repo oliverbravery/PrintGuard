@@ -7,6 +7,32 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2026-06-25
+
+### Changed
+
+- **One container, no second image, no terminal needed.** PrintGuard now ships as a **single
+  image** with the streaming server built in — there is no separate MediaMTX container to install
+  and no specific version of it to track down (the sticking point on Unraid and similar). Install
+  it with a single `docker run`, the now one-service `docker-compose.yaml`, or **one click from
+  Unraid Community Applications**. The hub still serves everything — dashboard, live video and all
+  — on `:8000`; the camera-publish ports `8554`/`1935` are optional and only matter if a camera
+  pushes a stream into PrintGuard. To put it on your network your own way — private over Tailscale,
+  public behind Cloudflare Access or an auth proxy — see the deployment guide.
+
+  *Upgrading from the two-container setup?* Pull the new image and remove the `mediamtx` service
+  (and its `mediamtx.yml` mount) from your compose file — the built-in server replaces it. Your
+  `/data` volume and settings carry over untouched.
+
+- **Settings now save themselves.** Camera image adjustments (brightness, contrast, sharpness,
+  rotation, crop) and monitor settings (thresholds, sensitivity, defect response, notifications)
+  now apply **live everywhere the moment you change them** — the camera preview, dashboard tiles
+  and risk gauges update as you drag, with no **Save** button to remember. A small **saved ✓**
+  indicator confirms each change is stored, and anything still in flight is saved automatically
+  when you close the panel. Notification channels, printers and Home Assistant (MQTT) keep an
+  explicit **Save**, since they hold credentials or open a live connection and shouldn't act on
+  half-typed input.
+
 ## [2.2.0] - 2026-06-25
 
 ### Added

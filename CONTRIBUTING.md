@@ -8,7 +8,7 @@ PrintGuard runs in two modes: local (in-browser) and hub (server). The engine is
 
 ```bash
 uv sync                              # Python engine + hub server
-uv run printguard                    # hub on :8000 (MediaMTX optional: docker compose up mediamtx)
+uv run printguard                    # hub on :8000 (MediaMTX is bundled into the image; for video in dev, brew install mediamtx and set MEDIAMTX_BINARY=$(which mediamtx))
 cd web && npm install && npm run dev # UI with hot reload on :5173, proxied to :8000
 ```
 

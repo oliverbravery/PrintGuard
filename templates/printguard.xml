@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>PrintGuard</Name>
+  <Repository>ghcr.io/oliverbravery/printguard:latest</Repository>
+  <Registry>https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/oliverbravery/PrintGuard/issues</Support>
+  <Project>https://github.com/oliverbravery/PrintGuard</Project>
+  <Overview>PrintGuard watches your 3D-printer cameras with an on-device vision model, pauses or cancels the print the moment it starts to fail, and sends a snapshot to your phone over ntfy, Telegram or Discord. No cloud, no account &#8212; camera frames never leave your server. Works with OctoPrint, Klipper (Moonraker) and Bambu Lab, and publishes every monitor to Home Assistant over MQTT.&#13;&#10;&#13;&#10;Everything is in this one image &#8212; the streaming server is built in, so there is no second container to install. Open the WebUI, pick a mode, add a camera and printer, then create a monitor that binds them.&#13;&#10;&#13;&#10;PrintGuard ships no authentication: anyone who can reach the WebUI can control your printers. Keep it on your LAN, or put Tailscale / Cloudflare Access / an auth proxy in front before exposing it. See the deployment guide: https://github.com/oliverbravery/PrintGuard/blob/main/docs/deployment.md</Overview>
+  <Category>HomeAutomation: Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/templates/printguard.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/web/public/apple-touch-icon.png</Icon>
+  <ExtraParams>--add-host host.docker.internal:host-gateway</ExtraParams>
+  <PostArgs/>
+  <DonateText/>
+  <DonateLink/>
+  <Config Name="WebUI" Target="8000" Default="8000" Mode="tcp" Description="Dashboard, engine socket and live video (HTTP)" Type="Port" Display="always" Required="true" Mask="false">8000</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/printguard" Mode="rw" Description="Stored settings and engine state" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/printguard</Config>
+  <Config Name="Camera RTSP publish" Target="8554" Default="8554" Mode="tcp" Description="Optional: only needed for cameras that push an RTSP stream into PrintGuard" Type="Port" Display="advanced" Required="false" Mask="false">8554</Config>
+  <Config Name="Camera RTMP publish" Target="1935" Default="1935" Mode="tcp" Description="Optional: only needed for cameras that push an RTMP stream into PrintGuard" Type="Port" Display="advanced" Required="false" Mask="false">1935</Config>
+</Container>

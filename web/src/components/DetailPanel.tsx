@@ -1,10 +1,11 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
 import { Modal } from "./Dialog";
 import { Feed } from "./Feed";
 import { DeviceChip } from "./MonitorTile";
 import { RiskGauge } from "./RiskGauge";
+import { SaveStatus } from "./SaveStatus";
 import { Sparkline } from "./Sparkline";
 import { Toggle } from "./Toggle";
 
@@ -44,20 +45,15 @@ function Slider({
 }
 
 export function DetailPanel({ monitor }: { monitor: Monitor }) {
-  const { engine, history, send, openDetail, openDialog, isPending } = useStore();
-  const [draft, setDraft] = useState(monitor);
+  const { engine, history, send, openDetail, openDialog, isPending, updateMonitor } = useStore();
   const titleId = useId();
   const actionRef = useRef<string | null>(null);
-  const saveRef = useRef<string | null>(null);
-  useEffect(() => setDraft(monitor), [monitor.id]);
-
-  const updating = isPending("monitor.update");
+  const removeRef = useRef(false);
   const removing = isPending("monitor.remove");
 
   useEffect(() => {
-    if (saveRef.current === "monitor.update" && !updating) close();
-    if (saveRef.current === "monitor.remove" && !removing) close();
-  }, [updating, removing]);
+    if (removeRef.current && !removing) close();
+  }, [removing]);
 
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
@@ -66,8 +62,6 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
   const score = points.at(-1)?.score ?? 0;
   const linked = Boolean(printer);
   const close = () => openDetail(null);
-
-  const patch = (fields: Partial<Monitor>) => setDraft((d) => ({ ...d, ...fields }));
 
   return (
     <Modal onClose={close} variant="sheet" labelledBy={titleId}>
@@ -135,7 +129,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
 
         <Section title="Monitoring">
           <div className="space-y-4">
-            <Toggle label="Watch this monitor" on={draft.enabled} onChange={(v) => patch({ enabled: v })} />
+            <Toggle label="Watch this monitor" on={monitor.enabled} onChange={(v) => updateMonitor(monitor.id, { enabled: v })} />
             {monitor.enabled && monitor.watching === false && (
               <p className="mono text-[0.7rem] text-text-2">
                 standby — printer is {printer?.device_state?.status ?? "not printing"}; inference resumes when it prints
@@ -143,7 +137,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
             )}
             <label className="block">
               <span className="label block mb-1">Camera</span>
-              <select className="field" value={draft.camera_id} onChange={(e) => patch({ camera_id: e.target.value })}>
+              <select className="field" value={monitor.camera_id} onChange={(e) => updateMonitor(monitor.id, { camera_id: e.target.value })}>
                 <option value="">No camera</option>
                 {(engine?.cameras ?? []).map((c) => (
                   <option key={c.id} value={c.id}>
@@ -152,20 +146,20 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
                 ))}
               </select>
             </label>
-            <Slider label="Alert threshold" value={draft.threshold} min={0.05} max={1} step={0.01} onChange={(v) => patch({ threshold: v })} />
-            <Slider label="Sensitivity" value={draft.sensitivity} min={0.2} max={5} step={0.1} onChange={(v) => patch({ sensitivity: v })} />
+            <Slider label="Alert threshold" value={monitor.threshold} min={0.05} max={1} step={0.01} onChange={(v) => updateMonitor(monitor.id, { threshold: v })} />
+            <Slider label="Sensitivity" value={monitor.sensitivity} min={0.2} max={5} step={0.1} onChange={(v) => updateMonitor(monitor.id, { sensitivity: v })} />
             <label className="block">
               <div className="flex justify-between mb-1">
                 <span className="label">Consecutive detections to alert</span>
-                <span className="mono text-[0.72rem]">{draft.consecutive}</span>
+                <span className="mono text-[0.72rem]">{monitor.consecutive}</span>
               </div>
               <input
                 type="range"
                 min={1}
                 max={15}
                 step={1}
-                value={draft.consecutive}
-                onChange={(e) => patch({ consecutive: Number(e.target.value) })}
+                value={monitor.consecutive}
+                onChange={(e) => updateMonitor(monitor.id, { consecutive: Number(e.target.value) })}
               />
             </label>
           </div>
@@ -175,7 +169,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
           <div className="space-y-4">
             <label className="block">
               <span className="label block mb-1">On sustained defect</span>
-              <select className="field" value={draft.on_defect} onChange={(e) => patch({ on_defect: e.target.value as Monitor["on_defect"] })}>
+              <select className="field" value={monitor.on_defect} onChange={(e) => updateMonitor(monitor.id, { on_defect: e.target.value as Monitor["on_defect"] })}>
                 <option value="none">Alert only</option>
                 <option value="pause">Pause the print</option>
                 <option value="cancel">Cancel the print</option>
@@ -184,24 +178,24 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
             <label className="block">
               <div className="flex justify-between mb-1">
                 <span className="label">Cooldown (seconds)</span>
-                <span className="mono text-[0.72rem]">{draft.cooldown_s}</span>
+                <span className="mono text-[0.72rem]">{monitor.cooldown_s}</span>
               </div>
               <input
                 type="range"
                 min={0}
                 max={600}
                 step={10}
-                value={draft.cooldown_s}
-                onChange={(e) => patch({ cooldown_s: Number(e.target.value) })}
+                value={monitor.cooldown_s}
+                onChange={(e) => updateMonitor(monitor.id, { cooldown_s: Number(e.target.value) })}
               />
             </label>
-            <Toggle label="Push notifications" on={draft.notify} onChange={(v) => patch({ notify: v })} />
+            <Toggle label="Push notifications" on={monitor.notify} onChange={(v) => updateMonitor(monitor.id, { notify: v })} />
           </div>
         </Section>
 
         <Section title="Printer">
           <div className="space-y-3">
-            <select className="field" value={draft.printer_id} onChange={(e) => patch({ printer_id: e.target.value })}>
+            <select className="field" value={monitor.printer_id} onChange={(e) => updateMonitor(monitor.id, { printer_id: e.target.value })}>
               <option value="">No printer (alerts only)</option>
               {printers.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -215,22 +209,14 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
           </div>
         </Section>
 
-        <div className="px-5 py-4 flex gap-2.5">
-          <button
-            className="btn btn-primary flex-1"
-            disabled={updating}
-            onClick={() => {
-              saveRef.current = "monitor.update";
-              send({ cmd: "monitor.update", id: monitor.id, patch: draft });
-            }}
-          >
-            {updating ? "Saving…" : "Save"}
-          </button>
+        <div className="px-5 py-4 flex items-center gap-2.5">
+          <SaveStatus />
+          <div className="flex-1" />
           <button
             className="btn btn-danger"
             disabled={removing}
             onClick={() => {
-              saveRef.current = "monitor.remove";
+              removeRef.current = true;
               send({ cmd: "monitor.remove", id: monitor.id });
             }}
           >

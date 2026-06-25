@@ -1,0 +1,11 @@
+<CommunityApplications>
+  <Profile>
+**PrintGuard** watches your 3D-printer cameras with an on-device vision model, pauses or cancels the print the moment it starts to fail, and pushes a snapshot to your phone over ntfy, Telegram or Discord. No cloud and no account — camera frames never leave your server. Works with OctoPrint, Klipper (Moonraker) and Bambu Lab, and exposes every monitor to Home Assistant over MQTT.
+
+This repository publishes the official PrintGuard container template.
+
+Support and docs: https://github.com/oliverbravery/PrintGuard
+  </Profile>
+  <Icon>https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/web/public/apple-touch-icon.png</Icon>
+  <WebPage>https://github.com/oliverbravery/PrintGuard</WebPage>
+</CommunityApplications>

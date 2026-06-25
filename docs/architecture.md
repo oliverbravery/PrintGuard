@@ -182,7 +182,7 @@ printguard/
     integrations/    printer service adapters (OctoPrint, Klipper, Bambu Lab, …)
     notifiers/       alert channel adapters (ntfy, Telegram, Discord, …)
     adapters.py      shared adapter contract (id, label, docs_url, JSON-schema config)
-  server/            hub platform: FastAPI, MediaMTX, LiteRT, PyAV
+  server/            hub platform: FastAPI, bundled MediaMTX (child process), LiteRT, PyAV
     api.py           REST API (/api/v1) over the engine protocol, scoped by token
     mcp.py           MCP server for agents, derived from the REST API
     mqtt.py          Home Assistant MQTT bridge (device discovery + two-way control)
