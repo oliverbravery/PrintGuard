@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { applyTheme, beginPreview, endPreview, PALETTES } from "../theme";
 import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
 import { Dialog } from "./Dialog";
+import { SaveStatus } from "./SaveStatus";
 import { SchemaForm } from "./SchemaForm";
 import { ThemeEditor } from "./ThemeEditor";
 import { Toggle } from "./Toggle";
@@ -26,16 +27,14 @@ function Swatch({ colors }: { colors: CustomTheme["colors"] }) {
 }
 
 export function SettingsDialog() {
-  const { engine, send, openDialog, leaveMode, isPending, notifyTest, testingNotifier, testNotifier, createdToken, clearCreatedToken } = useStore();
-  const [notifiers, setNotifiers] = useState(engine?.settings.notifiers ?? {});
-  const [updateCheck, setUpdateCheck] = useState(engine?.settings.update_check ?? true);
+  const { engine, send, openDialog, leaveMode, isPending, notifyTest, testingNotifier, testNotifier, createdToken, clearCreatedToken, updateSettings } = useStore();
+  const notifiers = engine?.settings.notifiers ?? {};
+  const updateCheck = engine?.settings.update_check ?? true;
   const [mqtt, setMqtt] = useState<MqttConfig>(engine?.settings.mqtt ?? {});
   const setMqttField = (key: keyof MqttConfig, value: MqttConfig[keyof MqttConfig]) => setMqtt({ ...mqtt, [key]: value });
   const [tokenName, setTokenName] = useState("");
   const [tokenScope, setTokenScope] = useState<ApiToken["scope"]>("read");
   const [tab, setTab] = useState<TabId>("alerts");
-  const saving = isPending("settings.update");
-  const sent = useRef(false);
   const close = () => openDialog(null);
   const tokens = engine?.tokens ?? [];
 
@@ -70,10 +69,6 @@ export function SettingsDialog() {
     applyTheme(selection, next, true);
     send({ cmd: "settings.update", patch: { themes: next, theme: selection } });
   };
-
-  useEffect(() => {
-    if (sent.current && !saving) close();
-  }, [saving]);
 
   useEffect(() => {
     if (!editing) return;
@@ -216,7 +211,7 @@ export function SettingsDialog() {
                       const next = { ...notifiers };
                       if (on) next[meta.id] = next[meta.id] ?? {};
                       else delete next[meta.id];
-                      setNotifiers(next);
+                      updateSettings({ notifiers: next });
                     }}
                   />
                   {enabled && (
@@ -224,7 +219,7 @@ export function SettingsDialog() {
                       <SchemaForm
                         meta={meta}
                         value={notifiers[meta.id]}
-                        onChange={(config) => setNotifiers({ ...notifiers, [meta.id]: config })}
+                        onChange={(config) => updateSettings({ notifiers: { ...notifiers, [meta.id]: config } })}
                       />
                       <div className="flex items-center gap-3">
                         <button
@@ -248,6 +243,9 @@ export function SettingsDialog() {
             <span className="text-[0.7rem] text-text-2 block">
               Defect alerts (with snapshots) go to every enabled channel for printers with notifications on.
             </span>
+            <div className="flex justify-end">
+              <SaveStatus />
+            </div>
           </div>
         )}
 
@@ -309,6 +307,16 @@ export function SettingsDialog() {
                 </span>
               </div>
             )}
+            <button
+              className="btn btn-primary w-full"
+              disabled={isPending("settings.update")}
+              onClick={() => send({ cmd: "settings.update", patch: { mqtt } })}
+            >
+              {isPending("settings.update") ? "Saving…" : "Save broker settings"}
+            </button>
+            <span className="text-[0.7rem] text-text-2 block">
+              Broker settings open a live connection, so they apply on Save rather than automatically.
+            </span>
           </div>
         )}
 
@@ -319,7 +327,7 @@ export function SettingsDialog() {
               label="Automatically check for updates"
               on={updateCheck}
               onChange={(on) => {
-                setUpdateCheck(on);
+                updateSettings({ update_check: on });
                 if (on && !engine?.update) send({ cmd: "update.check" });
               }}
             />
@@ -339,6 +347,9 @@ export function SettingsDialog() {
                 {engine?.version && `v${engine.version}`}
                 {engine?.update && !engine.update.available && " · up to date"}
               </span>
+            </div>
+            <div className="flex justify-end">
+              <SaveStatus />
             </div>
           </div>
         )}
@@ -422,19 +433,6 @@ export function SettingsDialog() {
               </div>
             </div>
           </div>
-        )}
-
-        {tab !== "api" && tab !== "appearance" && (
-          <button
-            className="btn btn-primary w-full"
-            disabled={saving}
-            onClick={() => {
-              sent.current = true;
-              send({ cmd: "settings.update", patch: { notifiers, update_check: updateCheck, mqtt } });
-            }}
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
         )}
 
         <div className="hairline pt-4 flex items-center justify-between">

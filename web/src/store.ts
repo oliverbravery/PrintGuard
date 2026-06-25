@@ -3,9 +3,37 @@ import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
-import type { CameraSource, EngineLink, EngineState, Layout, LayoutSection, Mode, ScorePoint } from "./types";
+import type { Camera, CameraSource, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, ScorePoint } from "./types";
 
 const HISTORY_LIMIT = 240;
+const UPDATE_DEBOUNCE_MS = 250;
+const updateTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+
+type OptimisticKind = "camera" | "monitor" | "settings";
+
+interface OptimisticEntry {
+  kind: OptimisticKind;
+  id?: string;
+  patch: Record<string, unknown>;
+  reqId: number | null;
+}
+
+function applyOptimistic(engine: EngineState, overlay: Record<string, OptimisticEntry>): EngineState {
+  let cameras = engine.cameras;
+  let monitors = engine.monitors;
+  let settings = engine.settings;
+  for (const entry of Object.values(overlay)) {
+    if (entry.kind === "camera") cameras = cameras.map((c) => (c.id === entry.id ? ({ ...c, ...entry.patch } as Camera) : c));
+    else if (entry.kind === "monitor") monitors = monitors.map((m) => (m.id === entry.id ? ({ ...m, ...entry.patch } as Monitor) : m));
+    else settings = { ...settings, ...entry.patch } as EngineState["settings"];
+  }
+  return { ...engine, cameras, monitors, settings };
+}
+
+function commandFor(entry: OptimisticEntry): Record<string, unknown> {
+  if (entry.kind === "settings") return { cmd: "settings.update", patch: entry.patch };
+  return { cmd: `${entry.kind}.update`, id: entry.id, patch: entry.patch };
+}
 
 function modeFromUrl(): Mode | null {
   const hash = location.hash.slice(1);
@@ -40,13 +68,19 @@ interface PgStore {
   focusCameraId: string | null;
   createdToken: { name: string; secret: string } | null;
   customising: boolean;
+  optimistic: Record<string, OptimisticEntry>;
+  savedAt: number | null;
   setCustomising(on: boolean): void;
   mutateLayout(key: keyof Layout, fn: (section: LayoutSection) => LayoutSection): void;
   resetLayout(): void;
   chooseMode(mode: Mode): void;
   leaveMode(): void;
-  send(cmd: Record<string, unknown>): void;
+  send(cmd: Record<string, unknown>): number;
   isPending(cmd: string): boolean;
+  updateCamera(id: string, patch: Record<string, unknown>): void;
+  updateMonitor(id: string, patch: Record<string, unknown>): void;
+  updateSettings(patch: Record<string, unknown>): void;
+  flushUpdates(): void;
   discover(): void;
   openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
   openDetail(id: string | null): void;
@@ -95,16 +129,48 @@ export const useStore = create<PgStore>((set, get) => {
     });
   };
 
+  const sendSilent = (cmd: Record<string, unknown>): number => {
+    const req_id = ++reqSeq;
+    get().link?.send({ ...cmd, req_id });
+    return req_id;
+  };
+
+  const flushKey = (key: string) => {
+    delete updateTimers[key];
+    const entry = get().optimistic[key];
+    if (!entry) return;
+    const reqId = sendSilent(commandFor(entry));
+    set((s) => (s.optimistic[key] ? { optimistic: { ...s.optimistic, [key]: { ...s.optimistic[key], reqId } } } : s));
+  };
+
+  const queueUpdate = (key: string, kind: OptimisticKind, id: string | undefined, patch: Record<string, unknown>) => {
+    set((s) => {
+      const prev = s.optimistic[key];
+      const entry: OptimisticEntry = { kind, id, patch: { ...(prev?.patch ?? {}), ...patch }, reqId: null };
+      const optimistic = { ...s.optimistic, [key]: entry };
+      return { optimistic, savedAt: null, engine: s.engine ? applyOptimistic(s.engine, optimistic) : s.engine };
+    });
+    clearTimeout(updateTimers[key]);
+    updateTimers[key] = setTimeout(() => flushKey(key), UPDATE_DEBOUNCE_MS);
+  };
+
   const onEvent = (event: any) => {
     switch (event.event) {
       case "state": {
         clearPending(event.req_id);
-        const settings = (event as EngineState).settings;
-        applyTheme(settings?.theme ?? "system", settings?.themes ?? []);
-        set({ engine: event as EngineState, phase: "ready" });
+        const server = event as EngineState;
+        let optimistic = get().optimistic;
+        const had = Object.keys(optimistic).length > 0;
+        if (event.req_id != null && had) {
+          optimistic = Object.fromEntries(Object.entries(optimistic).filter(([, e]) => e.reqId !== event.req_id));
+        }
+        const cleared = had && Object.keys(optimistic).length === 0;
+        const engine = Object.keys(optimistic).length ? applyOptimistic(server, optimistic) : server;
+        applyTheme(server.settings?.theme ?? "system", server.settings?.themes ?? []);
+        set({ engine, optimistic, phase: "ready", ...(cleared ? { savedAt: Date.now() } : {}) });
         if (!resumed && get().mode === "hub") {
           resumed = true;
-          void resumePublishers((event as EngineState).cameras, (reason) => get().toast("error", `publishing stopped: ${reason}`));
+          void resumePublishers(server.cameras, (reason) => get().toast("error", `publishing stopped: ${reason}`));
         }
         break;
       }
@@ -154,7 +220,15 @@ export const useStore = create<PgStore>((set, get) => {
       case "error":
         get().toast("error", event.message);
         clearPending(event.req_id);
-        set({ discovering: false, testing: false, testingNotifier: null });
+        set((s) => ({
+          discovering: false,
+          testing: false,
+          testingNotifier: null,
+          optimistic:
+            event.req_id != null
+              ? Object.fromEntries(Object.entries(s.optimistic).filter(([, e]) => e.reqId !== event.req_id))
+              : s.optimistic,
+        }));
         break;
     }
   };
@@ -198,6 +272,8 @@ export const useStore = create<PgStore>((set, get) => {
     focusCameraId: null,
     createdToken: null,
     customising: false,
+    optimistic: {},
+    savedAt: null,
 
     setCustomising(on) {
       set({ customising: on });
@@ -225,6 +301,7 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     leaveMode() {
+      get().flushUpdates();
       location.assign(location.pathname);
     },
 
@@ -233,10 +310,30 @@ export const useStore = create<PgStore>((set, get) => {
       const cmdType = cmd.cmd as string;
       set((s) => ({ pending: { ...s.pending, [cmdType]: { req_id, cmd: cmdType } } }));
       get().link?.send({ ...cmd, req_id });
+      return req_id;
     },
 
     isPending(cmd) {
       return cmd in get().pending;
+    },
+
+    updateCamera(id, patch) {
+      queueUpdate(`camera:${id}`, "camera", id, patch);
+    },
+
+    updateMonitor(id, patch) {
+      queueUpdate(`monitor:${id}`, "monitor", id, patch);
+    },
+
+    updateSettings(patch) {
+      queueUpdate("settings", "settings", undefined, patch);
+    },
+
+    flushUpdates() {
+      for (const key of Object.keys(updateTimers)) {
+        clearTimeout(updateTimers[key]);
+        flushKey(key);
+      }
     },
 
     discover() {
@@ -245,10 +342,12 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     openDialog(dialog, focusCameraId = null) {
+      get().flushUpdates();
       set({ dialog, discovered: null, printerTest: null, notifyTest: null, focusCameraId, createdToken: null });
     },
 
     openDetail(detailId) {
+      get().flushUpdates();
       set({ detailId, printerTest: null });
     },
 

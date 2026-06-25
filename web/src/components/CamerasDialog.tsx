@@ -6,6 +6,7 @@ import { publishStream, published, stopPublishing } from "../stream";
 import { sourceLabel } from "./CameraRail";
 import { CropEditor } from "./CropEditor";
 import { Dialog } from "./Dialog";
+import { SaveStatus } from "./SaveStatus";
 
 function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
@@ -38,17 +39,10 @@ function Slider({
 }
 
 function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
-  const { engine, send, isPending } = useStore();
+  const { engine, send, isPending, updateCamera } = useStore();
   const [open, setOpen] = useState(focus);
   const ref = useRef<HTMLDivElement>(null);
   const owner = camera.printer_id ? engine?.printers.find((p) => p.id === camera.printer_id) : null;
-  const [draft, setDraft] = useState({
-    brightness: camera.brightness ?? 1,
-    contrast: camera.contrast ?? 1,
-    sharpness: camera.sharpness ?? 0,
-    crop: camera.crop ?? null,
-    rotation: camera.rotation ?? 0,
-  });
 
   useEffect(() => {
     if (focus) {
@@ -56,33 +50,6 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
       ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [focus]);
-
-  useEffect(() => {
-    setDraft({
-      brightness: camera.brightness ?? 1,
-      contrast: camera.contrast ?? 1,
-      sharpness: camera.sharpness ?? 0,
-      crop: camera.crop ?? null,
-      rotation: camera.rotation ?? 0,
-    });
-  }, [camera.id]);
-
-  const dirty =
-    draft.brightness !== (camera.brightness ?? 1) ||
-    draft.contrast !== (camera.contrast ?? 1) ||
-    draft.sharpness !== (camera.sharpness ?? 0) ||
-    draft.rotation !== (camera.rotation ?? 0) ||
-    JSON.stringify(draft.crop) !== JSON.stringify(camera.crop ?? null);
-
-  const save = () => send({ cmd: "camera.update", id: camera.id, patch: draft });
-  const reset = () =>
-    setDraft({
-      brightness: camera.brightness ?? 1,
-      contrast: camera.contrast ?? 1,
-      sharpness: camera.sharpness ?? 0,
-      crop: camera.crop ?? null,
-      rotation: camera.rotation ?? 0,
-    });
 
   return (
     <div ref={ref} className="panel overflow-hidden">
@@ -117,27 +84,27 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
           <Slider
             label="Brightness"
-            value={draft.brightness}
+            value={camera.brightness ?? 1}
             min={0.25}
             max={2}
             step={0.05}
-            onChange={(v) => setDraft((d) => ({ ...d, brightness: v }))}
+            onChange={(v) => updateCamera(camera.id, { brightness: v })}
           />
           <Slider
             label="Contrast"
-            value={draft.contrast}
+            value={camera.contrast ?? 1}
             min={0.25}
             max={2}
             step={0.05}
-            onChange={(v) => setDraft((d) => ({ ...d, contrast: v }))}
+            onChange={(v) => updateCamera(camera.id, { contrast: v })}
           />
           <Slider
             label="Sharpness"
-            value={draft.sharpness}
+            value={camera.sharpness ?? 0}
             min={0}
             max={2}
             step={0.1}
-            onChange={(v) => setDraft((d) => ({ ...d, sharpness: v }))}
+            onChange={(v) => updateCamera(camera.id, { sharpness: v })}
           />
           <div className="space-y-1.5">
             <span className="label">Rotation</span>
@@ -145,8 +112,8 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
               {[0, 90, 180, 270].map((deg) => (
                 <button
                   key={deg}
-                  className={`btn flex-1 !py-1.5 !text-[0.66rem] ${draft.rotation === deg ? "!border-accent !text-accent" : ""}`}
-                  onClick={() => setDraft((d) => ({ ...d, rotation: deg }))}
+                  className={`btn flex-1 !py-1.5 !text-[0.66rem] ${(camera.rotation ?? 0) === deg ? "!border-accent !text-accent" : ""}`}
+                  onClick={() => updateCamera(camera.id, { rotation: deg })}
                 >
                   {deg}°
                 </button>
@@ -156,21 +123,12 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           <CropEditor
             camera={camera}
             mode={engine?.mode ?? "local"}
-            crop={draft.crop}
-            rotation={draft.rotation}
-            onChange={(crop) => setDraft((d) => ({ ...d, crop }))}
+            crop={camera.crop ?? null}
+            rotation={camera.rotation ?? 0}
+            onChange={(crop) => updateCamera(camera.id, { crop })}
           />
-          <div className="flex gap-2">
-            <button
-              className="btn btn-primary flex-1 !py-1.5"
-              disabled={!dirty || isPending("camera.update")}
-              onClick={save}
-            >
-              {isPending("camera.update") ? "Saving…" : "Save"}
-            </button>
-            <button className="btn !py-1.5" disabled={!dirty} onClick={reset}>
-              Reset
-            </button>
+          <div className="flex justify-end pt-1">
+            <SaveStatus />
           </div>
         </div>
       )}
