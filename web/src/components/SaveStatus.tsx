@@ -6,7 +6,7 @@ export function SaveStatus() {
     return <span className="mono text-[0.62rem] text-text-2 boot-cursor">saving</span>;
   }
   if (savedAt) {
-    const time = new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const time = new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     return <span className="chip chip-ok">saved ✓ {time}</span>;
   }
   return null;
