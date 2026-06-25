@@ -78,9 +78,10 @@ essentials a change must respect:
 
 ## Conventions
 
-- **Docstrings, not comments.** Every module, class and public method gets a docstring;
-  inline comments only when the *why* is non-obvious — never narrate what the code does. Let
-  descriptive names document intent.
+- **No comments; let names document intent.** The TypeScript/React UI carries **no** comments
+  or JSDoc — never narrate what the code does. In the Python engine/server, every module, class
+  and public method gets a docstring, but still no inline comments unless the *why* is genuinely
+  non-obvious.
 - **Minimal and consolidated.** No fallbacks, defensive guards or speculative abstractions
   unless asked. Prefer extending/refactoring existing code over adding parallel variants;
   delete code a change makes dead.

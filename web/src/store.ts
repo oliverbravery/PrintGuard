@@ -1,8 +1,9 @@
 import { create } from "zustand";
+import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
-import type { CameraSource, EngineLink, EngineState, Mode, ScorePoint } from "./types";
+import type { CameraSource, EngineLink, EngineState, Layout, LayoutSection, Mode, ScorePoint } from "./types";
 
 const HISTORY_LIMIT = 240;
 
@@ -38,6 +39,10 @@ interface PgStore {
   dialog: DialogKind;
   focusCameraId: string | null;
   createdToken: { name: string; secret: string } | null;
+  customising: boolean;
+  setCustomising(on: boolean): void;
+  mutateLayout(key: keyof Layout, fn: (section: LayoutSection) => LayoutSection): void;
+  resetLayout(): void;
   chooseMode(mode: Mode): void;
   leaveMode(): void;
   send(cmd: Record<string, unknown>): void;
@@ -192,6 +197,27 @@ export const useStore = create<PgStore>((set, get) => {
     dialog: null,
     focusCameraId: null,
     createdToken: null,
+    customising: false,
+
+    setCustomising(on) {
+      set({ customising: on });
+    },
+
+    mutateLayout(key, fn) {
+      const engine = get().engine;
+      if (!engine) return;
+      const base = currentLayout(engine.settings.layout);
+      const layout: Layout = { ...base, [key]: fn(base[key]) };
+      set({ engine: { ...engine, settings: { ...engine.settings, layout } } });
+      get().send({ cmd: "settings.update", patch: { layout } });
+    },
+
+    resetLayout() {
+      const engine = get().engine;
+      if (!engine) return;
+      set({ engine: { ...engine, settings: { ...engine.settings, layout: undefined } } });
+      get().send({ cmd: "settings.update", patch: { layout: {} } });
+    },
 
     chooseMode(mode) {
       history.pushState(null, "", `#${mode}`);

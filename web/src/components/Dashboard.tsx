@@ -1,13 +1,16 @@
 import { useEffect, useRef } from "react";
+import { applyLayout, section, withOrder } from "../layout";
 import { useStore } from "../store";
 import { CameraRail } from "./CameraRail";
 import { CamerasDialog } from "./CamerasDialog";
+import { CustomiseBar } from "./CustomiseBar";
 import { DetailPanel } from "./DetailPanel";
 import { Header, MobileActionBar } from "./Header";
 import { MonitorDialog } from "./MonitorDialog";
 import { MonitorTile } from "./MonitorTile";
 import { PrintersDialog } from "./PrintersDialog";
 import { SettingsDialog } from "./SettingsDialog";
+import { rectSortingStrategy, Sortable } from "./Sortable";
 import { UpdateDialog } from "./UpdateDialog";
 
 function EmptyState() {
@@ -84,8 +87,9 @@ function Toasts() {
 }
 
 export function Dashboard() {
-  const { engine, dialog, detailId } = useStore();
+  const { engine, dialog, detailId, customising, mutateLayout } = useStore();
   const monitors = engine?.monitors ?? [];
+  const { visible } = applyLayout(monitors, section(engine?.settings.layout, "monitors"));
   const detail = monitors.find((m) => m.id === detailId);
   return (
     <div className="min-h-screen">
@@ -93,6 +97,7 @@ export function Dashboard() {
         Skip to monitors
       </a>
       <Header />
+      <CustomiseBar />
       <CameraRail />
       <main
         id="main"
@@ -102,11 +107,18 @@ export function Dashboard() {
         {monitors.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr))]">
-            {monitors.map((monitor, index) => (
-              <MonitorTile key={monitor.id} monitor={monitor} index={index} />
-            ))}
-          </div>
+          <Sortable
+            ids={visible.map((m) => m.id)}
+            strategy={rectSortingStrategy}
+            disabled={!customising}
+            onReorder={(ids) => mutateLayout("monitors", (s) => withOrder(s, ids))}
+          >
+            <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr))]">
+              {visible.map((monitor, index) => (
+                <MonitorTile key={monitor.id} monitor={monitor} index={index} />
+              ))}
+            </div>
+          </Sortable>
         )}
       </main>
       {dialog === "cameras" && <CamerasDialog />}

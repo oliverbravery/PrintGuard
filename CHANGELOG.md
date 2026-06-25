@@ -18,6 +18,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   browser that opens the hub. The selection defaults to System, so each device follows its own
   light/dark preference until you choose one, and the correct theme paints on load with no
   flash. Works the same in local (in-browser) mode.
+- **Customisable dashboard layout** — tap **Customise** (the ▦ in the header) to arrange the
+  dashboard around your workflow: drag monitors into any order, **pin** the ones that matter
+  to the front, and **hide** the ones you don't, with a tray to bring hidden ones back. The
+  camera registry can be reordered and hidden the same way. Dragging works with mouse, touch
+  and keyboard, your layout is saved and synced to every browser that opens the hub, and it
+  works the same in local (in-browser) mode.
 - **Home Assistant integration over MQTT** — point the hub at your MQTT broker (**Settings →
   Home Assistant (MQTT)**) and every monitor appears in Home Assistant automatically through
   MQTT discovery, each as its own device: a **Defect** problem sensor, defect-score and state

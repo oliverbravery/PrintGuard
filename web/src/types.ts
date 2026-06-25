@@ -134,6 +134,17 @@ export interface CustomTheme {
   colors: Record<ThemeTokenKey, string>;
 }
 
+export interface LayoutSection {
+  order: string[];
+  pinned: string[];
+  hidden: string[];
+}
+
+export interface Layout {
+  monitors: LayoutSection;
+  cameras: LayoutSection;
+}
+
 export interface EngineStats {
   workers: number;
   infer_ms: number;
@@ -170,6 +181,7 @@ export interface EngineState {
     mqtt?: MqttConfig;
     theme: string;
     themes: CustomTheme[];
+    layout?: Layout;
   };
   tokens: ApiToken[];
   stats: EngineStats;

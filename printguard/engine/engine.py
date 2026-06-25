@@ -34,7 +34,7 @@ RECENT_EVENT_TYPES = ("alert", "warning", "device", "error")
 UPDATE_CHECK_INTERVAL_S = 86400.0
 WEBRTC_UNSUPPORTED = "WebRTC streams (WHEP/WHIP) can't be read — use the MJPEG (…?action=stream) or RTSP URL instead."
 
-SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}, "update_check": True, "mqtt": {}, "theme": "system", "themes": []}
+SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}, "update_check": True, "mqtt": {}, "theme": "system", "themes": [], "layout": {}}
 
 
 class Engine:

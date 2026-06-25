@@ -83,6 +83,24 @@ function ThemeToggle() {
   );
 }
 
+function CustomiseToggle() {
+  const engine = useStore((s) => s.engine);
+  const customising = useStore((s) => s.customising);
+  const setCustomising = useStore((s) => s.setCustomising);
+  if (!engine) return null;
+  return (
+    <button
+      className={`chip cursor-pointer hover:opacity-80 ${customising ? "chip-accent" : ""}`}
+      title="Customise layout"
+      aria-label="Customise layout"
+      aria-pressed={customising}
+      onClick={() => setCustomising(!customising)}
+    >
+      ▦
+    </button>
+  );
+}
+
 export function Header() {
   const { engine, mode, leaveMode } = useStore();
   const stats = engine?.stats;
@@ -99,6 +117,7 @@ export function Header() {
         </button>
         <VersionChip />
         <ThemeToggle />
+        <CustomiseToggle />
         <div className="flex-1" />
         {stats && (
           <div className="flex items-center gap-5 md:mr-2">
