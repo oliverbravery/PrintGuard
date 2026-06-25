@@ -28,7 +28,7 @@ function Swatch({ colors }: { colors: CustomTheme["colors"] }) {
 
 export function SettingsDialog() {
   const { engine, send, openDialog, leaveMode, isPending, notifyTest, testingNotifier, testNotifier, createdToken, clearCreatedToken, updateSettings } = useStore();
-  const notifiers = engine?.settings.notifiers ?? {};
+  const [notifiers, setNotifiers] = useState(engine?.settings.notifiers ?? {});
   const updateCheck = engine?.settings.update_check ?? true;
   const [mqtt, setMqtt] = useState<MqttConfig>(engine?.settings.mqtt ?? {});
   const setMqttField = (key: keyof MqttConfig, value: MqttConfig[keyof MqttConfig]) => setMqtt({ ...mqtt, [key]: value });
@@ -211,7 +211,7 @@ export function SettingsDialog() {
                       const next = { ...notifiers };
                       if (on) next[meta.id] = next[meta.id] ?? {};
                       else delete next[meta.id];
-                      updateSettings({ notifiers: next });
+                      setNotifiers(next);
                     }}
                   />
                   {enabled && (
@@ -219,7 +219,7 @@ export function SettingsDialog() {
                       <SchemaForm
                         meta={meta}
                         value={notifiers[meta.id]}
-                        onChange={(config) => updateSettings({ notifiers: { ...notifiers, [meta.id]: config } })}
+                        onChange={(config) => setNotifiers({ ...notifiers, [meta.id]: config })}
                       />
                       <div className="flex items-center gap-3">
                         <button
@@ -243,9 +243,16 @@ export function SettingsDialog() {
             <span className="text-[0.7rem] text-text-2 block">
               Defect alerts (with snapshots) go to every enabled channel for printers with notifications on.
             </span>
-            <div className="flex justify-end">
-              <SaveStatus />
-            </div>
+            <button
+              className="btn btn-primary w-full"
+              disabled={isPending("settings.update")}
+              onClick={() => send({ cmd: "settings.update", patch: { notifiers } })}
+            >
+              {isPending("settings.update") ? "Saving…" : "Save channels"}
+            </button>
+            <span className="text-[0.7rem] text-text-2 block">
+              Channels hold credentials, so they apply on Save rather than automatically.
+            </span>
           </div>
         )}
 

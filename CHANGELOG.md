@@ -12,13 +12,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Changed
 
 - **Settings now save themselves.** Camera image adjustments (brightness, contrast, sharpness,
-  rotation, crop) and monitor settings (thresholds, sensitivity, defect response, notifications),
-  along with your notification-channel and update preferences, now apply **live everywhere the
-  moment you change them** — the camera preview, dashboard tiles and risk gauges update as you
-  drag, with no **Save** button to remember. A small **saved ✓** indicator confirms each change
-  is stored, and anything still in flight is saved automatically when you close the panel. Printer
-  and Home Assistant (MQTT) connection settings keep an explicit **Save**, since they open a live
-  connection and shouldn't act on half-typed credentials.
+  rotation, crop) and monitor settings (thresholds, sensitivity, defect response, notifications)
+  now apply **live everywhere the moment you change them** — the camera preview, dashboard tiles
+  and risk gauges update as you drag, with no **Save** button to remember. A small **saved ✓**
+  indicator confirms each change is stored, and anything still in flight is saved automatically
+  when you close the panel. Notification channels, printers and Home Assistant (MQTT) keep an
+  explicit **Save**, since they hold credentials or open a live connection and shouldn't act on
+  half-typed input.
 
 ## [2.2.0] - 2026-06-25
 
