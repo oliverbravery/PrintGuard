@@ -29,6 +29,7 @@ FPS_SAMPLE_FRAMES = 25
 MEASURE_WARMUP_S = 1.0
 OPEN_WAIT_S = 8.0
 RECONNECT_DELAY_S = 3.0
+MJPEG_LIVE_OPTIONS = {"analyzeduration": "0", "probesize": "32"}
 
 
 class AVSource:
@@ -53,10 +54,15 @@ class AVSource:
         self._thread.start()
 
     def _open(self) -> tuple[Any, Any]:
-        """Opens the container, returning it and any pipe to close afterwards."""
+        """Opens the container, returning it and any pipe to close afterwards.
+
+        Callable sources are live MJPEG pipes; MJPEG_LIVE_OPTIONS caps the probe
+        so av.open identifies the stream from its first frame instead of draining
+        the pipe to fill PyAV's multi-megabyte default and never returning.
+        """
         if not isinstance(self._source, str):
             pipe = self._source()
-            return av.open(pipe, format="mjpeg", options={"analyzeduration": "0"}), pipe
+            return av.open(pipe, format="mjpeg", options=MJPEG_LIVE_OPTIONS), pipe
         options = {}
         if self._source.startswith("rtsp://"):
             options["rtsp_transport"] = "tcp"

@@ -7,6 +7,16 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2026-06-26
+
+### Fixed
+
+- **Bambu A1, A1 mini, P1P and P1S chamber cameras now show up on the dashboard.** Adding one of
+  these printers registered the printer but not its chamber camera — PrintGuard kept probing the
+  live camera stream instead of opening it, so no camera and no video appeared. The stream now
+  opens on its first frame and the camera registers like any other. (X1- and H2-series cameras use
+  RTSP and were never affected.)
+
 ## [2.2.1] - 2026-06-25
 
 ### Changed
