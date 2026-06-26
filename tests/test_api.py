@@ -177,6 +177,30 @@ def test_bambu_jpeg_stream_strips_frame_headers() -> None:
     assert out == b"".join(jpegs), "the 16-byte frame headers are stripped, leaving concatenated JPEGs"
 
 
+def test_callable_mjpeg_sources_cap_pyav_probe(monkeypatch) -> None:
+    from printguard.server import platform
+
+    pipe = object()
+    captured = {}
+
+    def fake_open(target, *, format, options):
+        captured.update(target=target, format=format, options=options)
+        return "container"
+
+    monkeypatch.setattr(platform.av, "open", fake_open)
+    source = object.__new__(platform.AVSource)
+    source._source = lambda: pipe
+
+    container, returned_pipe = source._open()
+
+    assert (container, returned_pipe) == ("container", pipe)
+    assert captured == {
+        "target": pipe,
+        "format": "mjpeg",
+        "options": {"analyzeduration": "0", "probesize": "32"},
+    }, "live MJPEG pipes cap PyAV probing so av.open returns instead of draining frames"
+
+
 async def test_unknown_ids_and_events() -> None:
     async with api() as (client, _engine, _platform, _monitor_id, _printer_id, _camera_id, _tokens):
         assert (await client.get("/printers/nope")).status_code == 404
