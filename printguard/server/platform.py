@@ -29,6 +29,10 @@ FPS_SAMPLE_FRAMES = 25
 MEASURE_WARMUP_S = 1.0
 OPEN_WAIT_S = 8.0
 RECONNECT_DELAY_S = 3.0
+# Callable sources are live MJPEG pipes, such as Bambu A1/P1 cameras. Keep
+# probing short so av.open() identifies the stream instead of consuming frames
+# indefinitely before returning.
+MJPEG_LIVE_OPTIONS = {"analyzeduration": "0", "probesize": "32"}
 
 
 class AVSource:
@@ -56,7 +60,7 @@ class AVSource:
         """Opens the container, returning it and any pipe to close afterwards."""
         if not isinstance(self._source, str):
             pipe = self._source()
-            return av.open(pipe, format="mjpeg", options={"analyzeduration": "0"}), pipe
+            return av.open(pipe, format="mjpeg", options=MJPEG_LIVE_OPTIONS), pipe
         options = {}
         if self._source.startswith("rtsp://"):
             options["rtsp_transport"] = "tcp"
