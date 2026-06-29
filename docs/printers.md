@@ -6,8 +6,9 @@ and the networking caveats that trip people up.
 ## Register a printer
 
 Register a printer — [OctoPrint](https://octoprint.org),
-[Klipper (Moonraker)](https://moonraker.readthedocs.io) or
-[Bambu Lab](https://github.com/Doridian/OpenBambuAPI) — in the printer registry and test the
+[Klipper (Moonraker)](https://moonraker.readthedocs.io),
+[Prusa (PrusaLink)](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293)
+or [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) — in the printer registry and test the
 connection there, then bind it to a monitor. A monitor's detail panel chooses what a
 sustained defect should do: **alert only**, **pause** or **cancel**. Linked printers report
 job, progress and state on the monitors that use them — and gate inference, so an idle
@@ -41,6 +42,18 @@ are offered in **hub mode only**. On the printer, enable **LAN Only Mode** then 
 Mode** (Settings → Network) to open the MQTT channel, then link it with its IP, serial number
 and access code; the form links Bambu's
 [Enable LAN Mode](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode) guide.
+
+## Prusa
+
+Prusa printers connect over **PrusaLink**, the API that runs on the printer itself (MK4, MK4S,
+MK3.9, MK3.5, MINI, XL, CORE One) or on a Raspberry Pi attached to an MK3/MK2.5. It
+authenticates with HTTP Digest, which a browser cannot perform, so Prusa is offered in **hub
+mode only**. Enable **PrusaLink** on the printer (Settings → Network → PrusaLink) and link it
+with its URL and the password shown there; the username is always `maker`. PrintGuard talks to
+PrusaLink on your network and never to Prusa's cloud — **PrusaConnect is not used**, so no
+frames or job data leave hardware you own. PrusaLink's webcam pushes snapshots to PrusaConnect
+rather than serving a local video stream, so if the printer has a camera, add it as a separate
+**Stream URL**.
 
 ## Running in Docker
 

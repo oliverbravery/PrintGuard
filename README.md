@@ -23,8 +23,8 @@ real, [jump to Quick start](#quick-start).
 - **Failures caught early** — a compact vision model scores every frame and acts the moment a
   defect holds, so spaghetti and detachments don't run for hours (or burn through a spool).
 - **Damage stopped for you** — a sustained defect can pause or cancel the print through
-  OctoPrint, Klipper or Bambu Lab, with sensitivity, thresholds and cooldowns you set per
-  monitor.
+  OctoPrint, Klipper, Prusa (PrusaLink) or Bambu Lab, with sensitivity, thresholds and
+  cooldowns you set per monitor.
 - **A heads-up on your phone** — the instant a defect holds, a snapshot lands over ntfy,
   Telegram or Discord.
 - **Quiet when nothing's wrong** — printers linked to a service are only watched while they
@@ -92,7 +92,7 @@ it when you're ready.
 
 ## Printers, cameras and alerts
 
-Register your printer — OctoPrint, Klipper (Moonraker) or Bambu Lab — bind it to a monitor,
+Register your printer — OctoPrint, Klipper (Moonraker), Prusa (PrusaLink) or Bambu Lab — bind it to a monitor,
 and choose what a sustained defect does: alert, pause or cancel. If a printer exposes a webcam,
 PrintGuard adds it as a camera for you. Turn on ntfy, Telegram or Discord in **Settings** to
 get snapshot alerts and watchdog warnings.

@@ -14,9 +14,10 @@ from .bambu import BambuAdapter
 from .base import DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
 from .klipper import KlipperAdapter
 from .octoprint import OctoPrintAdapter
+from .prusa import PrusaAdapter
 
 INTEGRATIONS: dict[str, IntegrationAdapter] = {
-    adapter.id: adapter for adapter in (OctoPrintAdapter(), KlipperAdapter(), BambuAdapter())
+    adapter.id: adapter for adapter in (OctoPrintAdapter(), KlipperAdapter(), PrusaAdapter(), BambuAdapter())
 }
 
 

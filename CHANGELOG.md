@@ -7,6 +7,19 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.3] - 2026-06-28
+
+### Added
+
+- **Prusa printers now connect over PrusaLink.** Register a Prusa printer — MK4, MK4S, MK3.9,
+  MK3.5, MINI, XL, CORE One, or an MK3/MK2.5 running PrusaLink on a Raspberry Pi — alongside
+  OctoPrint, Klipper and Bambu. PrintGuard reads its job, progress and state, gates inference
+  while it is idle, and can **pause or cancel** the print when a defect holds. Enable PrusaLink
+  on the printer, then link it with its URL and the password shown under Settings → Network →
+  PrusaLink (the username is `maker`). Everything stays on your network: PrintGuard talks to the
+  printer directly and never to Prusa's cloud, so **PrusaConnect is not involved**. Like Bambu,
+  Prusa is offered in **hub mode only**.
+
 ## [2.2.2] - 2026-06-26
 
 ### Fixed
