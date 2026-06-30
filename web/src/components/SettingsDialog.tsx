@@ -446,9 +446,11 @@ export function SettingsDialog() {
           <span className="text-xs text-text-1">
             Mode: <span className="mono text-accent">{engine?.mode}</span>
           </span>
-          <button className="btn" onClick={leaveMode}>
-            Switch mode
-          </button>
+          {engine?.mode === "local" && (
+            <button className="btn" onClick={leaveMode}>
+              Back to start
+            </button>
+          )}
         </div>
       </div>
     </Dialog>

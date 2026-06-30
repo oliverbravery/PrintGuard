@@ -122,13 +122,15 @@ export function Header() {
     <header className="sticky top-0 z-30 border-b border-line-0 bg-ink-0/90 backdrop-blur-sm">
       <div className="mx-auto flex max-w-[1500px] items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-6">
         <Wordmark />
-        <button
-          className="chip chip-accent cursor-pointer hover:opacity-80"
-          title="Switch mode"
-          onClick={leaveMode}
-        >
-          {mode === "hub" ? "hub" : "local"} ▾
-        </button>
+        {mode === "local" && (
+          <button
+            className="chip chip-accent cursor-pointer hover:opacity-80"
+            title="Back to start"
+            onClick={leaveMode}
+          >
+            local ▾
+          </button>
+        )}
         <VersionChip />
         <ThemeToggle />
         <CustomiseToggle />

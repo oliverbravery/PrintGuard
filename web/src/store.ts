@@ -249,12 +249,17 @@ export const useStore = create<PgStore>((set, get) => {
   };
 
   const stored = modeFromUrl();
-  if (stored) queueMicrotask(() => boot(stored));
+  queueMicrotask(async () => {
+    if (stored) return void boot(stored);
+    const hubReady = await fetch("api/health").then((r) => r.ok).catch(() => false);
+    if (hubReady) boot("hub");
+    else set({ phase: "pick" });
+  });
   window.addEventListener("hashchange", () => location.reload());
 
   return {
     mode: stored,
-    phase: stored ? "booting" : "pick",
+    phase: "booting",
     bootMsg: "",
     link: null,
     engine: null,
