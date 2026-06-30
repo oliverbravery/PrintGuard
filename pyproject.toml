@@ -1,6 +1,6 @@
 [project]
 name = "printguard"
-version = "2.2.2"
+version = "2.3.0"
 description = "Real-time 3D print failure detection"
 
 license = "GPL-2.0-only"
@@ -22,6 +22,13 @@ dependencies = [
 
 [project.scripts]
 printguard = "printguard.server.app:main"
+printguard-desktop = "printguard.server.desktop:main"
+
+[project.optional-dependencies]
+desktop = [
+    "platformdirs>=4",
+    "pywebview>=6.2",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -32,6 +39,7 @@ packages = ["printguard"]
 
 [dependency-groups]
 dev = [
+    "pyinstaller>=6.11",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
 ]
