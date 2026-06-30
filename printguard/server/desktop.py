@@ -1,16 +1,17 @@
-"""Desktop app: runs hub mode in a native window on macOS and Windows.
+"""Desktop app: runs hub mode behind a tray icon on macOS and Windows.
 
-Packaged with PyInstaller, this is the install-free, no-terminal way to run a
-hub on a personal computer: a real application window backed by the same FastAPI
-hub the container serves, with the engine living in this process so it keeps
-watching while the window is minimised. Linux is served by the container image.
-It reuses the hub's application unchanged; only resource discovery and the
-window/process lifecycle differ from the container entry point in
-:mod:`printguard.server.app`.
+Packaged with PyInstaller, this is the install-free, no-terminal way to run a hub
+on a personal computer. The hub server and a system-tray icon live in this
+process; the window runs in a child process, so closing the window ends only that
+process while the tray and the engine keep running and the printer stays watched.
+Quit from the tray. Linux is served by the container image. The hub's FastAPI
+application is reused unchanged; only resource discovery and the window/process
+lifecycle differ from the container entry point in :mod:`printguard.server.app`.
 """
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import sys
 import threading
@@ -18,14 +19,14 @@ import time
 from pathlib import Path
 
 import platformdirs
+import pystray
 import uvicorn
 import webview
-from webview.menu import Menu, MenuAction, MenuSeparator
-
-from .app import create_app
+from PIL import Image
 
 APP_NAME = "PrintGuard"
 BUNDLE_ID = "io.printguard.desktop"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 READY_TIMEOUT_S = 30.0
 STOP_TIMEOUT_S = 10.0
 WIN_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -61,10 +62,43 @@ def _configure_environment() -> None:
     os.environ.setdefault("MEDIAMTX_BINARY", str(bundle / ("mediamtx.exe" if os.name == "nt" else "mediamtx")))
 
 
+def _run_webview(url: str) -> None:
+    """Child-process entry point: shows the hub in a native window.
+
+    The window owns its process's main thread, so it never contends with the
+    tray's, and closing it ends only this process.
+    """
+    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+    webview.create_window(APP_NAME, url, width=1280, height=820)
+    webview.start()
+
+
+class _Window:
+    """Shows the hub window in a child process spawned from the tray."""
+
+    def __init__(self, url: str) -> None:
+        self._url = url
+        self._context = multiprocessing.get_context("spawn")
+        self._process: multiprocessing.process.BaseProcess | None = None
+
+    def open(self) -> None:
+        """Opens the window, reusing the existing one if it is still up."""
+        if self._process is None or not self._process.is_alive():
+            self._process = self._context.Process(target=_run_webview, args=(self._url,), daemon=True)
+            self._process.start()
+
+    def close(self) -> None:
+        """Closes the window if it is open."""
+        if self._process is not None and self._process.is_alive():
+            self._process.terminate()
+
+
 class _Server:
     """Runs the hub's uvicorn server on a background daemon thread."""
 
     def __init__(self, port: int) -> None:
+        from .app import create_app
+
         config = uvicorn.Config(create_app(), host="0.0.0.0", port=port, log_level="warning")
         self._server = uvicorn.Server(config)
         self._server.install_signal_handlers = lambda: None
@@ -134,37 +168,47 @@ def _set_autostart(enabled: bool) -> None:
                     pass
 
 
-def main() -> None:
-    """Console entry point: serves the hub and shows it in a native window.
+def _load_icon() -> Image.Image:
+    bundle = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else None  # type: ignore[attr-defined]
+    path = (bundle / "icon.png") if bundle else (REPO_ROOT / "web" / "public" / "apple-touch-icon.png")
+    return Image.open(path)
 
-    Closing the window minimises it instead, leaving the hub running so the
-    printer stays watched; the menu's Quit stops the server and exits.
+
+def main() -> None:
+    """Console entry point: serves the hub behind a tray icon on the main thread.
+
+    The window runs in a child process; closing it leaves the tray and the hub
+    server running so the printer stays watched, and the tray's Quit exits.
     """
     _configure_environment()
     port = int(os.environ.get("PORT", "8000"))
     server = _Server(port)
     server.start()
-    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
-    window = webview.create_window(APP_NAME, f"http://localhost:{port}", width=1280, height=820)
-    quitting = threading.Event()
+    window = _Window(f"http://localhost:{port}")
+    window.open()
 
-    def on_closing() -> bool:
-        if quitting.is_set():
-            return True
-        window.minimize()
-        return False
+    def open_window(icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        window.open()
 
-    def quit_app() -> None:
-        quitting.set()
-        server.stop()
-        window.destroy()
-
-    def toggle_autostart() -> None:
+    def toggle_autostart(icon: pystray.Icon, item: pystray.MenuItem) -> None:
         _set_autostart(not _autostart_enabled())
 
-    window.events.closing += on_closing
-    menu = [Menu(APP_NAME, [MenuAction("Start at login", toggle_autostart), MenuSeparator(), MenuAction("Quit", quit_app)])]
-    webview.start(menu=menu)
+    def quit_app(icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        window.close()
+        server.stop()
+        icon.stop()
+
+    icon = pystray.Icon(
+        APP_NAME,
+        _load_icon(),
+        APP_NAME,
+        menu=pystray.Menu(
+            pystray.MenuItem("Open PrintGuard", open_window, default=True),
+            pystray.MenuItem("Start at login", toggle_autostart, checked=lambda item: _autostart_enabled()),
+            pystray.MenuItem("Quit", quit_app),
+        ),
+    )
+    icon.run()
 
 
 if __name__ == "__main__":

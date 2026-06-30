@@ -12,9 +12,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Added
 
 - **A desktop app for macOS and Windows — run a hub as an application.** PrintGuard now ships as a
-  native app that runs the full hub in its own window. Unlike the in-browser local mode it **keeps
-  watching while minimised**, so it covers the multi-hour prints that matter, and you can reach it
-  from your phone on the same network at `http://<computer>:8000`. Detection still runs entirely on
+  native app that runs the full hub from your menu bar / system tray. Close the window and the hub
+  keeps watching, so it covers the multi-hour prints that matter; quit from the tray. Reach it from
+  your phone on the same network at `http://<computer>:8000`. Detection still runs entirely on
   your own machine; no frame leaves your hardware. Turn on **Start at login** and forget about it.
   Download it from the landing page or the
   [Releases page](https://github.com/oliverbravery/PrintGuard/releases) — the builds are unsigned for

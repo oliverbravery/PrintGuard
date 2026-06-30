@@ -26,7 +26,9 @@ printguard-desktop = "printguard.server.desktop:main"
 
 [project.optional-dependencies]
 desktop = [
+    "pillow>=10",
     "platformdirs>=4",
+    "pystray>=0.19.5",
     "pywebview>=6.2",
 ]
 

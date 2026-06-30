@@ -7,7 +7,9 @@ into ``web/dist`` and the model present in ``models`` before building.
 """
 
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules, copy_metadata
@@ -15,6 +17,10 @@ from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_s
 ROOT = Path(SPECPATH).parent
 ICON = os.environ.get("PRINTGUARD_ICON") or None
 MEDIAMTX = os.environ.get("MEDIAMTX_BUNDLE")
+
+staging = Path(tempfile.mkdtemp(prefix="printguard-build-"))
+icon_png = staging / "icon.png"
+shutil.copyfile(ROOT / "web" / "public" / "apple-touch-icon.png", icon_png)
 
 binaries = collect_dynamic_libs("av") + collect_dynamic_libs("ai_edge_litert")
 if MEDIAMTX:
@@ -24,6 +30,7 @@ datas = [
     (str(ROOT / "models"), "models"),
     (str(ROOT / "mediamtx.yml"), "."),
     (str(ROOT / "web" / "dist"), "static"),
+    (str(icon_png), "."),
     (str(ROOT / "printguard" / "__init__.py"), "printguard"),
     (str(ROOT / "printguard" / "engine"), "printguard/engine"),
     (str(ROOT / "printguard" / "browser"), "printguard/browser"),

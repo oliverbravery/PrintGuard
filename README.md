@@ -58,16 +58,16 @@ Open any monitor for its live risk score, score history and one-tap printer cont
 
 ### Desktop app — macOS & Windows
 
-The easiest way to run a hub on the computer next to your printer: a native app that runs the
-engine in its own window — no Docker, no terminal. It **keeps watching while minimised**, and you
-can reach it from your phone on the same network at `http://<computer>:8000`. Nothing leaves your
-machine.
+The easiest way to run a hub on the computer next to your printer: a native app — no Docker, no
+terminal. It lives in your **menu bar / system tray**, so closing the window leaves the hub running
+and the printer watched; quit from the tray when you're done. Reach it from your phone on the same
+network at `http://<computer>:8000`. Nothing leaves your machine.
 
 [![Download for macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/oliverbravery/PrintGuard/releases/latest/download/PrintGuard-macos-arm64.dmg)
 &nbsp;
 [![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/oliverbravery/PrintGuard/releases/latest/download/PrintGuard-windows-x64.zip)
 
-Turn on **Start at login** from the app menu and forget about it. The builds are unsigned for now,
+Turn on **Start at login** from the tray menu and forget about it. The builds are unsigned for now,
 so the first launch needs a right-click → **Open** on macOS, or **More info → Run anyway** on
 Windows. On Linux, run the [Docker hub](#docker--for-an-always-on-server-or-nas) instead.
 
