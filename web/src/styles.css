@@ -44,6 +44,7 @@ html {
   font-family: var(--font-body);
   background: var(--color-ink-0);
   color: var(--color-text-0);
+  scroll-behavior: smooth;
 }
 
 body {
