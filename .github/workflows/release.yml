@@ -95,6 +95,38 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  desktop:
+    name: desktop
+    needs: [version, release]
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Build the desktop app
+        shell: bash
+        run: bash packaging/build.sh
+      - name: Attach to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ needs.version.outputs.version }}" dist/PrintGuard-* --clobber
+
   pages:
     name: pages
     needs: [version, docker]
