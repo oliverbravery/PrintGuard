@@ -12,6 +12,13 @@ uv run printguard                    # hub on :8000 (MediaMTX is bundled into th
 cd web && npm install && npm run dev # UI with hot reload on :5173, proxied to :8000
 ```
 
+To work on the desktop app, run the tray build in dev or produce a local installer:
+
+```bash
+uv run --extra desktop printguard-desktop   # tray app: the hub in the background
+bash packaging/build.sh                      # build a .dmg / .zip / .AppImage into dist/
+```
+
 Run the tests before and after your change:
 
 ```bash
@@ -124,6 +131,8 @@ On merge, the [release workflow](.github/workflows/release.yml):
 2. only after the image is published, tags the merge commit `vX.Y.Z` and creates the
    GitHub release with the changelog section as its notes — a failed build never
    becomes a release;
-3. deploys the in-browser demo to GitHub Pages.
+3. deploys the in-browser demo to GitHub Pages;
+4. builds the macOS, Windows and Linux desktop apps and attaches them to the release.
 
-Docker is the only supported distribution.
+Docker (servers and NAS boxes) and the desktop app (personal computers) are the supported
+distributions.

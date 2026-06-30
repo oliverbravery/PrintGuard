@@ -56,7 +56,24 @@ Open any monitor for its live risk score, score history and one-tap printer cont
 
 ## Quick start
 
-PrintGuard is a **single container** - Install with one command:
+### Desktop app — macOS & Windows
+
+The easiest way to run a hub on the computer next to your printer: a native app that runs the
+engine in its own window — no Docker, no terminal. It **keeps watching while minimised**, and you
+can reach it from your phone on the same network at `http://<computer>:8000`. Nothing leaves your
+machine.
+
+[![Download for macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/oliverbravery/PrintGuard/releases/latest/download/PrintGuard-macos-arm64.dmg)
+&nbsp;
+[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/oliverbravery/PrintGuard/releases/latest/download/PrintGuard-windows-x64.zip)
+
+Turn on **Start at login** from the app menu and forget about it. The builds are unsigned for now,
+so the first launch needs a right-click → **Open** on macOS, or **More info → Run anyway** on
+Windows. On Linux, run the [Docker hub](#docker--for-an-always-on-server-or-nas) instead.
+
+### Docker — for an always-on server or NAS
+
+PrintGuard is a **single container** — install with one command:
 
 ```bash
 docker run -d --name printguard --restart unless-stopped \
@@ -89,6 +106,9 @@ it when you're ready.
 | Model runs | [LiteRT.js (WASM)](https://developers.google.com/edge/litert) | [ai-edge-litert](https://pypi.org/project/ai-edge-litert/) |
 | Frames leave the device | never | only to your own server |
 | Survives closing the tab | no | yes |
+
+The **desktop app** (macOS and Windows) is hub mode without the setup — the same persistent engine
+as the container, in a native window on (and never leaving) your own computer.
 
 ## Printers, cameras and alerts
 
