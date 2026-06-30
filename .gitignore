@@ -8,6 +8,8 @@ data/
 node_modules/
 web/dist/
 *.tsbuildinfo
+/build/
+/dist/
 web/public/models/
 web/public/pysrc.zip
 web/.pages-sim/
