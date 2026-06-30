@@ -27,6 +27,13 @@ function detectOS(): "mac" | "windows" | "other" {
   return "other";
 }
 
+function scrollToId(id: string) {
+  return (event: React.MouseEvent) => {
+    event.preventDefault();
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+  };
+}
+
 function AppleIcon() {
   return (
     <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
@@ -131,8 +138,8 @@ export function Home() {
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-5 py-3">
           <Wordmark />
           <div className="flex-1" />
-          <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#features">FEATURES</a>
-          <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#install">INSTALL</a>
+          <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#features" onClick={scrollToId("features")}>FEATURES</a>
+          <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#install" onClick={scrollToId("install")}>INSTALL</a>
           <a className="mono text-[0.66rem] text-text-2 transition-colors hover:text-accent" href={REPO_URL} target="_blank" rel="noreferrer">GITHUB ↗</a>
           <button className="btn btn-primary" onClick={launch}>Live demo</button>
         </div>
@@ -152,7 +159,7 @@ export function Home() {
         </p>
         <div className="reveal flex flex-wrap items-center justify-center gap-3" style={{ "--i": 3 } as React.CSSProperties}>
           <button className="btn btn-primary" onClick={launch}>Try the live demo →</button>
-          <a className="btn" href="#install">Install PrintGuard</a>
+          <a className="btn" href="#install" onClick={scrollToId("install")}>Install PrintGuard</a>
         </div>
         <div className="mt-10 flex items-center justify-center gap-6 sm:gap-12">
           <Spec index={3} value="≈5 MB" label="model" />
