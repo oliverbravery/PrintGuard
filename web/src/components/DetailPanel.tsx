@@ -24,6 +24,8 @@ function Slider({
   min,
   max,
   step,
+  hint,
+  format = (v) => v.toFixed(2),
   onChange,
 }: {
   label: string;
@@ -31,15 +33,27 @@ function Slider({
   min: number;
   max: number;
   step: number;
+  hint?: string;
+  format?: (v: number) => string;
   onChange: (v: number) => void;
 }) {
+  const hintId = useId();
   return (
     <label className="block">
       <div className="flex justify-between mb-1">
         <span className="label">{label}</span>
-        <span className="mono text-[0.72rem] text-text-0">{value.toFixed(2)}</span>
+        <span className="mono text-[0.72rem] text-text-0">{format(value)}</span>
       </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-describedby={hint ? hintId : undefined}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      {hint && <p id={hintId} className="text-[0.7rem] leading-snug text-text-2 mt-1">{hint}</p>}
     </label>
   );
 }
@@ -146,22 +160,34 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
                 ))}
               </select>
             </label>
-            <Slider label="Alert threshold" value={monitor.threshold} min={0.05} max={1} step={0.01} onChange={(v) => updateMonitor(monitor.id, { threshold: v })} />
-            <Slider label="Sensitivity" value={monitor.sensitivity} min={0.2} max={5} step={0.1} onChange={(v) => updateMonitor(monitor.id, { sensitivity: v })} />
-            <label className="block">
-              <div className="flex justify-between mb-1">
-                <span className="label">Consecutive detections to alert</span>
-                <span className="mono text-[0.72rem]">{monitor.consecutive}</span>
-              </div>
-              <input
-                type="range"
-                min={1}
-                max={15}
-                step={1}
-                value={monitor.consecutive}
-                onChange={(e) => updateMonitor(monitor.id, { consecutive: Number(e.target.value) })}
-              />
-            </label>
+            <Slider
+              label="Alert threshold"
+              value={monitor.threshold}
+              min={0.05}
+              max={1}
+              step={0.01}
+              hint="The score a frame must reach to count as a defect. Raise to cut false alarms; lower to catch subtler failures."
+              onChange={(v) => updateMonitor(monitor.id, { threshold: v })}
+            />
+            <Slider
+              label="Sensitivity"
+              value={monitor.sensitivity}
+              min={0.2}
+              max={5}
+              step={0.1}
+              hint="How decisively the model scores each frame. Raise if real defects read too low; lower if clean prints get flagged."
+              onChange={(v) => updateMonitor(monitor.id, { sensitivity: v })}
+            />
+            <Slider
+              label="Consecutive detections to alert"
+              value={monitor.consecutive}
+              min={1}
+              max={15}
+              step={1}
+              format={String}
+              hint="Flagged frames in a row before it acts. Raise to ride out brief blips; lower to react faster."
+              onChange={(v) => updateMonitor(monitor.id, { consecutive: v })}
+            />
           </div>
         </Section>
 
@@ -175,20 +201,16 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
                 <option value="cancel">Cancel the print</option>
               </select>
             </label>
-            <label className="block">
-              <div className="flex justify-between mb-1">
-                <span className="label">Cooldown (seconds)</span>
-                <span className="mono text-[0.72rem]">{monitor.cooldown_s}</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={600}
-                step={10}
-                value={monitor.cooldown_s}
-                onChange={(e) => updateMonitor(monitor.id, { cooldown_s: Number(e.target.value) })}
-              />
-            </label>
+            <Slider
+              label="Cooldown (seconds)"
+              value={monitor.cooldown_s}
+              min={0}
+              max={600}
+              step={10}
+              format={String}
+              hint="Quiet gap after acting before it can act again. Raise to avoid repeat alerts on one failure."
+              onChange={(v) => updateMonitor(monitor.id, { cooldown_s: v })}
+            />
             <Toggle label="Push notifications" on={monitor.notify} onChange={(v) => updateMonitor(monitor.id, { notify: v })} />
           </div>
         </Section>
