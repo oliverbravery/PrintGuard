@@ -11,6 +11,7 @@ lifecycle differ from the container entry point in :mod:`printguard.server.app`.
 
 from __future__ import annotations
 
+import io
 import multiprocessing
 import os
 import sys
@@ -200,9 +201,45 @@ def _set_autostart(enabled: bool) -> None:
 
 
 def _load_icon() -> Image.Image:
+    """Loads the tray icon, reduced to a macOS menu-bar template silhouette.
+
+    macOS status-bar icons are template images that the system tints for the light or dark
+    menu bar, so the colour app icon is flattened to its opaque shape there to sit among the
+    other status items; every other platform keeps the full-colour icon.
+    """
     bundle = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else None  # type: ignore[attr-defined]
     path = (bundle / "icon.png") if bundle else (REPO_ROOT / "web" / "public" / "apple-touch-icon.png")
-    return Image.open(path)
+    icon = Image.open(path)
+    if sys.platform != "darwin":
+        return icon
+    silhouette = icon.convert("L").point(lambda level: max(0, min(255, (level - 16) * 12)))
+    template = Image.new("RGBA", icon.size, (0, 0, 0, 0))
+    template.putalpha(silhouette)
+    return template
+
+
+def _show_tray(icon: pystray.Icon) -> None:
+    """Reveals the tray icon, rebuilding it as a crisp macOS menu-bar template.
+
+    pystray sizes the status-bar NSImage to the menu-bar thickness in pixels, so on Retina it
+    is upscaled and blurry and it carries no template flag. Rebuild it from the full-resolution
+    silhouette, cap its point size to the menu-bar thickness so macOS keeps the surplus pixels
+    for high-DPI, and tag it as a template so it adapts to the light or dark menu bar. A
+    ``setup`` callback owns making the icon visible.
+    """
+    icon.visible = True
+    if sys.platform != "darwin":
+        return
+    import AppKit
+    import Foundation
+
+    buffer = io.BytesIO()
+    icon._icon.save(buffer, "png")
+    image = AppKit.NSImage.alloc().initWithData_(Foundation.NSData(buffer.getvalue()))
+    thickness = icon._status_bar.thickness()
+    image.setSize_(AppKit.NSMakeSize(thickness, thickness))
+    image.setTemplate_(True)
+    icon._status_item.button().setImage_(image)
 
 
 def main() -> None:
@@ -239,7 +276,7 @@ def main() -> None:
             pystray.MenuItem("Quit", quit_app),
         ),
     )
-    icon.run()
+    icon.run(setup=_show_tray)
 
 
 if __name__ == "__main__":
