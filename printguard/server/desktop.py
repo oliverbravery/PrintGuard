@@ -62,12 +62,43 @@ def _configure_environment() -> None:
     os.environ.setdefault("MEDIAMTX_BINARY", str(bundle / ("mediamtx.exe" if os.name == "nt" else "mediamtx")))
 
 
+def _enable_wkwebview_camera() -> None:
+    """Lets the macOS WKWebView use this device's camera for the "this device" source.
+
+    WKWebView ships with the media-stream feature disabled, so ``navigator.mediaDevices``
+    is undefined even on a secure localhost page and the UI reports the camera as blocked.
+    Turn the WebKit media preferences on and auto-grant the capture permission that
+    pywebview otherwise leaves unhandled (WebKit then defaults to deny); the bundle's
+    ``NSCameraUsageDescription`` covers the macOS device-access prompt.
+    """
+    import objc
+    from webview.platforms import cocoa
+
+    media_preferences = ("mediaDevicesEnabled", "mediaStreamEnabled", "peerConnectionEnabled")
+    host_class = cocoa.BrowserView.WebKitHost
+
+    class WebKitHost(objc.Category(host_class)):
+        def initWithFrame_configuration_(self, frame, configuration):
+            preferences = configuration.preferences()
+            for key in media_preferences:
+                preferences.setValue_forKey_(True, key)
+            return objc.super(host_class, self).initWithFrame_configuration_(frame, configuration)
+
+    class BrowserDelegate(objc.Category(cocoa.BrowserView.BrowserDelegate)):
+        def webView_requestMediaCapturePermissionForOrigin_initiatedByFrame_type_decisionHandler_(
+            self, web_view, origin, frame, capture_type, decision_handler
+        ):
+            decision_handler(1)
+
+
 def _run_webview(url: str) -> None:
     """Child-process entry point: shows the hub in a native window.
 
     The window owns its process's main thread, so it never contends with the
     tray's, and closing it ends only this process.
     """
+    if sys.platform == "darwin":
+        _enable_wkwebview_camera()
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     webview.create_window(APP_NAME, url, width=1280, height=820)
     webview.start()

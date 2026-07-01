@@ -68,5 +68,10 @@ if sys.platform == "darwin":
         name="PrintGuard.app",
         icon=ICON,
         bundle_identifier="io.printguard.desktop",
-        info_plist={"CFBundleName": "PrintGuard", "NSHighResolutionCapable": True},
+        info_plist={
+            "CFBundleName": "PrintGuard",
+            "NSHighResolutionCapable": True,
+            "LSUIElement": True,
+            "NSCameraUsageDescription": "PrintGuard watches this device's camera for print defects.",
+        },
     )
