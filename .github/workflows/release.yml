@@ -113,11 +113,6 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Build the web UI
-        working-directory: web
-        run: |
-          npm ci
-          npm run build
       - name: Build the desktop app
         shell: bash
         run: bash packaging/build.sh

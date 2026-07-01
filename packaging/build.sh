@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Builds the PrintGuard desktop app for the host OS: fetches MediaMTX, generates
-# a platform icon, runs PyInstaller, and packages the result as a .dmg (macOS) or
-# .zip (Windows) under dist/. The desktop app targets macOS and Windows; Linux is
-# served by the container image. Run after `uv sync`.
+# Builds the PrintGuard desktop app for the host OS: builds the web UI, fetches
+# MediaMTX, generates a platform icon, runs PyInstaller, and packages the result
+# as a .dmg (macOS) or .zip (Windows) under dist/. The desktop app targets macOS
+# and Windows; Linux is served by the container image. Run after `uv sync`.
 set -euo pipefail
 
 MEDIAMTX_VERSION="${MEDIAMTX_VERSION:-1.18.2}"
@@ -10,6 +10,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 rm -rf dist build/desktop build/pyinstaller
 mkdir -p build/desktop
+
+(cd web && npm ci && npm run build)
 
 case "$(uname -m)" in
   arm64 | aarch64) ARCH=arm64 ;;
