@@ -21,6 +21,8 @@ READ_TOOLS = {
     "list_cameras",
     "get_camera",
     "get_camera_frame",
+    "get_monitor_history",
+    "get_monitor_snapshot",
     "recent_events",
 }
 

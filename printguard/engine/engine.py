@@ -9,6 +9,7 @@ cannot tell the difference.
 from __future__ import annotations
 
 import asyncio
+import base64
 import time
 import uuid
 from collections import deque
@@ -16,6 +17,7 @@ from typing import Any, Callable
 
 from . import updates, vision
 from .cameras import sanitise_camera, webrtc_endpoint
+from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
 from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
@@ -45,6 +47,7 @@ class Engine:
         self.cameras = CameraRegistry()
         self.printers = PrinterRegistry()
         self.monitors: dict[str, dict[str, Any]] = {}
+        self.history: dict[str, MonitorHistory] = {}
         self.tokens = TokenRegistry()
         self.settings: dict[str, Any] = dict(SETTINGS_DEFAULTS)
         self.update: dict[str, Any] | None = None
@@ -67,6 +70,8 @@ class Engine:
             "monitor.add": self._cmd_monitor_add,
             "monitor.update": self._cmd_monitor_update,
             "monitor.remove": self._cmd_monitor_remove,
+            "history.get": self._cmd_history_get,
+            "snapshot.get": self._cmd_snapshot_get,
             "notify.test": self._cmd_notify_test,
             "settings.update": self._cmd_settings_update,
             "token.create": self._cmd_token_create,
@@ -293,6 +298,7 @@ class Engine:
             if monitor["camera_id"] != camera.id or not monitor_watching(monitor, self.printers):
                 continue
             score = vision.defect_score(result, monitor["sensitivity"])
+            ts = time.time()
             self.emit(
                 {
                     "event": "result",
@@ -302,10 +308,20 @@ class Engine:
                     "prediction": "failure" if score >= monitor["threshold"] else "success",
                     "margin": round(result.get("margin", 0.0), 4),
                     "ms": self.scheduler.stats()["infer_ms"],
-                    "ts": time.time(),
+                    "ts": ts,
                 }
             )
+            self.history.setdefault(monitor["id"], MonitorHistory()).record(ts, score, monitor["threshold"])
             await self.watchdog.on_score(monitor, frame, score)
+
+    def note_alert(self, monitor_id: str, alert: dict[str, Any], jpeg: bytes | None) -> None:
+        """Records a fired alert and its triggering frame in a monitor's history."""
+        self.history.setdefault(monitor_id, MonitorHistory()).record_alert(alert["ts"], alert["score"], alert["action"], jpeg)
+
+    def monitor_snapshot(self, monitor_id: str, snap_id: str) -> bytes | None:
+        """Returns a captured risky-moment snapshot's JPEG bytes, or None."""
+        history = self.history.get(monitor_id)
+        return history.snapshot(snap_id) if history else None
 
     async def _cmd_discover(self, message: dict[str, Any]) -> None:
         sources = await self.platform.discover_cameras()
@@ -479,6 +495,18 @@ class Engine:
 
     async def _cmd_monitor_remove(self, message: dict[str, Any]) -> None:
         self.monitors.pop(message["id"], None)
+        self.history.pop(message["id"], None)
+
+    async def _cmd_history_get(self, message: dict[str, Any]) -> None:
+        history = self.history.get(message["monitor_id"])
+        series = history.series() if history else {"buckets": [], "snaps": [], "alerts": [], "stats": {}}
+        self.emit({"event": "history", "monitor_id": message["monitor_id"], **series, "req_id": message.get("req_id")})
+
+    async def _cmd_snapshot_get(self, message: dict[str, Any]) -> None:
+        jpeg = self.monitor_snapshot(message["monitor_id"], message["id"])
+        if jpeg is None:
+            raise KeyError(f"no snapshot {message['id']!r}")
+        self.emit({"event": "snapshot", "id": message["id"], "jpeg": base64.b64encode(jpeg).decode(), "req_id": message.get("req_id")})
 
     async def _cmd_notify_test(self, message: dict[str, Any]) -> None:
         adapter = NOTIFIERS.get(message.get("provider") or "")

@@ -171,7 +171,9 @@ class Watchdog:
         action = await self._act(monitor)
         monitor["alert"] = {"score": round(score, 3), "action": action, "ts": time.time()}
         self._engine.emit({"event": "alert", "monitor_id": mid, **monitor["alert"]})
-        await self._notify(monitor, frame, score, action)
+        image = await self._engine.platform.encode_jpeg(frame.rgb)
+        self._engine.note_alert(mid, monitor["alert"], image)
+        await self._notify(monitor, score, action, image)
 
     async def _act(self, monitor: dict[str, Any]) -> str:
         wanted = monitor.get("on_defect", "none")
@@ -191,7 +193,7 @@ class Watchdog:
         self._engine.emit({"event": "error", "message": f"{monitor['name']}: automatic {wanted} failed: {last_error}"})
         return "failed"
 
-    async def _notify(self, monitor: dict[str, Any], frame: Frame, score: float, action: str) -> None:
+    async def _notify(self, monitor: dict[str, Any], score: float, action: str, image: bytes | None) -> None:
         if not monitor.get("notify"):
             return
         if time.monotonic() - self._last_notified.get(monitor["id"], 0.0) < NOTIFY_COOLDOWN_S:
@@ -204,7 +206,6 @@ class Watchdog:
             body = "No automatic action configured"
         else:
             body = f"Action taken: {action}"
-        image = await self._engine.platform.encode_jpeg(frame.rgb)
         await self._send_alerts(title, body, image)
 
     async def _send_alerts(self, title: str, body: str, image: bytes | None) -> None:

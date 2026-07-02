@@ -243,6 +243,28 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         await engine.request({"cmd": "monitor.remove", "id": monitor_id})
         return public_state(engine)["monitors"]
 
+    @api.get("/monitors/{monitor_id}/history", operation_id="get_monitor_history", tags=["read"])
+    async def get_monitor_history(monitor_id: str, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Returns a monitor's rolled-up risk buckets, snapshot index and summary stats."""
+        _find(public_state(engine)["monitors"], monitor_id, "monitor")
+        events = await engine.request({"cmd": "history.get", "monitor_id": monitor_id})
+        history = next((e for e in events if e.get("event") == "history"), {})
+        return {key: value for key, value in history.items() if key not in ("event", "req_id")}
+
+    @api.get(
+        "/monitors/{monitor_id}/snapshots/{snap_id}",
+        operation_id="get_monitor_snapshot",
+        tags=["read"],
+        responses={200: {"content": {"image/jpeg": {}}}},
+        response_class=Response,
+    )
+    async def get_monitor_snapshot(monitor_id: str, snap_id: str, engine: Engine = Depends(get_engine)) -> Response:
+        """Returns a captured risky-moment snapshot as a JPEG image."""
+        jpeg = engine.monitor_snapshot(monitor_id, snap_id)
+        if jpeg is None:
+            raise HTTPException(404, f"no snapshot {snap_id!r} for monitor {monitor_id!r}")
+        return Response(jpeg, media_type="image/jpeg")
+
     @api.get("/printers", operation_id="list_printers", tags=["read"])
     async def list_printers(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
         """Lists every registered printer with its live status, progress and job."""

@@ -45,7 +45,7 @@ function Slider({
 }
 
 export function DetailPanel({ monitor }: { monitor: Monitor }) {
-  const { engine, history, send, openDetail, openDialog, isPending, updateMonitor } = useStore();
+  const { engine, history, send, openDetail, openStats, openDialog, isPending, updateMonitor } = useStore();
   const titleId = useId();
   const actionRef = useRef<string | null>(null);
   const removeRef = useRef(false);
@@ -99,6 +99,9 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
               defect at {(monitor.alert.score * 100).toFixed(0)}% — action: {monitor.alert.action}
             </p>
           )}
+          <button className="btn w-full mt-3" onClick={() => openStats(monitor.id)}>
+            View detailed history
+          </button>
         </Section>
 
         {linked && printer && (

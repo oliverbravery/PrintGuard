@@ -4,6 +4,7 @@ and the command protocol, all against an in-memory platform."""
 from __future__ import annotations
 
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
@@ -335,3 +336,43 @@ async def test_camera_rotation_persists_and_rejects_off_axis() -> None:
         assert reborn.cameras.values()[0].rotation == 270, "rotation survives a restart"
     finally:
         await reborn.stop()
+
+
+async def test_history_buckets_and_alert_snapshots() -> None:
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        await asyncio.sleep(1.5)
+        history = next(e for e in await engine.request({"cmd": "history.get", "monitor_id": monitor_id}) if e["event"] == "history")
+        snaps = history["snaps"]
+        assert snaps, "a fired alert should capture a snapshot"
+        snapshot = next(e for e in await engine.request({"cmd": "snapshot.get", "monitor_id": monitor_id, "id": snaps[0]["id"]}) if e["event"] == "snapshot")
+
+    buckets, stats = history["buckets"], history["stats"]
+    assert buckets and buckets[0]["n"] > 0, "no inference was folded into a bucket"
+    assert stats["inferences"] == sum(b["n"] for b in buckets)
+    assert stats["defect_frames"] > 0 and stats["defect_pct"] > 0, "sustained defect not counted"
+    assert stats["alerts"] == 1 and len(snaps) == 1, "the cooldown holds a sustained defect to one alert and one snapshot"
+    assert snaps[0]["action"] == "none" and snaps[0]["score"] >= 0.6, "snapshot carries the alert's action and score"
+    assert base64.b64decode(snapshot["jpeg"]) == b"\xff\xd8fake", "snapshot bytes did not round-trip over the protocol"
+
+
+async def test_no_alert_means_no_snapshot() -> None:
+    platform = FakePlatform(infer_s=0.02, failing=False)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        await asyncio.sleep(1.0)
+        history = next(e for e in await engine.request({"cmd": "history.get", "monitor_id": monitor_id}) if e["event"] == "history")
+    assert history["buckets"], "buckets should fill even without defects"
+    assert history["stats"]["defect_frames"] == 0
+    assert history["snaps"] == [] and history["stats"]["alerts"] == 0, "no alert means no snapshot"
+
+
+async def test_monitor_remove_clears_history() -> None:
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        await asyncio.sleep(0.5)
+        assert engine.history[monitor_id].buckets, "history should accumulate while watching"
+        await engine.handle({"cmd": "monitor.remove", "id": monitor_id})
+        assert monitor_id not in engine.history, "history is dropped with its monitor"

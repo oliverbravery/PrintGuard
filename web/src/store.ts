@@ -3,7 +3,7 @@ import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
-import type { Camera, CameraSource, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, ScorePoint } from "./types";
+import type { Camera, CameraSource, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, ScorePoint } from "./types";
 
 const HISTORY_LIMIT = 240;
 const UPDATE_DEBOUNCE_MS = 250;
@@ -64,6 +64,9 @@ interface PgStore {
   pending: Record<string, { req_id: number; cmd: string }>;
   toasts: Toast[];
   detailId: string | null;
+  statsMonitorId: string | null;
+  historyData: Record<string, MonitorHistory | null>;
+  snapshotCache: Record<string, string>;
   dialog: DialogKind;
   focusCameraId: string | null;
   createdToken: { name: string; secret: string } | null;
@@ -84,6 +87,8 @@ interface PgStore {
   discover(): void;
   openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
   openDetail(id: string | null): void;
+  openStats(id: string | null): void;
+  fetchSnapshot(monitorId: string, id: string): void;
   clearCreatedToken(): void;
   testPrinter(provider: string, config: Record<string, string>): void;
   testNotifier(provider: string, config: Record<string, string>): void;
@@ -185,6 +190,19 @@ export const useStore = create<PgStore>((set, get) => {
         get().toast("alert", `Defect on ${name} — ${(event.score * 100).toFixed(0)}% (${event.action})`);
         break;
       }
+      case "history":
+        clearPending(event.req_id);
+        set((s) => ({
+          historyData: {
+            ...s.historyData,
+            [event.monitor_id]: { buckets: event.buckets, snaps: event.snaps, alerts: event.alerts, stats: event.stats },
+          },
+        }));
+        break;
+      case "snapshot":
+        clearPending(event.req_id);
+        set((s) => ({ snapshotCache: { ...s.snapshotCache, [event.id]: `data:image/jpeg;base64,${event.jpeg}` } }));
+        break;
       case "device":
         clearPending(event.req_id);
         set((s) =>
@@ -268,6 +286,9 @@ export const useStore = create<PgStore>((set, get) => {
     pending: {},
     toasts: [],
     detailId: null,
+    statsMonitorId: null,
+    historyData: {},
+    snapshotCache: {},
     dialog: null,
     focusCameraId: null,
     createdToken: null,
@@ -349,6 +370,17 @@ export const useStore = create<PgStore>((set, get) => {
     openDetail(detailId) {
       get().flushUpdates();
       set({ detailId, printerTest: null });
+    },
+
+    openStats(statsMonitorId) {
+      get().flushUpdates();
+      set({ statsMonitorId });
+      if (statsMonitorId) get().send({ cmd: "history.get", monitor_id: statsMonitorId });
+    },
+
+    fetchSnapshot(monitorId, id) {
+      if (get().snapshotCache[id]) return;
+      get().send({ cmd: "snapshot.get", monitor_id: monitorId, id });
     },
 
     clearCreatedToken() {

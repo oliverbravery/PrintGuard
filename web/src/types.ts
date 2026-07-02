@@ -78,6 +78,48 @@ export interface Monitor {
   watching?: boolean;
 }
 
+export interface HistoryBucket {
+  t: number;
+  n: number;
+  sum: number;
+  min: number;
+  max: number;
+  defects: number;
+}
+
+export interface Snapshot {
+  id: string;
+  ts: number;
+  score: number;
+  action: string;
+}
+
+export interface HistoryAlert {
+  ts: number;
+  score: number;
+  action: string;
+}
+
+export interface HistoryStats {
+  current: number;
+  avg: number;
+  min: number;
+  max: number;
+  inferences: number;
+  defect_frames: number;
+  defect_pct: number;
+  alerts: number;
+  watch_min: number;
+  snaps: number;
+}
+
+export interface MonitorHistory {
+  buckets: HistoryBucket[];
+  snaps: Snapshot[];
+  alerts: HistoryAlert[];
+  stats: Partial<HistoryStats>;
+}
+
 export interface SchemaProperty {
   type: string;
   title: string;
