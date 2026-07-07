@@ -7,6 +7,17 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.3] - 2026-07-06
+
+### Added
+
+- **The `/api/v1` read endpoints now describe their response bodies.** `docs/api.md` documents
+  the camera and monitor object shapes — and, importantly, where a camera's failure signal lives:
+  `last_result.prediction`, since the smoothed 0–1 defect score is a per-monitor quantity, not a
+  field on the camera. The camera and monitor routes also carry Pydantic response models, so the
+  interactive `/api/v1/docs` shows the shapes instead of empty bodies. The models are additive
+  only (every field optional, extras pass straight through), so responses are unchanged.
+
 ## [2.2.2] - 2026-06-26
 
 ### Fixed
