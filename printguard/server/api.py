@@ -9,13 +9,16 @@ the same tags drive both this API's bearer-scope guard and the MCP tool filter.
 from __future__ import annotations
 
 import hmac
+import io
 from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
+import av
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from ..engine import vision
 from ..engine.engine import Engine
 from ..engine.integrations import INTEGRATIONS
 from ..engine.notifiers import NOTIFIERS
@@ -307,6 +310,28 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         if jpeg is None:
             raise HTTPException(404, f"no frame available for camera {camera_id!r}")
         return Response(jpeg, media_type="image/jpeg")
+
+    @api.post("/classify", operation_id="classify_frame", tags=["read"])
+    async def classify_frame(
+        request: Request, sensitivity: float = 1.0, engine: Engine = Depends(get_engine)
+    ) -> dict[str, Any]:
+        """Classify a single supplied JPEG frame — no registered camera needed.
+
+        For an external orchestrator that can reach a camera PrintGuard cannot
+        (e.g. a cloud tool tunnelling to a LAN printer): POST the frame bytes as
+        `image/jpeg` and get back the same classification the scheduler produces
+        for a registered camera, plus the 0–1 `defect_score` for the given
+        `sensitivity`. Reuses the engine's own inference (`Platform.infer`) and
+        the hub's PyAV to decode — REST is hub-only, so there's no browser path.
+        """
+        data = await request.body()
+        try:
+            with av.open(io.BytesIO(data)) as container:
+                rgb = next(container.decode(video=0)).to_ndarray(format="rgb24")
+        except Exception as exc:
+            raise HTTPException(400, f"could not decode image: {exc}")
+        result = await engine.platform.infer(rgb)
+        return {**result, "defect_score": vision.defect_score(result, sensitivity)}
 
     @api.post("/cameras", operation_id="add_camera", tags=["manage"])
     async def add_camera(body: CameraCreate, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:

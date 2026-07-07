@@ -56,6 +56,7 @@ Base path `/api/v1`. Requests and responses are JSON, except the camera frame, w
 | `GET` | `/cameras` | read | List cameras with rate, health and latest score |
 | `GET` | `/cameras/{id}` | read | One camera |
 | `GET` | `/cameras/{id}/frame` | read | Freshest frame as `image/jpeg` |
+| `POST` | `/classify` | read | Classify a supplied JPEG frame (body = `image/jpeg`); no registered camera needed |
 | `GET` | `/events` | read | Recent alerts, warnings, device changes and errors |
 | `POST` | `/printers/{id}/action` | control | `{"action": "pause" \| "resume" \| "cancel"}` |
 | `POST` | `/monitors` | manage | Add a monitor (binds a camera + optional printer) |
@@ -85,6 +86,11 @@ curl -H "Authorization: Bearer $TOKEN" https://host/api/v1/cameras/$CAM/frame -o
 # Pause a print
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"action":"pause"}' https://host/api/v1/printers/$PRINTER/action
+
+# Classify a supplied frame (no registered camera needed)
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: image/jpeg" \
+  --data-binary @frame.jpg https://host/api/v1/classify
+# → {"prediction":"success","distances":{...},"margin":1.16,"defect_score":0.35}
 ```
 
 ## MCP server
