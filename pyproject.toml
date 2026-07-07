@@ -1,6 +1,6 @@
 [project]
 name = "printguard"
-version = "2.2.2"
+version = "2.3.0"
 description = "Real-time 3D print failure detection"
 
 license = "GPL-2.0-only"

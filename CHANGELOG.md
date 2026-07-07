@@ -7,6 +7,17 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-07-06
+
+### Added
+
+- **`POST /api/v1/classify` — score a single supplied JPEG frame.** Hand the model a frame
+  directly (POST the bytes as `image/jpeg`, `read` scope) and get back
+  `{prediction, distances, margin, defect_score}` — the same verdict the scheduler produces for
+  a registered camera, without registering one. Useful for an external orchestrator that can
+  reach a camera PrintGuard can't (e.g. a cloud tool tunnelling to a LAN printer), or an
+  agent/CI wanting a one-off check. Reuses the engine's own inference; hub only.
+
 ## [2.2.2] - 2026-06-26
 
 ### Fixed
