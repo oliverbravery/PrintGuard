@@ -32,6 +32,18 @@ async def test_web_static_files_revalidate_html_and_cache_hashed_assets(tmp_path
     assert "etag" in html.headers and "etag" in asset.headers
 
 
+async def test_health_reports_ready_version_without_caching() -> None:
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.3.7"))
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "version": "2.3.7"}
+    assert response.headers["cache-control"] == "no-store"
+
+
 async def test_hls_view_wakes_camera_before_proxying() -> None:
     platform = SimpleNamespace(view_camera=AsyncMock())
     app = create_app()
