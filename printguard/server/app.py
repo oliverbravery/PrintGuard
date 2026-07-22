@@ -123,9 +123,10 @@ def create_app() -> FastAPI:
     pysrc = build_pysrc()
 
     @app.get("/api/health")
-    def health() -> dict[str, bool]:
-        """Liveness probe."""
-        return {"ok": True}
+    def health(response: Response) -> dict[str, bool | str]:
+        """Reports hub readiness and the running version."""
+        response.headers["Cache-Control"] = "no-store"
+        return {"ok": True, "version": app.state.engine.platform.version}
 
     @app.get("/pysrc.zip")
     def pysrc_zip() -> Response:

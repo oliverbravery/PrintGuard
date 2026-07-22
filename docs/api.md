@@ -9,6 +9,19 @@ the UI:
 
 Both are hub-only. Local (in-browser) mode has no server to host them.
 
+## Health and version
+
+`GET /api/health` is the unauthenticated hub readiness endpoint for uptime checks and
+update monitors. A successful response is not cached and includes the installed version:
+
+```json
+{"ok": true, "version": "2.3.7"}
+```
+
+It returns `200 OK` only after the engine has started. Camera, printer and notifier health
+is available through the authenticated REST API and does not change the service-level
+probe.
+
 ## Authentication & scopes
 
 PrintGuard ships no identity layer of its own - put a proxy in front of the hub

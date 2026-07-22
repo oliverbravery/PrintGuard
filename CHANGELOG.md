@@ -7,6 +7,14 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.7] - 2026-07-22
+
+### Added
+
+- **Health checks can now read the running PrintGuard version.** The unauthenticated
+  `/api/health` endpoint reports readiness and the installed version for uptime and update
+  monitors without exposing printer, camera or configuration data.
+
 ## [2.3.6] - 2026-07-19
 
 ### Fixed

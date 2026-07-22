@@ -152,7 +152,9 @@ anything the UI can do is automatable. Point an MCP client (Claude, an IDE) at
 `https://<host>/mcp/`, or use the REST API at `/api/v1` - both can read printer and camera
 status, fetch the **current camera frame as an image**, and pause/resume/cancel. Capability is
 per token: issue scoped bearer tokens (**read** ⊂ **control** ⊂ **manage**) from **Settings**,
-and an agent only gets what you grant. Full reference: **[docs/api.md](docs/api.md)**.
+and an agent only gets what you grant. Uptime and update monitors can call the unauthenticated
+`GET /api/health` endpoint for readiness and the installed version. Full reference:
+**[docs/api.md](docs/api.md)**.
 
 ## How it works
 
