@@ -8,7 +8,7 @@ COPY web/ ./
 COPY docs/assets/ ../docs/assets/
 RUN npm run build
 
-FROM python:3.13-slim AS deps
+FROM python:3.13-slim-bookworm AS deps
 ARG INFERENCE_EXTRA
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
@@ -17,7 +17,7 @@ RUN uv sync --frozen --no-dev --no-install-project --compile-bytecode $INFERENCE
 COPY printguard/ printguard/
 RUN uv sync --frozen --no-dev --compile-bytecode $INFERENCE_EXTRA
 
-FROM python:3.13-slim
+FROM python:3.13-slim-bookworm
 WORKDIR /app
 RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then apt-get update && apt-get install -y --no-install-recommends intel-opencl-icd ocl-icd-libopencl1; fi \
     && rm -rf /var/lib/apt/lists/*
