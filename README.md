@@ -104,6 +104,45 @@ Ports `8554`/`1935` only matter for cameras that *push* a stream into PrintGuard
 [`ghcr.io/oliverbravery/printguard`](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
 on every release.
 
+#### Hardware acceleration
+
+Hub mode runs one ONNX model through the fastest supported provider it can use. On macOS, Core ML
+can use the CPU, GPU and Neural Engine. On Windows 11 24H2 or newer, Windows ML installs the
+matching certified Intel, NVIDIA, AMD or Qualcomm provider on first launch; older Windows versions
+use the optimised CPU runtime. The standard amd64 image uses Intel CPU, GPU or NPU hardware through
+OpenVINO; arm64 images and other Linux hosts use the optimised CPU runtime.
+
+On an Intel Linux host, expose the integrated or discrete GPU:
+
+```bash
+docker run -d --name printguard --restart unless-stopped \
+  --device /dev/dri \
+  -p 8000:8000 -p 8554:8554 -p 1935:1935 \
+  -v printguard:/data \
+  ghcr.io/oliverbravery/printguard
+```
+
+For Docker Compose, add the device to the `printguard` service:
+
+```yaml
+    devices:
+      - /dev/dri:/dev/dri
+```
+
+For an NVIDIA RTX 30 series or newer host with the NVIDIA Container Toolkit installed, use the
+NVIDIA image:
+
+```bash
+docker run -d --name printguard --restart unless-stopped \
+  --gpus all \
+  -p 8000:8000 -p 8554:8554 -p 1935:1935 \
+  -v printguard:/data \
+  ghcr.io/oliverbravery/printguard:latest-nvidia
+```
+
+The dashboard's **compute** readout names the active provider. If no compatible accelerator is
+available, ONNX Runtime uses the CPU.
+
 ## Two modes, one engine
 
 The same detection engine runs in two places - try it instantly in the browser, then self-host
@@ -112,7 +151,7 @@ it when you're ready.
 | | Local mode | Hub mode |
 |---|---|---|
 | Engine runs | in your browser (Pyodide) | on the server (CPython) |
-| Model runs | [LiteRT.js (WASM)](https://developers.google.com/edge/litert) | [ai-edge-litert](https://pypi.org/project/ai-edge-litert/) |
+| Model runs | [LiteRT.js (WASM)](https://developers.google.com/edge/litert) | [ONNX Runtime](https://onnxruntime.ai/) |
 | Frames leave the device | never | only to your own server |
 | Survives closing the tab | no | yes |
 
