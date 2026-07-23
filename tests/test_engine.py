@@ -141,7 +141,7 @@ async def test_slow_printer_action_does_not_pause_inference(monkeypatch) -> None
         platform.failing = True
         await asyncio.wait_for(platform.action_started.wait(), 1.0)
         before = len([event for event in events if event.get("event") == "result"])
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.3)
         after = len([event for event in events if event.get("event") == "result"])
         await asyncio.sleep(0.3)
         alerts = [event for event in events if event.get("event") == "alert"]
@@ -497,14 +497,29 @@ async def test_history_buckets_and_alert_snapshots() -> None:
         snaps = history["snaps"]
         assert snaps, "a fired alert should capture a snapshot"
         snapshot = next(e for e in await engine.request({"cmd": "snapshot.get", "monitor_id": monitor_id, "id": snaps[0]["id"]}) if e["event"] == "snapshot")
+        state_result = engine.state_event()["monitors"][0]["result"]
 
     buckets, stats = history["buckets"], history["stats"]
     assert buckets and buckets[0]["n"] > 0, "no inference was folded into a bucket"
+    assert state_result and state_result["ts"] >= buckets[-1]["t"], "state snapshot should carry the latest live score"
+    assert history["now"] >= buckets[-1]["t"], "history windows should use the engine clock"
     assert stats["inferences"] == sum(b["n"] for b in buckets)
     assert stats["defect_frames"] > 0 and stats["defect_pct"] > 0, "sustained defect not counted"
     assert stats["alerts"] == 1 and len(snaps) == 1, "the cooldown holds a sustained defect to one alert and one snapshot"
     assert snaps[0]["action"] == "none" and snaps[0]["score"] >= 0.6, "snapshot carries the alert's action and score"
     assert base64.b64decode(snapshot["jpeg"]) == b"\xff\xd8fake", "snapshot bytes did not round-trip over the protocol"
+
+
+async def test_result_events_are_bounded_without_losing_history() -> None:
+    platform = FakePlatform(infer_s=0.01)
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await asyncio.sleep(1.2)
+        history = next(e for e in await engine.request({"cmd": "history.get", "monitor_id": monitor_id}) if e["event"] == "history")
+
+    results = [event for event in events if event.get("event") == "result"]
+    assert 3 <= len(results) <= 7
+    assert history["stats"]["inferences"] > len(results) * 2
 
 
 async def test_no_alert_means_no_snapshot() -> None:

@@ -8,8 +8,8 @@ import { riskColor, RiskGauge } from "./RiskGauge";
 
 const HISTORY_POLL_MS = 5000;
 
-function ago(ts: number): string {
-  const s = Math.max(0, Date.now() / 1000 - ts);
+function ago(ts: number, now: number): string {
+  const s = Math.max(0, now - ts);
   if (s < 60) return `${Math.floor(s)}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
@@ -34,14 +34,14 @@ function StatTile({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SnapshotThumb({ monitorId, snap, threshold, onOpen }: { monitorId: string; snap: Snapshot; threshold: number; onOpen: () => void }) {
+function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId: string; snap: Snapshot; threshold: number; now: number; onOpen: () => void }) {
   const url = useStore((s) => s.snapshotCache[snap.id]);
   const fetchSnapshot = useStore((s) => s.fetchSnapshot);
   useEffect(() => {
     fetchSnapshot(monitorId, snap.id);
   }, [monitorId, snap.id]);
   return (
-    <button type="button" onClick={onOpen} className="panel group relative block overflow-hidden text-left" aria-label={`Snapshot at ${(snap.score * 100).toFixed(0)}% risk, ${ago(snap.ts)}`}>
+    <button type="button" onClick={onOpen} className="panel group relative block overflow-hidden text-left" aria-label={`Snapshot at ${(snap.score * 100).toFixed(0)}% risk, ${ago(snap.ts, now)}`}>
       <div className="aspect-video bg-ink-0">
         {url ? (
           <img src={url} alt="" className="h-full w-full object-cover" />
@@ -55,7 +55,7 @@ function SnapshotThumb({ monitorId, snap, threshold, onOpen }: { monitorId: stri
         {(snap.score * 100).toFixed(0)}%
       </span>
       <span className="label absolute inset-x-0 bottom-0 bg-ink-1/85 px-2 py-1">
-        {ago(snap.ts)}
+        {ago(snap.ts, now)}
         {snap.action !== "none" && ` · ${snap.action}`}
       </span>
     </button>
@@ -77,7 +77,7 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
     return () => clearInterval(timer);
   }, [monitor.id]);
 
-  const grouped = useMemo(() => groupBuckets(history?.buckets ?? [], period, Date.now() / 1000), [history, period]);
+  const grouped = useMemo(() => (history ? groupBuckets(history.buckets, period, history.now) : []), [history, period]);
   const stats = history?.stats ?? {};
   const snaps = useMemo(
     () => [...(history?.snaps ?? [])].sort((a, b) => (sortByScore ? b.score - a.score : b.ts - a.ts)),
@@ -152,8 +152,8 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
             <p className="mono text-[0.7rem] text-text-2">No alerts have fired yet — a snapshot is captured each time a defect alert triggers.</p>
           ) : (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {snaps.map((snap) => (
-                <SnapshotThumb key={snap.id} monitorId={monitor.id} snap={snap} threshold={monitor.threshold} onOpen={() => setEnlarged(snap)} />
+              {history && snaps.map((snap) => (
+                <SnapshotThumb key={snap.id} monitorId={monitor.id} snap={snap} threshold={monitor.threshold} now={history.now} onOpen={() => setEnlarged(snap)} />
               ))}
             </div>
           )}
@@ -168,7 +168,7 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
           >
             {enlargedUrl && <img src={enlargedUrl} alt="" className="max-h-full max-w-full object-contain" />}
             <span className="mono absolute left-6 top-6 text-sm" style={{ color: riskColor(enlarged.score, monitor.threshold) }}>
-              {(enlarged.score * 100).toFixed(0)}% · {ago(enlarged.ts)}
+              {(enlarged.score * 100).toFixed(0)}% · {history && ago(enlarged.ts, history.now)}
               {enlarged.action !== "none" && ` · ${enlarged.action}`}
             </span>
           </button>

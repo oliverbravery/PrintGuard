@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import httpx
 
 from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app
+from printguard.server.events import ConflatedEventQueue
 
 
 class AsyncContent(httpx.AsyncByteStream):
@@ -42,6 +43,23 @@ async def test_health_reports_ready_version_without_caching() -> None:
     assert response.status_code == 200
     assert response.json() == {"ok": True, "version": "2.3.7"}
     assert response.headers["cache-control"] == "no-store"
+
+
+async def test_event_queue_conflates_telemetry_without_dropping_ordered_events() -> None:
+    queue = ConflatedEventQueue()
+    queue.put({"event": "state", "version": "old"})
+    queue.put({"event": "result", "monitor_id": "one", "score": 0.1})
+    queue.put({"event": "warning", "message": "camera stalled"})
+    queue.put({"event": "state", "version": "new"})
+    queue.put({"event": "result", "monitor_id": "one", "score": 0.9})
+    queue.put({"event": "result", "monitor_id": "two", "score": 0.4})
+    queue.put({"event": "state", "req_id": 7, "version": "command"})
+
+    assert await queue.get() == {"event": "warning", "message": "camera stalled"}
+    assert await queue.get() == {"event": "state", "req_id": 7, "version": "command"}
+    assert await queue.get() == {"event": "state", "version": "new"}
+    assert await queue.get() == {"event": "result", "monitor_id": "one", "score": 0.9}
+    assert await queue.get() == {"event": "result", "monitor_id": "two", "score": 0.4}
 
 
 async def test_hls_view_wakes_camera_before_proxying() -> None:

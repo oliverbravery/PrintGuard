@@ -77,6 +77,7 @@ export interface Monitor {
   cooldown_s: number;
   alert?: Alert | null;
   watching?: boolean;
+  result?: ScorePoint | null;
 }
 
 export interface HistoryBucket {
@@ -115,6 +116,7 @@ export interface HistoryStats {
 }
 
 export interface MonitorHistory {
+  now: number;
   buckets: HistoryBucket[];
   snaps: Snapshot[];
   alerts: HistoryAlert[];

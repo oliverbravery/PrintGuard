@@ -71,33 +71,43 @@ def test_discovery_config_omits_printer_entities_without_a_printer() -> None:
 
 
 def test_monitor_state_phase_and_score() -> None:
-    assert mqtt.monitor_state(_monitor(), None, 0.5)["state"] == "watching"
-    assert mqtt.monitor_state(_monitor(), None, 0.5)["score"] == 50.0
-    assert mqtt.monitor_state(_monitor(enabled=False), None, None)["state"] == "disabled"
-    assert mqtt.monitor_state(_monitor(watching=False), None, None)["state"] == "idle"
-    triggered = mqtt.monitor_state(_monitor(alert={"score": 0.9, "action": "pause", "ts": 1.0}), None, 0.9)
+    assert mqtt.monitor_state(_monitor(result={"score": 0.5, "ts": 1.0}), None)["state"] == "watching"
+    assert mqtt.monitor_state(_monitor(result={"score": 0.5, "ts": 1.0}), None)["score"] == 50.0
+    assert mqtt.monitor_state(_monitor(result={"score": 0.42, "ts": 1.0}), None)["score"] == 42.0
+    assert mqtt.monitor_state(_monitor(enabled=False), None)["state"] == "disabled"
+    assert mqtt.monitor_state(_monitor(watching=False), None)["state"] == "idle"
+    triggered = mqtt.monitor_state(
+        _monitor(alert={"score": 0.9, "action": "pause", "ts": 1.0}, result={"score": 0.9, "ts": 1.0}),
+        None,
+    )
     assert triggered["state"] == "triggered"
     assert triggered["defect"] == "on"
 
 
 def test_monitor_state_includes_linked_printer_fields() -> None:
-    payload = mqtt.monitor_state(_monitor(printer_id="prn1"), _printer(), 0.1)
+    payload = mqtt.monitor_state(_monitor(printer_id="prn1", result={"score": 0.1, "ts": 1.0}), _printer())
     assert payload["printer_status"] == "printing"
     assert payload["progress"] == 42.5
     assert payload["job"] == "boat.gcode"
-    assert "printer_status" not in mqtt.monitor_state(_monitor(), None, 0.1)
+    assert "printer_status" not in mqtt.monitor_state(_monitor(result={"score": 0.1, "ts": 1.0}), None)
 
 
 def test_state_changed_damps_score_drift_but_not_transitions() -> None:
-    watching = mqtt.monitor_state(_monitor(), None, 0.40)
+    watching = mqtt.monitor_state(_monitor(result={"score": 0.40, "ts": 1.0}), None)
     assert mqtt.state_changed(None, watching)
     assert not mqtt.state_changed(watching, watching)
-    assert not mqtt.state_changed(watching, mqtt.monitor_state(_monitor(), None, 0.43))
-    assert mqtt.state_changed(watching, mqtt.monitor_state(_monitor(), None, 0.46))
-    triggered = mqtt.monitor_state(_monitor(alert={"score": 0.41, "action": "none", "ts": 1.0}), None, 0.41)
+    assert not mqtt.state_changed(watching, mqtt.monitor_state(_monitor(result={"score": 0.43, "ts": 2.0}), None))
+    assert mqtt.state_changed(watching, mqtt.monitor_state(_monitor(result={"score": 0.46, "ts": 2.0}), None))
+    triggered = mqtt.monitor_state(
+        _monitor(alert={"score": 0.41, "action": "none", "ts": 1.0}, result={"score": 0.41, "ts": 1.0}),
+        None,
+    )
     assert mqtt.state_changed(watching, triggered)
-    printing = mqtt.monitor_state(_monitor(printer_id="prn1"), _printer(), 0.1)
-    paused = mqtt.monitor_state(_monitor(printer_id="prn1"), _printer(device_state={"status": "paused", "progress": 42.6, "job": "boat.gcode"}), 0.1)
+    printing = mqtt.monitor_state(_monitor(printer_id="prn1", result={"score": 0.1, "ts": 1.0}), _printer())
+    paused = mqtt.monitor_state(
+        _monitor(printer_id="prn1", result={"score": 0.1, "ts": 1.0}),
+        _printer(device_state={"status": "paused", "progress": 42.6, "job": "boat.gcode"}),
+    )
     assert mqtt.state_changed(printing, paused)
 
 

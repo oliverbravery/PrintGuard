@@ -77,9 +77,11 @@ engine reconciles them on printer add/update, and on demand via `printer.cameras
 can't be removed on their own and are dropped with their printer.
 
 Events (engine → UI): a full `state` snapshot (on connect, after every command, and on a
-1 s ticker; it carries the running version and any available update), plus incremental
-`result`, `alert`, `warning`, `device`, `discovered`, `printer_test`, `notify_test`,
-`report_sent` and `error` events.
+1 s ticker; it carries the running version, latest monitor results and any available
+update), plus incremental `result`, `alert`, `warning`, `device`, `discovered`,
+`printer_test`, `notify_test`, `report_sent` and `error` events. Result updates are sampled
+at 5 Hz per monitor and conflated when a transport is slower; ordered events and
+command responses are never evicted by telemetry.
 
 `report.send` is the anonymous bug report ([`engine/reports.py`](../printguard/engine/reports.py)):
 one user-initiated POST of a Sentry feedback envelope - description, optional contact email,

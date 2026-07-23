@@ -36,6 +36,12 @@ function commandFor(entry: OptimisticEntry): Record<string, unknown> {
   return { cmd: `${entry.kind}.update`, id: entry.id, patch: entry.patch };
 }
 
+function appendScore(history: Record<string, ScorePoint[]>, monitorId: string, point: ScorePoint): Record<string, ScorePoint[]> {
+  const points = history[monitorId] ?? [];
+  if ((points.at(-1)?.ts ?? 0) >= point.ts) return history;
+  return { ...history, [monitorId]: [...points, point].slice(-HISTORY_LIMIT) };
+}
+
 function modeFromUrl(): Mode | null {
   const hash = location.hash.slice(1);
   return hash === "local" || hash === "hub" ? hash : null;
@@ -178,8 +184,12 @@ export const useStore = create<PgStore>((set, get) => {
         }
         const cleared = had && Object.keys(optimistic).length === 0;
         const engine = Object.keys(optimistic).length ? applyOptimistic(server, optimistic) : server;
+        let history = get().history;
+        for (const monitor of server.monitors) {
+          if (monitor.result) history = appendScore(history, monitor.id, monitor.result);
+        }
         applyTheme(server.settings?.theme ?? "system", server.settings?.themes ?? []);
-        set({ engine, optimistic, phase: "ready", ...(cleared ? { savedAt: Date.now() } : {}) });
+        set({ engine, history, optimistic, phase: "ready", ...(cleared ? { savedAt: Date.now() } : {}) });
         if (!resumed && get().mode === "hub") {
           resumed = true;
           void resumePublishers(server.cameras, (reason) => get().toast("error", `publishing stopped: ${reason}`));
@@ -187,10 +197,7 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       }
       case "result":
-        set((s) => {
-          const points = [...(s.history[event.monitor_id] ?? []), { ts: event.ts, score: event.score }];
-          return { history: { ...s.history, [event.monitor_id]: points.slice(-HISTORY_LIMIT) } };
-        });
+        set((s) => ({ history: appendScore(s.history, event.monitor_id, { ts: event.ts, score: event.score }) }));
         break;
       case "alert": {
         const name = get().engine?.monitors.find((m) => m.id === event.monitor_id)?.name ?? "monitor";
@@ -202,7 +209,7 @@ export const useStore = create<PgStore>((set, get) => {
         set((s) => ({
           historyData: {
             ...s.historyData,
-            [event.monitor_id]: { buckets: event.buckets, snaps: event.snaps, alerts: event.alerts, stats: event.stats },
+            [event.monitor_id]: { now: event.now, buckets: event.buckets, snaps: event.snaps, alerts: event.alerts, stats: event.stats },
           },
         }));
         break;

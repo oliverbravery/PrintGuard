@@ -21,6 +21,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   Docker and Unraid users can expose `/dev/dri` for Intel hardware, while NVIDIA hosts can
   use the `-nvidia` image with GPU passthrough.
 
+### Fixed
+
+- **Live risk no longer appears stuck at zero while inference is running.** PrintGuard now
+  keeps the latest score in authoritative state, bounds and conflates live telemetry
+  without dropping ordered events, and uses the engine clock for detailed history.
+
 ## [2.3.6] - 2026-07-19
 
 ### Fixed
