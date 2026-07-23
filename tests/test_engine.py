@@ -522,6 +522,19 @@ async def test_result_events_are_bounded_without_losing_history() -> None:
     assert history["stats"]["inferences"] > len(results) * 2
 
 
+async def test_camera_restart_cancels_stuck_inference() -> None:
+    platform = FakePlatform(infer_s=0.01)
+    platform.inference_blocked = True
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, events):
+        await asyncio.wait_for(platform.inference_started.wait(), timeout=1.0)
+        camera = next(iter(engine.cameras.values()))
+        await engine.restart_camera(camera)
+        platform.inference_blocked = False
+        await asyncio.sleep(0.2)
+
+    assert any(event.get("event") == "result" for event in events)
+
+
 async def test_no_alert_means_no_snapshot() -> None:
     platform = FakePlatform(infer_s=0.02, failing=False)
     async with running_engine(platform, camera_fps=[10.0]) as (engine, _):

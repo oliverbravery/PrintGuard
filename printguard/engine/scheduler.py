@@ -42,6 +42,7 @@ class Scheduler:
         self._last_error_at = 0.0
         self._dispatch_lock = asyncio.Lock()
         self._jobs: set[asyncio.Task[None]] = set()
+        self._camera_jobs: dict[str, asyncio.Task[None]] = {}
         self._slots = asyncio.Semaphore(platform.workers)
         self.infer_ms = 0.0
 
@@ -94,6 +95,11 @@ class Scheduler:
             camera.target_fps = min(camera.max_fps, share)
             remaining -= camera.target_fps
 
+    def cancel_camera(self, camera: Camera) -> None:
+        """Cancels the active inference job for a restarted camera."""
+        if task := self._camera_jobs.get(camera.id):
+            task.cancel()
+
     async def run(self) -> None:
         """Dispatch loop: hands the most overdue camera to a free worker."""
         while True:
@@ -109,6 +115,13 @@ class Scheduler:
                     task = asyncio.create_task(self._job(camera))
                     self._jobs.add(task)
                     task.add_done_callback(self._jobs.discard)
+                    self._camera_jobs[camera.id] = task
+
+                    def forget(done: asyncio.Task[None], camera_id: str = camera.id) -> None:
+                        if self._camera_jobs.get(camera_id) is done:
+                            self._camera_jobs.pop(camera_id)
+
+                    task.add_done_callback(forget)
                     continue
                 sleep_s = self._sleep_until_due(now)
             await asyncio.sleep(sleep_s)

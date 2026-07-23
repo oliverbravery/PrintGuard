@@ -183,10 +183,13 @@ class LiteRtInference:
     async def run(self, tensor: np.ndarray) -> np.ndarray:
         """Returns the model embedding for one preprocessed frame."""
         worker = await self._available.get()
-        try:
-            return await asyncio.to_thread(worker.run, tensor)
-        finally:
+        task = asyncio.create_task(asyncio.to_thread(worker.run, tensor))
+
+        def release(_: asyncio.Task[np.ndarray]) -> None:
             self._available.put_nowait(worker)
+
+        task.add_done_callback(release)
+        return await asyncio.shield(task)
 
     def benchmark(self) -> float:
         """Measures concurrent model throughput in inferences per second."""

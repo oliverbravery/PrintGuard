@@ -360,6 +360,7 @@ class Engine:
         source = camera.frame_source
         if source is None:
             return
+        self.scheduler.cancel_camera(camera)
         camera.frame_source = None
         source.close()
         await self.platform.release_camera(camera.id, camera.source)
