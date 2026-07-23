@@ -53,6 +53,7 @@ class Platform(Protocol):
 
     mode: str
     workers: int
+    inference_device: str
     version: str
     update_repo: str | None
     """GitHub ``owner/name`` to check for updates, or None to never call out

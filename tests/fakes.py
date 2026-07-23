@@ -40,6 +40,7 @@ class FakePlatform:
 
     mode = "test"
     workers = 1
+    inference_device = "test"
     version = "2.1.0"
     update_repo: str | None = None
     update_asset: str | None = None

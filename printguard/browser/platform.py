@@ -60,6 +60,7 @@ class BrowserPlatform:
 
     mode = "local"
     workers = 1
+    inference_device = "WASM"
     version = ""
     update_repo = None
     update_asset = None

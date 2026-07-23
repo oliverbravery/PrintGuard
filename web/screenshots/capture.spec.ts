@@ -52,7 +52,7 @@ function engine(): EngineState {
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
     settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
-    tokens: [], stats: { workers: 4, infer_ms: 18, capacity_fps: 36 }, integrations: [], notifiers: [],
+    tokens: [], stats: { workers: 4, inference_device: "CPU", infer_ms: 18, capacity_fps: 36 }, integrations: [], notifiers: [],
   };
 }
 

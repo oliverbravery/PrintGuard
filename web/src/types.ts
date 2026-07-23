@@ -193,6 +193,7 @@ export interface Layout {
 
 export interface EngineStats {
   workers: number;
+  inference_device: string;
   infer_ms: number;
   capacity_fps: number;
 }

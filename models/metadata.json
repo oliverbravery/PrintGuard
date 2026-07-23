@@ -3,7 +3,8 @@
     "architecture": "ShuffleNetV2-x1.0 (encoder / feature extractor only)",
     "source": "https://github.com/oliverbravery/Edge-FDM-Fault-Detection",
     "embedding_dim": 1024,
-    "tflite_file": "encoder_float32.tflite"
+    "tflite_file": "encoder_float32.tflite",
+    "onnx_file": "encoder_float32.onnx"
   },
   "input": {
     "layout": "NCHW",

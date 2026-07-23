@@ -153,6 +153,7 @@ export function Header() {
         <div className="flex-1" />
         {stats && (
           <div className="flex items-center gap-5 md:mr-2">
+            <Readout label="compute" value={stats.inference_device.toLowerCase()} className="hidden lg:block" />
             <Readout label="capacity" value={`${stats.capacity_fps.toFixed(1)} fps`} className="hidden min-[400px]:block" />
             <Readout label="latency" value={`${stats.infer_ms.toFixed(0)} ms`} />
             <Readout label="workers" value={String(stats.workers)} />

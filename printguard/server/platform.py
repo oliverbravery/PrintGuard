@@ -6,27 +6,24 @@ import asyncio
 import io
 import json
 import logging
-import os
 import re
 import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
-from importlib import metadata
 from functools import partial
+from importlib import metadata
 from pathlib import Path
 from typing import Any, Callable
 
 import av
 import httpx
 import numpy as np
-from ai_edge_litert.interpreter import Interpreter
-
 from ..engine import vision
 from ..engine.platform import Frame
 from .bambu_camera import open_bambu_jpeg_stream
+from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
 from .publish import H264Push
 
@@ -378,7 +375,7 @@ class AVSource:
 
 
 class ServerPlatform:
-    """Hub mode platform: LiteRT on CPU threads, frames via MediaMTX."""
+    """Hub mode platform: hardware inference and frames via MediaMTX."""
 
     mode = "hub"
     update_repo = "oliverbravery/PrintGuard"
@@ -388,15 +385,15 @@ class ServerPlatform:
     ) -> None:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
-        self.workers = max(1, (os.cpu_count() or 2) - 1)
-        self._executor = ThreadPoolExecutor(max_workers=self.workers)
-        self._thread_local = threading.local()
-        self._model_path = str(model_dir / "encoder_float32.tflite")
+        data_dir.mkdir(parents=True, exist_ok=True)
+        self._inference = Inference(model_dir / "encoder_float32.onnx", data_dir / "model-cache")
+        self.workers = self._inference.workers
+        self.inference_device = self._inference.device
+        logger.info("inference ready: %s (%d workers)", self.inference_device, self.workers)
         meta = json.loads((model_dir / "metadata.json").read_text())
         protos = json.loads((model_dir / "prototypes.json").read_text())["prototypes"]
         self.assets = vision.assets_from_dicts(meta, protos)
         self._state_path = data_dir / "state.json"
-        data_dir.mkdir(parents=True, exist_ok=True)
         self._client = httpx.AsyncClient(follow_redirects=True)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client)
         self._sources: dict[str, AVSource] = {}
@@ -404,27 +401,12 @@ class ServerPlatform:
     async def close(self) -> None:
         """Releases the HTTP client and inference workers."""
         await self._client.aclose()
-        self._executor.shutdown(wait=False, cancel_futures=True)
-
-    def _interpreter(self) -> Interpreter:
-        interpreter = getattr(self._thread_local, "interpreter", None)
-        if interpreter is None:
-            interpreter = Interpreter(model_path=self._model_path)
-            interpreter.allocate_tensors()
-            self._thread_local.interpreter = interpreter
-        return interpreter
-
-    def _infer_sync(self, rgb: np.ndarray) -> dict[str, Any]:
-        interpreter = self._interpreter()
-        tensor = vision.preprocess(rgb, self.assets)
-        interpreter.set_tensor(interpreter.get_input_details()[0]["index"], tensor)
-        interpreter.invoke()
-        embedding = interpreter.get_tensor(interpreter.get_output_details()[0]["index"])[0].copy()
-        return vision.classify(embedding, self.assets)
+        self._inference.close()
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
-        """Runs the model on a worker thread."""
-        return await asyncio.get_running_loop().run_in_executor(self._executor, self._infer_sync, rgb)
+        """Runs the model through the selected hardware provider."""
+        tensor = await asyncio.to_thread(vision.preprocess, rgb, self.assets)
+        return vision.classify(await self._inference.run(tensor), self.assets)
 
     async def discover_cameras(self) -> list[dict[str, Any]]:
         """Lists the host's video devices and active MediaMTX paths as attachable sources."""
@@ -545,7 +527,7 @@ class ServerPlatform:
             return b"".join(bytes(p) for p in packets)
 
         try:
-            return await asyncio.get_running_loop().run_in_executor(self._executor, encode)
+            return await asyncio.to_thread(encode)
         except Exception:
             return None
 
@@ -556,7 +538,7 @@ class ServerPlatform:
                 return next(container.decode(video=0)).to_ndarray(format="rgb24")
 
         try:
-            return await asyncio.get_running_loop().run_in_executor(self._executor, decode)
+            return await asyncio.to_thread(decode)
         except Exception:
             return None
 

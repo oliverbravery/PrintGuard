@@ -53,6 +53,7 @@ class Scheduler:
         """Live scheduler statistics for the state event."""
         return {
             "workers": self._platform.workers,
+            "inference_device": self._platform.inference_device,
             "infer_ms": round(self.infer_ms, 1),
             "capacity_fps": round(self.capacity_fps(), 2),
         }
