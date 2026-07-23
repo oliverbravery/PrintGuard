@@ -48,6 +48,7 @@ export interface Toast {
 }
 
 export type DialogKind = "cameras" | "printers" | "monitor" | "settings" | "update" | "guide" | "report" | null;
+export type SettingsTabId = "appearance" | "alerts" | "mqtt" | "updates" | "api" | "advanced";
 
 interface PgStore {
   mode: Mode | null;
@@ -70,6 +71,7 @@ interface PgStore {
   historyData: Record<string, MonitorHistory | null>;
   snapshotCache: Record<string, string>;
   dialog: DialogKind;
+  settingsTab: SettingsTabId | null;
   focusCameraId: string | null;
   createdToken: { name: string; secret: string } | null;
   customising: boolean;
@@ -88,6 +90,7 @@ interface PgStore {
   flushUpdates(): void;
   discover(): void;
   openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
+  openSettings(tab?: SettingsTabId): void;
   openDetail(id: string | null): void;
   openStats(id: string | null): void;
   fetchSnapshot(monitorId: string, id: string): void;
@@ -308,6 +311,7 @@ export const useStore = create<PgStore>((set, get) => {
     historyData: {},
     snapshotCache: {},
     dialog: null,
+    settingsTab: null,
     focusCameraId: null,
     createdToken: null,
     customising: false,
@@ -382,7 +386,30 @@ export const useStore = create<PgStore>((set, get) => {
 
     openDialog(dialog, focusCameraId = null) {
       get().flushUpdates();
-      set({ dialog, discovered: null, printerTest: null, notifyTest: null, reportResult: null, focusCameraId, createdToken: null });
+      set({
+        dialog,
+        discovered: null,
+        printerTest: null,
+        notifyTest: null,
+        reportResult: null,
+        focusCameraId,
+        createdToken: null,
+        settingsTab: null,
+      });
+    },
+
+    openSettings(settingsTab = "alerts") {
+      get().flushUpdates();
+      set({
+        dialog: "settings",
+        discovered: null,
+        printerTest: null,
+        notifyTest: null,
+        reportResult: null,
+        focusCameraId: null,
+        createdToken: null,
+        settingsTab,
+      });
     },
 
     openDetail(detailId) {

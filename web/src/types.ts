@@ -192,7 +192,6 @@ export interface Layout {
 }
 
 export interface EngineStats {
-  workers: number;
   inference_device: string;
   infer_ms: number;
   capacity_fps: number;
@@ -230,6 +229,7 @@ export interface EngineState {
     theme: string;
     themes: CustomTheme[];
     layout?: Layout;
+    inference_runtime: "auto" | "litert" | "onnx";
   };
   tokens: ApiToken[];
   stats: EngineStats;

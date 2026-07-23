@@ -26,7 +26,7 @@ flowchart LR
     engine -- "Platform protocol" --> platform
 
     subgraph platform["one Platform per runtime"]
-        server["server/platform.py<br/>CPython · ONNX Runtime · PyAV · httpx"]
+        server["server/platform.py<br/>CPython · LiteRT / ONNX Runtime · PyAV · httpx"]
         browser["browser/platform.py<br/>Pyodide · LiteRT.js · getUserMedia · fetch"]
     end
 
@@ -42,7 +42,8 @@ needs but cannot implement portably. Identical signatures, different runtimes:
 
 | Method | Hub (CPython) | Local (browser) |
 |---|---|---|
-| `infer(rgb)` | ONNX Runtime execution providers | LiteRT.js in WASM via a JS bridge |
+| `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark | No-op |
+| `infer(rgb)` | Selected LiteRT or ONNX Runtime model | LiteRT.js in WASM via a JS bridge |
 | `discover_cameras()` | MediaMTX path list | `enumerateDevices()` |
 | `open_camera(id, source)` | PyAV reader thread; MediaMTX pulls RTSP and WHEP streams | `getUserMedia` + canvas grabs |
 | `http(...)` | httpx | `fetch` (CORS applies) |
@@ -209,7 +210,7 @@ printguard/
     integrations/    printer service adapters (OctoPrint, Klipper, Elegoo, PrusaLink, Bambu Lab, …)
     notifiers/       alert channel adapters (ntfy, Telegram, Discord, native desktop, …)
     adapters.py      shared adapter contract (id, label, docs_url, JSON-schema config)
-  server/            hub platform: FastAPI, bundled MediaMTX (child process), ONNX Runtime, PyAV
+  server/            hub platform: FastAPI, bundled MediaMTX (child process), LiteRT / ONNX Runtime, PyAV
     api.py           REST API (/api/v1) over the engine protocol, scoped by token
     mcp.py           MCP server for agents, derived from the REST API
     mqtt.py          Home Assistant MQTT bridge (device discovery + two-way control)

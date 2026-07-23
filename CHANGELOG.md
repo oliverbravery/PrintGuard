@@ -14,12 +14,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - **Health checks can now read the running PrintGuard version.** The unauthenticated
   `/api/health` endpoint reports readiness and the installed version for uptime and update
   monitors without exposing printer, camera or configuration data.
-- **Hub and desktop model inference now use the best available hardware automatically.**
-  One ONNX model now runs through Apple Core ML, Windows ML, Intel OpenVINO or NVIDIA
-  TensorRT RTX according to the host. Docker and Unraid users can expose `/dev/dri` for
-  Intel hardware, while NVIDIA hosts can use the `-nvidia` image with GPU passthrough.
-  Other systems continue on an optimised CPU path, and the dashboard names the active
-  provider.
+- **Hub and desktop model inference now selects the fastest runtime on each machine.**
+  Automatic mode benchmarks LiteRT and ONNX Runtime locally, with ONNX able to use Apple
+  Core ML, Windows ML, Intel OpenVINO or NVIDIA TensorRT RTX. The new **Advanced** settings
+  tab can pin either model runtime, and the dashboard's compute readout opens it directly.
+  Docker and Unraid users can expose `/dev/dri` for Intel hardware, while NVIDIA hosts can
+  use the `-nvidia` image with GPU passthrough.
 
 ## [2.3.6] - 2026-07-19
 

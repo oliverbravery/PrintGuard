@@ -9,12 +9,34 @@ export function Wordmark({ size = "text-xl" }: { size?: string }) {
   );
 }
 
-function Readout({ label, value, className = "hidden md:block" }: { label: string; value: string; className?: string }) {
-  return (
-    <div className={`text-right leading-tight ${className}`}>
+function Readout({
+  label,
+  value,
+  className = "hidden md:block",
+  onClick,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+  onClick?: () => void;
+}) {
+  const content = (
+    <>
       <span className="mono block text-[0.78rem] text-text-0">{value}</span>
       <span className="label block">{label}</span>
-    </div>
+    </>
+  );
+  return onClick ? (
+    <button
+      className={`cursor-pointer text-right leading-tight hover:opacity-75 ${className}`}
+      onClick={onClick}
+      title="Choose model runtime"
+      aria-label={`Compute: ${value}. Choose model runtime`}
+    >
+      {content}
+    </button>
+  ) : (
+    <div className={`text-right leading-tight ${className}`}>{content}</div>
   );
 }
 
@@ -130,7 +152,7 @@ function ReportChip() {
 }
 
 export function Header() {
-  const { engine, mode, leaveMode } = useStore();
+  const { engine, mode, leaveMode, openSettings } = useStore();
   const stats = engine?.stats;
   return (
     <header className="sticky top-0 z-30 border-b border-line-0 bg-ink-0/90 backdrop-blur-sm">
@@ -153,10 +175,14 @@ export function Header() {
         <div className="flex-1" />
         {stats && (
           <div className="flex items-center gap-5 md:mr-2">
-            <Readout label="compute" value={stats.inference_device.toLowerCase()} className="hidden lg:block" />
+            <Readout
+              label="compute"
+              value={stats.inference_device.toLowerCase()}
+              className="hidden lg:block"
+              onClick={mode === "hub" ? () => openSettings("advanced") : undefined}
+            />
             <Readout label="capacity" value={`${stats.capacity_fps.toFixed(1)} fps`} className="hidden min-[400px]:block" />
             <Readout label="latency" value={`${stats.infer_ms.toFixed(0)} ms`} />
-            <Readout label="workers" value={String(stats.workers)} />
           </div>
         )}
         <HeaderActions className="hidden md:flex md:items-center md:gap-2 lg:gap-3" />

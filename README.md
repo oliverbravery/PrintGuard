@@ -106,11 +106,14 @@ on every release.
 
 #### Hardware acceleration
 
-Hub mode runs one ONNX model through the fastest supported provider it can use. On macOS, Core ML
-can use the CPU, GPU and Neural Engine. On Windows 11 24H2 or newer, Windows ML installs the
-matching certified Intel, NVIDIA, AMD or Qualcomm provider on first launch; older Windows versions
-use the optimised CPU runtime. The standard amd64 image uses Intel CPU, GPU or NPU hardware through
-OpenVINO; arm64 images and other Linux hosts use the optimised CPU runtime.
+Hub and desktop mode include both LiteRT and ONNX models. **Automatic** benchmarks their concurrent
+throughput on the host and uses the faster runtime; **Settings → Advanced** can pin either one.
+ONNX Runtime selects the fastest supported provider it can use. On macOS, Core ML can use the CPU,
+GPU and Neural Engine. On Windows 11 24H2 or newer, Windows ML installs the matching certified
+Intel, NVIDIA, AMD or Qualcomm provider on first launch; older Windows versions use the optimised
+CPU runtime. The standard amd64 image uses Intel CPU, GPU or NPU hardware through OpenVINO; arm64
+images and other Linux hosts use the optimised CPU runtime. LiteRT uses its optimised CPU path for
+this model.
 
 On an Intel Linux host, expose the integrated or discrete GPU:
 
@@ -140,8 +143,8 @@ docker run -d --name printguard --restart unless-stopped \
   ghcr.io/oliverbravery/printguard:latest-nvidia
 ```
 
-The dashboard's **compute** readout names the active provider. If no compatible accelerator is
-available, ONNX Runtime uses the CPU.
+The dashboard's **compute** readout names the active provider and opens the runtime setting. If no
+compatible accelerator is available, ONNX Runtime uses the CPU.
 
 ## Two modes, one engine
 
@@ -151,7 +154,7 @@ it when you're ready.
 | | Local mode | Hub mode |
 |---|---|---|
 | Engine runs | in your browser (Pyodide) | on the server (CPython) |
-| Model runs | [LiteRT.js (WASM)](https://developers.google.com/edge/litert) | [ONNX Runtime](https://onnxruntime.ai/) |
+| Model runs | [LiteRT.js (WASM)](https://developers.google.com/edge/litert) | [LiteRT](https://github.com/google-ai-edge/LiteRT) or [ONNX Runtime](https://onnxruntime.ai/) |
 | Frames leave the device | never | only to your own server |
 | Survives closing the tab | no | yes |
 
