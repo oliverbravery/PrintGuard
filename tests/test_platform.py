@@ -6,13 +6,16 @@ import asyncio
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from printguard.server.platform import ServerPlatform
 
 
-async def test_onnx_model_inference(tmp_path: Path) -> None:
-    """The production model loads and classifies through ONNX Runtime."""
+@pytest.mark.parametrize("runtime", ["auto", "litert", "onnx"])
+async def test_model_inference(tmp_path: Path, runtime: str) -> None:
+    """Every selectable production model runtime loads and classifies."""
     platform = ServerPlatform(Path("models"), tmp_path, "http://localhost:9997", "rtsp://localhost:8554")
+    await platform.configure({"inference_runtime": runtime})
     image = np.arange(240 * 320 * 3, dtype=np.uint8).reshape(240, 320, 3)
 
     results = await asyncio.gather(platform.infer(image), platform.infer(image))

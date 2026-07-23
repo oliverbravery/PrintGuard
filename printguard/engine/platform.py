@@ -63,6 +63,10 @@ class Platform(Protocol):
     """Release asset filename this deployment updates with (the desktop app's
     installer), or None when the deployment updates outside the app."""
 
+    async def configure(self, settings: dict[str, Any]) -> None:
+        """Applies platform-owned settings before inference starts."""
+        ...
+
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
         """Runs the model on an RGB frame and returns a classify() result."""
         ...

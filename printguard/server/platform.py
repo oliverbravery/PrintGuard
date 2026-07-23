@@ -386,10 +386,10 @@ class ServerPlatform:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
         data_dir.mkdir(parents=True, exist_ok=True)
-        self._inference = Inference(model_dir / "encoder_float32.onnx", data_dir / "model-cache")
-        self.workers = self._inference.workers
-        self.inference_device = self._inference.device
-        logger.info("inference ready: %s (%d workers)", self.inference_device, self.workers)
+        self._model_dir = model_dir
+        self._model_cache = data_dir / "model-cache"
+        self.workers = 1
+        self.inference_device = "Initialising"
         meta = json.loads((model_dir / "metadata.json").read_text())
         protos = json.loads((model_dir / "prototypes.json").read_text())["prototypes"]
         self.assets = vision.assets_from_dicts(meta, protos)
@@ -397,6 +397,23 @@ class ServerPlatform:
         self._client = httpx.AsyncClient(follow_redirects=True)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client)
         self._sources: dict[str, AVSource] = {}
+
+    async def configure(self, settings: dict[str, Any]) -> None:
+        """Selects the requested inference runtime."""
+        runtime = settings["inference_runtime"]
+        inference = await asyncio.to_thread(Inference, self._model_dir, self._model_cache, runtime)
+        previous = getattr(self, "_inference", None)
+        self._inference = inference
+        self.workers = inference.workers
+        self.inference_device = inference.device
+        if previous is not None:
+            previous.close()
+        logger.info(
+            "inference ready: %s via %s (%d workers)",
+            self.inference_device,
+            inference.runtime if runtime == "auto" else runtime,
+            self.workers,
+        )
 
     async def close(self) -> None:
         """Releases the HTTP client and inference workers."""

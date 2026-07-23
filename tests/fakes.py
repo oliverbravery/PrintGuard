@@ -58,6 +58,11 @@ class FakePlatform:
         self.releases: list[dict[str, Any]] = []
         self.released_cameras: list[str] = []
         self.state: dict[str, Any] = {}
+        self.inference_runtime = "auto"
+
+    async def configure(self, settings: dict[str, Any]) -> None:
+        """Records the selected inference runtime."""
+        self.inference_runtime = settings["inference_runtime"]
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
         await asyncio.sleep(self.infer_s)

@@ -22,7 +22,7 @@ staging = Path(tempfile.mkdtemp(prefix="printguard-build-"))
 icon_png = staging / "icon.png"
 shutil.copyfile(ROOT / "web" / "public" / "apple-touch-icon.png", icon_png)
 
-binaries = collect_dynamic_libs("av") + collect_dynamic_libs("onnxruntime")
+binaries = collect_dynamic_libs("av") + collect_dynamic_libs("onnxruntime") + collect_dynamic_libs("ai_edge_litert")
 if MEDIAMTX:
     binaries.append((MEDIAMTX, "."))
 

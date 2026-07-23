@@ -85,6 +85,9 @@ class BrowserPlatform:
         protos = jsonlib.loads(await (await pyfetch("models/prototypes.json")).string())["prototypes"]
         return cls(bridge, vision.assets_from_dicts(meta, protos))
 
+    async def configure(self, settings: dict[str, Any]) -> None:
+        """Accepts shared settings that do not alter local inference."""
+
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
         """Preprocesses in numpy and runs the model through LiteRT.js."""
         from pyodide.ffi import to_js

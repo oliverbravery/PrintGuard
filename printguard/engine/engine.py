@@ -38,7 +38,15 @@ RECENT_EVENTS_MAX = 100
 RECENT_EVENT_TYPES = ("alert", "warning", "device", "error")
 EVENT_LOG_LEVELS = {"alert": logging.INFO, "warning": logging.WARNING, "error": logging.ERROR, "device": logging.DEBUG}
 UPDATE_CHECK_INTERVAL_S = 86400.0
-SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}, "update_check": True, "mqtt": {}, "theme": "system", "themes": [], "layout": {}}
+SETTINGS_DEFAULTS: dict[str, Any] = {
+    "notifiers": {},
+    "update_check": True,
+    "mqtt": {},
+    "theme": "system",
+    "themes": [],
+    "layout": {},
+    "inference_runtime": "auto",
+}
 
 
 class Engine:
@@ -87,6 +95,8 @@ class Engine:
         """Restores persisted state and launches the background loops."""
         persisted = self.platform.load_state() or {}
         self.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in persisted.get("settings", {}).items() if k in SETTINGS_DEFAULTS}}
+        await self.platform.configure(self.settings)
+        self.scheduler.reset()
         for record in persisted.get("tokens", []):
             self.tokens.add(Token(**record))
         for record in persisted.get("printers", []):
@@ -617,7 +627,12 @@ class Engine:
 
     async def _cmd_settings_update(self, message: dict[str, Any]) -> None:
         patch = {k: v for k, v in message.get("patch", {}).items() if k in SETTINGS_DEFAULTS}
-        self.settings = {**self.settings, **patch}
+        settings = {**self.settings, **patch}
+        if settings["inference_runtime"] not in ("auto", "litert", "onnx"):
+            raise ValueError("inference runtime must be auto, litert or onnx")
+        if settings["inference_runtime"] != self.settings["inference_runtime"]:
+            await self.scheduler.reconfigure(lambda: self.platform.configure(settings))
+        self.settings = settings
         logger.info("settings updated: %s", sorted(patch))
 
     async def _cmd_token_create(self, message: dict[str, Any]) -> None:

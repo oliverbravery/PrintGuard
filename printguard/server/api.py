@@ -129,6 +129,7 @@ class ProviderTest(BaseModel):
 class SettingsPatch(BaseModel):
     notifiers: dict[str, dict[str, Any]] | None = None
     mqtt: dict[str, Any] | None = None
+    inference_runtime: Literal["auto", "litert", "onnx"] | None = None
 
 
 class ActionBody(BaseModel):

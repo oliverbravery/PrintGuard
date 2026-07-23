@@ -433,12 +433,15 @@ async def test_state_persists_across_restart() -> None:
         monitor_id = next(iter(engine.monitors))
         printer_id = await _register_printer(engine)
         await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"name": "Resurrected", "notify": True, "printer_id": printer_id}})
-        await engine.handle({"cmd": "settings.update", "patch": {"theme": "light"}})
+        await engine.handle({"cmd": "settings.update", "patch": {"theme": "light", "inference_runtime": "onnx"}})
+        assert platform.inference_runtime == "onnx"
 
     reborn = Engine(platform)
     await reborn.start()
     try:
         assert reborn.settings["theme"] == "light", "theme survives a restart"
+        assert reborn.settings["inference_runtime"] == "onnx"
+        assert platform.inference_runtime == "onnx"
         assert [c.name for c in reborn.cameras.values()] == ["cam10.0"]
         restored = reborn.monitors[monitor_id]
         assert restored["name"] == "Resurrected"
