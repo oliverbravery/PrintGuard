@@ -6,7 +6,6 @@ services:
     ports:
       - "8000:8000"
       - "8554:8554"
-      - "1935:1935"
     volumes:
       - ./data:/data
     extra_hosts:

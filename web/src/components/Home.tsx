@@ -14,7 +14,7 @@ const WIN_DOWNLOAD = `${DOWNLOAD}/PrintGuard-windows-x64.zip`;
 const UNRAID_URL = `${REPO_URL}/blob/main/templates/printguard.xml`;
 
 const DOCKER_CMD = `docker run -d --name printguard --restart unless-stopped \\
-  -p 8000:8000 -p 8554:8554 -p 1935:1935 \\
+  -p 8000:8000 -p 8554:8554 \\
   -v printguard:/data \\
   ghcr.io/oliverbravery/printguard`;
 const COMPOSE_CMD =

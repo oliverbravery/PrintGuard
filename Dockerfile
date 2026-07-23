@@ -35,5 +35,5 @@ ENV PATH="/app/.venv/bin:$PATH" \
     MEDIAMTX_BINARY=/usr/local/bin/mediamtx \
     MEDIAMTX_CONFIG=/app/mediamtx.yml
 VOLUME /data
-EXPOSE 8000 8554 1935
+EXPOSE 8000 8554
 CMD ["printguard"]
