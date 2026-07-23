@@ -6,8 +6,6 @@ import { Modal } from "./Dialog";
 import { DefectBars, RiskBandChart } from "./RiskChart";
 import { riskColor, RiskGauge } from "./RiskGauge";
 
-const HISTORY_POLL_MS = 5000;
-
 function ago(ts: number, now: number): string {
   const s = Math.max(0, now - ts);
   if (s < 60) return `${Math.floor(s)}s ago`;
@@ -63,7 +61,7 @@ function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId:
 }
 
 export function StatsPage({ monitor }: { monitor: Monitor }) {
-  const { historyData, openStats, send } = useStore();
+  const { historyData, openStats } = useStore();
   const titleId = useId();
   const [period, setPeriod] = useState<Period>("1h");
   const [sortByScore, setSortByScore] = useState(false);
@@ -71,11 +69,6 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
   const enlargedUrl = useStore((s) => (enlarged ? s.snapshotCache[enlarged.id] : undefined));
   const history = historyData[monitor.id];
   const close = () => openStats(null);
-
-  useEffect(() => {
-    const timer = setInterval(() => send({ cmd: "history.get", monitor_id: monitor.id }), HISTORY_POLL_MS);
-    return () => clearInterval(timer);
-  }, [monitor.id]);
 
   const grouped = useMemo(() => (history ? groupBuckets(history.buckets, period, history.now) : []), [history, period]);
   const stats = history?.stats ?? {};

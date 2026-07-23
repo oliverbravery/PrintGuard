@@ -198,6 +198,7 @@ export const useStore = create<PgStore>((set, get) => {
       }
       case "result":
         set((s) => ({ history: appendScore(s.history, event.monitor_id, { ts: event.ts, score: event.score }) }));
+        if (get().statsMonitorId === event.monitor_id) get().send({ cmd: "history.get", monitor_id: event.monitor_id });
         break;
       case "alert": {
         const name = get().engine?.monitors.find((m) => m.id === event.monitor_id)?.name ?? "monitor";
