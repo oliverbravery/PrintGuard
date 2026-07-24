@@ -12,6 +12,7 @@ const DOWNLOAD = `${REPO_URL}/releases/latest/download`;
 const MAC_DOWNLOAD = `${DOWNLOAD}/PrintGuard-macos-arm64.dmg`;
 const WIN_DOWNLOAD = `${DOWNLOAD}/PrintGuard-windows-x64.zip`;
 const UNRAID_URL = `${REPO_URL}/blob/main/templates/printguard.xml`;
+const ACCELERATION_URL = `${REPO_URL}#hardware-acceleration`;
 
 const DOCKER_CMD = `docker run -d --name printguard --restart unless-stopped \\
   -p 8000:8000 -p 8554:8554 \\
@@ -238,6 +239,15 @@ export function Home() {
             <Command command={DOCKER_CMD} />
             <p className="mb-2 mt-5 text-xs text-text-2">OR WITH COMPOSE</p>
             <Command command={COMPOSE_CMD} />
+            <p className="mt-4 text-xs leading-relaxed text-text-2">
+              Inference runs on the CPU out of the box. An Intel GPU or NPU needs only{" "}
+              <span className="text-text-1">--device /dev/dri</span>; an NVIDIA RTX 30 series or newer host uses the{" "}
+              <span className="text-text-1">:latest-nvidia</span> image with{" "}
+              <span className="text-text-1">--gpus all</span>.{" "}
+              <a className="text-text-1 underline decoration-line-0 underline-offset-2 transition-colors hover:text-accent" href={ACCELERATION_URL} target="_blank" rel="noreferrer">
+                Hardware acceleration ↗
+              </a>
+            </p>
             <a className="mono mt-4 inline-block text-[0.7rem] text-text-2 transition-colors hover:text-accent" href={UNRAID_URL} target="_blank" rel="noreferrer">
               Unraid — install from Community Applications ↗
             </a>

@@ -144,6 +144,17 @@ docker run -d --name printguard --restart unless-stopped \
   ghcr.io/oliverbravery/printguard:latest-nvidia
 ```
 
+For Docker Compose, take the same image and reserve the GPU (Compose v2.30 or newer):
+
+```yaml
+    image: ghcr.io/oliverbravery/printguard:latest-nvidia
+    gpus: all
+```
+
+On Unraid, set the repository to `ghcr.io/oliverbravery/printguard:latest-nvidia` and add
+`--runtime=nvidia --gpus all` to *Extra Parameters*; an Intel GPU needs only the template's
+**Intel GPU** device.
+
 The dashboard's **compute** readout names the active provider and opens the runtime setting. If no
 compatible accelerator is available, ONNX Runtime uses the CPU.
 

@@ -1,5 +1,7 @@
 services:
   printguard:
+    # GPU inference (an Intel /dev/dri device, or the -nvidia image) is set up in the README's
+    # "Hardware acceleration" section; the CPU runtime needs nothing here.
     image: ghcr.io/oliverbravery/printguard:latest
     build: .
     restart: unless-stopped
