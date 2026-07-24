@@ -8,16 +8,19 @@ COPY web/ ./
 COPY docs/assets/ ../docs/assets/
 RUN npm run build
 
-FROM python:3.13-slim AS deps
+FROM python:3.13-slim-bookworm AS deps
+ARG INFERENCE_EXTRA
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project --compile-bytecode
+RUN uv sync --frozen --no-dev --no-install-project --compile-bytecode $INFERENCE_EXTRA
 COPY printguard/ printguard/
-RUN uv sync --frozen --no-dev --compile-bytecode
+RUN uv sync --frozen --no-dev --compile-bytecode $INFERENCE_EXTRA
 
-FROM python:3.13-slim
+FROM python:3.13-slim-bookworm
 WORKDIR /app
+RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then apt-get update && apt-get install -y --no-install-recommends intel-opencl-icd ocl-icd-libopencl1; fi \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/.venv .venv
 COPY --from=mediamtx /mediamtx /usr/local/bin/mediamtx
 COPY printguard/ printguard/
@@ -32,5 +35,5 @@ ENV PATH="/app/.venv/bin:$PATH" \
     MEDIAMTX_BINARY=/usr/local/bin/mediamtx \
     MEDIAMTX_CONFIG=/app/mediamtx.yml
 VOLUME /data
-EXPOSE 8000 8554 1935
+EXPOSE 8000 8554
 CMD ["printguard"]

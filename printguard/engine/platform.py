@@ -53,6 +53,7 @@ class Platform(Protocol):
 
     mode: str
     workers: int
+    inference_device: str
     version: str
     update_repo: str | None
     """GitHub ``owner/name`` to check for updates, or None to never call out
@@ -61,6 +62,10 @@ class Platform(Protocol):
     update_asset: str | None
     """Release asset filename this deployment updates with (the desktop app's
     installer), or None when the deployment updates outside the app."""
+
+    async def configure(self, settings: dict[str, Any]) -> None:
+        """Applies platform-owned settings before inference starts."""
+        ...
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
         """Runs the model on an RGB frame and returns a classify() result."""

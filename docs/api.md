@@ -9,6 +9,19 @@ the UI:
 
 Both are hub-only. Local (in-browser) mode has no server to host them.
 
+## Health and version
+
+`GET /api/health` is the unauthenticated hub readiness endpoint for uptime checks and
+update monitors. A successful response is not cached and includes the installed version:
+
+```json
+{"ok": true, "version": "2.3.7"}
+```
+
+It returns `200 OK` only after the engine has started. Camera, printer and notifier health
+is available through the authenticated REST API and does not change the service-level
+probe.
+
 ## Authentication & scopes
 
 PrintGuard ships no identity layer of its own - put a proxy in front of the hub
@@ -179,7 +192,7 @@ threshold applied) - the quickest per-camera "failing?" read. It is `"unknown"` 
 frame can't be classified (e.g. the embedding isn't finite).
 
 **Monitor object** (`GET /monitors`, `GET /monitors/{id}`): binds a camera (+ optional
-printer) and holds the detection policy and the latest alert:
+printer) and holds the detection policy, latest result and latest alert:
 
 ```jsonc
 {
@@ -189,6 +202,9 @@ printer) and holds the detection policy and the latest alert:
   "sensitivity": 1.0,          // scales how far the distance margin moves the score off 0.5
   "threshold": 0.6,            // defect score at/above which a frame counts as a failure
   "watching": true,            // whether it is actively inferring right now
+  "result": {                  // latest per-monitor score, or null before the first inference
+    "score": 0.42, "ts": 1720000000.0
+  },
   "alert": {                   // null until a sustained defect trips the watchdog
     "score": 0.82, "action": "pause", "ts": 1720000000.0
   }
@@ -199,9 +215,11 @@ printer) and holds the detection policy and the latest alert:
 = more defective) applies a monitor's `sensitivity` to the frame's distance margin, so it is
 **per-monitor, not on the camera**. It appears in:
 
-- the `result` events on the WebSocket and `GET /events`:
+- the `result` events on the WebSocket:
   `{ "event": "result", "monitor_id", "camera_id", "score" (0–1), "prediction" (this
-  monitor's `threshold` applied), "margin", "ms", "ts" }`,
+  monitor's `threshold` applied), "margin", "ms", "ts" }`, sampled at up to 5 Hz per
+  monitor,
+- the monitor object's latest `result`, which is also carried by each full `state` snapshot,
 - a monitor's `alert.score` once it trips, and
 - the MQTT *Defect score* sensor, published as `0–100` (the `0–1` score ×100).
 

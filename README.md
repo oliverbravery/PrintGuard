@@ -86,7 +86,7 @@ PrintGuard is a **single container** - install with one command:
 
 ```bash
 docker run -d --name printguard --restart unless-stopped \
-  -p 8000:8000 -p 8554:8554 -p 1935:1935 \
+  -p 8000:8000 -p 8554:8554 \
   -v printguard:/data \
   ghcr.io/oliverbravery/printguard
 ```
@@ -98,11 +98,65 @@ that binds them.
   [template](templates/printguard.xml)) and install from the UI; no terminal needed.
 - **Docker Compose** - prefer a file? [`docker-compose.yaml`](docker-compose.yaml): `curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml && docker compose up -d`.
 
-Ports `8554`/`1935` only matter for cameras that *push* a stream into PrintGuard - most setups
-(URL pull, Bambu, or "this device") can leave them off. Images for `amd64` and `arm64`
+Port `8554` only matters for cameras that *push* RTSP into PrintGuard. To accept an RTMP push,
+also publish `-p 1935:1935`. Most setups (URL pull, Bambu, or "this device") can leave both off.
+Images for `amd64` and `arm64`
 (Raspberry Pi 4/5) are published to
 [`ghcr.io/oliverbravery/printguard`](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
 on every release.
+
+#### Hardware acceleration
+
+Hub and desktop mode include both LiteRT and ONNX models. **Automatic** benchmarks their concurrent
+throughput on the host and uses the faster runtime; **Settings → Advanced** can pin either one.
+ONNX Runtime selects the fastest supported provider it can use. On macOS, Core ML can use the CPU,
+GPU and Neural Engine. On Windows 11 24H2 or newer, Windows ML installs the matching certified
+Intel, NVIDIA, AMD or Qualcomm provider on first launch; older Windows versions use the optimised
+CPU runtime. The standard amd64 image uses Intel CPU, GPU or NPU hardware through OpenVINO; arm64
+images and other Linux hosts use the optimised CPU runtime. LiteRT uses its optimised CPU path for
+this model.
+
+On an Intel Linux host, expose the integrated or discrete GPU:
+
+```bash
+docker run -d --name printguard --restart unless-stopped \
+  --device /dev/dri \
+  -p 8000:8000 -p 8554:8554 \
+  -v printguard:/data \
+  ghcr.io/oliverbravery/printguard
+```
+
+For Docker Compose, add the device to the `printguard` service:
+
+```yaml
+    devices:
+      - /dev/dri:/dev/dri
+```
+
+For an NVIDIA RTX 30 series or newer host with the NVIDIA Container Toolkit installed, use the
+NVIDIA image:
+
+```bash
+docker run -d --name printguard --restart unless-stopped \
+  --gpus all \
+  -p 8000:8000 -p 8554:8554 \
+  -v printguard:/data \
+  ghcr.io/oliverbravery/printguard:latest-nvidia
+```
+
+For Docker Compose, take the same image and reserve the GPU (Compose v2.30 or newer):
+
+```yaml
+    image: ghcr.io/oliverbravery/printguard:latest-nvidia
+    gpus: all
+```
+
+On Unraid, set the repository to `ghcr.io/oliverbravery/printguard:latest-nvidia` and add
+`--runtime=nvidia --gpus all` to *Extra Parameters*; an Intel GPU needs only the template's
+**Intel GPU** device.
+
+The dashboard's **compute** readout names the active provider and opens the runtime setting. If no
+compatible accelerator is available, ONNX Runtime uses the CPU.
 
 ## Two modes, one engine
 
@@ -112,7 +166,7 @@ it when you're ready.
 | | Local mode | Hub mode |
 |---|---|---|
 | Engine runs | in your browser (Pyodide) | on the server (CPython) |
-| Model runs | [LiteRT.js (WASM)](https://developers.google.com/edge/litert) | [ai-edge-litert](https://pypi.org/project/ai-edge-litert/) |
+| Model runs | [LiteRT.js (WASM)](https://developers.google.com/edge/litert) | [LiteRT](https://github.com/google-ai-edge/LiteRT) or [ONNX Runtime](https://onnxruntime.ai/) |
 | Frames leave the device | never | only to your own server |
 | Survives closing the tab | no | yes |
 
@@ -152,7 +206,9 @@ anything the UI can do is automatable. Point an MCP client (Claude, an IDE) at
 `https://<host>/mcp/`, or use the REST API at `/api/v1` - both can read printer and camera
 status, fetch the **current camera frame as an image**, and pause/resume/cancel. Capability is
 per token: issue scoped bearer tokens (**read** ⊂ **control** ⊂ **manage**) from **Settings**,
-and an agent only gets what you grant. Full reference: **[docs/api.md](docs/api.md)**.
+and an agent only gets what you grant. Uptime and update monitors can call the unauthenticated
+`GET /api/health` endpoint for readiness and the installed version. Full reference:
+**[docs/api.md](docs/api.md)**.
 
 ## How it works
 

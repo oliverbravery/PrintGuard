@@ -26,7 +26,7 @@ flowchart LR
     engine -- "Platform protocol" --> platform
 
     subgraph platform["one Platform per runtime"]
-        server["server/platform.py<br/>CPython · LiteRT · PyAV · httpx"]
+        server["server/platform.py<br/>CPython · LiteRT / ONNX Runtime · PyAV · httpx"]
         browser["browser/platform.py<br/>Pyodide · LiteRT.js · getUserMedia · fetch"]
     end
 
@@ -42,7 +42,8 @@ needs but cannot implement portably. Identical signatures, different runtimes:
 
 | Method | Hub (CPython) | Local (browser) |
 |---|---|---|
-| `infer(rgb)` | ai-edge-litert on CPU threads | LiteRT.js in WASM via a JS bridge |
+| `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark | No-op |
+| `infer(rgb)` | Selected LiteRT or ONNX Runtime model | LiteRT.js in WASM via a JS bridge |
 | `discover_cameras()` | MediaMTX path list | `enumerateDevices()` |
 | `open_camera(id, source)` | PyAV reader thread; MediaMTX pulls RTSP and WHEP streams | `getUserMedia` + canvas grabs |
 | `http(...)` | httpx | `fetch` (CORS applies) |
@@ -76,9 +77,11 @@ engine reconciles them on printer add/update, and on demand via `printer.cameras
 can't be removed on their own and are dropped with their printer.
 
 Events (engine → UI): a full `state` snapshot (on connect, after every command, and on a
-1 s ticker; it carries the running version and any available update), plus incremental
-`result`, `alert`, `warning`, `device`, `discovered`, `printer_test`, `notify_test`,
-`report_sent` and `error` events.
+1 s ticker; it carries the running version, latest monitor results and any available
+update), plus incremental `result`, `alert`, `warning`, `device`, `discovered`,
+`printer_test`, `notify_test`, `report_sent` and `error` events. Result updates are sampled
+at 5 Hz per monitor and conflated when a transport is slower; ordered events and
+command responses are never evicted by telemetry.
 
 `report.send` is the anonymous bug report ([`engine/reports.py`](../printguard/engine/reports.py)):
 one user-initiated POST of a Sentry feedback envelope - description, optional contact email,
@@ -209,7 +212,7 @@ printguard/
     integrations/    printer service adapters (OctoPrint, Klipper, Elegoo, PrusaLink, Bambu Lab, …)
     notifiers/       alert channel adapters (ntfy, Telegram, Discord, native desktop, …)
     adapters.py      shared adapter contract (id, label, docs_url, JSON-schema config)
-  server/            hub platform: FastAPI, bundled MediaMTX (child process), LiteRT, PyAV
+  server/            hub platform: FastAPI, bundled MediaMTX (child process), LiteRT / ONNX Runtime, PyAV
     api.py           REST API (/api/v1) over the engine protocol, scoped by token
     mcp.py           MCP server for agents, derived from the REST API
     mqtt.py          Home Assistant MQTT bridge (device discovery + two-way control)
@@ -217,7 +220,7 @@ printguard/
   browser/           local platform: Pyodide bridge to LiteRT.js and getUserMedia
   pysrc.py           builds the engine source archive Pyodide unpacks
 web/                 React + Tailwind UI (presentation only)
-models/              TFLite encoder, normalisation metadata, class prototypes
+models/              TFLite and ONNX encoders, normalisation metadata, class prototypes
 tests/               engine simulation + adapter contract tests (pytest)
 ```
 

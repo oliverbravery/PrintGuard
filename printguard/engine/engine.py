@@ -32,13 +32,22 @@ from .watchdog import Watchdog
 logger = logging.getLogger(__name__)
 
 STATE_TICK_S = 1.0
+RESULT_EVENT_INTERVAL_S = 0.2
 REATTACH_EVERY_TICKS = 10
 REQUEST_TIMEOUT_S = 15.0
 RECENT_EVENTS_MAX = 100
 RECENT_EVENT_TYPES = ("alert", "warning", "device", "error")
 EVENT_LOG_LEVELS = {"alert": logging.INFO, "warning": logging.WARNING, "error": logging.ERROR, "device": logging.DEBUG}
 UPDATE_CHECK_INTERVAL_S = 86400.0
-SETTINGS_DEFAULTS: dict[str, Any] = {"notifiers": {}, "update_check": True, "mqtt": {}, "theme": "system", "themes": [], "layout": {}}
+SETTINGS_DEFAULTS: dict[str, Any] = {
+    "notifiers": {},
+    "update_check": True,
+    "mqtt": {},
+    "theme": "system",
+    "themes": [],
+    "layout": {},
+    "inference_runtime": "auto",
+}
 
 
 class Engine:
@@ -50,6 +59,8 @@ class Engine:
         self.printers = PrinterRegistry()
         self.monitors: dict[str, dict[str, Any]] = {}
         self.history: dict[str, MonitorHistory] = {}
+        self._results: dict[str, dict[str, float]] = {}
+        self._result_emitted_at: dict[str, float] = {}
         self.tokens = TokenRegistry()
         self.settings: dict[str, Any] = dict(SETTINGS_DEFAULTS)
         self.update: dict[str, Any] | None = None
@@ -87,6 +98,8 @@ class Engine:
         """Restores persisted state and launches the background loops."""
         persisted = self.platform.load_state() or {}
         self.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in persisted.get("settings", {}).items() if k in SETTINGS_DEFAULTS}}
+        await self.platform.configure(self.settings)
+        self.scheduler.reset()
         for record in persisted.get("tokens", []):
             self.tokens.add(Token(**record))
         for record in persisted.get("printers", []):
@@ -189,7 +202,14 @@ class Engine:
             "update": self.update,
             "cameras": [c.public() for c in self.cameras.values()],
             "printers": [p.public() for p in self.printers.values()],
-            "monitors": [{**m, "watching": monitor_watching(m, self.printers)} for m in self.monitors.values()],
+            "monitors": [
+                {
+                    **monitor,
+                    "watching": monitor_watching(monitor, self.printers),
+                    "result": self._results.get(monitor["id"]),
+                }
+                for monitor in self.monitors.values()
+            ],
             "settings": self.settings,
             "tokens": [t.public() for t in self.tokens.values()],
             "stats": self.scheduler.stats(),
@@ -340,6 +360,7 @@ class Engine:
         source = camera.frame_source
         if source is None:
             return
+        self.scheduler.cancel_camera(camera)
         camera.frame_source = None
         source.close()
         await self.platform.release_camera(camera.id, camera.source)
@@ -387,19 +408,24 @@ class Engine:
                 continue
             score = vision.defect_score(result, monitor["sensitivity"])
             ts = time.time()
-            self.emit(
-                {
-                    "event": "result",
-                    "monitor_id": monitor["id"],
-                    "camera_id": camera.id,
-                    "score": round(score, 4),
-                    "prediction": "failure" if score >= monitor["threshold"] else "success",
-                    "margin": round(result.get("margin", 0.0), 4),
-                    "ms": self.scheduler.stats()["infer_ms"],
-                    "ts": ts,
-                }
-            )
-            self.history.setdefault(monitor["id"], MonitorHistory()).record(ts, score, monitor["threshold"])
+            point = {"score": round(score, 4), "ts": ts}
+            monitor_id = monitor["id"]
+            self._results[monitor_id] = point
+            self.history.setdefault(monitor_id, MonitorHistory()).record(ts, score, monitor["threshold"])
+            emitted_at = time.monotonic()
+            if emitted_at - self._result_emitted_at.get(monitor_id, 0.0) >= RESULT_EVENT_INTERVAL_S:
+                self._result_emitted_at[monitor_id] = emitted_at
+                self.emit(
+                    {
+                        "event": "result",
+                        "monitor_id": monitor_id,
+                        "camera_id": camera.id,
+                        **point,
+                        "prediction": "failure" if score >= monitor["threshold"] else "success",
+                        "margin": round(result.get("margin", 0.0), 4),
+                        "ms": self.scheduler.stats()["infer_ms"],
+                    }
+                )
             await self.watchdog.on_score(monitor, frame, score)
 
     def note_alert(self, monitor_id: str, alert: dict[str, Any], jpeg: bytes | None) -> None:
@@ -593,11 +619,13 @@ class Engine:
         if self.monitors.pop(message["id"], None) is not None:
             logger.info("monitor %s removed", message["id"])
         self.history.pop(message["id"], None)
+        self._results.pop(message["id"], None)
+        self._result_emitted_at.pop(message["id"], None)
 
     async def _cmd_history_get(self, message: dict[str, Any]) -> None:
         history = self.history.get(message["monitor_id"])
         series = history.series() if history else {"buckets": [], "snaps": [], "alerts": [], "stats": {}}
-        self.emit({"event": "history", "monitor_id": message["monitor_id"], **series, "req_id": message.get("req_id")})
+        self.emit({"event": "history", "monitor_id": message["monitor_id"], "now": time.time(), **series, "req_id": message.get("req_id")})
 
     async def _cmd_snapshot_get(self, message: dict[str, Any]) -> None:
         jpeg = self.monitor_snapshot(message["monitor_id"], message["id"])
@@ -617,7 +645,12 @@ class Engine:
 
     async def _cmd_settings_update(self, message: dict[str, Any]) -> None:
         patch = {k: v for k, v in message.get("patch", {}).items() if k in SETTINGS_DEFAULTS}
-        self.settings = {**self.settings, **patch}
+        settings = {**self.settings, **patch}
+        if settings["inference_runtime"] not in ("auto", "litert", "onnx"):
+            raise ValueError("inference runtime must be auto, litert or onnx")
+        if settings["inference_runtime"] != self.settings["inference_runtime"]:
+            await self.scheduler.reconfigure(lambda: self.platform.configure(settings))
+        self.settings = settings
         logger.info("settings updated: %s", sorted(patch))
 
     async def _cmd_token_create(self, message: dict[str, Any]) -> None:

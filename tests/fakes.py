@@ -40,6 +40,7 @@ class FakePlatform:
 
     mode = "test"
     workers = 1
+    inference_device = "test"
     version = "2.1.0"
     update_repo: str | None = None
     update_asset: str | None = None
@@ -51,14 +52,24 @@ class FakePlatform:
         self.reject_actions = False
         self.action_delay_s = 0.0
         self.action_started = asyncio.Event()
+        self.inference_started = asyncio.Event()
+        self.inference_blocked = False
         self.report_status = 200
         self.http_calls: list[tuple[str, str]] = []
         self.http_requests: list[dict[str, Any]] = []
         self.releases: list[dict[str, Any]] = []
         self.released_cameras: list[str] = []
         self.state: dict[str, Any] = {}
+        self.inference_runtime = "auto"
+
+    async def configure(self, settings: dict[str, Any]) -> None:
+        """Records the selected inference runtime."""
+        self.inference_runtime = settings["inference_runtime"]
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
+        self.inference_started.set()
+        if self.inference_blocked:
+            await asyncio.Event().wait()
         await asyncio.sleep(self.infer_s)
         distances = {"success": 9.0, "failure": 1.0} if self.failing else {"success": 1.0, "failure": 9.0}
         return {"prediction": "failure" if self.failing else "success", "distances": distances, "margin": 8.0}

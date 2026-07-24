@@ -31,6 +31,8 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import aiomqtt
 
+from .events import ConflatedEventQueue
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -38,7 +40,6 @@ if TYPE_CHECKING:
 
 RECONNECT_DELAY_S = 5.0
 KEEPALIVE_S = 30
-QUEUE_MAX = 512
 STATE_DEADBAND = 5.0
 CONTINUOUS_FIELDS = ("score", "progress")
 MANUFACTURER = "PrintGuard"
@@ -91,7 +92,7 @@ def device_config_topic(prefix: str, monitor_id: str) -> str:
     return f"{prefix}/device/printguard_{monitor_id}/config"
 
 
-def monitor_state(monitor: dict[str, Any], printer: dict[str, Any] | None, score: float | None) -> dict[str, Any]:
+def monitor_state(monitor: dict[str, Any], printer: dict[str, Any] | None) -> dict[str, Any]:
     """Builds the state blob a monitor's Home Assistant entities read.
 
     Defect and watching follow the monitor's own ``alert`` and ``watching``
@@ -106,6 +107,7 @@ def monitor_state(monitor: dict[str, Any], printer: dict[str, Any] | None, score
         phase = "watching"
     else:
         phase = "idle"
+    score = monitor["result"]["score"] if monitor.get("result") else None
     payload: dict[str, Any] = {
         "enabled": "on" if monitor.get("enabled") else "off",
         "watching": "on" if monitor.get("watching") else "off",
@@ -280,8 +282,7 @@ class MqttBridge:
     def __init__(self, engine: "Engine", get_config: Callable[[], dict[str, Any]]) -> None:
         self._engine = engine
         self._get_config = get_config
-        self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=QUEUE_MAX)
-        self._scores: dict[str, float] = {}
+        self._queue = ConflatedEventQueue()
         self._reported: dict[str, dict[str, Any]] = {}
         self._published: dict[str, str] = {}
         self._devices: set[str] = set()
@@ -299,9 +300,7 @@ class MqttBridge:
             await asyncio.gather(self._task, return_exceptions=True)
 
     def _sink(self, event: dict[str, Any]) -> None:
-        if self._queue.full():
-            self._queue.get_nowait()
-        self._queue.put_nowait(event)
+        self._queue.put(event)
 
     async def _run(self) -> None:
         while True:
@@ -376,7 +375,9 @@ class MqttBridge:
         if kind == "state":
             await self._reconcile(client, event, base, prefix)
         elif kind == "result":
-            self._scores[event["monitor_id"]] = event.get("score", 0.0)
+            monitor = next((monitor for monitor in self._state.get("monitors", []) if monitor["id"] == event["monitor_id"]), None)
+            if monitor is not None:
+                monitor["result"] = {"score": event["score"], "ts": event["ts"]}
             await self._publish_state(client, event["monitor_id"], base)
         elif kind == "alert":
             await self._publish_snapshot(client, event["monitor_id"], base)
@@ -403,7 +404,7 @@ class MqttBridge:
         if monitor is None:
             return
         printer = next((p for p in self._state.get("printers", []) if p["id"] == monitor.get("printer_id")), None)
-        payload = monitor_state(monitor, printer, self._scores.get(monitor_id))
+        payload = monitor_state(monitor, printer)
         if not state_changed(self._reported.get(monitor_id), payload):
             return
         self._reported[monitor_id] = payload

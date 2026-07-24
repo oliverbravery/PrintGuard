@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useStore } from "../store";
+import { type SettingsTabId, useStore } from "../store";
 import { applyTheme, beginPreview, endPreview, PALETTES } from "../theme";
 import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
 import { Dialog } from "./Dialog";
@@ -7,8 +7,6 @@ import { SaveStatus } from "./SaveStatus";
 import { SchemaForm } from "./SchemaForm";
 import { ThemeEditor } from "./ThemeEditor";
 import { Toggle } from "./Toggle";
-
-type TabId = "appearance" | "alerts" | "mqtt" | "updates" | "api";
 
 const SCHEMES: { id: string; name: string; glyph: string }[] = [
   { id: "system", name: "System", glyph: "◐" },
@@ -27,14 +25,27 @@ function Swatch({ colors }: { colors: CustomTheme["colors"] }) {
 }
 
 export function SettingsDialog() {
-  const { engine, send, openDialog, leaveMode, isPending, notifyTest, testingNotifier, testNotifier, createdToken, clearCreatedToken, updateSettings } = useStore();
+  const {
+    engine,
+    send,
+    openDialog,
+    leaveMode,
+    isPending,
+    notifyTest,
+    testingNotifier,
+    testNotifier,
+    createdToken,
+    clearCreatedToken,
+    updateSettings,
+    settingsTab,
+  } = useStore();
   const [notifiers, setNotifiers] = useState(engine?.settings.notifiers ?? {});
   const updateCheck = engine?.settings.update_check ?? true;
   const [mqtt, setMqtt] = useState<MqttConfig>(engine?.settings.mqtt ?? {});
   const setMqttField = (key: keyof MqttConfig, value: MqttConfig[keyof MqttConfig]) => setMqtt({ ...mqtt, [key]: value });
   const [tokenName, setTokenName] = useState("");
   const [tokenScope, setTokenScope] = useState<ApiToken["scope"]>("read");
-  const [tab, setTab] = useState<TabId>("alerts");
+  const [tab, setTab] = useState<SettingsTabId>(settingsTab ?? "alerts");
   const close = () => openDialog(null);
   const tokens = engine?.tokens ?? [];
 
@@ -81,7 +92,7 @@ export function SettingsDialog() {
     (n) => (engine?.mode === "hub" || n.browser_ok) && (!n.desktop_only || desktopApp),
   );
 
-  const tabs: { id: TabId; label: string }[] = [
+  const tabs: { id: SettingsTabId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
     { id: "alerts", label: "Alerts" },
     ...(engine?.mode === "hub"
@@ -89,6 +100,7 @@ export function SettingsDialog() {
           { id: "mqtt", label: "Home Assistant" },
           { id: "updates", label: "Updates" },
           { id: "api", label: "API" },
+          { id: "advanced", label: "Advanced" },
         ] as const)
       : []),
   ];
@@ -441,6 +453,41 @@ export function SettingsDialog() {
                   {isPending("token.create") ? "…" : "Generate"}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "advanced" && (
+          <div
+            role="tabpanel"
+            id="settings-panel-advanced"
+            aria-labelledby="settings-tab-advanced"
+            tabIndex={0}
+            className="space-y-3"
+          >
+            <label className="label block" htmlFor="inference-runtime">
+              Model runtime
+            </label>
+            <select
+              id="inference-runtime"
+              className="field w-full"
+              value={engine?.settings.inference_runtime ?? "auto"}
+              onChange={(event) => updateSettings({ inference_runtime: event.target.value })}
+            >
+              <option value="auto">Automatic</option>
+              <option value="litert">LiteRT</option>
+              <option value="onnx">ONNX Runtime</option>
+            </select>
+            <span className="block text-[0.7rem] leading-relaxed text-text-2">
+              Automatic benchmarks both models and uses the higher-throughput runtime. ONNX Runtime can use Core ML,
+              Windows ML, OpenVINO or NVIDIA hardware; LiteRT uses its optimised CPU runtime for this model.
+            </span>
+            <div className="flex items-center justify-between gap-3 rounded border border-line-0 px-3 py-2">
+              <span className="text-xs text-text-1">Active compute</span>
+              <span className="chip">{engine?.stats.inference_device ?? "initialising"}</span>
+            </div>
+            <div className="flex justify-end">
+              <SaveStatus />
             </div>
           </div>
         )}

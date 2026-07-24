@@ -22,7 +22,7 @@ staging = Path(tempfile.mkdtemp(prefix="printguard-build-"))
 icon_png = staging / "icon.png"
 shutil.copyfile(ROOT / "web" / "public" / "apple-touch-icon.png", icon_png)
 
-binaries = collect_dynamic_libs("av") + collect_dynamic_libs("ai_edge_litert")
+binaries = collect_dynamic_libs("av") + collect_dynamic_libs("onnxruntime") + collect_dynamic_libs("ai_edge_litert")
 if MEDIAMTX:
     binaries.append((MEDIAMTX, "."))
 
@@ -40,10 +40,11 @@ datas += copy_metadata("printguard") + copy_metadata("fastmcp", recursive=True)
 hiddenimports = (
     collect_submodules("uvicorn")
     + collect_submodules("av")
+    + collect_submodules("onnxruntime.capi")
     + collect_submodules("fastmcp.server")
     + collect_submodules("mcp.server")
     + collect_submodules("desktop_notifier")
-    + ["ai_edge_litert.interpreter"]
+    + ["onnxruntime"]
 )
 
 if sys.platform == "darwin":
@@ -56,8 +57,8 @@ if sys.platform == "win32":
     hiddenimports += clr_hidden + ["clr"]
     winrt_datas, winrt_binaries, winrt_hidden = collect_all("winrt")
     datas += winrt_datas
-    binaries += winrt_binaries
-    hiddenimports += winrt_hidden
+    binaries += winrt_binaries + collect_dynamic_libs("winui3")
+    hiddenimports += winrt_hidden + collect_submodules("winui3")
 
 a = Analysis(
     [str(Path(SPECPATH) / "desktop_entry.py")],

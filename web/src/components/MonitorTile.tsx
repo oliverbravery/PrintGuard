@@ -19,7 +19,8 @@ export function DeviceChip({ state }: { state: DeviceState | undefined }) {
 }
 
 export function MonitorTile({ monitor, index }: { monitor: Monitor; index: number }) {
-  const { engine, history, openDetail, customising, mutateLayout } = useStore();
+  const { engine, history, openDetail, customising, mutateLayout, dialog, detailId, statsMonitorId } = useStore();
+  const covered = dialog !== null || detailId !== null || statsMonitorId !== null;
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   const score = history[monitor.id]?.at(-1)?.score ?? 0;
@@ -74,7 +75,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
           </>
         )}
       </div>
-      <Feed camera={camera} mode={engine?.mode ?? "local"} />
+      <Feed camera={camera} mode={engine?.mode ?? "local"} active={!covered} />
       {alerting && (
         <div className="absolute inset-x-0 top-[calc(50%-14px)] z-[4] flex justify-center">
           <span className="display bg-bad text-on-accent text-xs font-bold tracking-[0.3em] px-4 py-1.5">

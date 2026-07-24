@@ -6,27 +6,25 @@ import asyncio
 import io
 import json
 import logging
-import os
 import re
 import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
-from importlib import metadata
 from functools import partial
+from importlib import metadata
 from pathlib import Path
 from typing import Any, Callable
 
 import av
 import httpx
 import numpy as np
-from ai_edge_litert.interpreter import Interpreter
-
+from av.video.reformatter import VideoReformatter
 from ..engine import vision
 from ..engine.platform import Frame
 from .bambu_camera import open_bambu_jpeg_stream
+from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
 from .publish import H264Push
 
@@ -219,6 +217,11 @@ class AVSource:
     bespoke protocol, e.g. Bambu's chamber camera). When publish_url is set,
     each decoded frame is also transcoded to H.264 and pushed there, so sources
     MediaMTX cannot pull itself reach viewers as HLS.
+
+    Frames are converted to RGB through one reused single-threaded scaler,
+    for the reason H264Push documents, and one conversion at a time: a scaler
+    is a single FFmpeg context, and the scheduler and a snapshot request can
+    both ask for the freshest frame at once.
     """
 
     def __init__(
@@ -237,6 +240,8 @@ class AVSource:
         self.last_error: str | None = None
         self._latest: tuple[av.VideoFrame, float, float] | None = None
         self._latest_rgb: Frame | None = None
+        self._reformatter = VideoReformatter()
+        self._converting = asyncio.Lock()
         self._seq = 0
         self._stop = False
         self._monitoring = True
@@ -362,13 +367,17 @@ class AVSource:
         if latest is None:
             return None
         frame, seq, ts = latest
-        if self._latest_rgb is not None and self._latest_rgb.seq == seq:
-            return self._latest_rgb
-        rgb = await asyncio.to_thread(frame.to_ndarray, format="rgb24")
-        result = Frame(rgb=rgb, seq=seq, ts=ts)
-        if self._latest is latest:
-            self._latest_rgb = result
-        return result
+        async with self._converting:
+            if self._latest_rgb is not None and self._latest_rgb.seq == seq:
+                return self._latest_rgb
+            rgb = await asyncio.to_thread(self._to_rgb, frame)
+            result = Frame(rgb=rgb, seq=seq, ts=ts)
+            if self._latest is latest:
+                self._latest_rgb = result
+            return result
+
+    def _to_rgb(self, frame: av.VideoFrame) -> np.ndarray:
+        return self._reformatter.reformat(frame, format="rgb24", threads=1).to_ndarray()
 
     def close(self) -> None:
         """Stops the reader thread."""
@@ -378,7 +387,7 @@ class AVSource:
 
 
 class ServerPlatform:
-    """Hub mode platform: LiteRT on CPU threads, frames via MediaMTX."""
+    """Hub mode platform: hardware inference and frames via MediaMTX."""
 
     mode = "hub"
     update_repo = "oliverbravery/PrintGuard"
@@ -388,43 +397,45 @@ class ServerPlatform:
     ) -> None:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
-        self.workers = max(1, (os.cpu_count() or 2) - 1)
-        self._executor = ThreadPoolExecutor(max_workers=self.workers)
-        self._thread_local = threading.local()
-        self._model_path = str(model_dir / "encoder_float32.tflite")
+        data_dir.mkdir(parents=True, exist_ok=True)
+        self._model_dir = model_dir
+        self._model_cache = data_dir / "model-cache"
+        self.workers = 1
+        self.inference_device = "Initialising"
         meta = json.loads((model_dir / "metadata.json").read_text())
         protos = json.loads((model_dir / "prototypes.json").read_text())["prototypes"]
         self.assets = vision.assets_from_dicts(meta, protos)
         self._state_path = data_dir / "state.json"
-        data_dir.mkdir(parents=True, exist_ok=True)
         self._client = httpx.AsyncClient(follow_redirects=True)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client)
         self._sources: dict[str, AVSource] = {}
 
+    async def configure(self, settings: dict[str, Any]) -> None:
+        """Selects the requested inference runtime."""
+        runtime = settings["inference_runtime"]
+        inference = await asyncio.to_thread(Inference, self._model_dir, self._model_cache, runtime)
+        previous = getattr(self, "_inference", None)
+        self._inference = inference
+        self.workers = inference.workers
+        self.inference_device = inference.device
+        if previous is not None:
+            previous.close()
+        logger.info(
+            "inference ready: %s via %s (%d workers)",
+            self.inference_device,
+            inference.runtime if runtime == "auto" else runtime,
+            self.workers,
+        )
+
     async def close(self) -> None:
         """Releases the HTTP client and inference workers."""
         await self._client.aclose()
-        self._executor.shutdown(wait=False, cancel_futures=True)
-
-    def _interpreter(self) -> Interpreter:
-        interpreter = getattr(self._thread_local, "interpreter", None)
-        if interpreter is None:
-            interpreter = Interpreter(model_path=self._model_path)
-            interpreter.allocate_tensors()
-            self._thread_local.interpreter = interpreter
-        return interpreter
-
-    def _infer_sync(self, rgb: np.ndarray) -> dict[str, Any]:
-        interpreter = self._interpreter()
-        tensor = vision.preprocess(rgb, self.assets)
-        interpreter.set_tensor(interpreter.get_input_details()[0]["index"], tensor)
-        interpreter.invoke()
-        embedding = interpreter.get_tensor(interpreter.get_output_details()[0]["index"])[0].copy()
-        return vision.classify(embedding, self.assets)
+        self._inference.close()
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
-        """Runs the model on a worker thread."""
-        return await asyncio.get_running_loop().run_in_executor(self._executor, self._infer_sync, rgb)
+        """Runs the model through the selected hardware provider."""
+        tensor = await asyncio.to_thread(vision.preprocess, rgb, self.assets)
+        return vision.classify(await self._inference.run(tensor), self.assets)
 
     async def discover_cameras(self) -> list[dict[str, Any]]:
         """Lists the host's video devices and active MediaMTX paths as attachable sources."""
@@ -541,11 +552,11 @@ class ServerPlatform:
             codec.width, codec.height = frame.width, frame.height
             codec.pix_fmt = "yuvj420p"
             codec.time_base = Fraction(1, 30)
-            packets = codec.encode(frame.reformat(format="yuvj420p")) + codec.encode(None)
+            packets = codec.encode(frame.reformat(format="yuvj420p", threads=1)) + codec.encode(None)
             return b"".join(bytes(p) for p in packets)
 
         try:
-            return await asyncio.get_running_loop().run_in_executor(self._executor, encode)
+            return await asyncio.to_thread(encode)
         except Exception:
             return None
 
@@ -553,10 +564,10 @@ class ServerPlatform:
         """Decodes supplied image bytes to an RGB frame with PyAV."""
         def decode() -> np.ndarray:
             with av.open(io.BytesIO(data)) as container:
-                return next(container.decode(video=0)).to_ndarray(format="rgb24")
+                return next(container.decode(video=0)).reformat(format="rgb24", threads=1).to_ndarray()
 
         try:
-            return await asyncio.get_running_loop().run_in_executor(self._executor, decode)
+            return await asyncio.to_thread(decode)
         except Exception:
             return None
 

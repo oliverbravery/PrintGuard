@@ -17,8 +17,15 @@ jobs:
       - run: uv run pytest
 
   image:
-    name: image
+    name: image (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: standard
+            extra: ""
+          - name: NVIDIA
+            extra: --extra nvidia
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -26,8 +33,18 @@ jobs:
         with:
           context: .
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: INFERENCE_EXTRA=${{ matrix.extra }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  image-gate:
+    name: image
+    needs: image
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every image variant must have built, under a name branch protection can require
+        run: '[ "${{ needs.image.result }}" = "success" ]'
 
   version:
     name: version

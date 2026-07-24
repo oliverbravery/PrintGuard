@@ -1,10 +1,10 @@
 # Deploying a hub securely
 
 A hub exposes everything a browser needs - dashboard, engine socket, live video and
-device publishing - on a single HTTP port, `:8000`. The streaming server is built into the
-same image and listens on `:8554`/`:1935` only so LAN cameras can push streams in (its
-control API and HLS muxer bind to localhost inside the container); nothing else needs to be
-reachable. PrintGuard ships **no authentication**: anyone who can reach `:8000` sees every
+device publishing - on a single HTTP port, `:8000`. The streaming server keeps RTSP (`:8554`)
+and RTMP (`:1935`) listeners available for LAN cameras that push streams in; publish either port
+only when needed. Its control API and HLS muxer bind to localhost inside the container; nothing
+else needs to be reachable. PrintGuard ships **no authentication**: anyone who can reach `:8000` sees every
 camera and can pause or cancel your printers. Never port-forward it from the internet - put
 one of the following in front instead. Each one carries full functionality, live video
 included, because video is plain HTTP through the same port.

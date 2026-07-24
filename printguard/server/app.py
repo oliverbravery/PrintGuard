@@ -32,6 +32,7 @@ from ..engine import logs
 from ..engine.engine import Engine
 from ..pysrc import build_pysrc
 from .api import ApiAuth, build_api_app
+from .events import ConflatedEventQueue
 from .mcp import build_mcp_app
 from .mediamtx import EmbeddedMediaMTX
 from .mqtt import MqttBridge
@@ -123,9 +124,10 @@ def create_app() -> FastAPI:
     pysrc = build_pysrc()
 
     @app.get("/api/health")
-    def health() -> dict[str, bool]:
-        """Liveness probe."""
-        return {"ok": True}
+    def health(response: Response) -> dict[str, bool | str]:
+        """Reports hub readiness and the running version."""
+        response.headers["Cache-Control"] = "no-store"
+        return {"ok": True, "version": app.state.engine.platform.version}
 
     @app.get("/pysrc.zip")
     def pysrc_zip() -> Response:
@@ -142,28 +144,30 @@ def create_app() -> FastAPI:
         await websocket.accept()
         logger.info("UI connected")
         engine: Engine = app.state.engine
-        queue: asyncio.Queue = asyncio.Queue(maxsize=256)
-
-        def sink(event: dict) -> None:
-            if queue.full():
-                queue.get_nowait()
-            queue.put_nowait(event)
+        queue = ConflatedEventQueue()
 
         async def pump() -> None:
             while True:
                 await websocket.send_text(json.dumps(await queue.get()))
 
-        engine.add_sink(sink)
-        pump_task = asyncio.ensure_future(pump())
-        try:
+        async def receive() -> None:
             while True:
                 await engine.handle(json.loads(await websocket.receive_text()))
+
+        engine.add_sink(queue.put)
+        tasks = [asyncio.ensure_future(pump()), asyncio.ensure_future(receive())]
+        try:
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
         except WebSocketDisconnect:
             pass
         finally:
             logger.info("UI disconnected")
-            engine.remove_sink(sink)
-            pump_task.cancel()
+            engine.remove_sink(queue.put)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     hls_warned_at = [0.0]
 

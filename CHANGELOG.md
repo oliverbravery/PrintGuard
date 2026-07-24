@@ -7,6 +7,40 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.7] - 2026-07-22
+
+### Added
+
+- **Health checks can now read the running PrintGuard version.** The unauthenticated
+  `/api/health` endpoint reports readiness and the installed version for uptime and update
+  monitors without exposing printer, camera or configuration data.
+- **Hub and desktop model inference now selects the fastest runtime on each machine.**
+  Automatic mode benchmarks LiteRT and ONNX Runtime locally, with ONNX able to use Apple
+  Core ML, Windows ML, Intel OpenVINO or NVIDIA TensorRT RTX. The new **Advanced** settings
+  tab can pin either model runtime, and the dashboard's compute readout opens it directly.
+  Docker and Unraid users can expose `/dev/dri` for Intel hardware, while NVIDIA hosts can
+  use the `-nvidia` image with GPU passthrough.
+
+### Fixed
+
+- **Dashboard feeds no longer stick on "no signal" while the camera is live.** Opening a
+  monitor's details or a dialog left a second player running for the same camera behind it,
+  and once the platform paused that hidden one it never resumed — the tile stayed frozen
+  under a "no signal" overlay although the camera was streaming and monitoring never
+  stopped. A tile now hands its stream to whatever opens on top and takes it back on close,
+  any feed that is paused resumes itself at the live edge, and the overlay only reads "no
+  signal" when the camera really has none.
+- **Webcams no longer drop out at random during long runs.** Every captured frame started a
+  fresh pool of operating-system threads to convert it, faster than they could be reclaimed,
+  so after a few minutes the feed froze and monitoring stopped until the camera restarted
+  itself, while memory climbed by hundreds of megabytes. Capture now holds a flat thread
+  count and steady memory over hours. This affected the desktop app's own webcams most, and
+  MJPEG and Bambu cameras on any hub; a snapshot taken during inference could also read a
+  half-converted frame.
+- **Live risk no longer appears stuck at zero while inference is running.** PrintGuard now
+  keeps the latest score in authoritative state, bounds and conflates live telemetry
+  without dropping ordered events, and uses the engine clock for detailed history.
+
 ## [2.3.6] - 2026-07-19
 
 ### Fixed

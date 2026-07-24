@@ -129,6 +129,7 @@ class ProviderTest(BaseModel):
 class SettingsPatch(BaseModel):
     notifiers: dict[str, dict[str, Any]] | None = None
     mqtt: dict[str, Any] | None = None
+    inference_runtime: Literal["auto", "litert", "onnx"] | None = None
 
 
 class ActionBody(BaseModel):
@@ -175,6 +176,11 @@ class MonitorAlert(_ReadModel):
     ts: float | None = None
 
 
+class MonitorResult(_ReadModel):
+    score: float | None = None
+    ts: float | None = None
+
+
 class MonitorOut(_ReadModel):
     id: str
     name: str | None = None
@@ -188,6 +194,7 @@ class MonitorOut(_ReadModel):
     on_defect: Literal["none", "pause", "cancel"] | None = None
     cooldown_s: int | None = None
     watching: bool | None = None
+    result: MonitorResult | None = None
     alert: MonitorAlert | None = None
 
 

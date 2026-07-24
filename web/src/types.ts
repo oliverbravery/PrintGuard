@@ -77,6 +77,7 @@ export interface Monitor {
   cooldown_s: number;
   alert?: Alert | null;
   watching?: boolean;
+  result?: ScorePoint | null;
 }
 
 export interface HistoryBucket {
@@ -115,6 +116,7 @@ export interface HistoryStats {
 }
 
 export interface MonitorHistory {
+  now: number;
   buckets: HistoryBucket[];
   snaps: Snapshot[];
   alerts: HistoryAlert[];
@@ -192,7 +194,7 @@ export interface Layout {
 }
 
 export interface EngineStats {
-  workers: number;
+  inference_device: string;
   infer_ms: number;
   capacity_fps: number;
 }
@@ -229,6 +231,7 @@ export interface EngineState {
     theme: string;
     themes: CustomTheme[];
     layout?: Layout;
+    inference_runtime: "auto" | "litert" | "onnx";
   };
   tokens: ApiToken[];
   stats: EngineStats;
