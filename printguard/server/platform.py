@@ -20,6 +20,7 @@ from typing import Any, Callable
 import av
 import httpx
 import numpy as np
+from av.video.reformatter import VideoReformatter
 from ..engine import vision
 from ..engine.platform import Frame
 from .bambu_camera import open_bambu_jpeg_stream
@@ -216,6 +217,11 @@ class AVSource:
     bespoke protocol, e.g. Bambu's chamber camera). When publish_url is set,
     each decoded frame is also transcoded to H.264 and pushed there, so sources
     MediaMTX cannot pull itself reach viewers as HLS.
+
+    Frames are converted to RGB through one reused single-threaded scaler,
+    for the reason H264Push documents, and one conversion at a time: a scaler
+    is a single FFmpeg context, and the scheduler and a snapshot request can
+    both ask for the freshest frame at once.
     """
 
     def __init__(
@@ -234,6 +240,8 @@ class AVSource:
         self.last_error: str | None = None
         self._latest: tuple[av.VideoFrame, float, float] | None = None
         self._latest_rgb: Frame | None = None
+        self._reformatter = VideoReformatter()
+        self._converting = asyncio.Lock()
         self._seq = 0
         self._stop = False
         self._monitoring = True
@@ -359,13 +367,17 @@ class AVSource:
         if latest is None:
             return None
         frame, seq, ts = latest
-        if self._latest_rgb is not None and self._latest_rgb.seq == seq:
-            return self._latest_rgb
-        rgb = await asyncio.to_thread(frame.to_ndarray, format="rgb24")
-        result = Frame(rgb=rgb, seq=seq, ts=ts)
-        if self._latest is latest:
-            self._latest_rgb = result
-        return result
+        async with self._converting:
+            if self._latest_rgb is not None and self._latest_rgb.seq == seq:
+                return self._latest_rgb
+            rgb = await asyncio.to_thread(self._to_rgb, frame)
+            result = Frame(rgb=rgb, seq=seq, ts=ts)
+            if self._latest is latest:
+                self._latest_rgb = result
+            return result
+
+    def _to_rgb(self, frame: av.VideoFrame) -> np.ndarray:
+        return self._reformatter.reformat(frame, format="rgb24", threads=1).to_ndarray()
 
     def close(self) -> None:
         """Stops the reader thread."""
@@ -540,7 +552,7 @@ class ServerPlatform:
             codec.width, codec.height = frame.width, frame.height
             codec.pix_fmt = "yuvj420p"
             codec.time_base = Fraction(1, 30)
-            packets = codec.encode(frame.reformat(format="yuvj420p")) + codec.encode(None)
+            packets = codec.encode(frame.reformat(format="yuvj420p", threads=1)) + codec.encode(None)
             return b"".join(bytes(p) for p in packets)
 
         try:
@@ -552,7 +564,7 @@ class ServerPlatform:
         """Decodes supplied image bytes to an RGB frame with PyAV."""
         def decode() -> np.ndarray:
             with av.open(io.BytesIO(data)) as container:
-                return next(container.decode(video=0)).to_ndarray(format="rgb24")
+                return next(container.decode(video=0)).reformat(format="rgb24", threads=1).to_ndarray()
 
         try:
             return await asyncio.to_thread(decode)

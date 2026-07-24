@@ -303,29 +303,71 @@ async def test_releasing_pull_camera_removes_managed_path() -> None:
     server.mediamtx.remove_path.assert_awaited_once_with("camera")
 
 
-async def test_camera_source_converts_only_grabbed_frames(monkeypatch) -> None:
+class Scaler:
+    """Records the conversions a reused VideoReformatter is asked for."""
+
+    created: list["Scaler"] = []
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+        Scaler.created.append(self)
+
+    def reformat(self, frame, *, format: str, threads: int):
+        self.calls.append((format, threads))
+        return SimpleNamespace(to_ndarray=lambda: np.zeros((48, 64, 3), dtype=np.uint8))
+
+
+@pytest.fixture
+def scalers(monkeypatch):
+    """Replaces both scaler call sites, yielding every instance they create."""
+    from printguard.server import platform, publish
+
+    Scaler.created = []
+    monkeypatch.setattr(platform, "VideoReformatter", Scaler)
+    monkeypatch.setattr(publish, "VideoReformatter", Scaler)
+    return Scaler.created
+
+
+async def test_camera_source_converts_only_grabbed_frames(monkeypatch, scalers) -> None:
     from printguard.server import platform
 
     monkeypatch.setattr(platform.AVSource, "_run", lambda self: None)
 
-    class VideoFrame:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def to_ndarray(self, *, format: str):
-            self.calls += 1
-            return np.zeros((48, 64, 3), dtype=np.uint8)
-
-    frame = VideoFrame()
     source = platform.AVSource("rtsp://mediamtx/camera")
-    source._latest = (frame, 1.0, 2.0)
+    source._latest = (object(), 1.0, 2.0)
     first = await source.grab()
     second = await source.grab()
+    source._latest = (object(), 2.0, 3.0)
+    third = await source.grab()
     source.close()
 
-    assert first is second
+    assert first is second and third is not first
     assert first is not None and first.seq == 1.0 and first.ts == 2.0
-    assert frame.calls == 1
+    assert [scaler.calls for scaler in scalers] == [[("rgb24", 1), ("rgb24", 1)]]
+
+
+def test_published_frames_share_one_single_threaded_scaler(monkeypatch, scalers) -> None:
+    """Per-frame conversion reuses one single-threaded scaler.
+
+    PyAV builds a fresh scaler per reformat() call, and its default thread
+    count gives each one a slice-thread pool, so converting every frame of a
+    camera churns OS threads faster than the system reclaims them until the
+    process can no longer start one.
+    """
+    from printguard.server import publish
+
+    stream = SimpleNamespace(
+        width=0, height=0, pix_fmt="", codec_context=SimpleNamespace(options={}, time_base=None), encode=Mock(return_value=[])
+    )
+    monkeypatch.setattr(
+        publish.av, "open", Mock(return_value=SimpleNamespace(add_stream=Mock(return_value=stream), mux=Mock()))
+    )
+    push = publish.H264Push("rtsp://mediamtx/camera", 30)
+
+    for _ in range(3):
+        push.send(SimpleNamespace(width=64, height=48))
+
+    assert [scaler.calls for scaler in scalers] == [[("yuv420p", 1)] * 3]
 
 
 async def test_unknown_ids_and_events() -> None:

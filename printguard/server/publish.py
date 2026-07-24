@@ -15,6 +15,7 @@ from fractions import Fraction
 
 import av
 from av.video.frame import PictureType
+from av.video.reformatter import VideoReformatter
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +83,19 @@ class H264Push:
     viewers receive them as HLS. Timestamps follow the wall clock and a
     keyframe is forced every KEYFRAME_INTERVAL_S, keeping HLS segments short
     regardless of the source's real, often variable, frame rate.
+
+    Conversion to the encoder's pixel format goes through one reused
+    single-threaded scaler: PyAV's per-frame ``reformat`` builds a fresh
+    scaler whose default thread count spawns a slice-thread pool per call,
+    which at a camera's frame rate churns hundreds of OS threads a second
+    faster than they are reaped, until the process can no longer start one.
     """
 
     def __init__(self, rtsp_url: str, fps: int) -> None:
         self._rtsp_url = rtsp_url
         self._fps = fps
         self._clock = Fraction(1, RTP_CLOCK)
+        self._reformatter = VideoReformatter()
         self._push: av.container.OutputContainer | None = None
         self._stream: av.video.stream.VideoStream | None = None
         self._start = 0.0
@@ -105,7 +113,7 @@ class H264Push:
             self._stream.codec_context.time_base = self._clock
             self._start = now
             self._last_key = now - KEYFRAME_INTERVAL_S
-        out = frame.reformat(format="yuv420p")
+        out = self._reformatter.reformat(frame, format="yuv420p", threads=1)
         out.pts = int((now - self._start) / self._clock)
         out.time_base = self._clock
         if now - self._last_key >= KEYFRAME_INTERVAL_S:

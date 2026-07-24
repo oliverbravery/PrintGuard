@@ -23,6 +23,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Fixed
 
+- **Webcams no longer drop out at random during long runs.** Every captured frame started a
+  fresh pool of operating-system threads to convert it, faster than they could be reclaimed,
+  so after a few minutes the feed froze and monitoring stopped until the camera restarted
+  itself, while memory climbed by hundreds of megabytes. Capture now holds a flat thread
+  count and steady memory over hours. This affected the desktop app's own webcams most, and
+  MJPEG and Bambu cameras on any hub; a snapshot taken during inference could also read a
+  half-converted frame.
 - **Live risk no longer appears stuck at zero while inference is running.** PrintGuard now
   keeps the latest score in authoritative state, bounds and conflates live telemetry
   without dropping ordered events, and uses the engine clock for detailed history.
