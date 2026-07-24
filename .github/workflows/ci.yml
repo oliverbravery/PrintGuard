@@ -37,6 +37,15 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
+  image-gate:
+    name: image
+    needs: image
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every image variant must have built, under a name branch protection can require
+        run: '[ "${{ needs.image.result }}" = "success" ]'
+
   version:
     name: version
     runs-on: ubuntu-latest
