@@ -7,6 +7,22 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.8] - 2026-07-24
+
+### Added
+
+- **Keep a copy of your diagnostics, or send them wherever you like.** The bug report
+  dialog now has a **Download logs** button that saves exactly what a report would carry —
+  the diagnostics bundle plus PrintGuard's own and the dashboard's recent logs, with every
+  credential stripped and no camera frames — as a single zip. Read it before anything
+  leaves your machine, attach it to a GitHub issue, or hand it to whoever is helping you.
+  Nothing is sent when you download.
+
+### Changed
+
+- **The report button in the header is now a bug icon** rather than a flag, so it is clear
+  at a glance what it opens.
+
 ## [2.3.7] - 2026-07-22
 
 ### Added

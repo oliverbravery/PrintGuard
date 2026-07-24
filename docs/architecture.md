@@ -59,7 +59,8 @@ runtime service, extend the Platform contract on both sides.
 
 Commands (UI → engine): `discover`, `camera.add/update/remove`,
 `printer.add/update/remove`, `printer.action`, `printer.test`, `printer.cameras.refresh`,
-`monitor.add/update/remove`, `notify.test`, `settings.update`, `update.check`, `report.send`.
+`monitor.add/update/remove`, `notify.test`, `settings.update`, `update.check`, `report.send`,
+`report.bundle`.
 Every command may carry a `req_id`, echoed on the responding event so the UI can resolve
 pending requests.
 
@@ -79,7 +80,7 @@ can't be removed on their own and are dropped with their printer.
 Events (engine → UI): a full `state` snapshot (on connect, after every command, and on a
 1 s ticker; it carries the running version, latest monitor results and any available
 update), plus incremental `result`, `alert`, `warning`, `device`, `discovered`,
-`printer_test`, `notify_test`, `report_sent` and `error` events. Result updates are sampled
+`printer_test`, `notify_test`, `report_sent`, `report_bundle` and `error` events. Result updates are sampled
 at 5 Hz per monitor and conflated when a transport is slower; ordered events and
 command responses are never evicted by telemetry.
 
@@ -88,6 +89,8 @@ one user-initiated POST of a Sentry feedback envelope - description, optional co
 user-attached files, a diagnostics bundle and the engine and UI log tails, with every
 credential redacted - through `platform.http`, so it works identically in both modes. There
 is no SDK and no automatic telemetry; nothing is sent unless the user submits a report.
+`report.bundle` packs those same scrubbed files into a zip the UI downloads instead, for a
+user who would rather read the diagnostics or take them somewhere else.
 
 ## Logging
 
@@ -100,7 +103,8 @@ broadcast, so the tail carries the same timeline the UI shows plus the lifecycle
 Uvicorn runs without its own log config so its records land in the same handlers. The UI
 keeps its own ring ([`web/src/log.ts`](../web/src/log.ts)) of boot milestones, socket drops,
 toasts, console warnings/errors and uncaught exceptions. Bug reports attach both tails,
-scrubbed of every configured credential value. `LOG_LEVEL=DEBUG` adds command traces and
+scrubbed of every configured credential value, and the same pair can be downloaded as a zip
+from the report dialog. `LOG_LEVEL=DEBUG` adds command traces and
 exception tracebacks.
 
 ## The programmatic surface (hub only)

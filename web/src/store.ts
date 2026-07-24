@@ -42,6 +42,15 @@ function appendScore(history: Record<string, ScorePoint[]>, monitorId: string, p
   return { ...history, [monitorId]: [...points, point].slice(-HISTORY_LIMIT) };
 }
 
+function saveBase64(filename: string, base64: string, type: string) {
+  const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))], { type }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 function modeFromUrl(): Mode | null {
   const hash = location.hash.slice(1);
   return hash === "local" || hash === "hub" ? hash : null;
@@ -246,6 +255,11 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       case "report_sent":
         set({ reportResult: event });
+        break;
+      case "report_bundle":
+        clearPending(event.req_id);
+        saveBase64(event.filename, event.zip, "application/zip");
+        get().toast("info", `Diagnostics saved as ${event.filename}`);
         break;
       case "token_created":
         set({ createdToken: { name: event.name, secret: event.token } });

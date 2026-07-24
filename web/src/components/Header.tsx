@@ -1,5 +1,6 @@
 import { useStore } from "../store";
 import { applyTheme, nextScheme } from "../theme";
+import { BugIcon } from "./BugIcon";
 
 export function Wordmark({ size = "text-xl" }: { size?: string }) {
   return (
@@ -141,12 +142,12 @@ function ReportChip() {
   const openDialog = useStore((s) => s.openDialog);
   return (
     <button
-      className="chip cursor-pointer hover:opacity-80"
+      className="chip inline-flex cursor-pointer items-center hover:opacity-80"
       title="Report a bug"
       aria-label="Report a bug"
       onClick={() => openDialog("report")}
     >
-      ⚑
+      <BugIcon />
     </button>
   );
 }

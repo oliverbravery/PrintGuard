@@ -92,6 +92,7 @@ class Engine:
             "token.remove": self._cmd_token_remove,
             "update.check": self._cmd_update_check,
             "report.send": self._cmd_report_send,
+            "report.bundle": self._cmd_report_bundle,
         }
 
     async def start(self) -> None:
@@ -683,3 +684,18 @@ class Engine:
         except Exception as exc:
             logger.warning("bug report failed to send", exc_info=True)
             self.emit({"event": "report_sent", "ok": False, "error": str(exc), "req_id": message.get("req_id")})
+
+    async def _cmd_report_bundle(self, message: dict[str, Any]) -> None:
+        files = reports.report_files(
+            diag=reports.diagnostics(self),
+            ui_logs=message.get("logs") or [],
+            secrets=reports.collect_secrets(self),
+        )
+        self.emit(
+            {
+                "event": "report_bundle",
+                "filename": reports.archive_name(),
+                "zip": base64.b64encode(reports.archive(files)).decode(),
+                "req_id": message.get("req_id"),
+            }
+        )

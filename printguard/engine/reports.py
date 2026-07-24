@@ -7,16 +7,22 @@ user attached. There is no SDK and no automatic telemetry: nothing leaves
 the device unless the user submits a report, and every credential is
 stripped before it does - structurally from the diagnostics, and by value
 from the freeform log text, where a library error message may embed one.
+
+The same scrubbed files can be packed into a zip the user downloads instead,
+to inspect or send somewhere else themselves.
 """
 
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
 import sys
 import time
 import uuid
+import zipfile
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from platform import platform as host_os
 from typing import TYPE_CHECKING, Any
@@ -173,6 +179,49 @@ def feedback_event(message: str, email: str | None, client: dict[str, Any], diag
     }
 
 
+def report_files(
+    *,
+    diag: dict[str, Any],
+    ui_logs: Sequence[str],
+    secrets: set[str],
+    attachments: Sequence[dict[str, Any]] = (),
+) -> list[tuple[str, str, bytes]]:
+    """Builds a report's files: diagnostics, both log tails and user attachments.
+
+    The diagnostics JSON and both log tails are scrubbed of every value in
+    ``secrets``, since an error string inside any of them may embed a
+    credential the structural redaction cannot see.
+    """
+    files = [("diagnostics.json", "application/json", scrub(json.dumps(diag, indent=2), secrets).encode())]
+    if logs.recent():
+        files.append(("engine.log", "text/plain", scrub("\n".join(logs.recent()), secrets).encode()))
+    if ui_logs:
+        files.append(("ui.log", "text/plain", scrub("\n".join(str(line) for line in ui_logs), secrets).encode()))
+    for attachment in attachments:
+        files.append(
+            (
+                str(attachment["name"]),
+                str(attachment.get("type") or "application/octet-stream"),
+                base64.b64decode(attachment["data"]),
+            )
+        )
+    return files
+
+
+def archive(files: list[tuple[str, str, bytes]]) -> bytes:
+    """Packs report files into a zip archive."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as bundle:
+        for filename, _content_type, payload in files:
+            bundle.writestr(filename, payload)
+    return buffer.getvalue()
+
+
+def archive_name() -> str:
+    """Names a downloaded archive after the moment it was taken."""
+    return f"printguard-diagnostics-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.zip"
+
+
 def encode_envelope(event: dict[str, Any], attachments: list[tuple[str, str, bytes]]) -> bytes:
     """Serialises a feedback event and its attachments as a Sentry envelope."""
     lines = [
@@ -201,8 +250,8 @@ async def send_report(
     email: str | None,
     client: dict[str, Any],
     diag: dict[str, Any],
-    attachments: list[dict[str, Any]],
-    ui_logs: list[str],
+    attachments: Sequence[dict[str, Any]],
+    ui_logs: Sequence[str],
     secrets: set[str],
 ) -> None:
     """Submits one bug report envelope to the feedback inbox.
@@ -217,9 +266,7 @@ async def send_report(
         attachments: User-attached files as {name, type, data} with
             base64-encoded data.
         ui_logs: The UI's recent log lines; the engine's own tail is read
-            from the logging module. Both are attached scrubbed of every
-            value in ``secrets``, as is the diagnostics JSON, since error
-            strings inside either may embed a credential.
+            from the logging module.
         secrets: Credential values to scrub, from ``collect_secrets``.
 
     Raises:
@@ -228,19 +275,7 @@ async def send_report(
     """
     if not message:
         raise ValueError("a description of the problem is required")
-    files = [("diagnostics.json", "application/json", scrub(json.dumps(diag, indent=2), secrets).encode())]
-    if logs.recent():
-        files.append(("engine.log", "text/plain", scrub("\n".join(logs.recent()), secrets).encode()))
-    if ui_logs:
-        files.append(("ui.log", "text/plain", scrub("\n".join(str(line) for line in ui_logs), secrets).encode()))
-    for attachment in attachments:
-        files.append(
-            (
-                str(attachment["name"]),
-                str(attachment.get("type") or "application/octet-stream"),
-                base64.b64decode(attachment["data"]),
-            )
-        )
+    files = report_files(diag=diag, ui_logs=ui_logs, secrets=secrets, attachments=attachments)
     event = feedback_event(message, email, client, diag)
     status, _ = await http(
         "POST",
