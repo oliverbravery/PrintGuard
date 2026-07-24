@@ -7,10 +7,11 @@ export function useVideoStream(
   videoRef: React.RefObject<HTMLVideoElement | null>,
   camera: Camera | undefined,
   mode: string,
+  active = true,
 ): void {
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !camera) return;
+    if (!video || !camera || !active) return;
     if (mode === "local") {
       video.srcObject = bridge.getStream(camera.id);
       void video.play().catch(() => {});
@@ -31,7 +32,7 @@ export function useVideoStream(
       document.removeEventListener("visibilitychange", onVisibility);
       stop?.();
     };
-  }, [videoRef, camera?.id, camera?.online, mode]);
+  }, [videoRef, camera?.id, camera?.online, mode, active]);
 }
 
 export function adjust(data: ImageData, brightness: number, contrast: number, sharpness: number): void {

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { renderVideoFrame, useVideoStream } from "../image";
 import type { Camera } from "../types";
 
-export function Feed({ camera, mode }: { camera: Camera | undefined; mode: string }) {
+export function Feed({ camera, mode, active = true }: { camera: Camera | undefined; mode: string; active?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -13,9 +13,9 @@ export function Feed({ camera, mode }: { camera: Camera | undefined; mode: strin
   const rotation = camera?.rotation ?? 0;
   const useCanvas = sharpness > 0 || crop !== null || brightness !== 1 || contrast !== 1 || rotation !== 0;
 
-  useVideoStream(videoRef, camera, mode);
+  useVideoStream(videoRef, camera, mode, active);
 
-  useEffect(() => setPlaying(false), [camera?.id]);
+  useEffect(() => setPlaying(false), [camera?.id, active]);
 
   useEffect(() => {
     if (!useCanvas) return;
@@ -54,7 +54,7 @@ export function Feed({ camera, mode }: { camera: Camera | undefined; mode: strin
       {(!camera || !playing) && (
         <div className="absolute inset-0 grid place-items-center bg-ink-0/85 z-[2]">
           <span className="mono text-[0.65rem] tracking-[0.2em] text-text-2 uppercase">
-            {camera ? (camera.standby ? "starting stream" : "no signal") : "no camera bound"}
+            {!camera ? "no camera bound" : camera.standby || camera.online ? "starting stream" : "no signal"}
           </span>
         </div>
       )}

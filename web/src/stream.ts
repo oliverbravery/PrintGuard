@@ -11,6 +11,7 @@ const RECORDER_MIMES = [
 
 const PUBLISH_RECONNECT_MS = 2000;
 const PUBLISHERS_KEY = "pg-publishers";
+const LIVE_RESYNC_S = 2;
 
 export const published = new Map<string, () => void>();
 
@@ -45,16 +46,23 @@ export function hlsUrl(path: string): string {
 }
 
 export function playHls(video: HTMLVideoElement, url: string): () => void {
+  let hls: Hls | null = null;
+  let retry: number | undefined;
+  const resume = () => {
+    const edge = hls?.liveSyncPosition ?? (video.seekable.length ? video.seekable.end(video.seekable.length - 1) : null);
+    if (edge !== null && edge - video.currentTime > LIVE_RESYNC_S) video.currentTime = edge;
+    void video.play().catch(() => {});
+  };
+  video.addEventListener("pause", resume);
   if (!Hls.isSupported()) {
     video.src = url;
-    void video.play().catch(() => {});
+    resume();
     return () => {
+      video.removeEventListener("pause", resume);
       video.removeAttribute("src");
       video.load();
     };
   }
-  let hls: Hls | null = null;
-  let retry: number | undefined;
   const start = () => {
     hls = new Hls({
       liveSyncDuration: 5,
@@ -68,10 +76,11 @@ export function playHls(video: HTMLVideoElement, url: string): () => void {
     });
     hls.loadSource(url);
     hls.attachMedia(video);
-    void video.play().catch(() => {});
+    resume();
   };
   start();
   return () => {
+    video.removeEventListener("pause", resume);
     clearTimeout(retry);
     hls?.destroy();
   };

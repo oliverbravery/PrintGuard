@@ -23,6 +23,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Fixed
 
+- **Dashboard feeds no longer stick on "no signal" while the camera is live.** Opening a
+  monitor's details or a dialog left a second player running for the same camera behind it,
+  and once the platform paused that hidden one it never resumed — the tile stayed frozen
+  under a "no signal" overlay although the camera was streaming and monitoring never
+  stopped. A tile now hands its stream to whatever opens on top and takes it back on close,
+  any feed that is paused resumes itself at the live edge, and the overlay only reads "no
+  signal" when the camera really has none.
 - **Webcams no longer drop out at random during long runs.** Every captured frame started a
   fresh pool of operating-system threads to convert it, faster than they could be reclaimed,
   so after a few minutes the feed froze and monitoring stopped until the camera restarted
