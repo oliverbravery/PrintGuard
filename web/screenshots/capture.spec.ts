@@ -8,6 +8,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const asset = (name: string) => resolve(here, "../../docs/assets", name);
 const dataUrl = (name: string) => `data:image/jpeg;base64,${readFileSync(resolve(here, "frames", name)).toString("base64")}`;
 const FRAMES = { healthy: dataUrl("healthy.jpg"), defect: dataUrl("defect.jpg") };
+const VERSION = readFileSync(resolve(here, "../../pyproject.toml"), "utf8").match(/^version = "(.+)"$/m)![1];
 
 const NOW = 1_700_000_000_000;
 const series = (fn: (i: number) => number, n = 48): ScorePoint[] =>
@@ -36,7 +37,7 @@ const history: Record<string, ScorePoint[]> = {
 
 function engine(): EngineState {
   return {
-    mode: "hub", version: "2.3.0", update: null,
+    mode: "hub", version: VERSION, update: null,
     cameras: [
       camera("c1", "Workshop · Prusa", { kind: "rtsp", url: "rtsp://10.0.0.21:8554/prusa" }, true),
       camera("c2", "Garage · Ender", { kind: "rtsp", url: "rtsp://10.0.0.22:8554/ender" }),
@@ -90,6 +91,14 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
     colorScheme: scene.theme,
   });
   const page = await context.newPage();
+  await page.addInitScript(() => {
+    class UnconnectedSocket extends EventTarget {
+      readyState = 0;
+      send(): void {}
+      close(): void {}
+    }
+    (window as unknown as { WebSocket: unknown }).WebSocket = UnconnectedSocket;
+  });
   await page.goto("/");
   await page.evaluate(
     ({ state, theme }) => {
@@ -108,7 +117,7 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
     for (const el of document.querySelectorAll<HTMLElement>(".aspect-video")) {
       const img = document.createElement("img");
       img.src = el.closest(".tile-alert") ? frames.defect : frames.healthy;
-      img.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1";
+      img.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:3";
       el.appendChild(img);
     }
   }, FRAMES);
