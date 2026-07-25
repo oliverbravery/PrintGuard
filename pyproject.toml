@@ -22,6 +22,7 @@ dependencies = [
     "pycentauri>=0.7.0",
     "pydantic-settings>=2.14.2",
     "pyprusalink>=3.0",
+    "pywin32>=312; sys_platform == 'win32'",
     "starlette>=1.3.1",
     "uvicorn[standard]>=0.49.0",
     "wasdk-Microsoft.Windows.AI.MachineLearning>=2.1.3; sys_platform == 'win32'",

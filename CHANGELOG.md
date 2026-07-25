@@ -33,6 +33,14 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - **The report button in the header is now a bug icon** rather than a flag, so it is clear
   at a glance what it opens.
 
+### Fixed
+
+- **A hub that is force quit or crashes no longer blocks the next one from starting.** The
+  bundled streaming server was left running when PrintGuard did not exit cleanly, and it
+  kept port 8554 — so the next start, whether the desktop app, a container or another hub
+  on that machine, failed with "address already in use" from an app that was no longer
+  running. The streaming server now always stops with the hub, however the hub ends.
+
 ## [2.3.7] - 2026-07-22
 
 ### Added
