@@ -50,10 +50,17 @@ jobs:
             platforms: linux/amd64,linux/arm64
             suffix: ""
             extra: ""
+            gpu_runtime_packages: ""
+          - name: Intel
+            platforms: linux/amd64
+            suffix: -intel
+            extra: ""
+            gpu_runtime_packages: intel-opencl-icd ocl-icd-libopencl1
           - name: NVIDIA
             platforms: linux/amd64
             suffix: -nvidia
             extra: --extra nvidia
+            gpu_runtime_packages: ""
     permissions:
       contents: read
       packages: write
@@ -81,7 +88,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: INFERENCE_EXTRA=${{ matrix.extra }}
+          build-args: |
+            INFERENCE_EXTRA=${{ matrix.extra }}
+            GPU_RUNTIME_PACKAGES=${{ matrix.gpu_runtime_packages }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=${{ matrix.name }}

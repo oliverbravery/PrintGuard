@@ -20,7 +20,7 @@
   <DonateLink/>
   <Config Name="WebUI" Target="8000" Default="8000" Mode="tcp" Description="Dashboard, engine socket and live video (HTTP)" Type="Port" Display="always" Required="true" Mask="false">8000</Config>
   <Config Name="Data" Target="/data" Default="/mnt/user/appdata/printguard" Mode="rw" Description="Stored settings and engine state" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/printguard</Config>
-  <Config Name="Intel GPU" Target="/dev/dri" Default="" Mode="rw" Description="Optional: expose an Intel GPU for accelerated model inference. For an NVIDIA GPU instead, change the repository to ghcr.io/oliverbravery/printguard:latest-nvidia and add --runtime=nvidia --gpus all to Extra Parameters" Type="Device" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Intel GPU" Target="/dev/dri" Default="" Mode="rw" Description="Optional: expose an Intel GPU for accelerated model inference, alongside changing the repository to ghcr.io/oliverbravery/printguard:latest-intel. For an NVIDIA GPU instead, change the repository to ghcr.io/oliverbravery/printguard:latest-nvidia and add --runtime=nvidia --gpus all to Extra Parameters" Type="Device" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="Camera RTSP publish" Target="8554" Default="8554" Mode="tcp" Description="Optional: only needed for cameras that push an RTSP stream into PrintGuard" Type="Port" Display="advanced" Required="false" Mask="false">8554</Config>
   <Config Name="Camera RTMP publish" Target="1935" Default="" Mode="tcp" Description="Optional: only needed for cameras that push an RTMP stream into PrintGuard" Type="Port" Display="advanced" Required="false" Mask="false"></Config>
 </Container>

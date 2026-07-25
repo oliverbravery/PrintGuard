@@ -20,6 +20,16 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Changed
 
+- **The Docker image is a third smaller.** The amd64 image drops from 1.1 GB to 720 MB on
+  disk — a 377 MB download becomes 263 MB — and arm64 from 623 MB to 566 MB. Compiled
+  dependencies now ship without their debug symbols, and the 290 MB Intel GPU compute
+  runtime moved into its own image. Pulls and updates are quicker, and nothing about how
+  PrintGuard runs changes.
+- **Intel GPU inference now uses the `-intel` image.** Pair `--device /dev/dri` with
+  `ghcr.io/oliverbravery/printguard:latest-intel`, which carries the Intel GPU compute
+  runtime; if you pass `/dev/dri` to the standard image today, switch tags to keep GPU
+  inference. Intel **CPU** acceleration through OpenVINO is unchanged on the standard
+  image, and NVIDIA hosts keep using `latest-nvidia`.
 - **The report button in the header is now a bug icon** rather than a flag, so it is clear
   at a glance what it opens.
 

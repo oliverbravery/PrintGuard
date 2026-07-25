@@ -112,23 +112,24 @@ throughput on the host and uses the faster runtime; **Settings → Advanced** ca
 ONNX Runtime selects the fastest supported provider it can use. On macOS, Core ML can use the CPU,
 GPU and Neural Engine. On Windows 11 24H2 or newer, Windows ML installs the matching certified
 Intel, NVIDIA, AMD or Qualcomm provider on first launch; older Windows versions use the optimised
-CPU runtime. The standard amd64 image uses Intel CPU, GPU or NPU hardware through OpenVINO; arm64
-images and other Linux hosts use the optimised CPU runtime. LiteRT uses its optimised CPU path for
-this model.
+CPU runtime. The standard amd64 image uses Intel CPU hardware through OpenVINO; arm64 images and
+other Linux hosts use the optimised CPU runtime. LiteRT uses its optimised CPU path for this model.
 
-On an Intel Linux host, expose the integrated or discrete GPU:
+To run inference on an Intel integrated or discrete GPU, use the Intel image and expose the device
+— it carries the Intel GPU compute runtime, which the standard image leaves out to stay small:
 
 ```bash
 docker run -d --name printguard --restart unless-stopped \
   --device /dev/dri \
   -p 8000:8000 -p 8554:8554 \
   -v printguard:/data \
-  ghcr.io/oliverbravery/printguard
+  ghcr.io/oliverbravery/printguard:latest-intel
 ```
 
-For Docker Compose, add the device to the `printguard` service:
+For Docker Compose, use that image and add the device to the `printguard` service:
 
 ```yaml
+    image: ghcr.io/oliverbravery/printguard:latest-intel
     devices:
       - /dev/dri:/dev/dri
 ```
