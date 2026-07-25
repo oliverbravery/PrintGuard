@@ -37,6 +37,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   image, and NVIDIA hosts keep using `latest-nvidia`.
 - **The report button in the header is now a bug icon** rather than a flag, so it is clear
   at a glance what it opens.
+- **Elegoo and Prusa printers, and desktop notifications, are no longer marked
+  experimental.** They have held up in use, so the warning is gone from their setup forms;
+  nothing about how they are configured changes.
 
 ### Fixed
 

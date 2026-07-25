@@ -42,7 +42,7 @@ class ElegooAdapter(IntegrationAdapter):
         "Neptune 4 and OrangeStorm printers use their stock Moonraker service."
     )
     browser_ok = False
-    experimental = True
+    experimental = False
     schema = {
         "type": "object",
         "properties": {
