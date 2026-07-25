@@ -2,70 +2,76 @@
 
 # PrintGuard
 
-![GitHub stars](https://img.shields.io/github/stars/oliverbravery/PrintGuard?style=flat&color=ff4d00)
-![Licence](https://img.shields.io/badge/licence-GPL--2.0-2ea44f)
+**Catches failing 3D prints on your own hardware, pauses the printer, and tells you why.**
+
+[![Latest release](https://img.shields.io/github/v/release/oliverbravery/PrintGuard?style=flat&color=ff4d00&label=release)](https://github.com/oliverbravery/PrintGuard/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/oliverbravery/PrintGuard?style=flat&color=ff4d00)](https://github.com/oliverbravery/PrintGuard/stargazers)
+[![Licence](https://img.shields.io/badge/licence-GPL--2.0-2ea44f)](LICENSE.md)
 [![Container](https://img.shields.io/badge/ghcr.io-oliverbravery%2Fprintguard-2496ed?logo=docker&logoColor=white)](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
 [![Live demo](https://img.shields.io/badge/demo-try_it_in_your_browser-ff4d00)](https://oliverbravery.github.io/PrintGuard/)
 
+[Live demo](https://oliverbravery.github.io/PrintGuard/) · [Quick start](#quick-start) · [Documentation](docs/README.md) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](CONTRIBUTING.md)
+
 </div>
 
-**PrintGuard watches your 3D printer cameras with an on-device vision model, pauses the
-printer the moment a print starts to fail, and sends a snapshot to your phone.** No cloud, no
-subscription, no account - your camera frames never leave hardware you own.
+A compact vision model scores every camera frame on the machine you run it on. When a defect
+holds for long enough, PrintGuard pauses or cancels the print through your print server and
+pushes a snapshot to your phone. No cloud, no subscription, no account, and your camera
+frames never leave hardware you own.
 
 ![PrintGuard dashboard: three cameras at a glance, one print mid-failure and auto-paused](docs/assets/dashboard.png)
 
-## Try it now - nothing to install
+## Contents
+
+- [Try it now, nothing to install](#try-it-now-nothing-to-install)
+- [What you get](#what-you-get)
+- [Quick start](#quick-start)
+  - [Desktop app for macOS and Windows](#desktop-app-for-macos-and-windows)
+  - [Docker for an always-on server or NAS](#docker-for-an-always-on-server-or-nas)
+- [Two modes, one engine](#two-modes-one-engine)
+- [Make it yours](#make-it-yours)
+- [Printers, cameras and alerts](#printers-cameras-and-alerts)
+- [Hardware acceleration](#hardware-acceleration)
+- [Exposing a hub safely](#exposing-a-hub-safely)
+- [Home Assistant](#home-assistant)
+- [Automate it with MCP and the API](#automate-it-with-mcp-and-the-api)
+- [How the detector works](#how-the-detector-works)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [Licence](#licence)
+
+## Try it now, nothing to install
 
 **[oliverbravery.github.io/PrintGuard](https://oliverbravery.github.io/PrintGuard/)** runs the
 *entire* engine in your browser. Point your webcam at a print and watch it score each frame
-live. Nothing is installed and no frame leaves your device. When you're ready to run it for
+live. Nothing is installed and no frame leaves your device. When you are ready to run it for
 real, [jump to Quick start](#quick-start).
 
 ## What you get
 
-- **Failures caught early** - a compact vision model scores every frame and acts the moment a
-  defect holds, so spaghetti and detachments don't run for hours (or burn through a spool).
-- **Damage stopped for you** - a sustained defect can pause or cancel the print through
-  OctoPrint, Klipper, Elegoo, Prusa (PrusaLink) or Bambu Lab, with sensitivity, thresholds and
-  cooldowns you set per monitor.
-- **A heads-up on your phone** - the instant a defect holds, a snapshot lands over ntfy,
+- **Failures caught early.** A compact vision model scores every frame and acts the moment a
+  defect holds, so spaghetti and detachments do not run for hours, or burn through a spool.
+- **Damage stopped for you.** A sustained defect can pause or cancel the print through
+  OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, with sensitivity, thresholds and cooldowns
+  you set per monitor.
+- **A heads-up on your phone.** The instant a defect holds, a snapshot lands over ntfy,
   Telegram or Discord.
-- **Quiet when nothing's wrong** - printers linked to a service are only watched while they
-  actually print; inference rests when they're idle and wakes when a job starts.
-- **Loud when something is** - a dropped camera, frozen feed or unresponsive printer warns you
-  on the dashboard *and* your phone. If PrintGuard can't tell whether a printer is printing,
-  it keeps watching - losing the signal never silently stops monitoring.
-- **Every printer on one screen** - one machine shares inference fairly across as many cameras
+- **Quiet when nothing is wrong.** Printers linked to a service are only watched while they
+  actually print. Inference rests when they are idle and wakes when a job starts.
+- **Loud when something is.** A dropped camera, frozen feed or unresponsive printer warns you
+  on the dashboard *and* your phone. If PrintGuard cannot tell whether a printer is printing,
+  it keeps watching: losing the signal never silently stops monitoring.
+- **Every printer on one screen.** One machine shares inference fairly across as many cameras
   as your hardware can sustain.
-
-## Make it yours
-
-Choose a look - **System**, **Light**, **Dark**, or design your own in the built-in theme
-editor - from the header. Your themes are saved and synced to every browser that opens the hub.
-
-| Dark | Light |
-|:---:|:---:|
-| ![Dark theme](docs/assets/dashboard.png) | ![Light theme](docs/assets/dashboard-light.png) |
-
-Tap **Customise** to arrange the dashboard around how *you* work: drag monitors into any
-order, **pin** the ones that matter to the front, and **hide** the rest - with a tray to bring
-them back. The camera rail rearranges the same way.
-
-![Customise mode: drag to reorder, pin and hide monitors and cameras](docs/assets/customise.png)
-
-Open any monitor for its live risk score, score history and one-tap printer controls.
-
-![Monitor detail with live risk score and printer controls](docs/assets/printer-detail.png)
 
 ## Quick start
 
-### Desktop app - macOS & Windows
+### Desktop app for macOS and Windows
 
-The easiest way to run a hub on the computer next to your printer: a native app - no Docker, no
-terminal. It lives in your **menu bar / system tray**, so closing the window leaves the hub running
-and the printer watched; quit from the tray when you're done. Reach it from your phone on the same
-network at `http://<computer>:8000`. Nothing leaves your machine.
+The easiest way to run a hub on the computer next to your printer: a native app, no Docker
+and no terminal. It lives in your menu bar or system tray, so closing the window leaves the
+hub running and the printer watched. Reach it from your phone on the same network at
+`http://<computer>:8000`.
 
 <div align="center">
 
@@ -75,14 +81,17 @@ network at `http://<computer>:8000`. Nothing leaves your machine.
 
 </div>
 
-Turn on **Start at login** from the tray menu and forget about it. The builds are unsigned for now,
-so the first launch needs one manual approval: on macOS, double-click the app, then open
-**System Settings → Privacy & Security** and click **Open Anyway** under *Security*; on Windows,
-choose **More info → Run anyway**. On Linux, run the [Docker hub](#docker--for-an-always-on-server-or-nas) instead.
+Turn on **Start at login** from the tray menu and forget about it.
 
-### Docker - for an always-on server or NAS
+> [!NOTE]
+> The builds are unsigned for now, so the first launch needs one approval. On macOS,
+> double-click the app, then open **System Settings → Privacy & Security** and click
+> **Open Anyway** under *Security*. On Windows, choose **More info → Run anyway**. On Linux,
+> run the [Docker hub](#docker-for-an-always-on-server-or-nas) instead.
 
-PrintGuard is a **single container** - install with one command:
+### Docker for an always-on server or NAS
+
+PrintGuard is a single container:
 
 ```bash
 docker run -d --name printguard --restart unless-stopped \
@@ -91,141 +100,146 @@ docker run -d --name printguard --restart unless-stopped \
   ghcr.io/oliverbravery/printguard
 ```
 
-Open `http://<host>:8000`, pick a mode, register a camera and your printer, then add a monitor
-that binds them.
+Open `http://<host>:8000`, register a camera and your printer, then add a monitor that binds
+them.
 
-- **Unraid** - add **PrintGuard** from Community Applications (or import the
-  [template](templates/printguard.xml)) and install from the UI; no terminal needed.
-- **Docker Compose** - prefer a file? [`docker-compose.yaml`](docker-compose.yaml): `curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml && docker compose up -d`.
+| Platform | How |
+|---|---|
+| **Unraid** | Add **PrintGuard** from Community Applications, or import the [template](templates/printguard.xml), and install from the UI. No terminal needed |
+| **Docker Compose** | `curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml && docker compose up -d` |
+| **Anything else** | The `docker run` above. Images are published for `amd64` and `arm64`, including Raspberry Pi 4 and 5 |
 
-Port `8554` only matters for cameras that *push* RTSP into PrintGuard. To accept an RTMP push,
-also publish `-p 1935:1935`. Most setups (URL pull, Bambu, or "this device") can leave both off.
-Images for `amd64` and `arm64`
-(Raspberry Pi 4/5) are published to
-[`ghcr.io/oliverbravery/printguard`](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
-on every release.
-
-#### Hardware acceleration
-
-Hub and desktop mode include both LiteRT and ONNX models. **Automatic** benchmarks their concurrent
-throughput on the host and uses the faster runtime; **Settings → Advanced** can pin either one.
-ONNX Runtime selects the fastest supported provider it can use. On macOS, Core ML can use the CPU,
-GPU and Neural Engine. On Windows 11 24H2 or newer, Windows ML installs the matching certified
-Intel, NVIDIA, AMD or Qualcomm provider on first launch; older Windows versions use the optimised
-CPU runtime. The standard amd64 image uses Intel CPU hardware through OpenVINO; arm64 images and
-other Linux hosts use the optimised CPU runtime. LiteRT uses its optimised CPU path for this model.
-
-To run inference on an Intel integrated or discrete GPU, use the Intel image and expose the device
-— it carries the Intel GPU compute runtime, which the standard image leaves out to stay small:
-
-```bash
-docker run -d --name printguard --restart unless-stopped \
-  --device /dev/dri \
-  -p 8000:8000 -p 8554:8554 \
-  -v printguard:/data \
-  ghcr.io/oliverbravery/printguard:latest-intel
-```
-
-For Docker Compose, use that image and add the device to the `printguard` service:
-
-```yaml
-    image: ghcr.io/oliverbravery/printguard:latest-intel
-    devices:
-      - /dev/dri:/dev/dri
-```
-
-For an NVIDIA RTX 30 series or newer host with the NVIDIA Container Toolkit installed, use the
-NVIDIA image:
-
-```bash
-docker run -d --name printguard --restart unless-stopped \
-  --gpus all \
-  -p 8000:8000 -p 8554:8554 \
-  -v printguard:/data \
-  ghcr.io/oliverbravery/printguard:latest-nvidia
-```
-
-For Docker Compose, take the same image and reserve the GPU (Compose v2.30 or newer):
-
-```yaml
-    image: ghcr.io/oliverbravery/printguard:latest-nvidia
-    gpus: all
-```
-
-On Unraid, set the repository to `ghcr.io/oliverbravery/printguard:latest-nvidia` and add
-`--runtime=nvidia --gpus all` to *Extra Parameters*; an Intel GPU needs only the template's
-**Intel GPU** device.
-
-The dashboard's **compute** readout names the active provider and opens the runtime setting. If no
-compatible accelerator is available, ONNX Runtime uses the CPU.
+Port `8554` only matters for cameras that *push* RTSP into PrintGuard, and `-p 1935:1935`
+for an RTMP push. Most setups pull from a URL or use a printer's own camera and need neither.
 
 ## Two modes, one engine
 
-The same detection engine runs in two places - try it instantly in the browser, then self-host
-it when you're ready.
+The same detection engine runs in two places. Try it instantly in the browser, then
+self-host it when you are ready.
 
 | | Local mode | Hub mode |
 |---|---|---|
-| Engine runs | in your browser (Pyodide) | on the server (CPython) |
-| Model runs | [LiteRT.js (WASM)](https://developers.google.com/edge/litert) | [LiteRT](https://github.com/google-ai-edge/LiteRT) or [ONNX Runtime](https://onnxruntime.ai/) |
-| Frames leave the device | never | only to your own server |
-| Survives closing the tab | no | yes |
+| Engine runs | In your browser, on Pyodide | On the server, on CPython |
+| Model runs | [LiteRT.js in WASM](https://developers.google.com/edge/litert) | [LiteRT](https://github.com/google-ai-edge/LiteRT) or [ONNX Runtime](https://onnxruntime.ai/) |
+| Frames leave the device | Never | Only to your own server |
+| Survives closing the tab | No | Yes |
+| Printers | OctoPrint and Klipper | All of them |
 
-The **desktop app** (macOS and Windows) is hub mode without the setup - the same persistent engine
-as the container, in a native window on (and never leaving) your own computer.
+The **desktop app** is hub mode without the setup: the same persistent engine as the
+container, in a native window on your own computer.
+
+## Make it yours
+
+Choose **System**, **Light**, **Dark**, or design your own in the built-in theme editor.
+Themes are saved on the hub and follow every browser that opens it.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/dashboard.png" alt="Dark theme"></td>
+<td width="50%"><img src="docs/assets/dashboard-light.png" alt="Light theme"></td>
+</tr>
+<tr>
+<td align="center"><b>Dark</b></td>
+<td align="center"><b>Light</b></td>
+</tr>
+</table>
+
+Tap **Customise** to arrange the dashboard around how *you* work: drag monitors into any
+order, **pin** the ones that matter to the front, and **hide** the rest, with a tray to bring
+them back. The camera rail rearranges the same way.
+
+![Customise mode: drag to reorder, pin and hide monitors and cameras](docs/assets/customise.png)
+
+Open any monitor for its live risk score, score history and one-tap printer controls.
+
+![Monitor detail with live risk score and printer controls](docs/assets/printer-detail.png)
 
 ## Printers, cameras and alerts
 
-Register your printer - OctoPrint, Klipper (Moonraker), Elegoo, Prusa (PrusaLink) or Bambu Lab -
-bind it to a monitor, and choose what a sustained defect does: alert, pause or cancel. If a
-printer exposes a webcam, PrintGuard adds it as a camera for you. Turn on ntfy, Telegram,
-Discord, or (in the desktop app) native OS notifications in **Settings** to get snapshot alerts
-and watchdog warnings.
+Register your printer, bind it to a monitor, and choose what a sustained defect does: alert,
+pause or cancel. If a printer exposes a webcam, PrintGuard adds it as a camera for you.
 
-Connecting over Docker or HTTPS, or linking an Elegoo, Prusa or Bambu printer, has a few gotchas - the full
-walk-through (and webcam/camera options) lives in **[docs/printers.md](docs/printers.md)**.
+| | Supported |
+|---|---|
+| **Print services** | OctoPrint, Klipper via Moonraker, Elegoo, Prusa via PrusaLink, Bambu Lab |
+| **Cameras** | Printer webcams, RTSP, RTMP, HTTP/MJPEG, WHEP, anything pushed to the bundled MediaMTX, and the browser's own camera |
+| **Alerts** | ntfy, Telegram, Discord, and native notifications in the desktop app |
+
+Connecting over Docker or HTTPS, and linking an Elegoo, Prusa or Bambu printer, each have a
+gotcha or two. The full walk-through is in
+**[docs/printers.md](docs/printers.md)**.
+
+## Hardware acceleration
+
+Hub and desktop mode carry both LiteRT and ONNX models and benchmark them on your machine at
+start, keeping whichever is faster. ONNX Runtime then uses the best provider available: Core
+ML on macOS, Windows ML on Windows 11 24H2 or newer, OpenVINO on Intel, TensorRT on NVIDIA.
+Two extra image tags exist for GPUs:
+
+```bash
+ghcr.io/oliverbravery/printguard:latest-intel    # with --device /dev/dri
+ghcr.io/oliverbravery/printguard:latest-nvidia   # with --gpus all
+```
+
+Which tag to pull, what each provider needs and how to pin a runtime:
+**[docs/hardware.md](docs/hardware.md)**.
 
 ## Exposing a hub safely
 
-PrintGuard ships no auth, so put an identity layer in front before anything leaves your trusted
-network - never port-forward the hub's ports directly.
-**[docs/deployment.md](docs/deployment.md)** has step-by-step setups for **Tailscale**
-(recommended), **Cloudflare Tunnel + Access** and **oauth2-proxy**, plus a hardening checklist.
+> [!WARNING]
+> PrintGuard ships no authentication. Anyone who can reach the hub sees every camera and can
+> pause or cancel your printers. Never port-forward it.
+
+Put an identity layer in front instead. **[docs/deployment.md](docs/deployment.md)** has
+step-by-step setups for **Tailscale**, which is the recommendation for a private hub,
+**Cloudflare Tunnel with Access**, and **oauth2-proxy**, plus a hardening checklist.
 
 ## Home Assistant
 
-Point the hub at your MQTT broker (**Settings → Home Assistant**) and every monitor appears in
-Home Assistant automatically through MQTT discovery - a defect sensor, defect score, the latest
-failure snapshot, an **Enabled** switch, and, for linked printers, live status with **Pause**,
-**Resume** and **Cancel**. Control is two-way, so your automations can drive PrintGuard. The
-broker is yours and the bridge runs on the hub, so no frames leave your hardware.
+Point the hub at your MQTT broker under **Settings → Home Assistant** and every monitor
+appears in Home Assistant automatically through MQTT discovery: a defect sensor, the defect
+score, the latest failure snapshot, an **Enabled** switch, and for linked printers live
+status with **Pause**, **Resume** and **Cancel**. Control is two-way, so your automations can
+drive PrintGuard. The broker is yours and the bridge runs on the hub, so no frames leave your
+hardware.
 
-## Automate it - MCP and API
+## Automate it with MCP and the API
 
-A hub exposes its engine to agents and scripts through the same protocol the dashboard uses, so
-anything the UI can do is automatable. Point an MCP client (Claude, an IDE) at
-`https://<host>/mcp/`, or use the REST API at `/api/v1` - both can read printer and camera
-status, fetch the **current camera frame as an image**, and pause/resume/cancel. Capability is
-per token: issue scoped bearer tokens (**read** ⊂ **control** ⊂ **manage**) from **Settings**,
-and an agent only gets what you grant. Uptime and update monitors can call the unauthenticated
-`GET /api/health` endpoint for readiness and the installed version. Full reference:
+A hub exposes its engine to agents and scripts over the same protocol the dashboard uses, so
+anything the UI can do is automatable. Point an MCP client at `https://<host>/mcp/`, or use
+the REST API at `/api/v1`. Both read printer and camera status, fetch the **current frame as
+an image**, and pause, resume or cancel.
+
+Capability is per token: issue scoped bearer tokens, `read` ⊂ `control` ⊂ `manage`, from
+**Settings**, and an agent only gets what you grant. Uptime monitors can poll the
+unauthenticated `GET /api/health` for readiness and the installed version. Full reference:
 **[docs/api.md](docs/api.md)**.
 
-## How it works
+## How the detector works
 
 The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained for few-shot
 FDM fault detection in
-[Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection) (with an
-accompanying technical paper). The sensitivity and threshold sliders map straight onto the
-prototype distances, so you can tune for your camera and lighting without retraining.
+[Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection), which
+has an accompanying technical paper. The sensitivity and threshold sliders map straight onto
+the prototype distances, so you can tune for your camera and lighting without retraining.
 
-## For developers
+## Documentation
 
-- [docs/architecture.md](docs/architecture.md) - how one engine runs on CPython and in the
-  browser, the platform contract, the scheduler and the fail-safe design, with diagrams.
-- [docs/printers.md](docs/printers.md) - connecting printers and cameras, and the networking
-  gotchas (Docker, CORS, HTTPS, Bambu).
-- [docs/api.md](docs/api.md) - the hub's MCP server and REST API: scoped access tokens, every
-  endpoint and tool, and client setup.
-- [CONTRIBUTING.md](CONTRIBUTING.md) - dev setup, tests, and step-by-step guides for adding
-  printer integrations and notification providers.
+| Page | Covers |
+|---|---|
+| [docs/printers.md](docs/printers.md) | Printers, cameras, notification channels, and the networking caveats |
+| [docs/hardware.md](docs/hardware.md) | Image variants, model runtimes, GPU and NPU acceleration |
+| [docs/deployment.md](docs/deployment.md) | Reaching a hub from outside your LAN, and hardening it |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Symptom-first fixes, and how to pull logs and diagnostics |
+| [docs/api.md](docs/api.md) | REST API and MCP server, scoped tokens, every endpoint and tool |
+| [docs/architecture.md](docs/architecture.md) | One engine on two runtimes, the platform contract, the scheduler, the fail-safe design |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in every release |
+
+## Contributing
+
+Dev setup, tests, and step-by-step guides for adding a printer integration or a notification
+provider are in **[CONTRIBUTING.md](CONTRIBUTING.md)**. Issues and pull requests are welcome.
+
+## Licence
+
+[GPL-2.0-only](LICENSE.md).

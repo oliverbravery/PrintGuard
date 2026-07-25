@@ -1,93 +1,144 @@
-# API & MCP
+<div align="center">
 
-A PrintGuard **hub** exposes its engine to agents and developers through two transports
-over one protocol - the same commands the dashboard sends, so nothing here can drift from
-the UI:
+# API and MCP
 
-- a **Model Context Protocol** server at `/mcp/` (Streamable HTTP) for agents, and
-- a versioned **REST API** at `/api/v1` for any HTTP client.
+[Docs](README.md) · [Architecture](architecture.md) · [Printers & cameras](printers.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · **API & MCP** · [Troubleshooting](troubleshooting.md)
 
-Both are hub-only. Local (in-browser) mode has no server to host them.
+</div>
+
+A hub exposes its engine to scripts and agents through two transports over one protocol: the
+same commands the dashboard sends, so nothing here can drift from the UI.
+
+- [Surfaces](#surfaces)
+- [Health and version](#health-and-version)
+- [Authentication and scopes](#authentication-and-scopes)
+- [REST API](#rest-api)
+- [MCP server](#mcp-server)
+- [The resource model](#the-resource-model)
+- [Reading detection state](#reading-detection-state)
+
+## Surfaces
+
+```mermaid
+flowchart LR
+    agent["Agent<br/>Claude, IDE"] --> mcp["/mcp/<br/>Streamable HTTP"]
+    script["Script, curl,<br/>uptime monitor"] --> rest["/api/v1<br/>REST"]
+    ui["Dashboard"] --> ws["WebSocket"]
+    ha["Home Assistant"] --> mqtt["MQTT bridge"]
+
+    mcp --> req["engine.request()"]
+    rest --> req
+    ws --> req
+    mqtt --> req
+    req --> engine["Engine<br/>one command protocol"]
+```
+
+| Surface | Endpoint | Auth |
+|---|---|---|
+| MCP server | `/mcp/`, Streamable HTTP | Bearer token |
+| REST API | `/api/v1` | Bearer token |
+| Health probe | `/api/health` | None |
+| Home Assistant | Your MQTT broker | Broker credentials |
+
+All of them are hub only. Local mode has no server to host them.
 
 ## Health and version
 
-`GET /api/health` is the unauthenticated hub readiness endpoint for uptime checks and
-update monitors. A successful response is not cached and includes the installed version:
+`GET /api/health` is the unauthenticated readiness endpoint for uptime checks and update
+monitors. The response is never cached and carries the installed version:
 
 ```json
-{"ok": true, "version": "2.3.7"}
+{"ok": true, "version": "2.3.8"}
 ```
 
-It returns `200 OK` only after the engine has started. Camera, printer and notifier health
-is available through the authenticated REST API and does not change the service-level
-probe.
+It returns `200 OK` only once the engine has started. Camera, printer and notifier health
+live behind the authenticated API and deliberately do not affect this probe.
 
-## Authentication & scopes
+## Authentication and scopes
 
-PrintGuard ships no identity layer of its own - put a proxy in front of the hub
-([docs/deployment.md](deployment.md)). On top of that, the API and MCP surface is gated by
-**capability scopes** so you can decide exactly what an agent may do.
+PrintGuard has no identity layer of its own, so put a proxy in front of the hub first
+([Deployment](deployment.md)). On top of that, this surface is gated by capability scopes.
 
 Scopes are cumulative:
 
 | Scope | Grants |
 |---|---|
-| `read` | status of monitors, printers and cameras, the current camera frame, recent events |
-| `control` | everything in `read`, plus pause / resume / cancel a print |
-| `manage` | everything in `control`, plus add/remove/edit cameras, printers and monitors, change settings, test printer services and notifiers, discover cameras |
+| `read` | Status of monitors, printers and cameras, the current camera frame, recent events |
+| `control` | Everything in `read`, plus pause, resume and cancel |
+| `manage` | Everything in `control`, plus adding, editing and removing cameras, printers and monitors, changing settings, testing services and discovering cameras |
 
-Issue scoped **bearer tokens** from the dashboard - **Settings → API & MCP access**. Name a
-token, choose its scope and **Generate**; the full secret (a `pg_…` string) is shown
-**once**, so copy it then. Only a hash is stored, so a token can never be retrieved later -
-if one is lost, revoke it and issue another. Revoking takes effect immediately.
+Issue tokens from **Settings → API & MCP access**. Name a token, choose its scope and
+**Generate**. The secret, a `pg_…` string, is shown **once**:
 
 ```http
 Authorization: Bearer pg_Zr8...agent
 ```
 
-- **No tokens issued (default):** the surface is **read-only** and trusts whatever
-  fronts it - control and management stay closed until you issue a token.
-- **Any token issued:** a valid bearer is required for every request; its scope
-  decides what it can reach. MCP additionally **hides** tools a token cannot use.
+| Token state | Behaviour |
+|---|---|
+| No tokens issued, the default | The surface is read-only and trusts whatever fronts it. Control and management stay closed |
+| Any token issued | A valid bearer is required for every request, and its scope decides what it reaches. MCP additionally **hides** tools a token cannot use |
 
-Tokens are stored hashed and are managed only from the UI (behind your proxy), never over
-the API itself - an agent holding a `manage` token can drive printers and cameras but
-cannot mint or escalate tokens. Serve the hub over HTTPS so tokens are never sent in clear.
+> [!IMPORTANT]
+> Only a hash is stored, so a lost token cannot be recovered: revoke it and issue another.
+> Revocation is immediate. Tokens are managed from the UI only, never over the API, so an
+> agent holding a `manage` token can drive printers and cameras but cannot mint or escalate
+> tokens. Serve the hub over HTTPS so tokens never travel in clear.
 
 ## REST API
 
-Base path `/api/v1`. Requests and responses are JSON, except the camera frame, which is
-`image/jpeg`. Mutating endpoints return the affected collection.
+Base path `/api/v1`. JSON in and out, except the camera frame, which is `image/jpeg`.
+Mutating endpoints return the affected collection. The interactive OpenAPI schema is served
+at `/api/v1/docs`.
 
-| Method | Path | Scope | Description |
-|---|---|---|---|
-| `GET` | `/state` | read | Full snapshot: cameras, printers, monitors, settings, stats |
-| `GET` | `/monitors` | read | List monitors with camera, linked printer and latest alert |
-| `GET` | `/monitors/{id}` | read | One monitor |
-| `GET` | `/printers` | read | List registered printers with status, progress and job |
-| `GET` | `/printers/{id}` | read | One printer |
-| `GET` | `/cameras` | read | List cameras with rate, health and latest score |
-| `GET` | `/cameras/{id}` | read | One camera |
-| `GET` | `/cameras/{id}/frame` | read | Freshest frame as `image/jpeg` |
-| `POST` | `/classify` | read | Classify a supplied frame (body = `image/jpeg`, `?sensitivity=`); no registered camera needed |
-| `GET` | `/events` | read | Recent alerts, warnings, device changes and errors |
-| `POST` | `/printers/{id}/action` | control | `{"action": "pause" \| "resume" \| "cancel"}` |
-| `POST` | `/monitors` | manage | Add a monitor (binds a camera + optional printer) |
-| `PATCH` | `/monitors/{id}` | manage | Update a monitor |
-| `DELETE` | `/monitors/{id}` | manage | Remove a monitor |
-| `POST` | `/printers` | manage | Register a printer |
-| `PATCH` | `/printers/{id}` | manage | Update a printer |
-| `DELETE` | `/printers/{id}` | manage | Remove a printer |
-| `POST` | `/printers/test` | manage | `{"provider", "config"}` - reachability |
-| `POST` | `/cameras` | manage | Add a camera |
-| `PATCH` | `/cameras/{id}` | manage | Update a camera |
-| `DELETE` | `/cameras/{id}` | manage | Remove a camera |
-| `POST` | `/cameras/discover` | manage | List attachable, unregistered sources |
-| `POST` | `/cameras/refresh-printers` | manage | Register cameras newly exposed by registered printers |
-| `PATCH` | `/settings` | manage | Update settings (e.g. notifiers) |
-| `POST` | `/notifiers/test` | manage | `{"provider", "config"}` - send a test |
+<details open>
+<summary><b>Read</b></summary>
 
-Interactive schema (OpenAPI) is served at `/api/v1/docs`.
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/state` | Full snapshot: cameras, printers, monitors, settings, stats |
+| `GET` | `/monitors` | List monitors with camera, linked printer and latest alert |
+| `GET` | `/monitors/{id}` | One monitor |
+| `GET` | `/printers` | List registered printers with status, progress and job |
+| `GET` | `/printers/{id}` | One printer |
+| `GET` | `/cameras` | List cameras with rate, health and latest score |
+| `GET` | `/cameras/{id}` | One camera |
+| `GET` | `/cameras/{id}/frame` | Freshest frame as `image/jpeg` |
+| `POST` | `/classify` | Classify a supplied frame, body `image/jpeg`, `?sensitivity=`. No registered camera needed |
+| `GET` | `/events` | Recent alerts, warnings, device changes and errors |
+
+</details>
+
+<details>
+<summary><b>Control</b></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/printers/{id}/action` | `{"action": "pause" \| "resume" \| "cancel"}` |
+
+</details>
+
+<details>
+<summary><b>Manage</b></summary>
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/monitors` | Add a monitor, binding a camera and an optional printer |
+| `PATCH` | `/monitors/{id}` | Update a monitor |
+| `DELETE` | `/monitors/{id}` | Remove a monitor |
+| `POST` | `/printers` | Register a printer |
+| `PATCH` | `/printers/{id}` | Update a printer |
+| `DELETE` | `/printers/{id}` | Remove a printer |
+| `POST` | `/printers/test` | `{"provider", "config"}`, reachability only |
+| `POST` | `/cameras` | Add a camera |
+| `PATCH` | `/cameras/{id}` | Update a camera |
+| `DELETE` | `/cameras/{id}` | Remove a camera |
+| `POST` | `/cameras/discover` | List attachable, unregistered sources |
+| `POST` | `/cameras/refresh-printers` | Register cameras newly exposed by registered printers |
+| `PATCH` | `/settings` | Update settings, for example notifiers |
+| `POST` | `/notifiers/test` | `{"provider", "config"}`, sends a test alert |
+
+</details>
 
 ```bash
 # Status of every printer
@@ -100,7 +151,7 @@ curl -H "Authorization: Bearer $TOKEN" https://host/api/v1/cameras/$CAM/frame -o
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"action":"pause"}' https://host/api/v1/printers/$PRINTER/action
 
-# Classify a supplied frame (no registered camera needed)
+# Classify a supplied frame, no registered camera needed
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: image/jpeg" \
   --data-binary @frame.jpg https://host/api/v1/classify
 # → {"prediction":"success","distances":{...},"margin":1.16,"defect_score":0.35}
@@ -108,16 +159,16 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: image/jpeg" \
 
 ## MCP server
 
-Endpoint `https://<host>/mcp/`, transport **Streamable HTTP**, authenticated with the same
-bearer token. Tools mirror the REST operations one-to-one (by `operation_id`); the tool
-list a client sees is filtered to the scopes its token holds.
+Endpoint `https://<host>/mcp/`, transport **Streamable HTTP**, same bearer token. Tools
+mirror the REST operations one to one by `operation_id`, and the list a client sees is
+filtered to the scopes its token holds.
 
-| Tool | Scope | |
-|---|---|---|
-| `get_state`, `list_monitors`, `get_monitor`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `recent_events` | read | status |
-| `get_camera_frame` | read | returns the frame as **image content** an agent can look at |
-| `control_printer` | control | pause / resume / cancel |
-| `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_settings`, `test_notifier` | manage | configuration |
+| Scope | Tools |
+|---|---|
+| `read` | `get_state`, `list_monitors`, `get_monitor`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `recent_events` |
+| `read` | `get_camera_frame`, which returns the frame as **image content** an agent can look at |
+| `control` | `control_printer` |
+| `manage` | `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_settings`, `test_notifier` |
 
 Point a client at the endpoint with the token as a bearer header:
 
@@ -142,32 +193,35 @@ npx @modelcontextprotocol/inspector
 
 ## The resource model
 
-Cameras and printers are **registered resources** - each is created and deleted only
-through its own collection (`/cameras`, `/printers`). A **monitor** binds one camera and,
-optionally, one printer (by `camera_id` / `printer_id`) and carries the inference
-thresholds and defect-response policy; removing a resource clears it from any monitor that
-referenced it.
+Cameras and printers are **registered resources**, created and deleted only through their
+own collection. A **monitor** binds one camera and optionally one printer by `camera_id` and
+`printer_id`, and carries the thresholds and defect-response policy. Removing a resource
+clears it from any monitor that referenced it.
 
-Credentials are redacted from this read surface: any printer or notifier config field its
-adapter marks secret (API keys, access codes, bot tokens) is stripped from every REST and
-MCP response; only the dashboard's own WebSocket, behind your proxy, receives them.
+> [!NOTE]
+> Credentials are redacted from this surface. Any printer or notifier config field its
+> adapter marks secret, such as API keys, access codes and bot tokens, is stripped from
+> every REST and MCP response. Only the dashboard's own WebSocket, behind your proxy,
+> receives them.
 
-Every printer integration (OctoPrint, Klipper/Moonraker, Elegoo, PrusaLink, Bambu Lab, …) is normalised to one
-shape, so a printer reads and controls the same way regardless of its service.
+Every integration is normalised to one shape, so a printer reads and controls the same way
+regardless of its service:
 
-- **Status** - one of `printing`, `paused`, `idle`, `error`, `offline`, `unknown`.
-- **State** - `{ "status", "progress" (0–100), "job" }`, reported on printer objects as
-  `device_state`.
-- **Actions** - `pause`, `resume`, `cancel`.
+| | Values |
+|---|---|
+| **Status** | `printing`, `paused`, `idle`, `error`, `offline`, `unknown` |
+| **State** | `{ "status", "progress" 0-100, "job" }`, reported on printers as `device_state` |
+| **Actions** | `pause`, `resume`, `cancel` |
 
 ## Reading detection state
 
-The response bodies below are what an integrator polls to answer "is this print failing?".
-Two facts matter and are easy to miss: the **camera** carries a per-frame *classification*,
-while the smoothed **0–1 defect score** is a per-**monitor** quantity - the camera object has
-no numeric score field.
+Two facts are easy to miss:
 
-**Camera object** (`GET /cameras`, `GET /cameras/{id}`):
+- the **camera** carries a per-frame *classification*,
+- the smoothed **0-1 defect score** is a per-**monitor** quantity. The camera object has no
+  numeric score field.
+
+**Camera object**, `GET /cameras` and `GET /cameras/{id}`:
 
 ```jsonc
 {
@@ -187,12 +241,11 @@ no numeric score field.
 ```
 
 `last_result` is the newest raw classification, or `null` before the camera has been
-inferred. `prediction` is simply the **nearest class prototype** for that frame (no
-threshold applied) - the quickest per-camera "failing?" read. It is `"unknown"` when the
-frame can't be classified (e.g. the embedding isn't finite).
+inferred. `prediction` is the **nearest class prototype** for that frame with no threshold
+applied, which makes it the quickest per-camera "failing?" read. It is `"unknown"` when the
+frame cannot be classified, for example when the embedding is not finite.
 
-**Monitor object** (`GET /monitors`, `GET /monitors/{id}`): binds a camera (+ optional
-printer) and holds the detection policy, latest result and latest alert:
+**Monitor object**, `GET /monitors` and `GET /monitors/{id}`:
 
 ```jsonc
 {
@@ -211,18 +264,18 @@ printer) and holds the detection policy, latest result and latest alert:
 }
 ```
 
-**Prediction vs defect score.** The **0–1 defect score** (`0.5` = decision boundary, higher
-= more defective) applies a monitor's `sensitivity` to the frame's distance margin, so it is
-**per-monitor, not on the camera**. It appears in:
+**Prediction against defect score.** The 0-1 defect score, where `0.5` is the decision
+boundary and higher is more defective, applies a monitor's `sensitivity` to the frame's
+distance margin, so it is per-monitor rather than per-camera. It appears in:
 
-- the `result` events on the WebSocket:
-  `{ "event": "result", "monitor_id", "camera_id", "score" (0–1), "prediction" (this
-  monitor's `threshold` applied), "margin", "ms", "ts" }`, sampled at up to 5 Hz per
+- `result` events on the WebSocket:
+  `{ "event": "result", "monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts" }`,
+  where `prediction` has that monitor's `threshold` applied, sampled at up to 5 Hz per
   monitor,
-- the monitor object's latest `result`, which is also carried by each full `state` snapshot,
-- a monitor's `alert.score` once it trips, and
-- the MQTT *Defect score* sensor, published as `0–100` (the `0–1` score ×100).
+- the monitor object's latest `result`, also carried by every full `state` snapshot,
+- a monitor's `alert.score` once it trips,
+- the MQTT *Defect score* sensor, published as 0-100.
 
-So: to poll one camera's current verdict, read `GET /cameras/{id}` → `last_result.prediction`;
-for the smoothed `0–1` score or a monitor's threshold-applied verdict, read the monitor or the
-`result` events.
+So: to poll one camera's current verdict read `GET /cameras/{id}` and take
+`last_result.prediction`; for the smoothed score or a threshold-applied verdict, read the
+monitor or the `result` events.

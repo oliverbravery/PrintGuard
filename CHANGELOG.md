@@ -12,21 +12,21 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Added
 
 - **Keep a copy of your diagnostics, or send them wherever you like.** The bug report
-  dialog now has a **Download logs** button that saves exactly what a report would carry —
+  dialog now has a **Download logs** button that saves exactly what a report would carry,
   the diagnostics bundle plus PrintGuard's own and the dashboard's recent logs, with every
-  credential stripped and no camera frames — as a single zip. Read it before anything
+  credential stripped and no camera frames, as a single zip. Read it before anything
   leaves your machine, attach it to a GitHub issue, or hand it to whoever is helping you.
   Nothing is sent when you download.
 
 - **Read the changelog for any version, not just the pending ones.** The version chip in
   the header now opens a picker covering every published release, with the one you are
   running and the newest one both marked, so you can see what a version changed before you
-  take it — or catch up on what you already have.
+  take it, or catch up on what you already have.
 
 ### Changed
 
 - **The Docker image is a third smaller.** The amd64 image drops from 1.1 GB to 720 MB on
-  disk — a 377 MB download becomes 263 MB — and arm64 from 623 MB to 566 MB. Compiled
+  disk, a 377 MB download becomes 263 MB, and arm64 from 623 MB to 566 MB. Compiled
   dependencies now ship without their debug symbols, and the 290 MB Intel GPU compute
   runtime moved into its own image. Pulls and updates are quicker, and nothing about how
   PrintGuard runs changes.
@@ -45,7 +45,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 - **A hub that is force quit or crashes no longer blocks the next one from starting.** The
   bundled streaming server was left running when PrintGuard did not exit cleanly, and it
-  kept port 8554 — so the next start, whether the desktop app, a container or another hub
+  kept port 8554, so the next start, whether the desktop app, a container or another hub
   on that machine, failed with "address already in use" from an app that was no longer
   running. The streaming server now always stops with the hub, however the hub ends.
 
