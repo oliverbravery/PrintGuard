@@ -30,10 +30,11 @@ async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None
             when the deployment updates outside the app.
 
     Returns:
-        A status dict with ``current``, ``latest``, ``available``, the
-        ``releases`` newer than ``current`` (newest first, each carrying its
-        changelog ``notes`` and ``url``) and ``download`` - the latest
-        release's URL for ``asset``, or None.
+        A status dict with ``current``, ``latest``, ``available``, every
+        published ``releases`` entry (newest first, each carrying its
+        changelog ``notes`` and ``url``, so the UI can show the history as
+        well as what is pending) and ``download`` - the latest release's URL
+        for ``asset``, or None.
 
     Raises:
         RuntimeError: If GitHub does not return a releases list.
@@ -43,8 +44,7 @@ async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None
     status, body = await http("GET", RELEASES_URL.format(repo=repo), headers=HEADERS, timeout=TIMEOUT_S)
     if status != 200 or not isinstance(body, list):
         raise RuntimeError(f"GitHub returned {status}")
-    current_version = Version(current)
-    newer: list[dict[str, Any]] = []
+    published: list[tuple[Version, dict[str, Any]]] = []
     assets_by_version: dict[str, list[dict[str, Any]]] = {}
     for release in body:
         if release.get("draft") or release.get("prerelease"):
@@ -53,28 +53,35 @@ async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None
             version = Version((release.get("tag_name") or "").lstrip("v"))
         except InvalidVersion:
             continue
-        if version.is_prerelease or version <= current_version:
+        if version.is_prerelease:
             continue
         assets_by_version[str(version)] = release.get("assets") or []
-        newer.append(
-            {
-                "version": str(version),
-                "name": release.get("name") or str(version),
-                "notes": (release.get("body") or "").strip(),
-                "url": release.get("html_url") or f"https://github.com/{repo}/releases/tag/v{version}",
-                "published_at": release.get("published_at"),
-            }
+        published.append(
+            (
+                version,
+                {
+                    "version": str(version),
+                    "name": release.get("name") or str(version),
+                    "notes": (release.get("body") or "").strip(),
+                    "url": release.get("html_url") or f"https://github.com/{repo}/releases/tag/v{version}",
+                    "published_at": release.get("published_at"),
+                },
+            )
         )
-    newer.sort(key=lambda release: Version(release["version"]), reverse=True)
+    published.sort(key=lambda item: item[0], reverse=True)
+    current_version = Version(current)
+    latest = max(published[0][0], current_version) if published else current_version
+    available = latest > current_version
     download = None
-    if asset and newer:
-        latest_assets = assets_by_version[newer[0]["version"]]
-        download = next((a.get("browser_download_url") for a in latest_assets if a.get("name") == asset), None)
+    if asset and available:
+        download = next(
+            (a.get("browser_download_url") for a in assets_by_version[str(latest)] if a.get("name") == asset), None
+        )
     return {
         "current": current,
-        "latest": newer[0]["version"] if newer else current,
-        "available": bool(newer),
-        "releases": newer,
+        "latest": str(latest),
+        "available": available,
+        "releases": [release for _, release in published],
         "download": download,
         "checked_at": time.time(),
         "releases_url": f"https://github.com/{repo}/releases",

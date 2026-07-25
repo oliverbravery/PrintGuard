@@ -18,6 +18,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   leaves your machine, attach it to a GitHub issue, or hand it to whoever is helping you.
   Nothing is sent when you download.
 
+- **Read the changelog for any version, not just the pending ones.** The version chip in
+  the header now opens a picker covering every published release, with the one you are
+  running and the newest one both marked, so you can see what a version changed before you
+  take it — or catch up on what you already have.
+
 ### Changed
 
 - **The Docker image is a third smaller.** The amd64 image drops from 1.1 GB to 720 MB on

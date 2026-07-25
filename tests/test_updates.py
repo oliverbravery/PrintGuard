@@ -39,7 +39,7 @@ async def _check(engine: Engine) -> dict:
     return next(e for e in events if e["event"] == "state")["update"]
 
 
-async def test_reports_only_newer_stable_releases_newest_first() -> None:
+async def test_reports_stable_releases_newest_first() -> None:
     engine, platform = _engine(
         version="2.1.0",
         releases=[
@@ -54,9 +54,27 @@ async def test_reports_only_newer_stable_releases_newest_first() -> None:
     update = await _check(engine)
     assert update["available"] is True
     assert update["latest"] == "2.3.0"
-    assert [r["version"] for r in update["releases"]] == ["2.3.0", "2.2.0"]
-    assert update["releases"][0]["notes"] == "two-three"
+    assert [r["version"] for r in engine.releases] == ["2.3.0", "2.2.0", "2.1.0"]
+    assert engine.releases[0]["notes"] == "two-three"
     assert ("GET", "https://api.github.com/repos/o/r/releases") in platform.http_calls
+
+
+async def test_history_is_served_on_demand_not_in_every_snapshot() -> None:
+    engine, platform = _engine(version="2.3.0", releases=[_release("v2.2.0"), _release("v2.3.0", "three")])
+    events = await engine.request({"cmd": "update.releases"})
+    served = next(e for e in events if e["event"] == "releases")["releases"]
+    assert [r["version"] for r in served] == ["2.3.0", "2.2.0"]
+    assert "releases" not in engine.state_event()["update"]
+
+    calls = len(platform.http_calls)
+    await engine.request({"cmd": "update.releases"})
+    assert len(platform.http_calls) == calls, "a second request must serve what was already fetched"
+
+
+async def test_history_is_empty_where_updates_do_not_apply() -> None:
+    engine = Engine(FakePlatform())  # update_repo defaults to None (local mode)
+    events = await engine.request({"cmd": "update.releases"})
+    assert next(e for e in events if e["event"] == "releases")["releases"] == []
 
 
 async def test_up_to_date_reports_no_update() -> None:
@@ -64,7 +82,7 @@ async def test_up_to_date_reports_no_update() -> None:
     update = await _check(engine)
     assert update["available"] is False
     assert update["latest"] == "2.3.0"
-    assert update["releases"] == []
+    assert [r["version"] for r in engine.releases] == ["2.3.0", "2.2.0"]
 
 
 async def test_desktop_asset_resolves_to_latest_download() -> None:

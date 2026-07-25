@@ -59,8 +59,8 @@ runtime service, extend the Platform contract on both sides.
 
 Commands (UI → engine): `discover`, `camera.add/update/remove`,
 `printer.add/update/remove`, `printer.action`, `printer.test`, `printer.cameras.refresh`,
-`monitor.add/update/remove`, `notify.test`, `settings.update`, `update.check`, `report.send`,
-`report.bundle`.
+`monitor.add/update/remove`, `notify.test`, `settings.update`, `update.check`,
+`update.releases`, `report.send`, `report.bundle`.
 Every command may carry a `req_id`, echoed on the responding event so the UI can resolve
 pending requests.
 
@@ -80,9 +80,15 @@ can't be removed on their own and are dropped with their printer.
 Events (engine → UI): a full `state` snapshot (on connect, after every command, and on a
 1 s ticker; it carries the running version, latest monitor results and any available
 update), plus incremental `result`, `alert`, `warning`, `device`, `discovered`,
-`printer_test`, `notify_test`, `report_sent`, `report_bundle` and `error` events. Result updates are sampled
+`printer_test`, `notify_test`, `releases`, `report_sent`, `report_bundle` and `error` events. Result updates are sampled
 at 5 Hz per monitor and conflated when a transport is slower; ordered events and
 command responses are never evicted by telemetry.
+
+`update.check` refreshes the release status against GitHub
+([`engine/updates.py`](../printguard/engine/updates.py)) and `update.releases` serves the
+changelog history the update dialog browses. The `state` snapshot carries only the status -
+version, latest, whether an update is available - because every release's notes together
+dwarf the rest of the snapshot, and the history is wanted only while that dialog is open.
 
 `report.send` is the anonymous bug report ([`engine/reports.py`](../printguard/engine/reports.py)):
 one user-initiated POST of a Sentry feedback envelope - description, optional contact email,

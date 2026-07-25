@@ -64,6 +64,7 @@ class Engine:
         self.tokens = TokenRegistry()
         self.settings: dict[str, Any] = dict(SETTINGS_DEFAULTS)
         self.update: dict[str, Any] | None = None
+        self.releases: list[dict[str, Any]] = []
         self.scheduler = Scheduler(platform, self.cameras, self._on_result, self._on_pipeline_error)
         self.watchdog = Watchdog(self)
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
@@ -91,6 +92,7 @@ class Engine:
             "token.create": self._cmd_token_create,
             "token.remove": self._cmd_token_remove,
             "update.check": self._cmd_update_check,
+            "update.releases": self._cmd_update_releases,
             "report.send": self._cmd_report_send,
             "report.bundle": self._cmd_report_bundle,
         }
@@ -393,12 +395,20 @@ class Engine:
             await asyncio.sleep(UPDATE_CHECK_INTERVAL_S)
 
     async def _check_updates(self) -> None:
-        """Fetches and stores the update status, raising if it cannot."""
+        """Fetches and stores the update status, raising if it cannot.
+
+        The release history is held apart from the status the state snapshot
+        carries: every changelog section together is far larger than the rest
+        of the snapshot, and the UI only needs it while the update dialog is
+        open.
+        """
         if not self.platform.update_repo:
             raise RuntimeError("update checks are not available in this mode")
-        self.update = await updates.fetch_updates(
+        status = await updates.fetch_updates(
             self.platform.http, self.platform.update_repo, self.platform.version, self.platform.update_asset
         )
+        self.releases = status.pop("releases")
+        self.update = status
 
     def _on_pipeline_error(self, message: str) -> None:
         self.emit({"event": "error", "message": message})
@@ -666,6 +676,12 @@ class Engine:
 
     async def _cmd_update_check(self, message: dict[str, Any]) -> None:
         await self._check_updates()
+        self.emit({"event": "releases", "releases": self.releases, "req_id": message.get("req_id")})
+
+    async def _cmd_update_releases(self, message: dict[str, Any]) -> None:
+        if self.update is None and self.platform.update_repo:
+            await self._check_updates()
+        self.emit({"event": "releases", "releases": self.releases, "req_id": message.get("req_id")})
 
     async def _cmd_report_send(self, message: dict[str, Any]) -> None:
         try:

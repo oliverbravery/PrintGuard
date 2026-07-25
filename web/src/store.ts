@@ -4,7 +4,7 @@ import { bootLocal } from "./local";
 import { log } from "./log";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
-import type { Camera, CameraSource, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, ScorePoint } from "./types";
+import type { Camera, CameraSource, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
 const UPDATE_DEBOUNCE_MS = 250;
@@ -79,6 +79,7 @@ interface PgStore {
   notifyTest: { provider: string; ok: boolean; error?: string } | null;
   testingNotifier: string | null;
   reportResult: { ok: boolean; error?: string } | null;
+  releases: UpdateRelease[];
   pending: Record<string, { req_id: number; cmd: string }>;
   toasts: Toast[];
   detailId: string | null;
@@ -256,6 +257,10 @@ export const useStore = create<PgStore>((set, get) => {
       case "report_sent":
         set({ reportResult: event });
         break;
+      case "releases":
+        clearPending(event.req_id);
+        set({ releases: event.releases });
+        break;
       case "report_bundle":
         clearPending(event.req_id);
         saveBase64(event.filename, event.zip, "application/zip");
@@ -326,6 +331,7 @@ export const useStore = create<PgStore>((set, get) => {
     notifyTest: null,
     testingNotifier: null,
     reportResult: null,
+    releases: [],
     pending: {},
     toasts: [],
     detailId: null,
