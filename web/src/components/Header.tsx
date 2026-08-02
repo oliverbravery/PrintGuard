@@ -153,7 +153,7 @@ function ReportChip() {
 }
 
 export function Header() {
-  const { engine, mode, leaveMode, openSettings } = useStore();
+  const { engine, mode, openDialog, openSettings } = useStore();
   const stats = engine?.stats;
   return (
     <header className="sticky top-0 z-30 border-b border-line-0 bg-ink-0/90 backdrop-blur-sm">
@@ -162,8 +162,8 @@ export function Header() {
         {mode === "local" && (
           <button
             className="chip chip-accent cursor-pointer hover:opacity-80"
-            title="Back to start"
-            onClick={leaveMode}
+            title="What the live demo can and cannot do"
+            onClick={() => openDialog("demo")}
           >
             local ▾
           </button>

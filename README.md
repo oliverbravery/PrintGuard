@@ -123,6 +123,7 @@ self-host it when you are ready.
 | Model runs | [LiteRT.js in WASM](https://developers.google.com/edge/litert) | [LiteRT](https://github.com/google-ai-edge/LiteRT) or [ONNX Runtime](https://onnxruntime.ai/) |
 | Frames leave the device | Never | Only to your own server |
 | Survives closing the tab | No | Yes |
+| Cameras | This device's webcams | Any stream, plus printer cameras |
 | Printers | OctoPrint and Klipper | All of them |
 
 The **desktop app** is hub mode without the setup: the same persistent engine as the

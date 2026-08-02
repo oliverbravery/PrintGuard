@@ -23,6 +23,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   running and the newest one both marked, so you can see what a version changed before you
   take it, or catch up on what you already have.
 
+- **The live demo says what it cannot do.** Local mode now opens with a short notice
+  covering the four things that need an installed hub: watching after the tab closes,
+  network and printer cameras, Bambu Lab, Prusa and Elegoo printers, and GPU or NPU
+  inference across several cameras. It appears once per browser, and the **local** chip in
+  the header reopens it.
+
 ### Changed
 
 - **The Docker image is a third smaller.** The amd64 image drops from 1.1 GB to 720 MB on

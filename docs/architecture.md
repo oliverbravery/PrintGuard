@@ -325,3 +325,9 @@ Local mode needs no backend at all, so the same `web/dist` build deploys to GitH
 The release workflow zips the engine source with `printguard/pysrc.py`, copies `models/` into
 the bundle, and every asset is fetched base-relative. The mode picker probes `api/health`,
 and when no hub answers the hub card becomes a Docker self-host link.
+
+Because the demo is most people's first contact with PrintGuard, local mode opens a notice
+listing what a hub adds (`web/src/components/DemoDialog.tsx`). It shows once per browser,
+keyed on `pg.demo.seen` in `localStorage`, and the header's **local** chip reopens it. The
+list is copy, not capability data: the dialogs already hide what a mode cannot do, through
+each adapter's `browser_ok` flag.
