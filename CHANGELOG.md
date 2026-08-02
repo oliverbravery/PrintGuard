@@ -7,6 +7,62 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.8] - 2026-07-24
+
+### Added
+
+- **Keep a copy of your diagnostics, or send them wherever you like.** The bug report
+  dialog now has a **Download logs** button that saves exactly what a report would carry,
+  the diagnostics bundle plus PrintGuard's own and the dashboard's recent logs, with every
+  credential stripped and no camera frames, as a single zip. Read it before anything
+  leaves your machine, attach it to a GitHub issue, or hand it to whoever is helping you.
+  Nothing is sent when you download.
+
+- **Read the changelog for any version, not just the pending ones.** The version chip in
+  the header now opens a picker covering every published release, with the one you are
+  running and the newest one both marked, so you can see what a version changed before you
+  take it, or catch up on what you already have.
+
+- **The live demo says what it cannot do.** Local mode now opens with a short notice
+  covering the four things that need an installed hub: watching after the tab closes,
+  network and printer cameras, Bambu Lab, Prusa and Elegoo printers, and GPU or NPU
+  inference across several cameras. It appears once per browser, and the **local** chip in
+  the header reopens it.
+
+### Changed
+
+- **The Docker image is a third smaller.** The amd64 image drops from 1.1 GB to 720 MB on
+  disk, a 377 MB download becomes 263 MB, and arm64 from 623 MB to 566 MB. Compiled
+  dependencies now ship without their debug symbols, and the 290 MB Intel GPU compute
+  runtime moved into its own image. Pulls and updates are quicker, and nothing about how
+  PrintGuard runs changes.
+- **Intel GPU inference now uses the `-intel` image.** Pair `--device /dev/dri` with
+  `ghcr.io/oliverbravery/printguard:latest-intel`, which carries the Intel GPU compute
+  runtime; if you pass `/dev/dri` to the standard image today, switch tags to keep GPU
+  inference. Intel **CPU** acceleration through OpenVINO is unchanged on the standard
+  image, and NVIDIA hosts keep using `latest-nvidia`.
+- **The report button in the header is now a bug icon** rather than a flag, so it is clear
+  at a glance what it opens.
+- **Elegoo and Prusa printers, and desktop notifications, are no longer marked
+  experimental.** They have held up in use, so the warning is gone from their setup forms;
+  nothing about how they are configured changes.
+
+### Fixed
+
+- **CPU inference is fast again after 2.3.7 cut it to a quarter of its throughput.** 2.3.7
+  ran at most two frames at once on hosts that could sustain many more, so capacity fell
+  from roughly 2,000 fps to under 500 on the same machine, and both LiteRT and ONNX Runtime
+  were affected. PrintGuard now measures how far the runtime on your host actually scales
+  instead of guessing from the core count, and runs that many frames at once. Expect the
+  **capacity** readout to return to what 2.3.6 showed or better, on Intel CPUs through
+  OpenVINO especially. Nothing to change: the measurement runs at startup and its result is
+  in the log as `inference ready:`. Thanks to @hedger for the report.
+- **A hub that is force quit or crashes no longer blocks the next one from starting.** The
+  bundled streaming server was left running when PrintGuard did not exit cleanly, and it
+  kept port 8554, so the next start, whether the desktop app, a container or another hub
+  on that machine, failed with "address already in use" from an app that was no longer
+  running. The streaming server now always stops with the hub, however the hub ends.
+
 ## [2.3.7] - 2026-07-22
 
 ### Added

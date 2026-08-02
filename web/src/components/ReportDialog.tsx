@@ -33,7 +33,9 @@ export function ReportDialog() {
   const [email, setEmail] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const sending = isPending("report.send");
+  const bundling = isPending("report.bundle");
   const close = () => openDialog(null);
+  const downloadBundle = () => send({ cmd: "report.bundle", logs: recentLogs() });
 
   const addFiles = async (files: FileList | null) => {
     if (!files) return;
@@ -127,15 +129,21 @@ export function ReportDialog() {
             Your description, any files you attach, and a diagnostics bundle: the app version and platform, your
             camera, printer, monitor and notification configuration with every credential removed, performance
             stats, recent errors and warnings, and the app's recent logs — also scrubbed of credentials. No
-            camera frames are included unless you attach them yourself.
+            camera frames are included unless you attach them yourself. Download the same bundle to read it
+            first, or to send it somewhere else yourself.
           </p>
         </details>
         {reportResult && !reportResult.ok && (
           <p className="text-xs text-bad">Sending failed: {reportResult.error || "unknown error"}</p>
         )}
-        <button className="btn btn-primary w-full" disabled={!message.trim() || sending} onClick={submit}>
-          {sending ? "Sending…" : "Send report"}
-        </button>
+        <div className="flex gap-2">
+          <button className="btn flex-1" disabled={bundling} onClick={downloadBundle}>
+            {bundling ? "Preparing…" : "Download logs"}
+          </button>
+          <button className="btn btn-primary flex-1" disabled={!message.trim() || sending} onClick={submit}>
+            {sending ? "Sending…" : "Send report"}
+          </button>
+        </div>
       </div>
     </Dialog>
   );

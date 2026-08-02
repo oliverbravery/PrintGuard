@@ -47,7 +47,7 @@ class PrusaAdapter(IntegrationAdapter):
         "shown there. The username is always 'maker'."
     )
     browser_ok = False
-    experimental = True
+    experimental = False
     schema = {
         "type": "object",
         "properties": {

@@ -1,0 +1,65 @@
+name: Issues
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [closed]
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  triage:
+    name: triage
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - run: >-
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "status: needs triage"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+
+  resolved:
+    name: resolved
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Reopen the issues the merge closed and mark them completed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          issue_numbers=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
+          for issue_number in $issue_numbers; do
+            gh issue reopen "$issue_number" --repo "$GITHUB_REPOSITORY"
+            gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json labels \
+              --jq '{labels: ([.labels[].name | select(startswith("status: ") | not)] + ["status: completed"])}' \
+              | gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/labels" -X PUT --input -
+          done
+
+  expire:
+    name: expire
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Close completed issues the reporter has not come back on
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cutoff=$(date -u -d '30 days ago' +%F)
+          issue_numbers=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "label:\"status: completed\" updated:<$cutoff" --json number --jq '.[].number')
+          for issue_number in $issue_numbers; do
+            gh issue close "$issue_number" --repo "$GITHUB_REPOSITORY" --reason completed \
+              --comment "Closing automatically after 30 days with no follow-up. Reopen it if the problem is still there."
+          done

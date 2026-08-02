@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import logging
+import zipfile
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
@@ -622,6 +624,26 @@ async def test_report_send_redacts_credentials_and_posts_feedback() -> None:
         assert f'"filename": "{log_file}"' in text and marker in text, f"{log_file} missing or not scrubbed"
     assert "engine started" in text, "engine lifecycle lines missing from the attached log tail"
     assert b"\x89PNG fake" in request["data"], "user attachment bytes missing from the envelope"
+
+
+async def test_report_bundle_downloads_the_same_scrubbed_files() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with configured_logging(), running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle(
+            {"cmd": "printer.add", "printer": {"name": "P", "provider": "octoprint", "config": {"base_url": "http://op", "api_key": "octo-secret"}}}
+        )
+        logging.getLogger("printguard.test").warning("upstream rejected credential octo-secret")
+        await engine.handle({"cmd": "report.bundle", "req_id": 4, "logs": ["ui line with octo-secret"]})
+
+    bundle = next(e for e in events if e.get("event") == "report_bundle")
+    assert bundle["req_id"] == 4 and bundle["filename"].startswith("printguard-diagnostics-")
+    with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle["zip"]))) as archive:
+        assert archive.namelist() == ["diagnostics.json", "engine.log", "ui.log"]
+        contents = {name: archive.read(name).decode() for name in archive.namelist()}
+    assert json.loads(contents["diagnostics.json"])["printers"][0]["config"]["api_key"] == reports.REDACTED
+    for name, text in contents.items():
+        assert "octo-secret" not in text, f"credential leaked into {name}"
+    assert not any(r["url"].startswith("https://") for r in platform.http_requests), "a download must send nothing"
 
 
 async def test_report_send_surfaces_failure() -> None:

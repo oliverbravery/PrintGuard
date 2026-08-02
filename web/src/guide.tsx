@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { BugIcon } from "./components/BugIcon";
 import type { DialogKind } from "./store";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
@@ -170,9 +171,10 @@ export const GUIDE: GuideSection[] = [
     title: "Something broken?",
     body: (
       <>
-        Report a bug from the <span className="mono">⚑</span> chip in the header — anonymously, no account
-        needed. Describe what happened, attach screenshots if they help, and optionally leave an email for
-        follow-up. A diagnostics bundle goes with it, with every credential stripped and no camera frames.
+        Report a bug from the <BugIcon className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" /> chip in the header —
+        anonymously, no account needed. Describe what happened, attach screenshots if they help, and optionally
+        leave an email for follow-up. A diagnostics bundle goes with it, with every credential stripped and no
+        camera frames — download the same bundle from that dialog to read it or send it somewhere else yourself.
       </>
     ),
     action: { label: "Report a bug", dialog: "report" },

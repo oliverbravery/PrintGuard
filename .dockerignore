@@ -1,7 +1,10 @@
 .git
+.claude
 .venv
 .env
+build
 data
+dist
 tests
 web/node_modules
 web/dist

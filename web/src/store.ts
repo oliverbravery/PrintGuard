@@ -4,7 +4,7 @@ import { bootLocal } from "./local";
 import { log } from "./log";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
-import type { Camera, CameraSource, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, ScorePoint } from "./types";
+import type { Camera, CameraSource, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
 const UPDATE_DEBOUNCE_MS = 250;
@@ -42,9 +42,24 @@ function appendScore(history: Record<string, ScorePoint[]>, monitorId: string, p
   return { ...history, [monitorId]: [...points, point].slice(-HISTORY_LIMIT) };
 }
 
+function saveBase64(filename: string, base64: string, type: string) {
+  const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))], { type }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 function modeFromUrl(): Mode | null {
   const hash = location.hash.slice(1);
   return hash === "local" || hash === "hub" ? hash : null;
+}
+
+const DEMO_SEEN_KEY = "pg.demo.seen";
+
+function demoNoticeDue(mode: Mode | null): boolean {
+  return mode === "local" && !localStorage.getItem(DEMO_SEEN_KEY);
 }
 
 export interface Toast {
@@ -53,7 +68,7 @@ export interface Toast {
   text: string;
 }
 
-export type DialogKind = "cameras" | "printers" | "monitor" | "settings" | "update" | "guide" | "report" | null;
+export type DialogKind = "cameras" | "printers" | "monitor" | "settings" | "update" | "guide" | "report" | "demo" | null;
 export type SettingsTabId = "appearance" | "alerts" | "mqtt" | "updates" | "api" | "advanced";
 
 interface PgStore {
@@ -70,6 +85,7 @@ interface PgStore {
   notifyTest: { provider: string; ok: boolean; error?: string } | null;
   testingNotifier: string | null;
   reportResult: { ok: boolean; error?: string } | null;
+  releases: UpdateRelease[];
   pending: Record<string, { req_id: number; cmd: string }>;
   toasts: Toast[];
   detailId: string | null;
@@ -96,6 +112,7 @@ interface PgStore {
   flushUpdates(): void;
   discover(): void;
   openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
+  dismissDemo(): void;
   openSettings(tab?: SettingsTabId): void;
   openDetail(id: string | null): void;
   openStats(id: string | null): void;
@@ -183,13 +200,21 @@ export const useStore = create<PgStore>((set, get) => {
           optimistic = Object.fromEntries(Object.entries(optimistic).filter(([, e]) => e.reqId !== event.req_id));
         }
         const cleared = had && Object.keys(optimistic).length === 0;
+        const arriving = get().phase !== "ready";
         const engine = Object.keys(optimistic).length ? applyOptimistic(server, optimistic) : server;
         let history = get().history;
         for (const monitor of server.monitors) {
           if (monitor.result) history = appendScore(history, monitor.id, monitor.result);
         }
         applyTheme(server.settings?.theme ?? "system", server.settings?.themes ?? []);
-        set({ engine, history, optimistic, phase: "ready", ...(cleared ? { savedAt: Date.now() } : {}) });
+        set({
+          engine,
+          history,
+          optimistic,
+          phase: "ready",
+          ...(cleared ? { savedAt: Date.now() } : {}),
+          ...(arriving && demoNoticeDue(get().mode) ? { dialog: "demo" as DialogKind } : {}),
+        });
         if (!resumed && get().mode === "hub") {
           resumed = true;
           void resumePublishers(server.cameras, (reason) => get().toast("error", `publishing stopped: ${reason}`));
@@ -246,6 +271,15 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       case "report_sent":
         set({ reportResult: event });
+        break;
+      case "releases":
+        clearPending(event.req_id);
+        set({ releases: event.releases });
+        break;
+      case "report_bundle":
+        clearPending(event.req_id);
+        saveBase64(event.filename, event.zip, "application/zip");
+        get().toast("info", `Diagnostics saved as ${event.filename}`);
         break;
       case "token_created":
         set({ createdToken: { name: event.name, secret: event.token } });
@@ -312,6 +346,7 @@ export const useStore = create<PgStore>((set, get) => {
     notifyTest: null,
     testingNotifier: null,
     reportResult: null,
+    releases: [],
     pending: {},
     toasts: [],
     detailId: null,
@@ -404,6 +439,11 @@ export const useStore = create<PgStore>((set, get) => {
         createdToken: null,
         settingsTab: null,
       });
+    },
+
+    dismissDemo() {
+      localStorage.setItem(DEMO_SEEN_KEY, "1");
+      get().openDialog(null);
     },
 
     openSettings(settingsTab = "alerts") {

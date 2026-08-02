@@ -32,7 +32,7 @@ class NativeNotifier(NotifierAdapter):
     docs_url = "https://github.com/samschott/desktop-notifier"
     browser_ok = False
     desktop_only = True
-    experimental = True
+    experimental = False
     setup_hint = (
         "Shows a native notification on the computer running the PrintGuard desktop app. "
         "On macOS, allow notifications for PrintGuard the first time it asks."

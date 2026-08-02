@@ -1,100 +1,188 @@
+<div align="center">
+
 # Printers, cameras and notifications
 
-How to connect printers, what PrintGuard does with their webcams, how to wire up alerts -
-and the networking caveats that trip people up.
+[Docs](README.md) · [Architecture](architecture.md) · **Printers & cameras** · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Troubleshooting](troubleshooting.md)
+
+</div>
+
+Connecting print services and cameras, what PrintGuard does with a printer's webcam, and
+how alerts are wired up.
+
+- [How the pieces fit](#how-the-pieces-fit)
+- [Register a printer](#register-a-printer)
+- [Supported print services](#supported-print-services)
+- [Printer cameras](#printer-cameras)
+- [Adding cameras yourself](#adding-cameras-yourself)
+- [Notifications](#notifications)
+- [Networking caveats](#networking-caveats)
+
+## How the pieces fit
+
+A camera and a printer are registered once each, then bound together by a monitor. One
+printer connection can back several monitors, and a monitor without a printer still watches
+and alerts.
+
+```mermaid
+flowchart LR
+    cam["Camera<br/>a video source"] --> mon
+    prn["Printer<br/>a print service connection"] -.-> mon
+    mon["Monitor<br/>thresholds + defect response"] --> act["Alert · Pause · Cancel"]
+    prn -. "job state gates inference" .-> mon
+```
+
+The dotted lines are the optional parts: bind no printer and PrintGuard alerts without
+being able to stop the print.
 
 ## Register a printer
 
-Register a printer - [OctoPrint](https://octoprint.org),
-[Klipper (Moonraker)](https://moonraker.readthedocs.io),
-[Elegoo](https://github.com/ELEGOO-3D/elegoo-link),
-[Prusa (PrusaLink)](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293)
-or [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) - in the printer registry and test the
-connection there, then bind it to a monitor. A monitor's detail panel chooses what a
-sustained defect should do: **alert only**, **pause** or **cancel**. Linked printers report
-job, progress and state on the monitors that use them - and gate inference, so an idle
-printer costs you nothing.
+Open the printer registry, choose the service, fill in the form and **Test** it before
+saving. Then bind it to a monitor and choose what a sustained defect does: **alert only**,
+**pause** or **cancel**.
+
+Linked printers report job name, progress and state on every monitor that uses them, and
+they gate inference: a printer that positively reports "not printing" stands its monitors
+down, so an idle printer costs nothing. Losing contact with a printer never stands
+monitoring down. See [failing safely](architecture.md#failing-safely).
+
+## Supported print services
+
+| Service | Modes | Authentication | Exposes a camera |
+|---|---|---|---|
+| [OctoPrint](https://octoprint.org) | Hub and local | API key | Yes, its webcam stream |
+| [Klipper via Moonraker](https://moonraker.readthedocs.io) | Hub and local | Optional API key | Yes, its configured webcams |
+| [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Hub only | Access code, or Moonraker API key | Centauri chamber camera |
+| [Prusa via PrusaLink](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | Hub only | HTTP Digest, user `maker` | No local stream |
+| [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | Hub only | Access code and serial | Chamber camera |
+
+"Hub only" means a browser cannot make the connection at all, so the integration is offered
+only when PrintGuard runs as a server. The reasons are per service and listed below.
+
+<details>
+<summary><b>Bambu Lab</b>: LAN Only Mode, Developer Mode, and why hub only</summary>
+
+Bambu printers speak MQTT over TLS rather than HTTP, and a browser cannot open a raw
+socket, so control is hub only.
+
+1. On the printer, enable **LAN Only Mode**, then **Developer Mode** under
+   Settings → Network. This opens the MQTT channel.
+2. Note the **access code** shown there, and the **serial number** under Settings → Device.
+3. Register the printer with its IP address, serial number and access code.
+
+The chamber camera is registered automatically: RTSP on the X1 and H2 series, or the
+proprietary port 6000 protocol on the A1 and P1 series. The form links Bambu's
+[Enable LAN Mode](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode) guide.
+
+</details>
+
+<details>
+<summary><b>Elegoo</b>: two families, Centauri and Neptune/OrangeStorm</summary>
+
+Elegoo control is hub only. Choose the family that matches your printer:
+
+**Centauri** covers the Centauri Carbon and Centauri Carbon 2. PrintGuard detects which
+local protocol the printer speaks and registers its chamber camera automatically.
+
+- Carbon 2: enable **LAN Only Mode** in its network settings and use the access code shown
+  there.
+- Original Carbon: the IP address is enough.
+
+**Neptune/OrangeStorm** covers the Neptune 4 Pro, Plus and Max, the OrangeStorm Giga, and
+any other Elegoo printer running Moonraker. PrintGuard uses the stock Moonraker service on
+port `7125` and accepts an API key if you set one.
+
+All state, camera and control traffic stays between PrintGuard and the printer on your LAN.
+Elegoo's cloud is never involved.
+
+</details>
+
+<details>
+<summary><b>Prusa</b>: PrusaLink, not PrusaConnect</summary>
+
+Prusa printers connect over **PrusaLink**, the API that runs on the printer itself on the
+MK4, MK4S, MK3.9, MK3.5, MINI, XL and CORE One, or on a Raspberry Pi attached to an MK3 or
+MK2.5. It authenticates with HTTP Digest, which a browser cannot perform, so Prusa is hub
+only.
+
+1. Enable **PrusaLink** on the printer under Settings → Network → PrusaLink.
+2. Register it with its URL and the password shown there. The username is always `maker`.
+
+**PrusaConnect is not used**, so no frames or job data leave hardware you own. PrusaLink's
+webcam feature pushes snapshots to PrusaConnect rather than serving a local video stream, so
+if the printer has a camera, add it separately as a **Stream URL**.
+
+</details>
 
 ## Printer cameras
 
-If a registered printer exposes a webcam, PrintGuard registers it as a camera automatically
-- no stream URL to copy. The camera registry's **Printer cameras** tab lists them, and a
-**Refresh** button picks up any camera attached to a printer after it was registered. This
-covers OctoPrint and Moonraker webcam streams, the Centauri Carbon chamber camera, and the
-Bambu chamber camera (over RTSP on the X1/H2 series, or the proprietary port-6000 protocol on
-the A1/P1 series, hub mode only). These cameras are managed by their printer and removed with
-it.
+If a registered printer exposes a webcam, PrintGuard registers it as a camera for you, with
+no stream URL to copy. The camera registry's **Printer cameras** tab lists them and a
+**Refresh** button picks up a camera attached after the printer was registered.
 
-## Hub mode cameras
+These cameras belong to their printer: they cannot be removed on their own and they are
+dropped when the printer is.
+
+## Adding cameras yourself
 
 Beyond printer webcams, a hub takes cameras three ways:
 
-- **Stream URL** - any RTSP, RTMP, HTTP/MJPEG or WHEP source; PrintGuard creates a MediaMTX pull path.
-- **This device** - publishes a browser camera to the hub over a WebSocket. It reconnects if
-  the hub restarts and resumes when you reopen the page on that device. Browsers only allow
-  camera access on secure pages, so this (and local mode) needs the hub served over HTTPS or
-  opened on `localhost`.
-- **Discovered** - anything already pushed to MediaMTX (e.g. `rtsp://host:8554/mycam` from a
-  Raspberry Pi) appears automatically.
+| Source | What it accepts | Notes |
+|---|---|---|
+| **Stream URL** | RTSP, RTMP, HTTP/MJPEG or WHEP | PrintGuard creates a MediaMTX pull path for it |
+| **This device** | The browser's own camera | Publishes to the hub over a WebSocket and reconnects after a hub restart |
+| **Discovered** | Anything already pushed to MediaMTX | For example `rtsp://host:8554/mycam` from a Raspberry Pi |
 
-## Bambu Lab
-
-Bambu Lab printers speak MQTT over TLS rather than HTTP, which a browser cannot open, so they
-are offered in **hub mode only**. On the printer, enable **LAN Only Mode** then **Developer
-Mode** (Settings → Network) to open the MQTT channel, then link it with its IP, serial number
-and access code; the form links Bambu's
-[Enable LAN Mode](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode) guide.
-
-## Elegoo
-
-Elegoo control is offered in **hub mode only**. Select the Centauri family for the original
-Centauri Carbon or Centauri Carbon 2; PrintGuard detects which local protocol the printer uses
-and automatically registers its chamber camera. The Carbon 2 must have **LAN Only Mode** enabled
-under its network settings and needs the access code shown there. The original Carbon needs only
-its IP address.
-
-Select the Neptune/OrangeStorm family for the Neptune 4 Pro, Plus or Max, OrangeStorm Giga, or
-another Elegoo printer running Moonraker. PrintGuard uses the stock Moonraker service on port
-`7125` and accepts an API key if you configured one. All state, camera and control traffic stays
-between PrintGuard and the printer on your LAN; Elegoo's cloud is not involved.
-
-## Prusa
-
-Prusa printers connect over **PrusaLink**, the API that runs on the printer itself (MK4, MK4S,
-MK3.9, MK3.5, MINI, XL, CORE One) or on a Raspberry Pi attached to an MK3/MK2.5. It
-authenticates with HTTP Digest, which a browser cannot perform, so Prusa is offered in **hub
-mode only**. Enable **PrusaLink** on the printer (Settings → Network → PrusaLink) and link it
-with its URL and the password shown there; the username is always `maker`. PrintGuard talks to
-PrusaLink on your network and never to Prusa's cloud - **PrusaConnect is not used**, so no
-frames or job data leave hardware you own. PrusaLink's webcam pushes snapshots to PrusaConnect
-rather than serving a local video stream, so if the printer has a camera, add it as a separate
-**Stream URL**.
-
-## Running in Docker
-
-The hub reaches printer services from *inside the container*, so `localhost` points at the
-container, not your host - connections to `http://localhost:5000` fail with *all connection
-attempts failed*. Use `host.docker.internal` instead (e.g. `http://host.docker.internal:5000`);
-the shipped `docker-compose.yaml` maps it for you. On a Linux host the service must also
-listen on `0.0.0.0`, not just loopback.
-
-## Local mode printer URLs
-
-In local mode the browser calls the services directly, so give it a URL the *browser* can
-reach - `http://localhost:5000` when it runs on the same machine, or the host's LAN IP
-otherwise (not `host.docker.internal`, which only resolves inside the container). The browser
-also enforces CORS: enable it in OctoPrint (Settings → API) or add `cors_domains` to
-`moonraker.conf`, otherwise the request is blocked with *access control checks* and the test
-fails. And if PrintGuard itself is served over HTTPS (e.g. a Cloudflare Tunnel), the browser
-blocks calls to an `http://` printer as mixed content - Safari reports *not allowed to request
-resource* even for `http://localhost`. To control a local HTTP printer from an HTTPS
-deployment, use **hub mode** (the server makes the request, with no browser restrictions) or
-serve the printer over HTTPS. Telegram's API sends no CORS headers, so that channel is
-hub-only.
+> [!IMPORTANT]
+> Browsers only grant camera access on secure pages. **This device** publishing and local
+> mode both need the hub served over HTTPS or opened on `localhost`.
+> [Deployment](deployment.md) covers HTTPS with Tailscale or a tunnel.
 
 ## Notifications
 
-Notification channels live in Settings: enable [ntfy](https://ntfy.sh),
-[Telegram](https://telegram.org) or [Discord](https://discord.com), fill in the form, and
-send a test alert. Every enabled channel receives defect snapshots and watchdog warnings for
-printers with notifications switched on.
+Alert channels live in **Settings**. Enable a channel, fill in the form and send a test
+alert. Every enabled channel receives defect snapshots and watchdog warnings for monitors
+that have notifications switched on.
+
+| Channel | Modes | Notes |
+|---|---|---|
+| [ntfy](https://ntfy.sh) | Hub and local | Self-hostable, no account needed |
+| [Discord](https://discord.com) | Hub and local | Webhook URL |
+| [Telegram](https://telegram.org) | Hub only | Telegram's API sends no CORS headers |
+| Desktop notification | Desktop app only | Native OS notification on the computer running the app |
+
+## Networking caveats
+
+Most connection problems come down to *who* makes the request. In hub mode the server does,
+from inside the container. In local mode the browser does, under browser security rules.
+
+```mermaid
+flowchart LR
+    subgraph hub["Hub mode"]
+        server["PrintGuard server"] -->|"server-side HTTP, no browser rules"| svc1["Print service"]
+    end
+    subgraph local["Local mode"]
+        browser["Browser tab"] -->|"CORS and mixed content apply"| svc2["Print service"]
+    end
+```
+
+**Running in Docker.** The hub reaches printer services from inside the container, so
+`localhost` means the container, not your host, and a URL like `http://localhost:5000`
+fails with *all connection attempts failed*. Use `http://host.docker.internal:5000`; the
+shipped [`docker-compose.yaml`](../docker-compose.yaml) maps that name for you. On a Linux
+host the print service must also listen on `0.0.0.0` rather than loopback only.
+
+**Local mode URLs.** Give the browser a URL it can reach itself: `http://localhost:5000`
+when the service runs on the same machine, otherwise the host's LAN IP. Never
+`host.docker.internal`, which only resolves inside a container.
+
+**CORS in local mode.** The browser enforces CORS, so enable it in OctoPrint under
+Settings → API, or add `cors_domains` to `moonraker.conf`. Without it the connection test
+fails with *access control checks*.
+
+**Mixed content.** If PrintGuard itself is served over HTTPS, for example through a
+Cloudflare Tunnel, the browser blocks calls to an `http://` printer. Safari reports *not
+allowed to request resource* even for `http://localhost`. To control an HTTP printer from
+an HTTPS deployment, use hub mode, where the server makes the request, or serve the printer
+over HTTPS.
+
+More symptoms and fixes: [Troubleshooting](troubleshooting.md).

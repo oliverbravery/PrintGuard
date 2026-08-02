@@ -1,5 +1,6 @@
 import { useStore } from "../store";
 import { applyTheme, nextScheme } from "../theme";
+import { BugIcon } from "./BugIcon";
 
 export function Wordmark({ size = "text-xl" }: { size?: string }) {
   return (
@@ -141,18 +142,18 @@ function ReportChip() {
   const openDialog = useStore((s) => s.openDialog);
   return (
     <button
-      className="chip cursor-pointer hover:opacity-80"
+      className="chip inline-flex cursor-pointer items-center hover:opacity-80"
       title="Report a bug"
       aria-label="Report a bug"
       onClick={() => openDialog("report")}
     >
-      ⚑
+      <BugIcon />
     </button>
   );
 }
 
 export function Header() {
-  const { engine, mode, leaveMode, openSettings } = useStore();
+  const { engine, mode, openDialog, openSettings } = useStore();
   const stats = engine?.stats;
   return (
     <header className="sticky top-0 z-30 border-b border-line-0 bg-ink-0/90 backdrop-blur-sm">
@@ -161,8 +162,8 @@ export function Header() {
         {mode === "local" && (
           <button
             className="chip chip-accent cursor-pointer hover:opacity-80"
-            title="Back to start"
-            onClick={leaveMode}
+            title="What the live demo can and cannot do"
+            onClick={() => openDialog("demo")}
           >
             local ▾
           </button>

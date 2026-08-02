@@ -93,6 +93,38 @@ essentials a change must respect:
   scheduler/monitor/watchdog/protocol behaviour extends the former; a new adapter is tested
   in the latter. Tests reach the engine through `engine.handle()`/`engine.request()`, not by
   poking internals.
+- **Prose: English, no em dashes.** Never use `—` in docs, changelog entries, commit
+  messages, PR descriptions or UI copy; use a comma, colon, brackets or a spaced hyphen.
+  Concise and factual, no filler or salesmanship.
+- **Anything published is written in the first person, as the maintainer.** PR titles and
+  descriptions, issue and PR comments, commit messages and release notes all go out under the
+  maintainer's account, so never write in the third person, never mention having been asked,
+  and never sign off as an assistant. Say what changed and what the reader needs to do, then
+  stop.
+
+## Documentation is part of every change
+
+**Docs are not optional follow-up work: a change is unfinished while a page still describes
+the old behaviour.** Before finishing any change, check the table below and update every page
+it touches in the same change - add what is new, correct what moved, and delete what the
+change made wrong or redundant. Never leave a doc describing something that no longer exists.
+
+| Changed | Update |
+|---|---|
+| Install steps, ports, image tags, headline features | `README.md` |
+| Engine protocol, events, `Platform` contract, scheduler, logging, repo layout | `docs/architecture.md` |
+| A printer integration, camera source, notifier, or their setup | `docs/printers.md` |
+| Model runtimes, execution providers, image variants, GPU setup | `docs/hardware.md` |
+| Exposure, proxies, origin checks, ports, hardening | `docs/deployment.md` |
+| A REST endpoint, MCP tool, scope or response shape | `docs/api.md` |
+| A failure mode users will hit, or its fix | `docs/troubleshooting.md` |
+| Anything user-visible | `CHANGELOG.md` (see Release) |
+| The UI's appearance | `docs/assets/` screenshots: `cd web && npm run screenshots` |
+| Dev setup, tests, adapter how-tos, release process | `CONTRIBUTING.md` |
+
+Docs favour tables and Mermaid diagrams over long prose, keep the centred nav line at the top
+of each page, and link rather than restate: duplicated documentation rots. `docs/README.md`
+indexes the set, so a new page goes in that table and in the README's Documentation table.
 
 ## Release
 
@@ -102,3 +134,8 @@ form), which is published **verbatim** as the GitHub release notes - write it fo
 deciding whether to pull the new image, not about the implementation. Three required checks
 must pass: **tests**, the production **image** build, and **version** (bumped past the last
 release with a matching changelog section). Docker is the only supported distribution.
+
+Link every issue a PR resolves with a closing keyword (`Fixes #123`). The issue lifecycle
+hangs off that link: the merge reopens the issue rather than closing it, marks it
+`status: completed`, and the published release asks the reporter to verify. See
+[CONTRIBUTING.md](CONTRIBUTING.md#what-a-merge-does-to-the-issues-it-fixes).

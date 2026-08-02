@@ -421,10 +421,11 @@ class ServerPlatform:
         if previous is not None:
             previous.close()
         logger.info(
-            "inference ready: %s via %s (%d workers)",
+            "inference ready: %s via %s (%d workers, %.0f fps)",
             self.inference_device,
             inference.runtime if runtime == "auto" else runtime,
             self.workers,
+            inference.capacity_fps,
         )
 
     async def close(self) -> None:

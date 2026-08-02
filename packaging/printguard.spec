@@ -58,7 +58,7 @@ if sys.platform == "win32":
     winrt_datas, winrt_binaries, winrt_hidden = collect_all("winrt")
     datas += winrt_datas
     binaries += winrt_binaries + collect_dynamic_libs("winui3")
-    hiddenimports += winrt_hidden + collect_submodules("winui3")
+    hiddenimports += winrt_hidden + collect_submodules("winui3") + ["win32api", "win32con", "win32job"]
 
 a = Analysis(
     [str(Path(SPECPATH) / "desktop_entry.py")],

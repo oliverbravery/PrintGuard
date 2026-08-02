@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import subprocess
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -84,7 +86,9 @@ class EmbeddedMediaMTX:
     second image whose version may be unavailable on a given host. It starts
     only when the image provides a binary path; pointed at an external MediaMTX
     the hub uses that and this never runs. A server that exits is restarted and
-    the failure logged, because dropped streams must never pass silently.
+    the failure logged, because dropped streams must never pass silently, and
+    its lifetime is tied to the hub's so no exit can leave it holding the
+    streaming ports.
     """
 
     def __init__(self, binary: str, config: str, api_base: str) -> None:
@@ -94,6 +98,9 @@ class EmbeddedMediaMTX:
         self._process: asyncio.subprocess.Process | None = None
         self._supervisor: asyncio.Task[None] | None = None
         self._stopping = False
+        self._watcher: subprocess.Popen[bytes] | None = None
+        self._watch_fd = -1
+        self._job: Any = None
 
     async def start(self) -> None:
         """Launches the server and waits until its control API accepts connections."""
@@ -114,11 +121,50 @@ class EmbeddedMediaMTX:
                 logger.error("MediaMTX failed to launch (%s); retrying", exc)
                 await asyncio.sleep(RESTART_DELAY_S)
                 continue
+            self._bind_lifetime(self._process.pid)
             code = await self._process.wait()
+            self._release_lifetime()
             if self._stopping:
                 return
             logger.error("MediaMTX exited (code %s); restarting", code)
             await asyncio.sleep(RESTART_DELAY_S)
+
+    def _bind_lifetime(self, pid: int) -> None:
+        """Makes the server die with this hub, however this hub exits.
+
+        ``stop`` covers an orderly shutdown, but a hub that is force quit,
+        killed or crashes never reaches it, and the orphan keeps the streaming
+        ports for itself - blocking every hub, desktop app and container
+        started on that host afterwards. Windows job objects end their members
+        when the last handle closes; POSIX has no equivalent, so a shell reads
+        one end of a pipe this process owns and kills the server the moment
+        that pipe closes with it.
+        """
+        if os.name == "nt":
+            import win32api
+            import win32con
+            import win32job
+
+            if self._job is None:
+                self._job = win32job.CreateJobObject(None, "")
+                limits = win32job.QueryInformationJobObject(self._job, win32job.JobObjectExtendedLimitInformation)
+                limits["BasicLimitInformation"]["LimitFlags"] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                win32job.SetInformationJobObject(self._job, win32job.JobObjectExtendedLimitInformation, limits)
+            handle = win32api.OpenProcess(win32con.PROCESS_SET_QUOTA | win32con.PROCESS_TERMINATE, False, pid)
+            win32job.AssignProcessToJobObject(self._job, handle)
+            return
+        read_fd, self._watch_fd = os.pipe()
+        self._watcher = subprocess.Popen(["/bin/sh", "-c", f"read _; kill {pid} 2>/dev/null"], stdin=read_fd)
+        os.close(read_fd)
+
+    def _release_lifetime(self) -> None:
+        """Drops the watcher for a server that has already exited."""
+        if self._watcher is None:
+            return
+        self._watcher.terminate()
+        self._watcher.wait()
+        self._watcher = None
+        os.close(self._watch_fd)
 
     async def _listening(self) -> bool:
         try:
