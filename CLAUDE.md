@@ -96,6 +96,11 @@ essentials a change must respect:
 - **Prose: English, no em dashes.** Never use `—` in docs, changelog entries, commit
   messages, PR descriptions or UI copy; use a comma, colon, brackets or a spaced hyphen.
   Concise and factual, no filler or salesmanship.
+- **Anything published is written in the first person, as the maintainer.** PR titles and
+  descriptions, issue and PR comments, commit messages and release notes all go out under the
+  maintainer's account, so never write in the third person, never mention having been asked,
+  and never sign off as an assistant. Say what changed and what the reader needs to do, then
+  stop.
 
 ## Documentation is part of every change
 

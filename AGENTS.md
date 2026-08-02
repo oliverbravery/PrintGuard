@@ -9,7 +9,8 @@ Two rules from it that are easy to skip and expensive to miss:
   update those pages in the same change, and delete what the change makes wrong. CLAUDE.md
   has the map of which page covers what.
 - **English, and never an em dash** in docs, changelog entries, commit messages or UI
-  copy.
+  copy. Everything published, including PR descriptions and issue comments, is written in the
+  first person as the maintainer, not in an assistant's voice.
 
 Deeper references: [docs/README.md](docs/README.md) indexes the documentation set;
 [docs/architecture.md](docs/architecture.md) covers the engine, the `Platform` contract,
