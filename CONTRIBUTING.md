@@ -11,6 +11,7 @@ Pyodide. All mode differences live behind the `Platform` contract.
 - [Adding a notification provider](#adding-a-notification-provider)
 - [Ground rules](#ground-rules)
 - [Release cycle](#release-cycle)
+- [What a merge does to the issues it fixes](#what-a-merge-does-to-the-issues-it-fixes)
 
 ## Development setup
 
@@ -177,3 +178,25 @@ On merge, the [release workflow](.github/workflows/release.yml):
 
 Docker, for servers and NAS boxes, and the desktop app, for personal computers, are the
 supported distributions.
+
+## What a merge does to the issues it fixes
+
+Link the issues a pull request resolves with a closing keyword, `Fixes #123`, or through the
+**Development** sidebar. Everything below follows from that link, so a pull request that only
+mentions an issue in prose gets none of it.
+
+A fix is not resolved until the reporter says it is, so
+[the issues workflow](.github/workflows/issues.yml) reopens what the merge closed and swaps
+the issue's `status:` label for `status: completed`. Once the release is actually published,
+the release workflow comments on each one naming the version and asking the reporter to close
+it if it worked, or to say what is still wrong. Thirty days without a reply closes it, and
+anyone can reopen it later.
+
+```mermaid
+flowchart LR
+    merge["PR merged<br/>Fixes #123"] --> reopen["reopened,<br/>status: completed"]
+    reopen --> notify["vX.Y.Z published:<br/>comment asks the reporter to verify"]
+    notify --> confirmed["reporter closes it"]
+    notify --> quiet["30 days quiet:<br/>closed automatically"]
+    notify --> more["still broken:<br/>stays open"]
+```

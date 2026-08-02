@@ -129,3 +129,8 @@ form), which is published **verbatim** as the GitHub release notes - write it fo
 deciding whether to pull the new image, not about the implementation. Three required checks
 must pass: **tests**, the production **image** build, and **version** (bumped past the last
 release with a matching changelog section). Docker is the only supported distribution.
+
+Link every issue a PR resolves with a closing keyword (`Fixes #123`). The issue lifecycle
+hangs off that link: the merge reopens the issue rather than closing it, marks it
+`status: completed`, and the published release asks the reporter to verify. See
+[CONTRIBUTING.md](CONTRIBUTING.md#what-a-merge-does-to-the-issues-it-fixes).

@@ -29,13 +29,13 @@ jobs:
       - name: Refuse to re-release an existing version
         run: |
           if git rev-parse -q --verify "refs/tags/v${{ steps.read.outputs.version }}" >/dev/null; then
-            echo "::error file=pyproject.toml::v${{ steps.read.outputs.version }} is already released — run 'uv version --bump patch|minor|major'"
+            echo "::error file=pyproject.toml::v${{ steps.read.outputs.version }} is already released, run 'uv version --bump patch|minor|major'"
             exit 1
           fi
       - name: Refuse to release an undocumented version
         run: |
           if ! grep -q "^## \[${{ steps.read.outputs.version }}\]" CHANGELOG.md; then
-            echo "::error file=CHANGELOG.md::no '## [${{ steps.read.outputs.version }}]' section — describe the change in CHANGELOG.md; it becomes the release notes"
+            echo "::error file=CHANGELOG.md::no '## [${{ steps.read.outputs.version }}]' section, describe the change in CHANGELOG.md; it becomes the release notes"
             exit 1
           fi
 
@@ -195,18 +195,13 @@ jobs:
           if [ -z "$pr_number" ]; then
             exit 0
           fi
-          pr_body=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
-          issue_numbers=$(printf '%s\n' "$pr_body" | awk 'tolower($0) ~ /^[[:space:]]*relates to /' | grep -oE '#[0-9]+' | tr -d '#' || true)
+          issue_numbers=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
           for issue_number in $issue_numbers; do
             marker="<!-- release-follow-up:${VERSION} -->"
             if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments" --jq '.[].body' | grep -Fq "$marker"; then
               continue
             fi
-            labels=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
-            if printf '%s\n' "$labels" | grep -Fxq "status: built"; then
-              gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --remove-label "status: built"
-            fi
-            gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --add-label "status: completed"
-            message="${marker}"$'\n\n'"${VERSION} is now live. Please update PrintGuard and let me know whether it resolves this issue. If it does, you can close the issue. Otherwise, leave it open and share any remaining details so I can follow up."
-            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "$message"
+            released="${VERSION} is released and carries the change for this issue. Update to it when you can, then let me know how it goes: the [release page](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}) has the notes and the desktop builds."
+            verify="If it resolves this, please close the issue. If it does not, leave it open and comment with what is still happening. With no reply it closes automatically after 30 days, and you can reopen it at any point."
+            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "${marker}"$'\n\n'"${released}"$'\n\n'"${verify}"
           done
