@@ -63,7 +63,7 @@ but cannot implement portably. Identical signatures, different runtimes:
 
 | Method | Hub (CPython) | Local (browser) |
 |---|---|---|
-| `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark | No-op |
+| `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count | No-op |
 | `infer(rgb)` | Selected LiteRT or ONNX Runtime model | LiteRT.js in WASM via a JS bridge |
 | `discover_cameras()` | MediaMTX path list | `enumerateDevices()` |
 | `open_camera(id, source)` | PyAV reader thread; MediaMTX pulls RTSP and WHEP streams | `getUserMedia` and canvas grabs |
@@ -196,7 +196,10 @@ When a camera is registered its native frame rate is measured once. From then on
 is fully dynamic:
 
 1. A smoothed estimate of observed inference latency continuously yields the sustainable
-   total rate, `workers / latency`.
+   total rate, `workers / latency`. `workers` is measured once when the runtime loads, by
+   adding concurrency until throughput stops growing, so the division holds rather than
+   extrapolating past a ceiling the host cannot reach. See
+   [model runtimes](hardware.md#model-runtimes).
 2. That capacity is water-filled across in-use cameras with max-min fairness: no camera is
    allocated beyond its native fps, and surplus flows to cameras that can use it.
 3. A free worker takes the most overdue camera and grabs its **freshest** frame at dispatch

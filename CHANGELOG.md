@@ -43,6 +43,14 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Fixed
 
+- **CPU inference is fast again after 2.3.7 cut it to a quarter of its throughput.** 2.3.7
+  ran at most two frames at once on hosts that could sustain many more, so capacity fell
+  from roughly 2,000 fps to under 500 on the same machine, and both LiteRT and ONNX Runtime
+  were affected. PrintGuard now measures how far the runtime on your host actually scales
+  instead of guessing from the core count, and runs that many frames at once. Expect the
+  **capacity** readout to return to what 2.3.6 showed or better, on Intel CPUs through
+  OpenVINO especially. Nothing to change: the measurement runs at startup and its result is
+  in the log as `inference ready:`. Thanks to @hedger for the report.
 - **A hub that is force quit or crashes no longer blocks the next one from starting.** The
   bundled streaming server was left running when PrintGuard did not exit cleanly, and it
   kept port 8554, so the next start, whether the desktop app, a container or another hub

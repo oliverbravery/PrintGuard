@@ -82,6 +82,13 @@ Hub and desktop mode carry the model twice, once for each runtime, and pick betw
 throughput on the machine it is actually running on and keeps the faster one. The choice is
 logged, so `docker logs printguard` shows what won and by how much.
 
+The same benchmark also decides **how many frames PrintGuard infers at once**. It adds
+workers while each one still pays for itself and stops at the host's real ceiling, which is
+not the core count: an accelerator serialises on one device, a runtime's Python binding may
+hold the interpreter lock, and a container may be under a CPU quota. Measuring covers all
+three, and the result is the `workers` term the scheduler divides by latency to get
+[capacity](architecture.md#scheduling-inference).
+
 Local mode is different: the browser runs
 [LiteRT.js](https://developers.google.com/edge/litert) in WebAssembly, which is the only
 option a browser tab has.
@@ -158,8 +165,10 @@ The header's **compute** readout names the active provider, for example `intel o
 | Setting | Effect |
 |---|---|
 | **Automatic** | Benchmark both runtimes on start and keep the faster |
-| **LiteRT** | Always use LiteRT, skipping the benchmark |
+| **LiteRT** | Always use LiteRT |
 | **ONNX Runtime** | Always use ONNX Runtime and its best provider |
 
-Pin a runtime when a benchmark result surprises you or you want deterministic startup. If a
-GPU you expect is not being used, [Troubleshooting](troubleshooting.md) has the checks.
+Pinning skips the comparison between runtimes, not the benchmark: the one you pin is still
+measured for how many workers it sustains. Pin a runtime when a benchmark result surprises
+you. If a GPU you expect is not being used, [Troubleshooting](troubleshooting.md) has the
+checks.
