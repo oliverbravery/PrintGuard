@@ -14,7 +14,7 @@ import os
 import re
 import secrets
 import time
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -95,30 +95,36 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        """Brings the hub up, and unwinds whatever it got up however it ends.
+
+        Startup can fail part way - a port already held, a model runtime that will
+        not load - and the pieces already running have to come back down with it,
+        or the streaming server outlives the hub and keeps its ports from the next
+        one. A stack releases them in reverse, on that path as on a clean stop.
+        """
         logger.info("hub starting (data=%s, models=%s, static=%s)", data_dir, model_dir, static_dir)
-        streamer = None
-        if mediamtx_binary and Path(mediamtx_binary).exists():
-            streamer = EmbeddedMediaMTX(mediamtx_binary, mediamtx_config, mediamtx_api)
-            await streamer.start()
-        else:
-            logger.warning("no bundled MediaMTX binary (%r) — expecting an external MediaMTX at %s", mediamtx_binary, mediamtx_api)
-        platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset)
-        engine = Engine(platform)
-        await engine.start()
-        app.state.engine = engine
-        api_app.state.engine = engine
-        app.state.hls = httpx.AsyncClient(base_url=mediamtx_hls, timeout=httpx.Timeout(10.0, read=60.0))
-        bridge = MqttBridge(engine, lambda: engine.settings.get("mqtt", {}))
-        bridge.start()
-        async with mcp_app.lifespan(app):
+        async with AsyncExitStack() as resources:
+            if mediamtx_binary and Path(mediamtx_binary).exists():
+                streamer = EmbeddedMediaMTX(mediamtx_binary, mediamtx_config, mediamtx_api)
+                await streamer.start()
+                resources.push_async_callback(streamer.stop)
+            else:
+                logger.warning("no bundled MediaMTX binary (%r) — expecting an external MediaMTX at %s", mediamtx_binary, mediamtx_api)
+            platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset)
+            resources.push_async_callback(platform.close)
+            engine = Engine(platform)
+            await engine.start()
+            resources.push_async_callback(engine.stop)
+            app.state.engine = engine
+            api_app.state.engine = engine
+            app.state.hls = httpx.AsyncClient(base_url=mediamtx_hls, timeout=httpx.Timeout(10.0, read=60.0))
+            resources.push_async_callback(app.state.hls.aclose)
+            bridge = MqttBridge(engine, lambda: engine.settings.get("mqtt", {}))
+            bridge.start()
+            resources.push_async_callback(bridge.stop)
+            await resources.enter_async_context(mcp_app.lifespan(app))
             yield
-        logger.info("hub shutting down")
-        await bridge.stop()
-        await app.state.hls.aclose()
-        await engine.stop()
-        await platform.close()
-        if streamer is not None:
-            await streamer.stop()
+            logger.info("hub shutting down")
 
     app = FastAPI(title="PrintGuard", lifespan=lifespan)
     pysrc = build_pysrc()

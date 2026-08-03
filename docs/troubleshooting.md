@@ -22,6 +22,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | `bind: address already in use` for `8000` or `8554` | Another PrintGuard already holds the port, often a desktop app or a container you forgot | Find the holder with `lsof -nP -iTCP:8554 -sTCP:LISTEN` on macOS or Linux, or `netstat -ano \| findstr 8554` on Windows, then stop it. Versions before 2.3.8 could leave the streaming server behind after a crash |
 | Dashboard loads but the header shows "Reconnecting" | The engine WebSocket cannot connect, usually a proxy that does not forward WebSockets, or a rewritten `Origin` | Check the proxy forwards upgrade headers, then see [origin checking](deployment.md#origin-checking) |
 | First launch of the desktop app is blocked | The builds are unsigned | macOS: **System Settings → Privacy & Security → Open Anyway**. Windows: **More info → Run anyway** |
+| The desktop app opens an empty white window | Its server did not start. 2.3.7 and 2.3.8 on macOS always hit this: Core ML could not load the model from a data directory whose path contains a space | Update to 2.3.9 or later, where the window reports what failed and shows the end of the log ([logs](#getting-logs-and-diagnostics)) |
 | Container restarts repeatedly | Usually an unwritable `/data` volume | Check the volume mount and its permissions, then read `docker logs printguard` |
 
 ## Cameras and video

@@ -29,12 +29,12 @@ async def test_model_inference(tmp_path: Path, runtime: str) -> None:
     assert platform.workers > 0
 
 
-async def test_runtimes_agree_on_embedding(tmp_path: Path) -> None:
+async def test_runtimes_agree_on_embedding() -> None:
     """Both runtimes carry the same model, so they must embed a frame the same way."""
     tensor = np.random.default_rng(0).random((1, 3, 224, 224), dtype=np.float32)
     embeddings = []
     for runtime in ("litert", "onnx"):
-        inference = Inference(Path("models"), tmp_path, runtime)
+        inference = Inference(Path("models"), runtime)
         embeddings.append(await inference.run(tensor))
         inference.close()
 
