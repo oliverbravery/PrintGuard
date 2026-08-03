@@ -83,11 +83,19 @@ def _measure_concurrency(model: Model) -> tuple[int, float]:
 
 
 class OnnxInference:
-    """Runs the ONNX model through the fastest available execution provider."""
+    """Runs the ONNX model through the fastest available execution provider.
+
+    Core ML compiles the model on every session rather than into a cache directory.
+    Its cache lookup builds the model URL with `NSURL URLWithString`, which yields
+    nil for any path holding a space, so a cache under `~/Library/Application
+    Support` fails every session it is meant to speed up - and the desktop app,
+    which is where that path is used, could not start at all. Compiling costs
+    about 0.2s per session.
+    """
 
     runtime = "onnx"
 
-    def __init__(self, model_path: Path, cache_dir: Path) -> None:
+    def __init__(self, model_path: Path) -> None:
         self._resources = ExitStack()
         registered = self._register_plugins()
         if sys.platform == "win32":
@@ -99,16 +107,10 @@ class OnnxInference:
             options.set_provider_selection_policy(ort.OrtExecutionProviderDevicePolicy.MAX_PERFORMANCE)
             self._session = ort.InferenceSession(str(model_path), sess_options=options)
         elif "CoreMLExecutionProvider" in ort.get_available_providers():
-            cache_dir.mkdir(parents=True, exist_ok=True)
             providers = [
                 (
                     "CoreMLExecutionProvider",
-                    {
-                        "ModelFormat": "MLProgram",
-                        "MLComputeUnits": "ALL",
-                        "RequireStaticInputShapes": "1",
-                        "ModelCacheDirectory": str(cache_dir),
-                    },
+                    {"ModelFormat": "MLProgram", "MLComputeUnits": "ALL", "RequireStaticInputShapes": "1"},
                 ),
                 "CPUExecutionProvider",
             ]
@@ -201,10 +203,10 @@ class LiteRtInference:
 class Inference:
     """Runs the requested model runtime at the concurrency it measurably sustains."""
 
-    def __init__(self, model_dir: Path, cache_dir: Path, runtime: InferenceRuntime) -> None:
+    def __init__(self, model_dir: Path, runtime: InferenceRuntime) -> None:
         candidates: list[OnnxInference | LiteRtInference] = []
         if runtime in ("auto", "onnx"):
-            candidates.append(OnnxInference(model_dir / "encoder_float32.onnx", cache_dir))
+            candidates.append(OnnxInference(model_dir / "encoder_float32.onnx"))
         if runtime in ("auto", "litert"):
             candidates.append(LiteRtInference(model_dir / "encoder_float32.tflite"))
         measured = [_measure_concurrency(candidate.run) for candidate in candidates]

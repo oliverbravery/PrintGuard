@@ -399,7 +399,7 @@ class ServerPlatform:
         self.update_asset = update_asset
         data_dir.mkdir(parents=True, exist_ok=True)
         self._model_dir = model_dir
-        self._model_cache = data_dir / "model-cache"
+        self._inference: Inference | None = None
         self.workers = 1
         self.inference_device = "Initialising"
         meta = json.loads((model_dir / "metadata.json").read_text())
@@ -413,8 +413,8 @@ class ServerPlatform:
     async def configure(self, settings: dict[str, Any]) -> None:
         """Selects the requested inference runtime."""
         runtime = settings["inference_runtime"]
-        inference = await asyncio.to_thread(Inference, self._model_dir, self._model_cache, runtime)
-        previous = getattr(self, "_inference", None)
+        inference = await asyncio.to_thread(Inference, self._model_dir, runtime)
+        previous = self._inference
         self._inference = inference
         self.workers = inference.workers
         self.inference_device = inference.device
@@ -429,9 +429,10 @@ class ServerPlatform:
         )
 
     async def close(self) -> None:
-        """Releases the HTTP client and inference workers."""
+        """Releases the HTTP client, and the inference workers once a runtime is up."""
         await self._client.aclose()
-        self._inference.close()
+        if self._inference is not None:
+            self._inference.close()
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
         """Runs the model through the selected hardware provider."""
