@@ -7,6 +7,25 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.9] - 2026-08-03
+
+### Fixed
+
+- **The macOS desktop app no longer opens to a blank white window.** On 2.3.7 and 2.3.8 the
+  app started, showed an empty window and never loaded, while the menu bar icon stayed
+  alive: Core ML could not load the model from the app's own data folder, because the
+  runtime's cache lookup rejects any path containing a space and macOS puts that folder in
+  `~/Library/Application Support`. Nothing was watched for as long as the window sat there.
+  Core ML now compiles the model each time the app starts, which adds about a fifth of a
+  second to startup and no longer depends on where your data lives. Update and open the
+  app; you can delete the leftover `model-cache` folder in the data directory.
+
+- **When the server does fail to start, the window says so.** Instead of a blank page, it
+  now shows what went wrong, the end of the log and where the full log is kept, so a broken
+  start can be reported or fixed rather than guessed at. A failed start also no longer
+  leaves the bundled streaming server running behind it, holding port 8554 against the next
+  hub you start.
+
 ## [2.3.8] - 2026-07-24
 
 ### Added
