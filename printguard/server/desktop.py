@@ -11,6 +11,7 @@ lifecycle differ from the container entry point in :mod:`printguard.server.app`.
 
 from __future__ import annotations
 
+import html
 import io
 import logging
 import multiprocessing
@@ -22,6 +23,8 @@ import threading
 import time
 from importlib import metadata
 from pathlib import Path
+from string import Template
+from typing import Any
 
 import platformdirs
 import pystray
@@ -38,7 +41,29 @@ BUNDLE_ID = "io.printguard.desktop"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 READY_TIMEOUT_S = 30.0
 STOP_TIMEOUT_S = 10.0
+FAILURE_LOG_LINES = 30
 WIN_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+FAILURE_PAGE = Template("""<!doctype html>
+<meta charset="utf-8">
+<title>PrintGuard</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.6 -apple-system, "Segoe UI", system-ui, sans-serif; margin: 0; padding: 40px 44px; }
+  h1 { font-size: 19px; margin: 0 0 14px; }
+  p { margin: 0 0 14px; max-width: 62ch; }
+  code { font-size: 13px; }
+  pre { background: rgba(127, 127, 127, 0.14); border-radius: 10px; font-size: 12px; overflow: auto; padding: 16px; }
+</style>
+<h1>PrintGuard could not start</h1>
+<p>Its server stopped while starting up, so there is nothing to show here and no printer is
+being watched. The reason is at the end of the log below, kept in full at
+<code>$log</code>.</p>
+<p>Quit PrintGuard from its menu bar or system tray icon and open it again once the cause is
+dealt with. If the log does not explain it, report it with the log attached at
+<a href="https://github.com/oliverbravery/PrintGuard/issues">github.com/oliverbravery/PrintGuard/issues</a>.</p>
+<pre>$log_tail</pre>
+""")
 
 PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -123,8 +148,8 @@ def _enable_wkwebview_camera() -> None:
             decision_handler(1)
 
 
-def _run_webview(url: str) -> None:
-    """Child-process entry point: shows the hub in a native window.
+def _run_webview(**contents: Any) -> None:
+    """Child-process entry point: shows the hub, or why it is not there, in a native window.
 
     The window owns its process's main thread, so it never contends with the
     tray's, and closing it ends only this process. The webview must keep its
@@ -136,7 +161,7 @@ def _run_webview(url: str) -> None:
     if sys.platform == "darwin":
         _enable_wkwebview_camera()
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
-    webview.create_window(APP_NAME, url, width=1280, height=820)
+    webview.create_window(APP_NAME, width=1280, height=820, **contents)
     webview.start(private_mode=False, storage_path=os.path.join(os.environ["DATA_DIR"], "webview"))
 
 
@@ -144,18 +169,25 @@ def _webview_url(port: int) -> str:
     return f"http://localhost:{port}/?v={metadata.version('printguard')}"
 
 
+def _failure_page() -> str:
+    """The page shown in place of the hub when its server never came up."""
+    return FAILURE_PAGE.substitute(
+        log=html.escape(os.environ["LOG_FILE"]), log_tail=html.escape("\n".join(logs.recent()[-FAILURE_LOG_LINES:]))
+    )
+
+
 class _Window:
     """Shows the hub window in a child process spawned from the tray."""
 
-    def __init__(self, url: str) -> None:
-        self._url = url
+    def __init__(self, **contents: Any) -> None:
+        self._contents = contents
         self._context = multiprocessing.get_context("spawn")
         self._process: multiprocessing.process.BaseProcess | None = None
 
     def open(self) -> None:
         """Opens the window, reusing the existing one if it is still up."""
         if self._process is None or not self._process.is_alive():
-            self._process = self._context.Process(target=_run_webview, args=(self._url,), daemon=True)
+            self._process = self._context.Process(target=_run_webview, kwargs=self._contents, daemon=True)
             self._process.start()
 
     def close(self) -> None:
@@ -176,13 +208,19 @@ class _Server:
         self._server.install_signal_handlers = lambda: None
         self._thread = threading.Thread(target=self._server.run, daemon=True)
 
-    def start(self) -> None:
-        """Starts serving and blocks until startup (engine and streamer) completes."""
+    def start(self) -> bool:
+        """Starts serving, blocks until startup completes, and reports whether it did.
+
+        A startup that fails ends the serving thread, so the wait stops there
+        instead of running the timeout out: what the window shows next depends on
+        the answer, and the user should not sit in front of a blank one until then.
+        """
         self._thread.start()
         deadline = time.monotonic() + READY_TIMEOUT_S
-        while time.monotonic() < deadline and not self._server.started:
+        while time.monotonic() < deadline and self._thread.is_alive() and not self._server.started:
             time.sleep(0.1)
         logger.info("hub server %s on :%d", "listening" if self._server.started else "did not start", self._port)
+        return self._server.started
 
     def stop(self) -> None:
         """Asks the server to exit and waits for the thread to finish."""
@@ -326,8 +364,7 @@ def main() -> None:
     logger.info("desktop app starting (frozen=%s, data=%s)", getattr(sys, "frozen", False), os.environ["DATA_DIR"])
     port = int(os.environ.get("PORT", "8000"))
     server = _Server(port)
-    server.start()
-    window = _Window(_webview_url(port))
+    window = _Window(url=_webview_url(port)) if server.start() else _Window(html=_failure_page())
     window.open()
     if sys.platform == "darwin":
         _watch_termination(window, server)

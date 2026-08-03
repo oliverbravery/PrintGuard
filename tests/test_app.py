@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
+import pytest
 
 from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app
 from printguard.server.events import ConflatedEventQueue
@@ -79,3 +80,29 @@ async def test_hls_view_wakes_camera_before_proxying() -> None:
 
     assert response.content == b"#EXTM3U"
     platform.view_camera.assert_awaited_once_with("camera-one")
+
+
+async def test_failed_startup_stops_the_streaming_server(monkeypatch, tmp_path) -> None:
+    """A hub that cannot finish starting takes the streaming server down with it.
+
+    Left running, it holds the streaming ports for as long as the process lives and
+    blocks the next hub started on that host, so an engine that will not start must
+    not strand it.
+    """
+    binary = tmp_path / "mediamtx"
+    binary.touch()
+    streamer = SimpleNamespace(start=AsyncMock(), stop=AsyncMock())
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MEDIAMTX_BINARY", str(binary))
+    monkeypatch.setattr("printguard.server.app.EmbeddedMediaMTX", lambda *_: streamer)
+    monkeypatch.setattr(
+        "printguard.server.app.Engine",
+        lambda _: SimpleNamespace(start=AsyncMock(side_effect=RuntimeError("no model runtime"))),
+    )
+    app = create_app()
+
+    with pytest.raises(RuntimeError):
+        async with app.router.lifespan_context(app):
+            pass
+
+    streamer.stop.assert_awaited_once()
