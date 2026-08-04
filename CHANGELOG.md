@@ -7,6 +7,16 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.10] - 2026-08-04
+
+### Added
+
+- **You can now sponsor PrintGuard.** Apple charges $99 a year for the Developer Program, and
+  without it the macOS desktop app cannot be signed or notarised, which is why macOS calls it
+  an unidentified developer the first time you open it. Sponsorship goes towards that licence
+  first, and nothing in PrintGuard is locked behind it. Nothing else changed in this release,
+  so there is nothing to gain by updating from 2.3.9.
+
 ## [2.3.9] - 2026-08-03
 
 ### Fixed
