@@ -9,8 +9,9 @@
 [![Licence](https://img.shields.io/badge/licence-GPL--2.0-2ea44f)](LICENSE.md)
 [![Container](https://img.shields.io/badge/ghcr.io-oliverbravery%2Fprintguard-2496ed?logo=docker&logoColor=white)](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
 [![Live demo](https://img.shields.io/badge/demo-try_it_in_your_browser-ff4d00)](https://oliverbravery.github.io/PrintGuard/)
+[![Sponsor](https://img.shields.io/github/sponsors/oliverbravery?style=flat&color=ff4d00&label=sponsors)](https://github.com/sponsors/oliverbravery)
 
-[Live demo](https://oliverbravery.github.io/PrintGuard/) · [Quick start](#quick-start) · [Documentation](docs/README.md) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](CONTRIBUTING.md)
+[Live demo](https://oliverbravery.github.io/PrintGuard/) · [Quick start](#quick-start) · [Documentation](docs/README.md) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](CONTRIBUTING.md) · [Sponsor](#sponsor)
 
 </div>
 
@@ -38,6 +39,7 @@ frames never leave hardware you own.
 - [How the detector works](#how-the-detector-works)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
+- [Sponsor](#sponsor)
 - [Licence](#licence)
 
 ## Try it now, nothing to install
@@ -240,6 +242,18 @@ the prototype distances, so you can tune for your camera and lighting without re
 
 Dev setup, tests, and step-by-step guides for adding a printer integration or a notification
 provider are in **[CONTRIBUTING.md](CONTRIBUTING.md)**. Issues and pull requests are welcome.
+
+## Sponsor
+
+PrintGuard is free, GPL-2.0, and has no paid tier. It has one cost I cannot design around:
+Apple charges $99 a year for the Developer Program, and without it the macOS app cannot be
+signed or notarised. That is why macOS warns you that PrintGuard is from an unidentified
+developer, and why the first launch takes a trip through System Settings.
+
+[**Sponsoring the project**](https://github.com/sponsors/oliverbravery) fixes that. Sustained
+sponsorship of $10 a month covers the licence across the year and removes that warning for
+everyone; anything past it goes on the hardware the integrations get tested against. One-off
+and monthly both work, and nothing in PrintGuard is ever locked behind it.
 
 ## Licence
 

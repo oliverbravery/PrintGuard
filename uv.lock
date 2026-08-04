@@ -1198,7 +1198,7 @@ wheels = [
 
 [[package]]
 name = "printguard"
-version = "2.3.9"
+version = "2.3.10"
 source = { editable = "." }
 dependencies = [
     { name = "ai-edge-litert" },

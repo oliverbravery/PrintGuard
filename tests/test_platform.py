@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from printguard.engine import vision
 from printguard.server.inference import Inference, _measure_concurrency
 from printguard.server.platform import ServerPlatform
 
@@ -29,17 +31,33 @@ async def test_model_inference(tmp_path: Path, runtime: str) -> None:
     assert platform.workers > 0
 
 
-async def test_runtimes_agree_on_embedding() -> None:
-    """Both runtimes carry the same model, so they must embed a frame the same way."""
+async def test_runtimes_agree_on_classification() -> None:
+    """Both runtimes carry the same model, so they must classify a frame the same way.
+
+    Execution providers pick kernels for the hardware they land on, so the embeddings
+    are held to the only agreement the detector depends on rather than to an
+    elementwise tolerance. Every prototype distance moves by at most the distance
+    between the two embeddings, so drift under half the margin cannot reach the
+    nearest prototype of the other.
+    """
+    model_dir = Path("models")
+    assets = vision.assets_from_dicts(
+        json.loads((model_dir / "metadata.json").read_text()),
+        json.loads((model_dir / "prototypes.json").read_text())["prototypes"],
+    )
     tensor = np.random.default_rng(0).random((1, 3, 224, 224), dtype=np.float32)
     embeddings = []
     for runtime in ("litert", "onnx"):
-        inference = Inference(Path("models"), runtime)
+        inference = Inference(model_dir, runtime)
         embeddings.append(await inference.run(tensor))
         inference.close()
 
+    classifications = [vision.classify(embedding, assets) for embedding in embeddings]
+    drift = float(np.linalg.norm(embeddings[0] - embeddings[1]))
+
     assert embeddings[0].shape == embeddings[1].shape == (1024,)
-    assert np.allclose(*embeddings, atol=1e-3)
+    assert classifications[0]["prediction"] == classifications[1]["prediction"]
+    assert drift < min(result["margin"] for result in classifications) / 2
 
 
 def test_measured_concurrency_tracks_scaling() -> None:
