@@ -7,6 +7,16 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.11] - 2026-08-04
+
+### Security
+
+- **Picked up the `cryptography` 50.0.0 security fix** ([CVE-2026-69247](https://github.com/advisories/GHSA-g6cj-pr64-35w5),
+  high). The flaw is in that library's PKCS#7 `EnvelopedData` decryption, which PrintGuard
+  never calls: the package is here only as a dependency of the JWT and token libraries
+  behind sign-in and push notifications, so no PrintGuard install was exposed. Nothing else
+  changed in this release. Pull the new image if you want a clean dependency scan.
+
 ## [2.3.10] - 2026-08-04
 
 ### Added
