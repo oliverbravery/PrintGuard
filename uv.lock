@@ -988,6 +988,14 @@ wheels = [
 ]
 
 [[package]]
+name = "nvidia-cuda-runtime-cu12"
+version = "12.9.79"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bc/46/a92db19b8309581092a3add7e6fceb4c301a3fd233969856a8cbf042cd3c/nvidia_cuda_runtime_cu12-12.9.79-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:25bba2dfb01d48a9b59ca474a1ac43c6ebf7011f1b0b8cc44f54eb6ac48a96c3", size = 3493179, upload-time = "2025-06-05T20:00:53.735Z" },
+]
+
+[[package]]
 name = "onnxruntime"
 version = "1.27.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1198,7 +1206,7 @@ wheels = [
 
 [[package]]
 name = "printguard"
-version = "2.3.11"
+version = "2.3.12"
 source = { editable = "." }
 dependencies = [
     { name = "ai-edge-litert" },
@@ -1233,6 +1241,7 @@ desktop = [
     { name = "pywebview" },
 ]
 nvidia = [
+    { name = "nvidia-cuda-runtime-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "onnxruntime-ep-nv-tensorrt-rtx-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 
@@ -1254,6 +1263,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "ml-dtypes", specifier = ">=0.5.1" },
     { name = "numpy", specifier = ">=2.1" },
+    { name = "nvidia-cuda-runtime-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'nvidia'", specifier = ">=12.9" },
     { name = "onnxruntime", marker = "sys_platform != 'win32'", specifier = ">=1.24.1" },
     { name = "onnxruntime-ep-nv-tensorrt-rtx-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'nvidia'", specifier = ">=0.3.0", index = "https://pypi.nvidia.com/" },
     { name = "onnxruntime-ep-openvino", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=1.5.2" },
@@ -1330,7 +1340,7 @@ memory = [
 
 [[package]]
 name = "pycentauri"
-version = "0.7.0"
+version = "0.9.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1340,9 +1350,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ba/3a/fb271d0c61a163d6f60d43e5c813378777aeff63f8972c113778208bf069/pycentauri-0.7.0.tar.gz", hash = "sha256:8e62fc6e0f8f35281badc525f32c0f572ebeafd587901a12afbccb79ec49f047", size = 104212, upload-time = "2026-07-15T05:15:56.574Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/da/ed25970b19d8f9b26baa2a896cce13f07deb56b3f26ae85ebcec03f18449/pycentauri-0.9.1.tar.gz", hash = "sha256:688c9a49870ae72ab8d8ad5a5d5b960e2ff4414ff2a17e932d463e157351600a", size = 111998, upload-time = "2026-08-08T02:18:38.296Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/d9/0c6dd7d2a873f20b232d1497b2f613bc2f56617844f63e56e372e9a57bcf/pycentauri-0.7.0-py3-none-any.whl", hash = "sha256:e0f6cd4fdac03bf207d8b48dc11398f10241f651c504680d9f2ba33bb0f2c1a0", size = 87508, upload-time = "2026-07-15T05:15:55.137Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/7e/5b60b7f7a03465abf63f238efa6a4512e6f74e2f0906e0961eec9db42209/pycentauri-0.9.1-py3-none-any.whl", hash = "sha256:586a008c47114d50a829b97e58cad144de3a375bd630e54ab2f53b4118d58732", size = 92678, upload-time = "2026-08-08T02:18:36.689Z" },
 ]
 
 [[package]]

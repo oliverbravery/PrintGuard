@@ -62,7 +62,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | Symptom | Cause | Fix |
 |---|---|---|
 | An Intel GPU is not used | The standard image leaves the Intel GPU runtime out | Use the `latest-intel` tag *and* pass `--device /dev/dri`. [Intel GPU](hardware.md#intel-gpu) |
-| An NVIDIA GPU is not used | Missing Container Toolkit, missing `--gpus all`, or the wrong tag | [NVIDIA GPU](hardware.md#nvidia-gpu) |
+| An NVIDIA GPU is not used | Missing Container Toolkit, the container started without the NVIDIA runtime, or the wrong tag | The log names the provider it could not load, then falls back to the CPU. [NVIDIA GPU](hardware.md#nvidia-gpu) |
 | **compute** reads `cpu` on a machine with an accelerator | No compatible provider was usable, so ONNX Runtime fell back | [Execution providers by platform](hardware.md#execution-providers-by-platform) |
 | Throughput differs from what you expected | Automatic mode picks whichever runtime benchmarks faster on the host | The choice is logged at start. Pin one in **Settings → Advanced** |
 

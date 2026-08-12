@@ -25,12 +25,15 @@ jobs:
           - name: standard
             extra: ""
             gpu_runtime_packages: ""
+            gpu_visible_devices: ""
           - name: Intel
             extra: ""
             gpu_runtime_packages: intel-opencl-icd ocl-icd-libopencl1
+            gpu_visible_devices: ""
           - name: NVIDIA
             extra: --extra nvidia
             gpu_runtime_packages: ""
+            gpu_visible_devices: all
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -41,6 +44,7 @@ jobs:
           build-args: |
             INFERENCE_EXTRA=${{ matrix.extra }}
             GPU_RUNTIME_PACKAGES=${{ matrix.gpu_runtime_packages }}
+            NVIDIA_VISIBLE_DEVICES=${{ matrix.gpu_visible_devices }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 

@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends binutils \
 
 FROM python:3.13-slim-bookworm
 ARG GPU_RUNTIME_PACKAGES
+ARG NVIDIA_VISIBLE_DEVICES
 WORKDIR /app
 RUN if [ -n "$GPU_RUNTIME_PACKAGES" ]; then apt-get update && apt-get install -y --no-install-recommends $GPU_RUNTIME_PACKAGES; fi \
     && rm -rf /var/lib/apt/lists/*
@@ -39,7 +40,9 @@ ENV PATH="/app/.venv/bin:$PATH" \
     DATA_DIR=/data \
     STATIC_DIR=/app/static \
     MEDIAMTX_BINARY=/usr/local/bin/mediamtx \
-    MEDIAMTX_CONFIG=/app/mediamtx.yml
+    MEDIAMTX_CONFIG=/app/mediamtx.yml \
+    NVIDIA_VISIBLE_DEVICES=$NVIDIA_VISIBLE_DEVICES \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
 VOLUME /data
 EXPOSE 8000 8554
 CMD ["printguard"]

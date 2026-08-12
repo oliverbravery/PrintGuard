@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from printguard.engine import vision
-from printguard.server.inference import Inference, _measure_concurrency
+from printguard.server.inference import Inference, _measure_concurrency, _register_library
 from printguard.server.platform import ServerPlatform
 
 
@@ -58,6 +58,16 @@ async def test_runtimes_agree_on_classification() -> None:
     assert embeddings[0].shape == embeddings[1].shape == (1024,)
     assert classifications[0]["prediction"] == classifications[1]["prediction"]
     assert drift < min(result["margin"] for result in classifications) / 2
+
+
+def test_provider_library_that_cannot_load_leaves_the_cpu(tmp_path: Path) -> None:
+    """A GPU image whose provider libraries the host cannot supply must still start.
+
+    The accelerated images carry a provider that needs libraries only the host can hand
+    over, so any host without them, or any container started without GPU access, would
+    otherwise take PrintGuard down at startup rather than watching printers on the CPU.
+    """
+    assert _register_library("printguard_test_provider", str(tmp_path / "libmissing.so")) is False
 
 
 def test_measured_concurrency_tracks_scaling() -> None:
