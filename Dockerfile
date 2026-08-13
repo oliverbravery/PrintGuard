@@ -1,6 +1,6 @@
 FROM bluenviron/mediamtx:1.18.2 AS mediamtx
 
-FROM node:22-alpine AS web
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 WORKDIR /build/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
