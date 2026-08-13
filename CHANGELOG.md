@@ -7,6 +7,14 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.12] - 2026-08-12
+
+### Fixed
+
+- The `latest-nvidia` image never carried the CUDA 12 runtime the TensorRT RTX provider
+  links against, so since 2.3.7 it exited at startup with `libcudart.so.12: cannot open
+  shared object file`. It carries it now. Thanks to @ForceConstant for the report.
+
 ## [2.3.11] - 2026-08-04
 
 ### Security

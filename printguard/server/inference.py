@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import importlib
 import importlib.util
 import logging
 import os
 import sys
+import sysconfig
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -26,6 +28,7 @@ BENCHMARK_RUNS = 10
 BENCHMARK_TENSOR = np.zeros((1, 3, 224, 224), dtype=np.float32)
 SCALING_GAIN = 1.1
 PLUGIN_MODULES = ("onnxruntime_ep_nv_tensorrt_rtx", "onnxruntime_ep_openvino")
+CUDA_RUNTIME_LIBRARY = "nvidia/cuda_runtime/lib/libcudart.so.12"
 WINDOWS_PROVIDERS = {
     "MIGraphXExecutionProvider",
     "NvTensorRtRtxExecutionProvider",
@@ -46,10 +49,34 @@ REGISTERED_LIBRARIES: set[str] = set()
 logger = logging.getLogger(__name__)
 
 
-def _register_library(name: str, path: str) -> None:
-    if name not in REGISTERED_LIBRARIES:
+def _preload_cuda_runtime() -> None:
+    """Loads the CUDA runtime that the TensorRT RTX provider library links against.
+
+    The NVIDIA Container Toolkit injects the driver, not the runtime, and the wheel
+    carrying `libcudart.so.12` installs it under site-packages where the dynamic linker
+    does not look, so the provider library cannot open without it being loaded first.
+    """
+    library = Path(sysconfig.get_paths()["purelib"], CUDA_RUNTIME_LIBRARY)
+    if library.exists():
+        ctypes.CDLL(str(library), mode=ctypes.RTLD_GLOBAL)
+
+
+def _register_library(name: str, path: str) -> bool:
+    """Registers a provider library with ONNX Runtime, reporting whether it is usable.
+
+    A provider whose libraries the host cannot supply, such as a GPU image started
+    without the drivers passed through, leaves inference on the CPU rather than
+    stopping PrintGuard from starting.
+    """
+    if name in REGISTERED_LIBRARIES:
+        return True
+    try:
         ort.register_execution_provider_library(name, path)
-        REGISTERED_LIBRARIES.add(name)
+    except Exception as exc:
+        logger.warning("execution provider %s is unavailable: %s", name, exc)
+        return False
+    REGISTERED_LIBRARIES.add(name)
+    return True
 
 
 def _throughput(model: Model, workers: int) -> float:
@@ -125,13 +152,14 @@ class OnnxInference:
         self._input_name = self._session.get_inputs()[0].name
 
     def _register_plugins(self) -> int:
+        _preload_cuda_runtime()
         registered = 0
         for module_name in PLUGIN_MODULES:
             if importlib.util.find_spec(module_name) is None:
                 continue
             module = importlib.import_module(module_name)
-            _register_library(module_name, module.get_library_path())
-            registered += 1
+            if _register_library(module_name, module.get_library_path()):
+                registered += 1
         return registered
 
     def _register_windows_providers(self) -> int:
@@ -152,8 +180,8 @@ class OnnxInference:
                 result = provider.ensure_ready_async().get()
                 if result.status != winml.ExecutionProviderReadyResultState.SUCCESS:
                     continue
-            _register_library(provider.name, provider.library_path)
-            registered += 1
+            if _register_library(provider.name, provider.library_path):
+                registered += 1
         return registered
 
     def run(self, tensor: np.ndarray) -> np.ndarray:

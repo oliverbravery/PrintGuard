@@ -51,16 +51,19 @@ jobs:
             suffix: ""
             extra: ""
             gpu_runtime_packages: ""
+            gpu_visible_devices: ""
           - name: Intel
             platforms: linux/amd64
             suffix: -intel
             extra: ""
             gpu_runtime_packages: intel-opencl-icd ocl-icd-libopencl1
+            gpu_visible_devices: ""
           - name: NVIDIA
             platforms: linux/amd64
             suffix: -nvidia
             extra: --extra nvidia
             gpu_runtime_packages: ""
+            gpu_visible_devices: all
     permissions:
       contents: read
       packages: write
@@ -91,6 +94,7 @@ jobs:
           build-args: |
             INFERENCE_EXTRA=${{ matrix.extra }}
             GPU_RUNTIME_PACKAGES=${{ matrix.gpu_runtime_packages }}
+            NVIDIA_VISIBLE_DEVICES=${{ matrix.gpu_visible_devices }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=${{ matrix.name }}

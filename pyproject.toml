@@ -1,6 +1,6 @@
 [project]
 name = "printguard"
-version = "2.3.11"
+version = "2.3.12"
 description = "Real-time 3D print failure detection"
 
 license = "GPL-2.0-only"
@@ -42,6 +42,7 @@ desktop = [
     "pywebview>=6.2",
 ]
 nvidia = [
+    "nvidia-cuda-runtime-cu12>=12.9; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "onnxruntime-ep-nv-tensorrt-rtx-cu12>=0.3.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 

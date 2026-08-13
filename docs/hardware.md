@@ -43,7 +43,7 @@ only in the acceleration runtime they bundle.
 |---|---|---|---|
 | `latest` | `amd64`, `arm64` | Nothing. Smallest download | Default choice, including Raspberry Pi 4/5 |
 | `latest-intel` | `amd64` | Intel GPU compute runtime | You pass `--device /dev/dri` for an Intel iGPU or Arc card |
-| `latest-nvidia` | `amd64` | TensorRT RTX execution provider | You have an RTX 30 series or newer and the NVIDIA Container Toolkit |
+| `latest-nvidia` | `amd64` | TensorRT RTX execution provider and the CUDA 12 runtime | You have an RTX 30 series or newer and the NVIDIA Container Toolkit |
 
 Versioned tags exist alongside them: `X.Y.Z`, `X.Y`, and the same three suffixes, for
 example `2.3.8-intel`. Pin `X.Y` if you want patch updates without surprises.
@@ -104,7 +104,7 @@ platform:
 | Windows 11 24H2 or newer, desktop app | Windows ML | Installs the certified Intel, NVIDIA, AMD or Qualcomm provider on first launch |
 | Older Windows, desktop app | Optimised CPU | No provider install |
 | Linux `amd64`, standard image | OpenVINO | Intel CPU path out of the box; GPU needs `latest-intel` and `/dev/dri` |
-| Linux `amd64`, `latest-nvidia` | TensorRT RTX | Needs the NVIDIA Container Toolkit and `--gpus all` |
+| Linux `amd64`, `latest-nvidia` | TensorRT RTX | Needs the NVIDIA Container Toolkit on the host |
 | Linux `arm64`, standard image | Optimised CPU | Raspberry Pi 4/5 and similar |
 
 If no accelerator is usable, ONNX Runtime falls back to its CPU provider and PrintGuard
@@ -147,15 +147,20 @@ docker run -d --name printguard --restart unless-stopped \
   ghcr.io/oliverbravery/printguard:latest-nvidia
 ```
 
-Compose, v2.30 or newer:
+Compose:
 
 ```yaml
     image: ghcr.io/oliverbravery/printguard:latest-nvidia
-    gpus: all
+    runtime: nvidia
 ```
 
-On Unraid, set the repository to the `-nvidia` tag and add `--runtime=nvidia --gpus all` to
-*Extra Parameters*.
+On Unraid, set the repository to the `-nvidia` tag and add `--runtime=nvidia` to *Extra
+Parameters*.
+
+The image asks the Container Toolkit for every GPU on the host and carries the CUDA 12
+runtime the provider needs, so the toolkit is the only thing to install. To pick one card,
+set `NVIDIA_VISIBLE_DEVICES` to its UUID or index. If the toolkit cannot hand the GPU over,
+PrintGuard logs which provider is unavailable and keeps running on the CPU.
 
 ## Reading and pinning the runtime
 

@@ -181,7 +181,7 @@ Two extra image tags exist for GPUs:
 
 ```bash
 ghcr.io/oliverbravery/printguard:latest-intel    # with --device /dev/dri
-ghcr.io/oliverbravery/printguard:latest-nvidia   # with --gpus all
+ghcr.io/oliverbravery/printguard:latest-nvidia   # with --runtime=nvidia
 ```
 
 Which tag to pull, what each provider needs and how to pin a runtime:
