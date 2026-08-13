@@ -16,7 +16,7 @@ const series = (fn: (i: number) => number, n = 48): ScorePoint[] =>
 
 const camera = (id: string, name: string, source: Camera["source"], inferring = false): Camera => ({
   id, name, source, printer_id: null, max_fps: 30, brightness: 1, contrast: 1, sharpness: 0,
-  crop: null, rotation: 0, target_fps: 5, achieved_fps: 4.7, inferring, in_use: true, online: true, last_result: null,
+  crop: null, rotation: 0, target_fps: 30, achieved_fps: 29.8, inferring, in_use: true, online: true, last_result: null,
 });
 
 const printer = (id: string, name: string, provider: string, status: string, progress: number, job: string): Printer => ({
@@ -53,7 +53,7 @@ function engine(): EngineState {
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
     settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
-    tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 36 }, integrations: [], notifiers: [],
+    tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: [], notifiers: [],
   };
 }
 
