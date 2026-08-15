@@ -28,6 +28,8 @@ DEVICE_POLL_S = 5.0
 NOTIFY_COOLDOWN_S = 30.0
 WATCH_TICK_S = 2.0
 OFFLINE_GRACE_S = 12.0
+RECOVER_HOLD_S = 60.0
+FLAP_HOLD_MAX_S = 900.0
 STALL_GRACE_S = 30.0
 ACT_ATTEMPTS = 3
 ACT_RETRY_S = 1.0
@@ -42,6 +44,8 @@ class Watchdog:
         self._cooldown_until: dict[str, float] = {}
         self._last_notified: dict[str, float] = {}
         self._down_since: dict[str, float] = {}
+        self._healthy_since: dict[str, float] = {}
+        self._flaps: dict[str, int] = {}
         self._warned: set[str] = set()
         self._online_since: dict[str, float] = {}
         self._tasks: set[asyncio.Task[None]] = set()
@@ -89,11 +93,12 @@ class Watchdog:
     async def watch_health(self) -> None:
         """Warns when a watched camera or printer service drops out.
 
-        Outages shorter than the grace period are ignored so reconnecting
-        sources do not flap; each sustained outage warns exactly once and
-        announces its recovery. A camera that stays online but stops
-        producing fresh frames counts as stalled - frozen feeds must not
-        pass for monitoring.
+        Outages shorter than the grace period are ignored, and a sustained
+        one warns exactly once; the recovery is only announced once health
+        has held for _recover_hold(), so a source that reconnects and drops
+        again is one warning rather than a notification per cycle. A camera
+        that stays online but stops producing fresh frames counts as stalled
+        - frozen feeds must not pass for monitoring.
         """
         while True:
             now = time.monotonic()
@@ -159,18 +164,38 @@ class Watchdog:
         down_message: str,
         up_message: str,
     ) -> bool:
-        if healthy:
-            self._down_since.pop(key, None)
-            if key in self._warned:
-                self._warned.discard(key)
-                await self._warn(monitor, up_message, recovered=True)
-            return False
-        since = self._down_since.setdefault(key, now)
-        if now - since >= grace and key not in self._warned:
+        if not healthy:
+            self._healthy_since.pop(key, None)
+            down_since = self._down_since.setdefault(key, now)
+            if now - down_since < grace or key in self._warned:
+                return False
             self._warned.add(key)
             await self._warn(monitor, down_message)
             return True
+        healthy_since = self._healthy_since.setdefault(key, now)
+        if key not in self._warned:
+            self._down_since.pop(key, None)
+            if now - healthy_since >= FLAP_HOLD_MAX_S:
+                self._flaps.pop(key, None)
+            return False
+        if now - healthy_since < self._recover_hold(key):
+            return False
+        self._warned.discard(key)
+        self._down_since.pop(key, None)
+        self._flaps[key] = self._flaps.get(key, 0) + 1
+        await self._warn(monitor, up_message, recovered=True)
         return False
+
+    def _recover_hold(self, key: str) -> float:
+        """How long a condition must stay healthy before its recovery is announced.
+
+        Every recovery doubles what the next one has to prove, up to
+        FLAP_HOLD_MAX_S, so a source that keeps dropping and reconnecting is
+        announced once for the whole unstable episode instead of on every
+        cycle. The requirement lapses once the condition has held for the
+        maximum without faulting again.
+        """
+        return min(FLAP_HOLD_MAX_S, RECOVER_HOLD_S * 2 ** self._flaps.get(key, 0))
 
     async def _warn(self, monitor: dict[str, Any], message: str, recovered: bool = False) -> None:
         self._engine.emit({"event": "warning", "monitor_id": monitor["id"], "message": message, "recovered": recovered})

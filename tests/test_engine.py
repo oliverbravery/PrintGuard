@@ -242,6 +242,7 @@ async def test_watchdog_and_failed_action(monkeypatch) -> None:
     watchdog.WATCH_TICK_S = 0.05
     watchdog.OFFLINE_GRACE_S = 0.2
     watchdog.ACT_RETRY_S = 0.01
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.05)
     monkeypatch.setattr(engine_module, "REATTACH_EVERY_TICKS", 1)
     platform = FakePlatform(infer_s=0.02, failing=True)
@@ -277,6 +278,7 @@ async def test_watchdog_restarts_stalled_camera_after_fresh_inference(monkeypatc
 
     monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
     monkeypatch.setattr(watchdog, "STALL_GRACE_S", 0.1)
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
     platform = FakePlatform(infer_s=0.01)
     async with running_engine(platform, camera_fps=[20.0]) as (engine, events):
@@ -299,6 +301,48 @@ async def test_watchdog_restarts_stalled_camera_after_fresh_inference(monkeypatc
             if event.get("event") == "warning" and event["recovered"] and "feed recovered" in event["message"]
         )
         assert any(event.get("event") == "result" for event in events[stalled_index + 1 : recovered_index])
+
+
+async def test_flapping_camera_warns_once_per_outage(monkeypatch) -> None:
+    from printguard.engine import engine as engine_module
+
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
+    monkeypatch.setattr(watchdog, "OFFLINE_GRACE_S", 0.05)
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.2)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True}})
+        camera = next(iter(engine.cameras.values()))
+
+        def warnings(recovered: bool) -> list[dict]:
+            return [e for e in events if e.get("event") == "warning" and e["recovered"] is recovered]
+
+        async def hold_source(online: bool, seconds: float) -> None:
+            while camera.frame_source is None:
+                await asyncio.sleep(0.01)
+            camera.frame_source.online = online
+            await asyncio.sleep(seconds)
+
+        for _ in range(5):
+            await hold_source(False, 0.15)
+            await hold_source(True, 0.1)
+
+        assert len(warnings(False)) == 1, f"a reconnecting camera warned {len(warnings(False))} times about one episode"
+        assert not warnings(True), "recovery was announced while the camera was still flapping"
+        assert len(platform.http_calls) == 1, f"flapping pushed {len(platform.http_calls)} notifications"
+
+        await hold_source(True, 0.5)
+        assert len(warnings(True)) == 1, "sustained recovery was never announced"
+        assert len(platform.http_calls) == 2, "recovery should push exactly once"
+
+        await hold_source(False, 0.15)
+        await hold_source(True, 0.3)
+        assert len(warnings(True)) == 1, "a camera that fails again must settle for longer before recovery is announced"
+        await hold_source(True, 0.6)
+        assert len(warnings(True)) == 2, "recovery was never announced after the longer settled period"
 
 
 async def test_protocol_surfaces_errors_and_filters_settings() -> None:
