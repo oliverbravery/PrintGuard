@@ -36,15 +36,8 @@ WINDOWS_PROVIDERS = {
     "QNNExecutionProvider",
     "VitisAIExecutionProvider",
 }
-PROVIDER_LABELS = {
-    "CoreMLExecutionProvider": "Apple Core ML",
-    "MIGraphXExecutionProvider": "AMD GPU",
-    "NvTensorRtRtxExecutionProvider": "NVIDIA GPU",
-    "nv_tensorrt_rtx": "NVIDIA GPU",
-    "OpenVINOExecutionProvider": "Intel OpenVINO",
-    "QNNExecutionProvider": "Qualcomm NPU",
-    "VitisAIExecutionProvider": "AMD NPU",
-}
+DEFAULT_CPU_PROVIDER = "CPUExecutionProvider"
+DEVICE_PRIORITY = ("GPU", "NPU", "CPU")
 REGISTERED_LIBRARIES: set[str] = set()
 logger = logging.getLogger(__name__)
 
@@ -77,6 +70,37 @@ def _register_library(name: str, path: str) -> bool:
         return False
     REGISTERED_LIBRARIES.add(name)
     return True
+
+
+def _device_rank(device: ort.OrtEpDevice) -> tuple[int, bool]:
+    """Orders one provider device by the throughput its hardware can be expected to reach."""
+    return DEVICE_PRIORITY.index(device.device.type.name), device.device.metadata.get("Discrete") != "1"
+
+
+def _execution_devices(devices: list[ort.OrtEpDevice]) -> list[ort.OrtEpDevice]:
+    """Returns the hardware the registered providers offer, fastest first.
+
+    A provider registers one device per piece of hardware it can reach, so a GPU
+    missing from this list is one the host's driver never handed to the provider,
+    which is the difference between a GPU that is unusable and one that is merely
+    slower. ONNX Runtime's own selection policies pick a device without saying which,
+    and OpenVINO's meta devices choose again at inference time, so neither can name
+    the hardware actually in use: the choice is made here instead, where it is named
+    in the `compute` readout and in the log.
+    """
+    return sorted(
+        (
+            device
+            for device in devices
+            if device.ep_name != DEFAULT_CPU_PROVIDER and "ov_meta_device" not in device.ep_metadata
+        ),
+        key=_device_rank,
+    )
+
+
+def _device_label(device: ort.OrtEpDevice) -> str:
+    """Names the hardware behind a provider device, for example `Intel GPU`."""
+    return f"{device.ep_vendor} {device.device.type.name}"
 
 
 def _throughput(model: Model, workers: int) -> float:
@@ -124,47 +148,47 @@ class OnnxInference:
 
     def __init__(self, model_path: Path) -> None:
         self._resources = ExitStack()
-        registered = self._register_plugins()
+        self._register_plugins()
         if sys.platform == "win32":
-            registered += self._register_windows_providers()
+            self._register_windows_providers()
 
         options = ort.SessionOptions()
         options.intra_op_num_threads = 1
-        if registered:
-            options.set_provider_selection_policy(ort.OrtExecutionProviderDevicePolicy.MAX_PERFORMANCE)
+        devices = _execution_devices(ort.get_ep_devices())
+        if devices:
+            logger.info("execution providers offer: %s", ", ".join(_device_label(device) for device in devices))
+            options.add_provider_for_devices(devices[:1], {})
             self._session = ort.InferenceSession(str(model_path), sess_options=options)
+            self.device = _device_label(devices[0])
         elif "CoreMLExecutionProvider" in ort.get_available_providers():
             providers = [
                 (
                     "CoreMLExecutionProvider",
                     {"ModelFormat": "MLProgram", "MLComputeUnits": "ALL", "RequireStaticInputShapes": "1"},
                 ),
-                "CPUExecutionProvider",
+                DEFAULT_CPU_PROVIDER,
             ]
             self._session = ort.InferenceSession(str(model_path), sess_options=options, providers=providers)
+            self.device = "Apple Core ML"
         else:
             self._session = ort.InferenceSession(
-                str(model_path), sess_options=options, providers=["CPUExecutionProvider"]
+                str(model_path), sess_options=options, providers=[DEFAULT_CPU_PROVIDER]
             )
+            self.device = "ONNX CPU"
 
-        provider = next((name for name in self._session.get_providers() if name in PROVIDER_LABELS), None)
-        self.device = PROVIDER_LABELS.get(provider, "ONNX CPU")
         self._input_name = self._session.get_inputs()[0].name
 
-    def _register_plugins(self) -> int:
+    def _register_plugins(self) -> None:
         _preload_cuda_runtime()
-        registered = 0
         for module_name in PLUGIN_MODULES:
             if importlib.util.find_spec(module_name) is None:
                 continue
             module = importlib.import_module(module_name)
-            if _register_library(module_name, module.get_library_path()):
-                registered += 1
-        return registered
+            _register_library(module_name, module.get_library_path())
 
-    def _register_windows_providers(self) -> int:
+    def _register_windows_providers(self) -> None:
         if sys.getwindowsversion().build < 26100:
-            return 0
+            return
         from winui3.microsoft.windows.applicationmodel.dynamicdependency.bootstrap import InitializeOptions, initialize
         import winui3.microsoft.windows.ai.machinelearning as winml
 
@@ -174,15 +198,12 @@ class OnnxInference:
             for provider in winml.ExecutionProviderCatalog.get_default().find_all_providers()
             if provider.name in WINDOWS_PROVIDERS
         ]
-        registered = 0
         for provider in providers:
             if provider.ready_state != winml.ExecutionProviderReadyState.READY:
                 result = provider.ensure_ready_async().get()
                 if result.status != winml.ExecutionProviderReadyResultState.SUCCESS:
                     continue
-            if _register_library(provider.name, provider.library_path):
-                registered += 1
-        return registered
+            _register_library(provider.name, provider.library_path)
 
     def run(self, tensor: np.ndarray) -> np.ndarray:
         """Returns the model embedding for one preprocessed frame."""
