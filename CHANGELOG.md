@@ -9,6 +9,18 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.4.0] - 2026-08-15
 
+### Fixed
+
+- **A camera that keeps dropping out no longer notifies you every time it reconnects.** The
+  watchdog announced a recovery the moment a feed came back, so a source that reconnected in
+  a loop pushed an "offline" alert and a "back" alert on every cycle, on ntfy and every other
+  channel alike. Raising the monitor's cooldown did not help, because that setting is the
+  quiet window after a defect alert and never covered these warnings. One unstable episode is
+  now one warning: a recovery is only announced once the feed has held for a minute, and each
+  recovery doubles what the next one has to hold for, up to fifteen minutes, so a source that
+  keeps flapping gets quieter rather than louder. Outages themselves are never delayed. Worth
+  pulling if you run a camera on marginal wifi. Thanks to @subpanel0576 for the report.
+
 ## [2.3.12] - 2026-08-12
 
 ### Fixed
