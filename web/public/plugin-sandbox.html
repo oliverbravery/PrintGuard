@@ -4,11 +4,113 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self' 'unsafe-eval'; connect-src 'none'; img-src 'none'; media-src 'none'; style-src 'none'; font-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; connect-src 'none'; img-src 'none'; media-src 'none'; style-src 'none'; font-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>PrintGuard plugin sandbox</title>
   </head>
   <body>
-    <script src="./plugin-sandbox.js"></script>
+    <!--
+      Runs one plugin file inside an opaque origin whose policy permits no
+      network, no images, no styles and no frames of its own.
+
+      Everything here is inline on purpose. The document has an opaque origin,
+      where 'self' matches nothing, so WebKit refuses an external script and the
+      sandbox would load and quietly run nothing. A module script is out for the
+      same reason: it is always fetched in CORS mode, which an opaque origin can
+      never satisfy.
+
+      The plugin is a pure function. It is handed state and its own stored data,
+      and hands back a view and a list of effects for PrintGuard to carry out,
+      every one of which is checked against the permissions the user granted
+      before anything happens.
+    -->
+    <script>
+      (function () {
+        "use strict";
+
+        for (const name of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches"]) {
+          try {
+            delete window[name];
+          } catch {
+            /* frozen on some engines; the policy above is what actually closes these */
+          }
+        }
+        try {
+          delete navigator.sendBeacon;
+        } catch {
+          /* as above */
+        }
+
+        let hooks = { view: null, action: null, events: {} };
+        let effects = [];
+        let store = {};
+        let manifest = {};
+
+        function context(state) {
+          return {
+            store,
+            state,
+            manifest,
+            now: Date.now() / 1000,
+            command(cmd) {
+              effects.push({ kind: "command", cmd });
+            },
+            http(request) {
+              effects.push({ kind: "http", request });
+            },
+            notify(text) {
+              effects.push({ kind: "notify", text: String(text) });
+            },
+            log(text) {
+              effects.push({ kind: "log", text: String(text) });
+            },
+          };
+        }
+
+        function load(code) {
+          hooks = { view: null, action: null, events: {} };
+          new Function("plugin", code)({
+            render(fn) {
+              hooks.view = fn;
+            },
+            action(fn) {
+              hooks.action = fn;
+            },
+            on(name, fn) {
+              hooks.events[name] = fn;
+            },
+          });
+        }
+
+        function run(message) {
+          const ctx = context(message.state || {});
+          effects = [];
+          let tree = null;
+          if (message.t === "action" && hooks.action) hooks.action(message.name, message.arg, ctx);
+          else if (message.t === "event" && hooks.events[message.event.event]) hooks.events[message.event.event](message.event, ctx);
+          if (hooks.view) tree = hooks.view(ctx);
+          store = ctx.store;
+          return { tree, store, effects };
+        }
+
+        addEventListener("message", (message) => {
+          const { id, t } = message.data || {};
+          try {
+            if (t === "init") {
+              store = message.data.store || {};
+              manifest = message.data.manifest || {};
+              load(message.data.code);
+              parent.postMessage({ id, t: "ready" }, "*");
+              return;
+            }
+            parent.postMessage({ id, t: "result", ...run(message.data) }, "*");
+          } catch (err) {
+            parent.postMessage({ id, t: "failed", message: String((err && err.message) || err) }, "*");
+          }
+        });
+
+        parent.postMessage({ t: "booted" }, "*");
+      })();
+    </script>
   </body>
 </html>

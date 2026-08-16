@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "picture-in-picture",
+      "name": "Picture in picture",
+      "description": "Keeps chosen camera feeds in a floating window that stays on top of other apps.",
+      "author": "oliverbravery",
+      "version": "1.0.0",
+      "permissions": [
+        "state:read",
+        "camera:view"
+      ],
+      "repo": "oliverbravery/PrintGuard",
+      "path": "plugins/picture-in-picture",
+      "ref": "bae6dd1e7bfc4c5adad4ec433b83d0c7f2dfc3fc",
+      "digests": {
+        "plugin.json": "03ce25b9cf5ebade092d6e6fdb878b5f87f96b153c3c83226e6f8fde7c4bb382",
+        "plugin.js": "14e25b87a2ccf231ba2bd6f71ddd2ca8f137747f2bdb6971887a0a048e4c3026"
+      }
+    }
+  ]
+}
