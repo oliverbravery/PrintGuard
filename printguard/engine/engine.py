@@ -784,7 +784,7 @@ class Engine:
             plugin.granted = [p for p in patch["granted"] if p in plugin.manifest["permissions"]]
         if "enabled" in patch:
             plugin.enabled = bool(patch["enabled"])
-            plugin.failure = str(patch["failure"])[:200] if patch.get("failure") else None
+            plugin.failure = None
         if "config" in patch:
             plugin.config = plugins.sanitise_config(patch["config"])
         if not {"config"} >= set(patch):

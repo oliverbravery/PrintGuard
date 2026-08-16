@@ -178,3 +178,27 @@ test("a command the plugin was not granted never reaches the engine", async ({ p
   expect(sent).not.toContain("printer.action");
   await expect(page.getByText("without permission")).toBeVisible();
 });
+
+test("pop-out puts the panel in a picture-in-picture window, themed", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP);
+  test.skip(!(await page.evaluate(() => "documentPictureInPicture" in window)), "no Document Picture-in-Picture here");
+
+  const panel = page.locator("section", { hasText: "Picture in picture" });
+  await panel.getByRole("button", { name: /Pop out/ }).click();
+  await expect(panel.getByText("Showing in a floating window")).toBeVisible();
+
+  const inside = await page.evaluate(() => {
+    const pip = (window as any).documentPictureInPicture.window;
+    return {
+      theme: pip.document.documentElement.dataset.theme,
+      styles: pip.document.querySelectorAll('style, link[rel="stylesheet"]').length,
+      videos: pip.document.querySelectorAll("video").length,
+      buttons: [...pip.document.querySelectorAll("button")].length,
+    };
+  });
+
+  expect(inside.videos).toBe(1);
+  expect(inside.buttons).toBe(1);
+  expect(inside.styles).toBeGreaterThan(0);
+  expect(inside.theme).toBeTruthy();
+});

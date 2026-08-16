@@ -101,6 +101,7 @@ interface PgStore {
   optimistic: Record<string, OptimisticEntry>;
   savedAt: number | null;
   pluginTrees: Record<string, PluginNode | null>;
+  pluginFailures: Record<string, string>;
   catalogue: CatalogueEntry[] | null;
   poppedPlugin: string | null;
   pluginAct(id: string, action: string, arg: unknown): void;
@@ -239,7 +240,7 @@ export const useStore = create<PgStore>((set, get) => {
     },
     onFailure: (id: string, failure: string) => {
       dropHosts((key) => key.startsWith(`${id}:`));
-      sendSilent({ cmd: "plugin.update", id, patch: { enabled: false, failure } });
+      set((s) => ({ pluginFailures: { ...s.pluginFailures, [id]: failure } }));
       get().toast("error", `Plugin ${id} stopped: ${failure}`);
     },
   };
@@ -257,7 +258,9 @@ export const useStore = create<PgStore>((set, get) => {
       engine.plugins.filter((p) => p.enabled).flatMap((p) => runnableFiles(p, engine).map((file) => `${p.id}:${file}`)),
     );
     dropHosts((key) => !wanted.has(key));
-    const missing = new Set([...wanted].filter((key) => !hosts.has(key)).map((key) => key.split(":")[0]));
+    const missing = new Set(
+      [...wanted].filter((key) => !hosts.has(key) && !get().pluginFailures[key.split(":")[0]]).map((key) => key.split(":")[0]),
+    );
     for (const id of missing) {
       if ([...codeRequests.values()].includes(id)) continue;
       codeRequests.set(sendSilent({ cmd: "plugin.code", id }), id);
@@ -279,6 +282,10 @@ export const useStore = create<PgStore>((set, get) => {
     const plugin = engine?.plugins.find((p) => p.id === id);
     if (!engine || !plugin) return;
     savedConfigs.set(id, JSON.stringify(plugin.config));
+    set((s) => {
+      const { [id]: _dropped, ...rest } = s.pluginFailures;
+      return { pluginFailures: rest };
+    });
     for (const file of runnableFiles(plugin, engine)) {
       const key = `${id}:${file}`;
       if (hosts.has(key) || !sources[file]) continue;
@@ -482,6 +489,7 @@ export const useStore = create<PgStore>((set, get) => {
     optimistic: {},
     savedAt: null,
     pluginTrees: {},
+    pluginFailures: {},
     catalogue: null,
     poppedPlugin: null,
 

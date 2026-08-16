@@ -5,6 +5,7 @@ import { PopOut, popOutSupported, usePopOut } from "./PopOut";
 
 export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
   const tree = useStore((s) => s.pluginTrees[plugin.id]);
+  const failure = useStore((s) => s.pluginFailures[plugin.id]) ?? plugin.failure;
   const popped = useStore((s) => s.poppedPlugin === plugin.id);
   const popPlugin = useStore((s) => s.popPlugin);
   const pip = usePopOut(popped, () => popPlugin(null));
@@ -16,7 +17,7 @@ export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
     <PluginNodeView node={tree} pluginId={plugin.id} mayViewCameras={mayViewCameras} />
   ) : (
     <span className="text-[0.7rem] text-text-2">
-      {plugin.failure ?? (needsPermissions ? "Waiting for permissions in Settings → Plugins." : "Starting")}
+      {failure ?? (needsPermissions ? "Waiting for permissions in Settings → Plugins." : "Starting")}
     </span>
   );
 
