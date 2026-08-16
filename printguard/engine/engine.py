@@ -16,7 +16,7 @@ import uuid
 from collections import deque
 from typing import Any, Callable
 
-from . import reports, updates, vision
+from . import plugins, reports, updates, vision
 from .cameras import sanitise_camera
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
@@ -24,7 +24,7 @@ from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import Frame, Platform
 from .printers import sanitise_printer
-from .registry import Camera, CameraRegistry, Printer, PrinterRegistry, Token, TokenRegistry
+from .registry import Camera, CameraRegistry, Plugin, PluginRegistry, Printer, PrinterRegistry, Token, TokenRegistry
 from .scheduler import Scheduler
 from .tokens import new_token
 from .watchdog import Watchdog
@@ -47,6 +47,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "themes": [],
     "layout": {},
     "inference_runtime": "auto",
+    "catalogue_url": plugins.CATALOGUE_URL,
 }
 
 
@@ -62,6 +63,8 @@ class Engine:
         self._results: dict[str, dict[str, float]] = {}
         self._result_emitted_at: dict[str, float] = {}
         self.tokens = TokenRegistry()
+        self.plugins = PluginRegistry()
+        self.catalogue: list[dict[str, Any]] = []
         self.settings: dict[str, Any] = dict(SETTINGS_DEFAULTS)
         self.update: dict[str, Any] | None = None
         self.releases: list[dict[str, Any]] = []
@@ -95,6 +98,13 @@ class Engine:
             "update.releases": self._cmd_update_releases,
             "report.send": self._cmd_report_send,
             "report.bundle": self._cmd_report_bundle,
+            "plugin.install": self._cmd_plugin_install,
+            "plugin.remove": self._cmd_plugin_remove,
+            "plugin.update": self._cmd_plugin_update,
+            "plugin.code": self._cmd_plugin_code,
+            "plugin.catalogue": self._cmd_plugin_catalogue,
+            "plugin.http": self._cmd_plugin_http,
+            "plugin.notify": self._cmd_plugin_notify,
         }
 
     async def start(self) -> None:
@@ -113,6 +123,11 @@ class Engine:
             self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=printer["config"]))
         for record in persisted.get("monitors", []):
             self.monitors[record["id"]] = sanitise_monitor(record["id"], record)
+        for record in persisted.get("plugins", []):
+            try:
+                self.plugins.add(Plugin(**record))
+            except TypeError:
+                logger.warning("dropping unreadable plugin record %r", record.get("id"))
         for record in persisted.get("cameras", []):
             settings = sanitise_camera(record["id"], record)
             camera = Camera(
@@ -130,6 +145,11 @@ class Engine:
             self.cameras.add(camera)
             self._schedule_attach(camera)
         self.cameras.sync_in_use(self.monitors, self.printers)
+        runtime = self.platform.plugin_runtime
+        if runtime is not None:
+            runtime.attach(self.request, self.plugin_failed)
+            self.add_sink(runtime.on_event)
+            await runtime.reload(self.plugins.running())
         self._tasks = [
             asyncio.ensure_future(self.scheduler.run()),
             asyncio.ensure_future(self.watchdog.poll_devices()),
@@ -153,6 +173,8 @@ class Engine:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         await self.watchdog.close()
+        if self.platform.plugin_runtime is not None:
+            await self.platform.plugin_runtime.close()
         for camera_id in list(self.cameras.items):
             await self._drop_camera(camera_id)
         await asyncio.gather(*(adapter.close() for adapter in INTEGRATIONS.values()))
@@ -218,6 +240,9 @@ class Engine:
             "stats": self.scheduler.stats(),
             "integrations": integrations_meta(),
             "notifiers": notifiers_meta(),
+            "plugins": [p.public() for p in self.plugins.values()],
+            "plugin_permissions": plugins.permissions_meta(),
+            "plugin_host": self.platform.plugin_runtime is not None,
         }
 
     def recent_events(self) -> list[dict[str, Any]]:
@@ -312,6 +337,7 @@ class Engine:
                 "monitors": [persisted_monitor(m) for m in self.monitors.values()],
                 "settings": self.settings,
                 "tokens": [t.persisted() for t in self.tokens.values()],
+                "plugins": [p.persisted() for p in self.plugins.values()],
             }
         )
 
@@ -700,6 +726,146 @@ class Engine:
         except Exception as exc:
             logger.warning("bug report failed to send", exc_info=True)
             self.emit({"event": "report_sent", "ok": False, "error": str(exc), "req_id": message.get("req_id")})
+
+    async def _cmd_plugin_install(self, message: dict[str, Any]) -> None:
+        """Fetches, verifies and registers a plugin, or reinstalls one in place.
+
+        Reinstalling is how a plugin is upgraded: the id is what identifies it,
+        so a newer revision of the same plugin replaces the old bytes and keeps
+        the permissions and stored data the user has already given it.
+        """
+        source = dict(message.get("source") or {})
+        if source.get("kind") == "github":
+            manifest, sources, sha = await plugins.fetch_github(
+                self.platform.http, str(source.get("repo", "")), str(source.get("path", "")), str(source.get("ref") or "HEAD")
+            )
+            source = {"kind": "github", "repo": source["repo"], "path": str(source.get("path", "")), "ref": sha}
+        elif source.get("kind") == "file":
+            manifest, sources = plugins.unpack(base64.b64decode(message["zip"]))
+            source = {"kind": "file", "filename": str(source.get("filename", "") or "bundle.zip")}
+        else:
+            raise ValueError(f"unknown plugin source {source.get('kind')!r}")
+        manifest = plugins.sanitise_manifest(manifest)
+        sources = plugins.sanitise_sources(sources)
+        digests = plugins.digests(manifest, sources)
+        await self._refresh_catalogue(quiet=True)
+        entry = plugins.verified_by(self.catalogue, manifest["id"], digests)
+        existing = self.plugins.get(manifest["id"])
+        self.plugins.add(
+            Plugin(
+                id=manifest["id"],
+                manifest=manifest,
+                sources=sources,
+                digests=digests,
+                source=source,
+                granted=[p for p in (existing.granted if existing else message.get("granted") or []) if p in manifest["permissions"]],
+                config=existing.config if existing else {},
+                verified=entry is not None,
+                enabled=existing.enabled if existing else True,
+                installed=time.time(),
+            )
+        )
+        logger.info(
+            "plugin %s v%s installed (%s, %s)",
+            manifest["id"], manifest["version"], source["kind"], "verified" if entry else "unverified",
+        )
+        await self._reload_plugins()
+
+    async def _cmd_plugin_remove(self, message: dict[str, Any]) -> None:
+        self.plugins.remove(message["id"])
+        await self._reload_plugins()
+
+    async def _cmd_plugin_update(self, message: dict[str, Any]) -> None:
+        plugin = self.plugins.get(message["id"])
+        if not plugin:
+            raise KeyError(f"no plugin {message['id']}")
+        patch = message.get("patch", {})
+        if "granted" in patch:
+            plugin.granted = [p for p in patch["granted"] if p in plugin.manifest["permissions"]]
+        if "enabled" in patch:
+            plugin.enabled = bool(patch["enabled"])
+            plugin.failure = None
+        if "config" in patch:
+            plugin.config = plugins.sanitise_config(patch["config"])
+        if not {"config"} >= set(patch):
+            await self._reload_plugins()
+
+    async def _cmd_plugin_code(self, message: dict[str, Any]) -> None:
+        plugin = self.plugins.get(message["id"])
+        if not plugin:
+            raise KeyError(f"no plugin {message['id']}")
+        self.emit(
+            {
+                "event": "plugin_code",
+                "id": plugin.id,
+                "sources": plugin.sources,
+                "granted": plugin.granted,
+                "req_id": message.get("req_id"),
+            }
+        )
+
+    async def _cmd_plugin_catalogue(self, message: dict[str, Any]) -> None:
+        await self._refresh_catalogue()
+        self.emit({"event": "catalogue", "plugins": self.catalogue, "req_id": message.get("req_id")})
+
+    async def _cmd_plugin_http(self, message: dict[str, Any]) -> None:
+        """Makes an outbound request on a plugin's behalf, if it may.
+
+        A plugin has no network of its own in either sandbox, so this is the
+        only way out, and it only opens for the hosts the plugin's manifest
+        declares and the user granted.
+        """
+        plugin = self.plugins.get(message["id"])
+        if not plugin or not plugin.may("net"):
+            raise PermissionError("plugin may not reach the network")
+        url = str(message.get("url", ""))
+        if not plugins.host_allowed(url, plugin.manifest["hosts"]):
+            raise PermissionError(f"plugin {plugin.id} did not declare {url}")
+        status, body = await self.platform.http(
+            str(message.get("method", "GET")).upper(),
+            url,
+            headers=message.get("headers") or None,
+            json=message.get("json"),
+        )
+        self.emit({"event": "plugin_http", "id": plugin.id, "status": status, "body": body, "req_id": message.get("req_id")})
+
+    async def _cmd_plugin_notify(self, message: dict[str, Any]) -> None:
+        plugin = self.plugins.get(message["id"])
+        if not plugin or not plugin.may("notify"):
+            raise PermissionError("plugin may not raise notifications")
+        self.emit(
+            {
+                "event": "plugin_notice",
+                "id": plugin.id,
+                "name": plugin.manifest["name"],
+                "text": str(message.get("text", ""))[:200],
+                "req_id": message.get("req_id"),
+            }
+        )
+
+    async def _refresh_catalogue(self, quiet: bool = False) -> None:
+        try:
+            self.catalogue = await plugins.fetch_catalogue(self.platform.http, self.settings["catalogue_url"])
+        except Exception as exc:
+            if not quiet:
+                raise
+            logger.warning("plugin catalogue unavailable: %s", exc)
+
+    async def _reload_plugins(self) -> None:
+        """Hands the running set to the hub's plugin runtime, where there is one."""
+        runtime = self.platform.plugin_runtime
+        if runtime is not None:
+            await runtime.reload(self.plugins.running())
+
+    def plugin_failed(self, plugin_id: str, reason: str) -> None:
+        """Disables a plugin its runtime could not keep running, and says why."""
+        plugin = self.plugins.get(plugin_id)
+        if plugin is None or not plugin.enabled:
+            return
+        plugin.enabled = False
+        plugin.failure = reason
+        self.emit({"event": "error", "message": f"plugin {plugin.manifest['name']} stopped: {reason}"})
+        self._sync()
 
     async def _cmd_report_bundle(self, message: dict[str, Any]) -> None:
         files = reports.report_files(

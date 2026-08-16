@@ -7,9 +7,12 @@ protocols; everything that consumes them is shared code.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .registry import Plugin
 
 
 @dataclass
@@ -48,6 +51,39 @@ class FrameSource(Protocol):
         ...
 
 
+class PluginRuntime(Protocol):
+    """Sandbox that runs the background half of installed plugins.
+
+    Only the hub has one. In local mode the browser runs the same source in
+    the same sandbox the UI half uses, so ``Platform.plugin_runtime`` is None
+    there and the engine simply has nothing to drive.
+    """
+
+    def attach(self, request: Callable[..., Awaitable[Any]], failed: Callable[[str, str], None]) -> None:
+        """Gives the runtime the engine's command channel and failure report."""
+        ...
+
+    def on_event(self, event: dict[str, Any]) -> None:
+        """Accepts an engine event for delivery to the running plugins."""
+        ...
+
+    async def reload(self, running: "list[Plugin]") -> None:
+        """Replaces the running set, starting and stopping sandboxes to match."""
+        ...
+
+    async def serve(self, plugin_id: str, request: dict[str, Any]) -> dict[str, Any] | None:
+        """Answers a request to a plugin's own routes, or None if it has none."""
+        ...
+
+    async def authorise(self, request: dict[str, Any]) -> bool | None:
+        """Asks any gating plugin to allow a request; None when none gates."""
+        ...
+
+    async def close(self) -> None:
+        """Tears every sandbox down."""
+        ...
+
+
 class Platform(Protocol):
     """Runtime services the engine needs but cannot implement portably."""
 
@@ -62,6 +98,10 @@ class Platform(Protocol):
     update_asset: str | None
     """Release asset filename this deployment updates with (the desktop app's
     installer), or None when the deployment updates outside the app."""
+
+    plugin_runtime: PluginRuntime | None
+    """Sandbox for the background half of plugins, or None where the runtime
+    lives outside the engine (the browser runs it in its own sandbox)."""
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Applies platform-owned settings before inference starts."""

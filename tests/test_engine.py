@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -15,7 +16,7 @@ from urllib.parse import urlparse
 import numpy as np
 from fakes import FakePlatform
 
-from printguard.engine import logs, reports, vision, watchdog
+from printguard.engine import logs, plugins, reports, vision, watchdog
 from printguard.engine.engine import EVENT_LOG_LEVELS, Engine
 from printguard.engine.integrations import INTEGRATIONS
 
@@ -715,3 +716,125 @@ async def test_token_secret_reaches_requester_but_is_never_logged(monkeypatch) -
     secret = created["token"]
     assert secret.startswith("pg_"), "requester did not receive the one-time secret"
     assert all(secret not in line for line in logs.recent()), "token secret leaked into the log tail"
+
+
+MANIFEST = {
+    "id": "demo",
+    "name": "Demo",
+    "version": "1.0.0",
+    "permissions": ["state:read", "monitor:control", "net"],
+    "hosts": ["hooks.example.com"],
+}
+PLUGIN_JS = "plugin.render = (state) => ({ type: 'text', value: state.monitors.length + ' monitors' });"
+
+
+def plugin_zip(manifest: dict | None = None, code: str = PLUGIN_JS) -> str:
+    """Packs a plugin bundle the way an imported file arrives."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("plugin.json", json.dumps(manifest if manifest is not None else MANIFEST))
+        archive.writestr("plugin.js", code)
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+async def install_demo(engine: Engine, **extra) -> dict:
+    """Installs the demo plugin from a file and returns its record."""
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(), **extra})
+    return engine.plugins.get("demo").public()
+
+
+async def test_plugin_installs_from_a_file_without_its_code_in_the_snapshot() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        record = await install_demo(engine, granted=["state:read", "printer:control"])
+
+    assert record["verified"] is False, "nothing in the catalogue vouched for this bundle"
+    assert record["granted"] == ["state:read"], "a permission the manifest never asked for was granted"
+    assert record["digests"]["plugin.js"] == hashlib.sha256(PLUGIN_JS.encode()).hexdigest()
+    snapshot = json.dumps(next(e for e in events if e.get("event") == "state" and e.get("plugins")))
+    assert PLUGIN_JS not in snapshot, "plugin source rode along in the state snapshot"
+
+
+async def test_plugin_code_reaches_only_the_tab_that_asked() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        await engine.handle({"cmd": "plugin.code", "id": "demo", "req_id": 12})
+
+    code = next(e for e in events if e.get("event") == "plugin_code")
+    assert code["req_id"] == 12 and code["sources"]["plugin.js"] == PLUGIN_JS
+
+
+async def test_plugin_installs_from_github_pinned_to_a_commit() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    sha = "a" * 40
+    platform.files = {
+        "https://api.github.com/repos/someone/pack/commits/main": (200, {"sha": sha}),
+        f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/plugin.json": (200, MANIFEST),
+        f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/plugin.js": (200, PLUGIN_JS),
+        f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/worker.js": (404, ""),
+    }
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle(
+            {"cmd": "plugin.install", "source": {"kind": "github", "repo": "someone/pack", "path": "kit", "ref": "main"}}
+        )
+        record = engine.plugins.get("demo")
+
+    assert record.source["ref"] == sha, "a moving branch was stored instead of the commit it resolved to"
+    assert list(record.sources) == ["plugin.js"]
+
+
+async def test_catalogue_verifies_only_the_exact_bytes_it_pinned() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    digests = plugins.digests(plugins.sanitise_manifest(MANIFEST), {"plugin.js": PLUGIN_JS})
+    platform.files = {plugins.CATALOGUE_URL: (200, {"plugins": [{"id": "demo", "name": "Demo", "digests": digests}]})}
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        assert (await install_demo(engine))["verified"] is True
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(code=PLUGIN_JS + "//")})
+        tampered = engine.plugins.get("demo").public()
+
+    assert tampered["verified"] is False, "an edited plugin still passed as verified"
+
+
+async def test_plugin_network_is_refused_beyond_the_hosts_it_declared() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine, granted=["net"])
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "req_id": 1})
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://elsewhere.example/a", "req_id": 2})
+        await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": []}})
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "req_id": 3})
+
+    assert next(e for e in events if e.get("event") == "plugin_http")["req_id"] == 1
+    refused = [e for e in events if e.get("event") == "error" and e.get("req_id") in (2, 3)]
+    assert len(refused) == 2, "an undeclared host or a revoked permission still got out"
+    assert not any("elsewhere.example" in url for _, url in platform.http_calls)
+
+
+async def test_plugin_state_view_carries_no_credentials() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        await _register_printer(engine)
+        view = plugins.project_state(engine.state_event(), ["state:read"])
+
+    assert view["printers"][0]["name"] == "P"
+    assert "config" not in view["printers"][0], "printer credentials reached a plugin"
+    assert "settings" not in view and "tokens" not in view
+
+
+async def test_plugins_survive_a_restart() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_demo(engine, granted=["state:read"])
+        await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"config": {"picked": ["cam"]}}})
+
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        restored = restarted.plugins.get("demo")
+        assert restored.sources["plugin.js"] == PLUGIN_JS
+        assert restored.config == {"picked": ["cam"]} and restored.granted == ["state:read"]
+        await restarted.handle({"cmd": "plugin.remove", "id": "demo"})
+        assert restarted.plugins.get("demo") is None
+    finally:
+        await restarted.stop()

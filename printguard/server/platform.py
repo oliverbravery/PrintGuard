@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -26,6 +27,7 @@ from ..engine.platform import Frame
 from .bambu_camera import open_bambu_jpeg_stream
 from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
+from .plugins import WasmPluginRuntime
 from .publish import H264Push
 
 FPS_SAMPLE_FRAMES = 25
@@ -409,6 +411,9 @@ class ServerPlatform:
         self._client = httpx.AsyncClient(follow_redirects=True)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client)
         self._sources: dict[str, AVSource] = {}
+        self.plugin_runtime = None if os.environ.get("PRINTGUARD_PLUGINS") == "off" else WasmPluginRuntime()
+        if self.plugin_runtime is None:
+            logger.warning("plugins are disabled by PRINTGUARD_PLUGINS=off")
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Selects the requested inference runtime."""

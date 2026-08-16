@@ -36,7 +36,7 @@ async def test_web_static_files_revalidate_html_and_cache_hashed_assets(tmp_path
 
 async def test_health_reports_ready_version_without_caching() -> None:
     app = create_app()
-    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.3.7"))
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.3.7", plugin_runtime=None))
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/health")
@@ -64,7 +64,7 @@ async def test_event_queue_conflates_telemetry_without_dropping_ordered_events()
 
 
 async def test_hls_view_wakes_camera_before_proxying() -> None:
-    platform = SimpleNamespace(view_camera=AsyncMock())
+    platform = SimpleNamespace(view_camera=AsyncMock(), plugin_runtime=None)
     app = create_app()
     app.state.engine = SimpleNamespace(platform=platform)
     app.state.hls = httpx.AsyncClient(
