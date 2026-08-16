@@ -8,7 +8,7 @@ COPY web/ ./
 COPY docs/assets/ ../docs/assets/
 RUN npm run build
 
-FROM python:3.13-slim-bookworm AS deps
+FROM python:3.13-slim-trixie AS deps
 ARG INFERENCE_EXTRA
 COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /usr/local/bin/uv
 WORKDIR /app
@@ -22,11 +22,17 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN apt-get update && apt-get install -y --no-install-recommends binutils \
     && find .venv \( -name '*.cpython-*.so' -o -name '*.abi3.so' \) -exec strip --strip-debug {} +
 
-FROM python:3.13-slim-bookworm
-ARG GPU_RUNTIME_PACKAGES
+FROM python:3.13-slim-trixie
+ARG GPU_RUNTIME_DEBS
 ARG NVIDIA_VISIBLE_DEVICES
 WORKDIR /app
-RUN if [ -n "$GPU_RUNTIME_PACKAGES" ]; then apt-get update && apt-get install -y --no-install-recommends $GPU_RUNTIME_PACKAGES; fi \
+RUN if [ -n "$GPU_RUNTIME_DEBS" ]; then \
+        apt-get update \
+        && apt-get install -y --no-install-recommends curl \
+        && curl -fsSL --remote-name-all --output-dir /tmp $GPU_RUNTIME_DEBS \
+        && apt-get install -y --no-install-recommends /tmp/*.deb \
+        && apt-get purge -y curl && apt-get autoremove -y && rm /tmp/*.deb; \
+    fi \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/.venv .venv
 COPY --from=mediamtx /mediamtx /usr/local/bin/mediamtx

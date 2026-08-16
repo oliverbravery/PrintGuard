@@ -9,6 +9,20 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.4.0] - 2026-08-15
 
+### Fixed
+
+- **The `latest-intel` image could not use most Intel GPUs.** It carried Debian's Intel GPU
+  driver, which is from late 2022 and predates Meteor Lake, Lunar Lake, Arrow Lake and
+  Battlemage, so OpenVINO was handed no GPU on that hardware and inference quietly stayed on
+  the CPU. The image now carries Intel's own current runtime, covering Arc, Battlemage and
+  every iGPU from Tiger Lake (11th gen) onwards. Intel publishes no current driver for Gen8
+  to Gen11 graphics, so a pre-Tiger-Lake iGPU stays on the OpenVINO CPU path. Thanks for the
+  report.
+- **The compute readout now names the hardware, not the provider.** `intel openvino` meant
+  either the GPU or the processor; it now reads `intel gpu` or `intel cpu`, and the log lists
+  what the providers offered at start, so a GPU that was never handed over is visible rather
+  than guessed at.
+
 ## [2.3.12] - 2026-08-12
 
 ### Fixed
