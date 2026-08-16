@@ -193,6 +193,24 @@ def sanitise_config(raw: Any) -> dict[str, Any]:
     return raw
 
 
+def outbound_request(plugin_id: str, request: Any) -> dict[str, Any]:
+    """Builds a plugin.http command out of what a plugin asked for.
+
+    Only these four fields are carried over, and the plugin's id is set last:
+    the request comes from inside a sandbox, so left to spread over the command
+    it could name a *different* installed plugin and borrow its network grant.
+    """
+    fields = request if isinstance(request, dict) else {}
+    return {
+        "cmd": "plugin.http",
+        "method": str(fields.get("method", "GET")),
+        "url": str(fields.get("url", "")),
+        "headers": fields.get("headers"),
+        "json": fields.get("json"),
+        "id": plugin_id,
+    }
+
+
 def host_allowed(url: str, hosts: list[str]) -> bool:
     """Whether a URL targets one of the hosts a plugin declared."""
     parsed = urlsplit(url)

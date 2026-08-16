@@ -27,6 +27,18 @@ export function projectState(engine: EngineState, granted: string[], permissions
   return view;
 }
 
+export function outboundRequest(id: string, request: Record<string, unknown> | undefined): Record<string, unknown> {
+  const fields = request ?? {};
+  return {
+    cmd: "plugin.http",
+    method: String(fields.method ?? "GET"),
+    url: String(fields.url ?? ""),
+    headers: fields.headers,
+    json: fields.json,
+    id,
+  };
+}
+
 export function commandAllowed(command: string, granted: string[], permissions: Permission[]): boolean {
   const owner = permissions.find((p) => p.commands?.includes(command));
   return owner !== undefined && granted.includes(owner.id);

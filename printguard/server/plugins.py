@@ -152,6 +152,7 @@ class WasmPluginRuntime:
         self._failed: Callable[[str, str], None] | None = None
         self._state: dict[str, Any] = {}
         self._ticker: asyncio.Task[None] | None = None
+        self._busy: set[str] = set()
         self._lock = asyncio.Lock()
 
     def attach(self, request: Callable[..., Awaitable[Any]], failed: Callable[[str, str], None]) -> None:
@@ -160,15 +161,18 @@ class WasmPluginRuntime:
         self._failed = failed
 
     def on_event(self, event: dict[str, Any]) -> None:
-        """Queues an engine event for the plugins that asked to hear it."""
+        """Delivers an engine event to the plugins that asked to hear it.
+
+        A worker still busy with the last one is skipped rather than queued
+        behind it: result events run at several hertz per monitor, and a plugin
+        slower than its own event rate would otherwise accumulate calls without
+        bound.
+        """
         if event.get("event") == "state":
             self._state = event
-        listeners = [
-            sandbox for sandbox in self._sandboxes.values()
-            if event.get("event") in sandbox.plugin.manifest["events"]
-        ]
-        for sandbox in listeners:
-            asyncio.ensure_future(self._invoke(sandbox, "event", event=event))
+        for sandbox in list(self._sandboxes.values()):
+            if event.get("event") in sandbox.plugin.manifest["events"] and sandbox.plugin.id not in self._busy:
+                asyncio.ensure_future(self._invoke(sandbox, "event", event=event))
 
     async def reload(self, running: list[Plugin]) -> None:
         """Starts sandboxes for plugins with a worker and drops the rest."""
@@ -233,6 +237,7 @@ class WasmPluginRuntime:
             "state": plugins.project_state(self._state, plugin.granted),
             "store": plugin.config,
         }
+        self._busy.add(plugin.id)
         try:
             output = await asyncio.wait_for(asyncio.to_thread(sandbox.call, request), CALL_TIMEOUT_S)
         except Exception as exc:
@@ -241,6 +246,8 @@ class WasmPluginRuntime:
                 self._failed(plugin.id, str(exc))
             logger.warning("plugin %s worker failed: %s", plugin.id, exc)
             return None
+        finally:
+            self._busy.discard(plugin.id)
         await self._store(plugin, output.get("store"))
         await self._perform(plugin, output.get("effects") or [])
         return output.get("result")
@@ -267,7 +274,7 @@ class WasmPluginRuntime:
                         raise PermissionError(f"{command.get('cmd')!r} needs a permission this plugin was not granted")
                     await self._request(command)
                 elif kind == "http":
-                    await self._request({"cmd": "plugin.http", "id": plugin.id, **(effect.get("request") or {})})
+                    await self._request(plugins.outbound_request(plugin.id, effect.get("request")))
                 elif kind == "notify":
                     if not plugin.may("notify"):
                         raise PermissionError("this plugin was not granted notifications")

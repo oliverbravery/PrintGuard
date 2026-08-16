@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { log } from "./log";
-import { commandAllowed, PluginHost, projectState } from "./plugins";
+import { commandAllowed, outboundRequest, PluginHost, projectState } from "./plugins";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
 import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
@@ -220,7 +220,7 @@ export const useStore = create<PgStore>((set, get) => {
         if (commandAllowed(name, plugin.granted, engine.plugin_permissions)) sendSilent(effect.cmd);
         else get().toast("error", `${plugin.manifest.name} tried to run ${name} without permission`);
       } else if (effect.kind === "http" && effect.request) {
-        sendSilent({ cmd: "plugin.http", id, ...effect.request });
+        sendSilent(outboundRequest(id, effect.request));
       } else if (effect.kind === "notify") {
         if (plugin.granted.includes("notify")) get().toast("info", `${plugin.manifest.name}: ${effect.text}`);
       } else if (effect.kind === "log") {
@@ -258,6 +258,10 @@ export const useStore = create<PgStore>((set, get) => {
       engine.plugins.filter((p) => p.enabled).flatMap((p) => runnableFiles(p, engine).map((file) => `${p.id}:${file}`)),
     );
     dropHosts((key) => !wanted.has(key));
+    const stale = Object.keys(get().pluginFailures).filter((id) => !engine.plugins.some((p) => p.id === id && p.enabled));
+    if (stale.length) {
+      set((s) => ({ pluginFailures: Object.fromEntries(Object.entries(s.pluginFailures).filter(([id]) => !stale.includes(id))) }));
+    }
     const missing = new Set(
       [...wanted].filter((key) => !hosts.has(key) && !get().pluginFailures[key.split(":")[0]]).map((key) => key.split(":")[0]),
     );

@@ -202,3 +202,24 @@ async def test_a_plugin_that_fails_is_disabled_rather_than_left_running(runtime:
 
         plugin = engine.plugins.get("guard")
         assert plugin.enabled is False and plugin.failure
+
+
+async def test_a_worker_cannot_borrow_another_plugins_network_grant(runtime: WasmPluginRuntime) -> None:
+    """A plugin names only itself on the way out.
+
+    The request comes from inside the sandbox, so a plugin that could set the
+    id on it would be checked against a *different* installed plugin's declared
+    hosts, and exfiltrate through a grant it was never given.
+    """
+    performed: list[dict] = []
+    runtime.attach(lambda command: _record(performed, command), lambda plugin_id, reason: None)
+    plugin = make_plugin("", granted=["net"], permissions=["net"])
+
+    await runtime._perform(
+        plugin,
+        [{"kind": "http", "request": {"id": "someone-else", "cmd": "printer.action", "url": "https://hooks.example.com/x"}}],
+    )
+
+    assert performed == [
+        {"cmd": "plugin.http", "method": "GET", "url": "https://hooks.example.com/x", "headers": None, "json": None, "id": "demo"}
+    ]
