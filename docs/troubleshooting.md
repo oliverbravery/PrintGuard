@@ -12,6 +12,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 - [Cameras and video](#cameras-and-video)
 - [Printers](#printers)
 - [Detection and alerts](#detection-and-alerts)
+- [Plugins](#plugins)
 - [Acceleration](#acceleration)
 - [Getting logs and diagnostics](#getting-logs-and-diagnostics)
 
@@ -57,6 +58,17 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | A stream of camera offline and back notifications | The feed keeps dropping out. Before 2.4.0 every reconnection announced itself, and the monitor's cooldown only covers defect alerts | Update to 2.4.0, where one unstable episode is one warning. The drop-outs themselves are worth chasing: check the camera's own connection and, for RTSP or WHEP, that MediaMTX holds the pull |
 | Telegram is not offered | Telegram's API sends no CORS headers | Hub mode only. [Notifications](printers.md#notifications) |
 | Home Assistant shows nothing | The broker settings are wrong, or discovery is disabled in Home Assistant | Check **Settings → Home Assistant** and the broker's own log |
+
+## Plugins
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A panel says it is waiting for permissions | The plugin was installed without granting what it asks for | Tick them under **Settings → Plugins → Permissions** |
+| A plugin stopped on its own, with a reason | Its sandbox failed, hung or ran out of memory. PrintGuard disables a plugin rather than letting it affect anything else | The reason is on the plugin in **Settings → Plugins** and in the log. Re-enable it once its author has fixed it |
+| Installing from a repository fails | The path holds no `plugin.json`, the reference does not exist, or GitHub is rate-limiting an unauthenticated request | Check the path points at the plugin's own folder, and try again in a few minutes |
+| A plugin installs as third party rather than verified | The catalogue vouches for different bytes, or does not list it at all | Expected for anything unreviewed. If it should be verified, its catalogue entry needs re-pinning |
+| A plugin's requests fail | The host is not one its manifest declared, or **Reach the internet** is not granted | Both are deliberate. Only its declared hosts are reachable |
+| Locked out of the hub by a plugin | A plugin holding **Authorise every request** is refusing them | Restart with `PRINTGUARD_PLUGINS=off` and remove it. [Deployment](deployment.md#plugins) |
 
 ## Acceleration
 

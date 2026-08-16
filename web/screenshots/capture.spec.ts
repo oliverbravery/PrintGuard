@@ -52,9 +52,43 @@ function engine(): EngineState {
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
+    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "" },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: [], notifiers: [],
+    plugins: [], plugin_permissions: PERMISSIONS, plugin_host: true,
   };
+}
+
+const PERMISSIONS = [
+  { id: "state:read", label: "Read the dashboard", description: "Monitor names, scores and alerts, camera and printer names and status. Never credentials or tokens." },
+  { id: "camera:view", label: "Show live camera feeds", description: "Place a camera feed in its own panel. The plugin never receives the video itself." },
+  { id: "notify", label: "Show notifications", description: "Raise a message in this dashboard. Does not use your alert channels." },
+];
+
+const CATALOGUE = [
+  {
+    id: "picture-in-picture", name: "Picture in picture", version: "1.0.0", author: "oliverbravery",
+    description: "Keeps chosen camera feeds in a floating window that stays on top of other apps.",
+    repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40),
+    permissions: ["state:read", "camera:view"], digests: {},
+  },
+  {
+    id: "print-log", name: "Print log", version: "0.3.0", author: "community",
+    description: "Writes every alert to a webhook so you can keep a record outside PrintGuard.",
+    repo: "someone/printguard-print-log", ref: "b".repeat(40),
+    permissions: ["state:read", "notify"], digests: {},
+  },
+];
+
+const INSTALLED = {
+  id: "picture-in-picture",
+  manifest: {
+    id: "picture-in-picture", name: "Picture in picture", version: "1.0.0", author: "oliverbravery", homepage: "",
+    description: "Keeps chosen camera feeds in a floating window that stays on top of other apps.",
+    permissions: ["state:read", "camera:view"], surfaces: ["panel", "float"], hosts: [], events: [], tick_s: 0,
+  },
+  files: ["plugin.js"], digests: {},
+  source: { kind: "github", repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40) },
+  granted: ["state:read", "camera:view"], config: {}, verified: true, enabled: true, installed: NOW / 1000, failure: null,
 }
 
 interface Scene {
@@ -64,6 +98,8 @@ interface Scene {
   theme: "dark" | "light";
   detailId?: string;
   customising?: boolean;
+  settingsTab?: string;
+  catalogue?: unknown[];
   mutate?: (engine: EngineState) => void;
 }
 
@@ -78,6 +114,12 @@ const SCENES: Scene[] = [
         monitors: { order: [], pinned: ["m1"], hidden: ["m3"] },
         cameras: { order: [], pinned: [], hidden: ["c3"] },
       };
+    },
+  },
+  {
+    name: "plugins", width: 1360, height: 860, theme: "dark", settingsTab: "plugins", catalogue: CATALOGUE,
+    mutate: (e) => {
+      e.plugins = [INSTALLED as never];
     },
   },
 ];
@@ -108,10 +150,15 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
     },
     {
       theme: scene.theme,
-      state: { mode: "hub", phase: "ready", engine: built, history, detailId: scene.detailId ?? null, customising: scene.customising ?? false },
+      state: {
+        mode: "hub", phase: "ready", engine: built, history,
+        detailId: scene.detailId ?? null, customising: scene.customising ?? false,
+        dialog: scene.settingsTab ? "settings" : null, settingsTab: scene.settingsTab ?? null,
+        catalogue: scene.catalogue ?? null,
+      },
     },
   );
-  await page.waitForSelector(".aspect-video");
+  await page.waitForSelector(scene.settingsTab ? "dialog" : ".aspect-video");
   await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}" });
   await page.evaluate((frames) => {
     for (const el of document.querySelectorAll<HTMLElement>(".aspect-video")) {

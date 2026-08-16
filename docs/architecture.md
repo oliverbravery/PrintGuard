@@ -2,7 +2,7 @@
 
 # Architecture
 
-[Docs](README.md) · **Architecture** · [Printers & cameras](printers.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · **Architecture** · [Printers & cameras](printers.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -18,6 +18,7 @@ nothing to drift: they execute the same files.
 - [Updates and bug reports](#updates-and-bug-reports)
 - [Logging](#logging)
 - [The programmatic surface](#the-programmatic-surface)
+- [Plugins](#plugins)
 - [Scheduling inference](#scheduling-inference)
 - [The defect pipeline](#the-defect-pipeline)
 - [Failing safely](#failing-safely)
@@ -70,6 +71,7 @@ but cannot implement portably. Identical signatures, different runtimes:
 | `http(...)` | httpx | `fetch`, so CORS applies |
 | `encode_jpeg(rgb)` | PyAV mjpeg | canvas `toBlob` |
 | `load_state` / `save_state` | `data/state.json` | `localStorage` |
+| `plugin_runtime` | QuickJS in WebAssembly, under wasmtime | `None`: the browser runs workers in its own sandbox |
 
 The UI is presentation-only and speaks one JSON command and event protocol, over a WebSocket
 in hub mode and over an in-page Pyodide bridge in local mode. The engine cannot tell which
@@ -91,6 +93,7 @@ Commands, UI to engine:
 | Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.test`, `printer.cameras.refresh` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
 | History | `history.get`, `snapshot.get` |
+| Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.http`, `plugin.notify` |
 | System | `settings.update`, `notify.test`, `token.create`, `token.remove`, `update.check`, `update.releases`, `report.send`, `report.bundle` |
 
 Every command may carry a `req_id`, echoed on the responding event so the UI can resolve
@@ -110,6 +113,7 @@ Events, engine to UI:
 | `releases` | The changelog history the update dialog browses |
 | `token_created` | A new API token's secret, delivered to the requesting transport and never written to the log |
 | `report_sent`, `report_bundle` | Bug report outcome, and the downloadable diagnostics zip |
+| `plugin_code`, `catalogue`, `plugin_http`, `plugin_notice` | A plugin's source for its sandbox, the reviewed-plugin catalogue, an outbound response, and a message a plugin raised |
 | `error` | Anything that failed, including failed printer actions |
 
 Result updates are conflated when a transport is slower than 5 Hz. Ordered events and
@@ -189,6 +193,41 @@ dashboard. Local mode never mounts them.
 
 REST and MCP are gated by cumulative scopes, `read` ⊂ `control` ⊂ `manage`. See
 [API & MCP](api.md).
+
+## Plugins
+
+Plugins are third-party code, so the engine never runs any of it.
+[`engine/plugins.py`](../printguard/engine/plugins.py) only sources it: fetch from GitHub at
+a resolved commit or unpack a zip, validate the manifest, hash the manifest and every source
+file, and compare that against the reviewed catalogue. The registry holds the result beside
+the cameras, printers and tokens, and persists through the same `save_state`.
+
+Execution is a sandbox on each side, and the permission table in `PERMISSIONS` is the one
+policy both enforce. It reaches the UI in the state snapshot as `plugin_permissions`, the
+same way `integrations_meta()` already drives the config forms, so the UI applies a policy
+it does not define.
+
+```mermaid
+flowchart LR
+    engine["engine (state, commands)"] -- "permitted state" --> panel & worker
+    panel["plugin.js<br/>opaque-origin iframe<br/>default-src 'none'"] -- "node tree + effects" --> ui["UI draws it"]
+    worker["worker.js<br/>QuickJS in wasm<br/>no fs, no sockets, fuel-capped"] -- "effects" --> engine
+    ui -- "checked effects" --> engine
+```
+
+Neither sandbox performs anything itself. Both return a list of effects, and each side
+checks every one against what the user granted before it goes anywhere. Enforcement has to
+sit at the sandbox edge: by the time a command reaches the engine it is indistinguishable
+from one the dashboard sent.
+
+A plugin's source never rides in the state snapshot, which broadcasts every second. It
+travels on request through `plugin.code`, like `snapshot.get` and `history.get`. Since that
+response is broadcast to every connected client, a tab must ignore one whose `req_id` is not
+its own, or a second tab's response starts a duplicate sandbox.
+
+The hub also mounts `/plugins/<id>/` onto a plugin's route handler, and, for a plugin holding
+`gate`, consults it before serving anything else. `PRINTGUARD_PLUGINS=off` brings the hub up
+with all of it inert. See [plugins](plugins.md).
 
 ## Scheduling inference
 
@@ -307,6 +346,7 @@ printguard/
     watchdog.py      defect response: streaks, printer actions, notifications, health
     updates.py       GitHub release check and changelog history
     reports.py       anonymous bug report and downloadable diagnostics bundle
+    plugins.py       plugin sourcing, hash pinning and the permission table (never executes)
     integrations/    printer service adapters (OctoPrint, Klipper, Elegoo, PrusaLink, Bambu Lab, …)
     notifiers/       alert channel adapters (ntfy, Telegram, Discord, native desktop, …)
     adapters.py      shared adapter contract (id, label, docs_url, JSON-schema config)
@@ -314,14 +354,18 @@ printguard/
     api.py           REST API (/api/v1) over the engine protocol, scoped by token
     mcp.py           MCP server for agents, derived from the REST API
     mqtt.py          Home Assistant MQTT bridge (device discovery + two-way control)
+    plugins.py       plugin worker sandbox: QuickJS in WebAssembly, under wasmtime
+    runtime/         the vendored quickjs-ng WASI build the sandbox runs
     mediamtx.py      MediaMTX control client and supervisor for the bundled binary
     bambu_camera.py  Bambu A1/P1 chamber-camera reader (proprietary port-6000 protocol)
     desktop.py       macOS and Windows tray app around the hub
   browser/           local platform: Pyodide bridge to LiteRT.js and getUserMedia
   pysrc.py           builds the engine source archive Pyodide unpacks
 web/                 React + Tailwind UI (presentation only)
+  public/            plugin-sandbox.html, the opaque-origin frame a plugin panel runs in
+plugins/             first-party plugins and the hash-pinned catalogue they are verified by
 models/              TFLite and ONNX encoders, normalisation metadata, class prototypes
-tests/               engine simulation + adapter contract tests (pytest)
+tests/               engine simulation, adapter contracts and the plugin sandbox (pytest)
 ```
 
 ## The static demo

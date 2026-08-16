@@ -2,7 +2,7 @@
 
 # API and MCP
 
-[Docs](README.md) · [Architecture](architecture.md) · [Printers & cameras](printers.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · **API & MCP** · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Architecture](architecture.md) · [Printers & cameras](printers.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · **API & MCP** · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 

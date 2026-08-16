@@ -155,6 +155,23 @@ export const GUIDE: GuideSection[] = [
     action: { label: "Manage access", dialog: "settings" },
   },
   {
+    id: "plugins",
+    led: "led-infer",
+    title: "Plugins",
+    body: (
+      <>
+        Add a panel to the dashboard, or a job that runs on the hub, from the catalogue or from any
+        GitHub repository. Plugins are third-party code, so they run in a sandbox with no network
+        and no access to your credentials, cameras or tokens, and only do what you grant them.{" "}
+        <strong>Picture in picture</strong> comes as one: it floats your live feeds above other apps.{" "}
+        <a className={link} href={docs("plugins.md")} target="_blank" rel="noreferrer">
+          Writing one ↗
+        </a>
+      </>
+    ),
+    action: { label: "Browse plugins", dialog: "settings" },
+  },
+  {
     id: "privacy",
     led: "led-on",
     title: "Your frames stay yours",
