@@ -11,6 +11,7 @@ import { GuideDialog } from "./GuideDialog";
 import { Header, MobileActionBar } from "./Header";
 import { MonitorDialog } from "./MonitorDialog";
 import { MonitorTile } from "./MonitorTile";
+import { PluginSection } from "./PluginPanel";
 import { PrintersDialog } from "./PrintersDialog";
 import { ReportDialog } from "./ReportDialog";
 import { SettingsDialog } from "./SettingsDialog";
@@ -95,6 +96,7 @@ export function Dashboard() {
             </div>
           </Sortable>
         )}
+        <PluginSection />
       </main>
       {dialog === "cameras" && <CamerasDialog />}
       {dialog === "printers" && <PrintersDialog />}

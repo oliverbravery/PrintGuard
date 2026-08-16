@@ -59,11 +59,11 @@ const ctx = {
   notify(text) { __effects.push({ kind: "notify", text: String(text) }); },
   log(text) { __effects.push({ kind: "log", text: String(text) }); },
 };
-(function (plugin, ctx) {
+(function (plugin) {
 """
 
 DRIVER = """
-})(plugin, ctx);
+})(plugin);
 let __result = null;
 if (__input.kind === "event" || __input.kind === "tick") {
   const handler = __hooks.events[__input.event.event];
