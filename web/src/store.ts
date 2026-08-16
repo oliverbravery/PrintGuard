@@ -106,7 +106,7 @@ interface PgStore {
   pluginAct(id: string, action: string, arg: unknown): void;
   popPlugin(id: string | null): void;
   fetchCatalogue(): void;
-  installPlugin(source: Record<string, unknown>, zip?: string): void;
+  installPlugin(source: Record<string, unknown>, zip?: string, granted?: string[]): void;
   setCustomising(on: boolean): void;
   mutateLayout(key: keyof Layout, fn: (section: LayoutSection) => LayoutSection): void;
   resetLayout(): void;
@@ -239,7 +239,7 @@ export const useStore = create<PgStore>((set, get) => {
     },
     onFailure: (id: string, failure: string) => {
       dropHosts((key) => key.startsWith(`${id}:`));
-      sendSilent({ cmd: "plugin.update", id, patch: { enabled: false } });
+      sendSilent({ cmd: "plugin.update", id, patch: { enabled: false, failure } });
       get().toast("error", `Plugin ${id} stopped: ${failure}`);
     },
   };
@@ -422,6 +422,8 @@ export const useStore = create<PgStore>((set, get) => {
     }
   };
 
+  (window as any).__pgEvent = onEvent;
+
   const boot = async (mode: Mode) => {
     log("info", `boot: ${mode} mode`);
     set({ mode, phase: "booting", bootMsg: mode === "hub" ? "Connecting to hub" : "Preparing local engine" });
@@ -497,8 +499,8 @@ export const useStore = create<PgStore>((set, get) => {
       get().send({ cmd: "plugin.catalogue" });
     },
 
-    installPlugin(source, zip) {
-      get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}) });
+    installPlugin(source, zip, granted) {
+      get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}), ...(granted ? { granted } : {}) });
     },
 
     setCustomising(on) {

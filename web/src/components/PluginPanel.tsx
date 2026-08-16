@@ -11,10 +11,13 @@ export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
   const floatable = plugin.manifest.surfaces.includes("float") && popOutSupported();
   const mayViewCameras = plugin.granted.includes("camera:view");
 
+  const needsPermissions = plugin.granted.length === 0 && plugin.manifest.permissions.length > 0;
   const body = tree ? (
     <PluginNodeView node={tree} pluginId={plugin.id} mayViewCameras={mayViewCameras} />
   ) : (
-    <span className="text-[0.7rem] text-text-2">{plugin.failure ?? "Starting"}</span>
+    <span className="text-[0.7rem] text-text-2">
+      {plugin.failure ?? (needsPermissions ? "Waiting for permissions in Settings → Plugins." : "Starting")}
+    </span>
   );
 
   return (

@@ -75,7 +75,8 @@ function Permissions({
 
 function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; permissions: Permission[]; hubOnly: boolean }) {
   const send = useStore((s) => s.send);
-  const [open, setOpen] = useState(false);
+  const unreviewed = plugin.granted.length === 0 && plugin.manifest.permissions.length > 0;
+  const [open, setOpen] = useState(unreviewed);
   const origin =
     plugin.source.kind === "github"
       ? `${plugin.source.repo}${plugin.source.path ? `/${plugin.source.path}` : ""} @ ${String(plugin.source.ref).slice(0, 7)}`
@@ -120,24 +121,53 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
   );
 }
 
-function Available({ entry, installed }: { entry: CatalogueEntry; installed: boolean }) {
+function Available({ entry, installed, permissions }: { entry: CatalogueEntry; installed: boolean; permissions: Permission[] }) {
   const installPlugin = useStore((s) => s.installPlugin);
   const isPending = useStore((s) => s.isPending);
+  const [asking, setAsking] = useState(false);
+  const wants = permissions.filter((p) => (entry.permissions ?? []).includes(p.id));
+
+  const install = () =>
+    installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref }, undefined, entry.permissions);
+
   return (
-    <div className="flex items-start gap-3 rounded border border-line-0 p-3">
-      <div className="min-w-0 flex-1">
-        <span className="block truncate text-xs text-text-0">
-          {entry.name} {entry.version && <span className="text-text-2">v{entry.version}</span>}
-        </span>
-        <span className="block text-[0.7rem] text-text-2">{entry.description}</span>
+    <div className="rounded border border-line-0 p-3 space-y-2">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <span className="block truncate text-xs text-text-0">
+            {entry.name} {entry.version && <span className="text-text-2">v{entry.version}</span>}
+          </span>
+          <span className="block text-[0.7rem] text-text-2">{entry.description}</span>
+        </div>
+        <button
+          className="btn btn-primary"
+          disabled={installed || isPending("plugin.install")}
+          onClick={() => (wants.length === 0 ? install() : setAsking(!asking))}
+        >
+          {installed ? "Installed" : "Install"}
+        </button>
       </div>
-      <button
-        className="btn btn-primary"
-        disabled={installed || isPending("plugin.install")}
-        onClick={() => installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref })}
-      >
-        {installed ? "Installed" : "Install"}
-      </button>
+      {asking && !installed && (
+        <div className="space-y-2 border-t border-line-0 pt-2">
+          <span className="block text-[0.7rem] text-text-1">Installing lets it:</span>
+          <ul className="space-y-1">
+            {wants.map((permission) => (
+              <li key={permission.id} className="text-[0.7rem]">
+                <span className={permission.risky ? "text-warn" : "text-text-1"}>{permission.label}</span>
+                <span className="block text-text-2">{permission.description}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex gap-2">
+            <button className="btn btn-primary" onClick={install}>
+              Install and allow
+            </button>
+            <button className="btn" onClick={() => setAsking(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -187,7 +217,12 @@ export function PluginsTab() {
       ) : (
         <div className="space-y-2">
           {catalogue.map((entry) => (
-            <Available key={entry.id} entry={entry} installed={plugins.some((p) => p.id === entry.id)} />
+            <Available
+              key={entry.id}
+              entry={entry}
+              installed={plugins.some((p) => p.id === entry.id)}
+              permissions={permissions}
+            />
           ))}
         </div>
       )}

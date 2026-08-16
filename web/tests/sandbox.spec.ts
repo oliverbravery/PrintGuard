@@ -71,3 +71,110 @@ test("effects come back for the host to check rather than being performed", asyn
 
   expect(result.effects).toEqual([{ kind: "command", cmd: { cmd: "printer.action", action: "cancel" } }]);
 });
+
+const PIP = `
+plugin.action((name, arg, ctx) => {
+  if (name === "toggle") ctx.store.picked = [arg];
+});
+plugin.render((ctx) => ({
+  type: "col",
+  children: [
+    { type: "row", children: (ctx.state.cameras || []).map((c) => ({ type: "button", label: c.name, action: "toggle", arg: c.id })) },
+    { type: "camera", camera_id: (ctx.store.picked || ["c1"])[0] },
+  ],
+}));
+`;
+
+const PLUGIN = {
+  id: "pip",
+  manifest: {
+    id: "pip", name: "Picture in picture", version: "1.0.0", description: "", author: "", homepage: "",
+    permissions: ["state:read", "camera:view"], surfaces: ["panel", "float"], hosts: [], events: [], tick_s: 0,
+  },
+  files: ["plugin.js"],
+  digests: {},
+  source: { kind: "github", repo: "oliverbravery/PrintGuard", ref: "abc1234" },
+  granted: ["state:read", "camera:view"],
+  config: {},
+  verified: true,
+  enabled: true,
+  installed: 0,
+  failure: null,
+};
+
+const PERMISSIONS = [
+  { id: "state:read", label: "Read", description: "", fields: { cameras: ["id", "name", "online"], monitors: ["id", "name"] } },
+  { id: "camera:view", label: "Cameras", description: "" },
+  { id: "printer:control", label: "Control printers", description: "", commands: ["printer.action"] },
+];
+
+async function dashboardWithPlugin(page: import("@playwright/test").Page, code: string, granted = PLUGIN.granted) {
+  await page.addInitScript(() => {
+    class Offline extends EventTarget {
+      readyState = 0;
+      send(): void {}
+      close(): void {}
+    }
+    (window as unknown as { WebSocket: unknown }).WebSocket = Offline;
+  });
+  await page.goto("/");
+  await page.evaluate(
+    ({ plugin, permissions, code, granted }) => {
+      const win = window as any;
+      const sent: any[] = [];
+      win.__sent = sent;
+      win.__pg.setState({
+        mode: "hub",
+        phase: "ready",
+        link: { send: (cmd: any) => sent.push(cmd), close() {} },
+        engine: {
+          mode: "hub", version: "test", update: null,
+          cameras: [
+            {
+              id: "c1", name: "Workshop", source: { kind: "rtsp", url: "rtsp://camera" }, printer_id: null,
+              max_fps: 30, brightness: 1, contrast: 1, sharpness: 0, crop: null, rotation: 0,
+              target_fps: 30, achieved_fps: 29.8, inferring: false, in_use: true, online: true, standby: false, last_result: null,
+            },
+          ],
+          printers: [], monitors: [], tokens: [], integrations: [], notifiers: [],
+          settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
+          stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
+          plugins: [{ ...plugin, granted }], plugin_permissions: permissions, plugin_host: true,
+        },
+      });
+      win.__pgEvent({ event: "state", ...win.__pg.getState().engine });
+      const request = sent.find((c) => c.cmd === "plugin.code");
+      win.__pgEvent({ event: "plugin_code", id: "pip", sources: { "plugin.js": code }, req_id: request?.req_id });
+    },
+    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted },
+  );
+}
+
+test("an installed plugin draws its panel with a real camera feed", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP);
+
+  const panel = page.locator("section", { hasText: "Picture in picture" });
+  await expect(panel.getByRole("button", { name: "Workshop" })).toBeVisible();
+  await expect(panel.locator("video")).toBeAttached();
+  await expect(panel.getByText("verified")).toBeVisible();
+});
+
+test("a camera node is refused when the feed permission is not granted", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP, ["state:read"]);
+
+  const panel = page.locator("section", { hasText: "Picture in picture" });
+  await expect(panel.getByText("Camera feeds not permitted")).toBeVisible();
+  await expect(panel.locator("video")).toHaveCount(0);
+});
+
+test("a command the plugin was not granted never reaches the engine", async ({ page }) => {
+  await dashboardWithPlugin(
+    page,
+    "plugin.render((ctx) => { ctx.command({ cmd: 'printer.action', id: 'p1', action: 'cancel' }); return { type: 'text', value: 'drawn' }; });",
+  );
+
+  await expect(page.getByText("drawn")).toBeVisible();
+  const sent = await page.evaluate(() => (window as any).__sent.map((c: any) => c.cmd));
+  expect(sent).not.toContain("printer.action");
+  await expect(page.getByText("without permission")).toBeVisible();
+});
