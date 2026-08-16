@@ -42,14 +42,14 @@ only in the acceleration runtime they bundle.
 | Tag | Platforms | Adds | Use it when |
 |---|---|---|---|
 | `latest` | `amd64`, `arm64` | Nothing. Smallest download | Default choice, including Raspberry Pi 4/5 |
-| `latest-intel` | `amd64` | Intel GPU compute runtime | You pass `--device /dev/dri` for an Intel iGPU or Arc card |
+| `latest-intel` | `amd64` | Intel's current GPU compute runtime | You pass `--device /dev/dri` for an Arc card, or an iGPU from Tiger Lake (11th gen) onwards |
 | `latest-nvidia` | `amd64` | TensorRT RTX execution provider and the CUDA 12 runtime | You have an RTX 30 series or newer and the NVIDIA Container Toolkit |
 
 Versioned tags exist alongside them: `X.Y.Z`, `X.Y`, and the same three suffixes, for
 example `2.3.8-intel`. Pin `X.Y` if you want patch updates without surprises.
 
 > [!NOTE]
-> The Intel GPU compute runtime is roughly 290 MB of compiler and driver libraries that do
+> The Intel GPU compute runtime is roughly 370 MB of compiler and driver libraries that do
 > nothing unless a GPU device is passed in, which is why it lives in its own tag rather
 > than the default image. Intel **CPU** acceleration through OpenVINO is in the standard
 > `amd64` image and needs no extra tag.
@@ -62,7 +62,7 @@ flowchart TD
     arch -- "arm64, e.g. Raspberry Pi" --> std["latest"]
     arch -- "amd64" --> gpu{"Passing a GPU to the container?"}
     gpu -- "No" --> std2["latest<br/>OpenVINO uses the Intel CPU path"]
-    gpu -- "Intel iGPU or Arc, /dev/dri" --> intel["latest-intel"]
+    gpu -- "Intel Arc, or an iGPU from Tiger Lake on, /dev/dri" --> intel["latest-intel"]
     gpu -- "NVIDIA RTX 30+ with Container Toolkit" --> nvidia["latest-nvidia"]
 ```
 
@@ -133,6 +133,22 @@ Compose:
 On Unraid, set the repository to `ghcr.io/oliverbravery/printguard:latest-intel` and add
 the template's **Intel GPU** device.
 
+The image carries Intel's own current compute runtime rather than the distribution's: it
+covers Arc and Battlemage cards, and every iGPU from Tiger Lake (11th gen) onwards. Intel
+ships no current driver for Gen8 to Gen11 graphics, so a pre-Tiger-Lake iGPU has no GPU
+path and inference stays on the OpenVINO CPU path.
+
+**compute** in the header names the hardware in use, so it reads `intel gpu` once the GPU
+is running the model, and `intel cpu` while OpenVINO is on the processor. The log lists
+everything the providers offered at start:
+
+```
+execution providers offer: Intel GPU, Intel CPU
+```
+
+A GPU missing from that line is one the driver never handed over: check that the device is
+passed in with `--device /dev/dri` and that the tag ends in `-intel`.
+
 ## NVIDIA GPU
 
 Needs an RTX 30 series card or newer and the
@@ -164,8 +180,9 @@ PrintGuard logs which provider is unavailable and keeps running on the CPU.
 
 ## Reading and pinning the runtime
 
-The header's **compute** readout names the active provider, for example `intel openvino` or
-`apple core ml`, and clicking it opens the setting. **Settings → Advanced** offers:
+The header's **compute** readout names the hardware the model is running on, for example
+`intel gpu`, `nvidia gpu` or `apple core ml`, and clicking it opens the setting.
+**Settings → Advanced** offers:
 
 | Setting | Effect |
 |---|---|
