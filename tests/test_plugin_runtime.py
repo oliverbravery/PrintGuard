@@ -7,9 +7,16 @@ failure here means the sandbox itself has changed behaviour.
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
+import json
+import zipfile
+from contextlib import asynccontextmanager
 
 import pytest
+from fakes import FakePlatform
 
+from printguard.engine.engine import Engine
 from printguard.engine.registry import Plugin
 from printguard.server.plugins import Sandbox, WasmPluginRuntime
 
@@ -111,3 +118,87 @@ def _record(sink: list[dict], command: dict) -> asyncio.Future:
     done: asyncio.Future = asyncio.get_event_loop().create_future()
     done.set_result(None)
     return done
+
+
+WORKER = """
+plugin.on('alert', (event, ctx) => {
+  ctx.store.last = event.score;
+  ctx.command({ cmd: 'monitor.update', id: event.monitor_id, patch: { enabled: false } });
+});
+plugin.route((request, ctx) => ({ status: 200, type: 'text/plain', body: 'seen ' + (ctx.store.last || 0) }));
+plugin.gate((request) => request.path !== '/secret');
+"""
+
+WORKER_MANIFEST = {
+    "id": "guard",
+    "name": "Guard",
+    "version": "1.0.0",
+    "permissions": ["monitor:control", "routes", "gate"],
+    "events": ["alert"],
+}
+
+
+def worker_zip() -> str:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("plugin.json", json.dumps(WORKER_MANIFEST))
+        archive.writestr("worker.js", WORKER)
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+class HostedPlatform(FakePlatform):
+    """A platform that carries a real plugin runtime, as the hub does."""
+
+    def __init__(self, runtime: WasmPluginRuntime) -> None:
+        super().__init__(infer_s=0.02)
+        self.plugin_runtime = runtime
+
+
+@asynccontextmanager
+async def engine_with_worker(runtime: WasmPluginRuntime):
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await engine.handle(
+            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": worker_zip(), "granted": WORKER_MANIFEST["permissions"]}
+        )
+        yield engine
+    finally:
+        await engine.stop()
+
+
+async def test_a_worker_reacts_to_an_alert_and_its_command_is_carried_out(runtime: WasmPluginRuntime) -> None:
+    async with engine_with_worker(runtime) as engine:
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "m", "camera_id": "c"}})
+        monitor_id = next(iter(engine.monitors))
+
+        engine.emit({"event": "alert", "monitor_id": monitor_id, "score": 0.91, "action": "pause"})
+        await asyncio.sleep(0.5)
+
+        assert engine.monitors[monitor_id]["enabled"] is False, "the worker's granted command never ran"
+        assert engine.plugins.get("guard").config == {"last": 0.91}, "the worker's own data was not kept"
+
+
+async def test_a_worker_serves_its_routes_and_gates_requests(runtime: WasmPluginRuntime) -> None:
+    async with engine_with_worker(runtime) as engine:
+        engine.emit({"event": "alert", "monitor_id": "m", "score": 0.5, "action": "none"})
+        await asyncio.sleep(0.4)
+
+        answer = await runtime.serve("guard", {"method": "GET", "path": "/plugins/guard/", "query": {}, "headers": {}, "body": None})
+        allowed = await runtime.authorise({"method": "GET", "path": "/", "query": {}, "headers": {}, "body": None})
+        refused = await runtime.authorise({"method": "GET", "path": "/secret", "query": {}, "headers": {}, "body": None})
+
+    assert answer["body"] == "seen 0.5"
+    assert allowed is True and refused is False
+
+
+async def test_a_plugin_that_fails_is_disabled_rather_than_left_running(runtime: WasmPluginRuntime) -> None:
+    async with engine_with_worker(runtime) as engine:
+        engine.plugins.get("guard").sources["worker.js"] = "plugin.on('alert', () => { while (true) {} });"
+        await engine.handle({"cmd": "plugin.update", "id": "guard", "patch": {"enabled": True}})
+
+        engine.emit({"event": "alert", "monitor_id": "m", "score": 0.5, "action": "none"})
+        await asyncio.sleep(1.0)
+
+        plugin = engine.plugins.get("guard")
+        assert plugin.enabled is False and plugin.failure

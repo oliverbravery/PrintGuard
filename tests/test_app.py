@@ -106,3 +106,54 @@ async def test_failed_startup_stops_the_streaming_server(monkeypatch, tmp_path) 
             pass
 
     streamer.stop.assert_awaited_once()
+
+
+class StubRuntime:
+    """Stands in for the plugin sandbox to exercise the hub's wiring."""
+
+    def __init__(self, answer=None, verdict=None) -> None:
+        self.answer = answer
+        self.verdict = verdict
+        self.seen: list[dict] = []
+
+    async def serve(self, plugin_id: str, request: dict):
+        self.seen.append(request)
+        return self.answer
+
+    async def authorise(self, request: dict):
+        self.seen.append(request)
+        return self.verdict
+
+
+def app_with(runtime: StubRuntime):
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.4.0", plugin_runtime=runtime))
+    return app
+
+
+async def test_plugin_routes_are_served_into_a_sandboxed_origin() -> None:
+    runtime = StubRuntime(answer={"status": 201, "type": "text/html", "body": "<p>hi</p>", "headers": {"set-cookie": "s=1", "x-evil": "no"}})
+    app = app_with(runtime)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/plugins/accounts/login?next=/", content=b"user=me")
+
+    assert response.status_code == 201 and response.text == "<p>hi</p>"
+    assert "sandbox" in response.headers["content-security-policy"], "a plugin's page was served as the dashboard's origin"
+    assert response.headers["set-cookie"] == "s=1"
+    assert "x-evil" not in response.headers, "a plugin set a header it has no business setting"
+    assert runtime.seen[0]["body"] == "user=me" and runtime.seen[0]["query"] == {"next": "/"}
+
+
+async def test_a_gating_plugin_can_refuse_a_request_but_never_its_own_routes() -> None:
+    runtime = StubRuntime(answer={"status": 200, "body": "login"}, verdict=False)
+    app = app_with(runtime)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        refused = await client.get("/")
+        own = await client.get("/plugins/accounts/login")
+        health = await client.get("/api/health")
+
+    assert refused.status_code == 403
+    assert own.status_code == 200, "the gate locked out the very page that signs you in"
+    assert health.status_code == 200, "readiness is never gated, so an uptime check still works"

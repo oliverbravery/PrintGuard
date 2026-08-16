@@ -201,8 +201,9 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 `Set-Cookie`, `Location` or `Cache-Control`. Its pages are served into a sandboxed origin,
 so they can render and script themselves but can never act as the dashboard.
 
-`gate` is consulted for every other request when the plugin holds that permission, with
-answers cached briefly per session and path. Anything but `true` refuses. A gate that
+`gate` is consulted for every other request when the plugin holds that permission, apart from
+`/api/health`, which stays open so uptime checks keep working. Answers are cached briefly per
+session and path. Anything but `true` refuses. A gate that
 cannot answer refuses too, so a broken plugin cannot open the hub up.
 
 ## Publishing
