@@ -265,8 +265,8 @@ A monitor's **watching** state gates inference
 | `idle`, `paused`, `error` | No, standby | Positively not printing |
 
 Only a *positive* "not printing" stands inference down. The watchdog loop then keeps the
-pipeline honest: each sustained condition warns exactly once, after a grace period so
-reconnecting sources do not flap, and announces recovery.
+pipeline honest: each sustained condition warns exactly once, after a grace period so a
+brief outage passes unremarked, and announces recovery once health has held.
 
 ```mermaid
 stateDiagram-v2
@@ -275,10 +275,12 @@ stateDiagram-v2
     Standby --> Watching: printing, or contact lost
     Watching --> Standby: positively not printing
     Watching --> Warned: sustained fault
-    Warned --> Watching: recovered
+    Warned --> Watching: healthy for the recovery hold
     note right of Warned
         Still watching. A warning
         never stands inference down.
+        Faulting again while warned
+        stays one warning.
     end note
 ```
 
@@ -287,9 +289,12 @@ staying online but producing no fresh frames, since a frozen RTSP feed must not 
 monitoring, and a linked printer service becoming **unreachable**, since defects could no
 longer pause it.
 
-Warnings surface as dashboard toasts and go out through the notification channels. Notifier
-delivery failures and inference crashes emit `error` events. There is no silent
-`except: pass` anywhere in the alert path.
+Warnings surface as dashboard toasts and go out through the notification channels, so the
+watchdog suppresses flapping rather than repeating itself: a source that reconnects and
+drops again is still the same warning, and each announced recovery doubles how long the
+next one must hold before it is announced, up to fifteen minutes. Outages are never
+delayed, only recoveries. Notifier delivery failures and inference crashes emit `error`
+events. There is no silent `except: pass` anywhere in the alert path.
 
 ## Repository layout
 

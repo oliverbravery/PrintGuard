@@ -143,6 +143,11 @@ Alert channels live in **Settings**. Enable a channel, fill in the form and send
 alert. Every enabled channel receives defect snapshots and watchdog warnings for monitors
 that have notifications switched on.
 
+A monitor's **cooldown** is the quiet window after a defect alert. Watchdog warnings are
+separate: a camera or printer that keeps dropping out warns once for the whole unstable
+episode, and the recovery is only announced once it has stayed healthy, so reconnections
+cannot turn into a stream of notifications.
+
 | Channel | Modes | Notes |
 |---|---|---|
 | [ntfy](https://ntfy.sh) | Hub and local | Self-hostable, no account needed |
