@@ -20,7 +20,7 @@ from printguard.engine.engine import Engine
 from printguard.engine.registry import Plugin
 from printguard.server.plugins import Sandbox, WasmPluginRuntime
 
-CALL = {"kind": "event", "event": {"event": "alert", "score": 0.9}, "request": {}, "state": {}, "store": {}, "config": {}, "now": 1.0}
+CALL = {"kind": "event", "event": {"event": "alert", "score": 0.9}, "request": {}, "state": {}, "store": {}}
 
 
 @pytest.fixture(scope="module")

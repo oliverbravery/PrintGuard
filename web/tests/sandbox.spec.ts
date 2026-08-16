@@ -25,7 +25,7 @@ async function runInSandbox(page: import("@playwright/test").Page, code: string,
         const answer = (event: MessageEvent) => {
           if (event.source !== frame.contentWindow) return;
           if (event.data.t === "booted") {
-            frame.contentWindow!.postMessage({ id: 1, t: "init", code, store: {}, manifest: {} }, "*");
+            frame.contentWindow!.postMessage({ id: 1, t: "init", code, store: {} }, "*");
           } else if (event.data.t === "ready") {
             frame.contentWindow!.postMessage({ id: 2, t: "state", state }, "*");
           } else {

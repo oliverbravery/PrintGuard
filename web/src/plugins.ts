@@ -65,7 +65,7 @@ export class PluginHost {
         if (message.source !== this.frame.contentWindow || message.data?.t !== "booted") return;
         removeEventListener("message", onBooted);
         clearTimeout(timer);
-        this.send({ t: "init", code: this.code, store: this.record.config, manifest: this.record.manifest })
+        this.send({ t: "init", code: this.code, store: this.record.config })
           .then(() => resolve())
           .catch(reject);
       };

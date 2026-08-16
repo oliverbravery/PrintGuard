@@ -29,7 +29,6 @@ SOURCE_FILES = ("plugin.js", "worker.js")
 SURFACES = ("panel", "float")
 MAX_SOURCE_BYTES = 64 * 1024
 MAX_CONFIG_BYTES = 16 * 1024
-MAX_CATALOGUE_BYTES = 512 * 1024
 MIN_TICK_S = 5.0
 CATALOGUE_URL = "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/catalogue.json"
 GITHUB_COMMIT_URL = "https://api.github.com/repos/{repo}/commits/{ref}"

@@ -44,14 +44,11 @@
         let hooks = { view: null, action: null, events: {} };
         let effects = [];
         let store = {};
-        let manifest = {};
 
         function context(state) {
           return {
             store,
             state,
-            manifest,
-            now: Date.now() / 1000,
             command(cmd) {
               effects.push({ kind: "command", cmd });
             },
@@ -98,7 +95,6 @@
           try {
             if (t === "init") {
               store = message.data.store || {};
-              manifest = message.data.manifest || {};
               load(message.data.code);
               parent.postMessage({ id, t: "ready" }, "*");
               return;

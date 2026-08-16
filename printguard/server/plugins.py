@@ -52,8 +52,6 @@ const plugin = {
 const ctx = {
   store: __input.store,
   state: __input.state,
-  manifest: __input.config,
-  now: __input.now,
   command(cmd) { __effects.push({ kind: "command", cmd }); },
   http(request) { __effects.push({ kind: "http", request }); },
   notify(text) { __effects.push({ kind: "notify", text: String(text) }); },
@@ -234,8 +232,6 @@ class WasmPluginRuntime:
             "request": payload.get("request", {}),
             "state": plugins.project_state(self._state, plugin.granted),
             "store": plugin.config,
-            "config": plugin.manifest,
-            "now": time.time(),
         }
         try:
             output = await asyncio.wait_for(asyncio.to_thread(sandbox.call, request), CALL_TIMEOUT_S)
