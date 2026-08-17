@@ -91,6 +91,7 @@
         }
 
         addEventListener("message", (message) => {
+          if (message.source !== parent) return;
           const { id, t } = message.data || {};
           try {
             if (t === "init") {

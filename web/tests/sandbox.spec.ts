@@ -72,6 +72,45 @@ test("effects come back for the host to check rather than being performed", asyn
   expect(result.effects).toEqual([{ kind: "command", cmd: { cmd: "printer.action", action: "cancel" } }]);
 });
 
+test("code only runs when it came from the frame's host", async ({ page }) => {
+  await page.goto("/");
+  const result = await page.evaluate(
+    () =>
+      new Promise<any>((resolve, reject) => {
+        const frame = document.createElement("iframe");
+        frame.src = "plugin-sandbox.html";
+        frame.sandbox.add("allow-scripts");
+        const bystander = document.createElement("iframe");
+        const said: string[] = [];
+        const answer = (event: MessageEvent) => {
+          if (event.source !== frame.contentWindow) return;
+          said.push(event.data.t);
+          if (event.data.t === "booted") {
+            const code = "plugin.render(() => ({ type: 'text', value: 'installed' }));";
+            frame.contentWindow!.postMessage({ id: 1, t: "init", code, store: {} }, "*");
+          } else if (event.data.t === "ready") {
+            const script = bystander.contentDocument!.createElement("script");
+            script.textContent =
+              "const hijack = { id: 2, t: 'init', code: \"plugin.render(() => ({ type: 'text', value: 'hijacked' }));\" };" +
+              "for (let i = 0; i < parent.frames.length; i++) parent.frames[i].postMessage(hijack, '*');";
+            bystander.contentDocument!.body.appendChild(script);
+            setTimeout(() => frame.contentWindow!.postMessage({ id: 3, t: "state", state: {} }, "*"), 100);
+          } else if (event.data.id === 3) {
+            removeEventListener("message", answer);
+            resolve({ ...event.data, said });
+          }
+        };
+        addEventListener("message", answer);
+        document.body.appendChild(frame);
+        document.body.appendChild(bystander);
+        setTimeout(() => reject(new Error("sandbox never answered")), 5000);
+      }),
+  );
+
+  expect(result.tree.value).toBe("installed");
+  expect(result.said.filter((t: string) => t === "ready")).toHaveLength(1);
+});
+
 const PIP = `
 plugin.action((name, arg, ctx) => {
   if (name === "toggle") ctx.store.picked = [arg];
