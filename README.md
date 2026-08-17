@@ -2,7 +2,7 @@
 
 # PrintGuard
 
-**Catches failing 3D prints on your own hardware, pauses the printer, and tells you why.**
+**Catches failed 3D prints on your own hardware, pauses the printer and sends you a snapshot alert.**
 
 [![Latest release](https://img.shields.io/github/v/release/oliverbravery/PrintGuard?style=flat&color=ff4d00&label=release)](https://github.com/oliverbravery/PrintGuard/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/oliverbravery/PrintGuard?style=flat&color=ff4d00)](https://github.com/oliverbravery/PrintGuard/stargazers)
@@ -17,8 +17,8 @@
 
 A compact vision model scores every camera frame on the machine you run it on. When a defect
 holds for long enough, PrintGuard pauses or cancels the print through your print server and
-pushes a snapshot to your phone. No cloud, no subscription, no account, and your camera
-frames never leave hardware you own.
+pushes a snapshot to your phone. There's no cloud and no subscription, and your camera frames
+never leave hardware you own.
 
 ![PrintGuard dashboard: three cameras at a glance, one print mid-failure and auto-paused](docs/assets/dashboard.png)
 
@@ -29,8 +29,8 @@ frames never leave hardware you own.
 - [Quick start](#quick-start)
   - [Desktop app for macOS and Windows](#desktop-app-for-macos-and-windows)
   - [Docker for an always-on server or NAS](#docker-for-an-always-on-server-or-nas)
-- [Two modes, one engine](#two-modes-one-engine)
-- [Make it yours](#make-it-yours)
+- [Local mode and hub mode](#local-mode-and-hub-mode)
+- [Themes and layout](#themes-and-layout)
 - [Printers, cameras and alerts](#printers-cameras-and-alerts)
 - [Hardware acceleration](#hardware-acceleration)
 - [Exposing a hub safely](#exposing-a-hub-safely)
@@ -46,34 +46,31 @@ frames never leave hardware you own.
 ## Try it now, nothing to install
 
 **[oliverbravery.github.io/PrintGuard](https://oliverbravery.github.io/PrintGuard/)** runs the
-*entire* engine in your browser. Point your webcam at a print and watch it score each frame
-live. Nothing is installed and no frame leaves your device. When you are ready to run it for
-real, [jump to Quick start](#quick-start).
+whole engine in your browser. Point your webcam at a print and watch it score each frame live.
+Nothing is installed and no frame leaves your device. When you are ready to run it for real,
+[jump to Quick start](#quick-start).
 
 ## What you get
 
-- **Failures caught early.** A compact vision model scores every frame and acts the moment a
-  defect holds, so spaghetti and detachments do not run for hours, or burn through a spool.
-- **Damage stopped for you.** A sustained defect can pause or cancel the print through
-  OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, with sensitivity, thresholds and cooldowns
-  you set per monitor.
-- **A heads-up on your phone.** The instant a defect holds, a snapshot lands over ntfy,
-  Telegram or Discord.
-- **Quiet when nothing is wrong.** Printers linked to a service are only watched while they
-  actually print. Inference rests when they are idle and wakes when a job starts.
-- **Loud when something is.** A dropped camera, frozen feed or unresponsive printer warns you
-  on the dashboard *and* your phone. If PrintGuard cannot tell whether a printer is printing,
-  it keeps watching: losing the signal never silently stops monitoring.
-- **Every printer on one screen.** One machine shares inference fairly across as many cameras
-  as your hardware can sustain.
+- Catches a failure early. The model scores every frame and acts as soon as a defect holds, so
+  spaghetti and detachments don't run for hours or burn through a spool.
+- Pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, with the
+  sensitivity, thresholds and cooldown you set per monitor.
+- Sends a snapshot to your phone over ntfy, Telegram or Discord the moment a defect holds.
+- Stays quiet when nothing is wrong. A printer linked to a print service is only watched while
+  it actually prints, so inference rests when it is idle and wakes when a job starts.
+- Tells you when it cannot see. A dropped camera, a frozen feed or an unresponsive printer
+  warns you on the dashboard and on your phone, and if PrintGuard cannot tell whether a printer
+  is printing it keeps watching.
+- Shares one model across as many cameras as your hardware can sustain.
 
 ## Quick start
 
 ### Desktop app for macOS and Windows
 
-The easiest way to run a hub on the computer next to your printer: a native app, no Docker
-and no terminal. It lives in your menu bar or system tray, so closing the window leaves the
-hub running and the printer watched. Reach it from your phone on the same network at
+The easiest way to run a hub on the computer next to your printer, with no Docker and no
+terminal. It lives in your menu bar or system tray, so closing the window leaves the hub
+running and the printer watched. Reach it from your phone on the same network at
 `http://<computer>:8000`.
 
 <div align="center">
@@ -88,9 +85,9 @@ Turn on **Start at login** from the tray menu and forget about it.
 
 > [!NOTE]
 > The builds are unsigned for now, so the first launch needs one approval. On macOS,
-> double-click the app, then open **System Settings → Privacy & Security** and click
-> **Open Anyway** under *Security*. On Windows, choose **More info → Run anyway**. On Linux,
-> run the [Docker hub](#docker-for-an-always-on-server-or-nas) instead.
+> double-click the app, then open Privacy & Security in System Settings and click
+> **Open Anyway** under Security. On Windows, choose **More info** and then **Run anyway**. On
+> Linux, run the [Docker hub](#docker-for-an-always-on-server-or-nas) instead.
 
 ### Docker for an always-on server or NAS
 
@@ -112,13 +109,13 @@ them.
 | **Docker Compose** | `curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml && docker compose up -d` |
 | **Anything else** | The `docker run` above. Images are published for `amd64` and `arm64`, including Raspberry Pi 4 and 5 |
 
-Port `8554` only matters for cameras that *push* RTSP into PrintGuard, and `-p 1935:1935`
-for an RTMP push. Most setups pull from a URL or use a printer's own camera and need neither.
+Port `8554` only matters for cameras that push RTSP into PrintGuard, and `-p 1935:1935` for an
+RTMP push. Most setups pull from a URL or use a printer's own camera and need neither.
 
-## Two modes, one engine
+## Local mode and hub mode
 
-The same detection engine runs in two places. Try it instantly in the browser, then
-self-host it when you are ready.
+The same detection engine runs in two places. Try it in the browser, then self-host it when you
+are ready.
 
 | | Local mode | Hub mode |
 |---|---|---|
@@ -129,13 +126,13 @@ self-host it when you are ready.
 | Cameras | This device's webcams | Any stream, plus printer cameras |
 | Printers | OctoPrint and Klipper | All of them |
 
-The **desktop app** is hub mode without the setup: the same persistent engine as the
-container, in a native window on your own computer.
+The desktop app is hub mode without the setup, the same persistent engine as the container in a
+native window on your own computer.
 
-## Make it yours
+## Themes and layout
 
-Choose **System**, **Light**, **Dark**, or design your own in the built-in theme editor.
-Themes are saved on the hub and follow every browser that opens it.
+Choose **System**, **Light**, **Dark**, or design your own in the built-in theme editor. Themes
+are saved on the hub and follow every browser that opens it.
 
 <table>
 <tr>
@@ -148,9 +145,9 @@ Themes are saved on the hub and follow every browser that opens it.
 </tr>
 </table>
 
-Tap **Customise** to arrange the dashboard around how *you* work: drag monitors into any
-order, **pin** the ones that matter to the front, and **hide** the rest, with a tray to bring
-them back. The camera rail rearranges the same way.
+Tap **Customise** to arrange the dashboard around how you work. Drag monitors into any order,
+pin the ones that matter to the front and hide the rest, with a tray to bring them back. The
+camera rail rearranges the same way.
 
 ![Customise mode: drag to reorder, pin and hide monitors and cameras](docs/assets/customise.png)
 
@@ -160,8 +157,9 @@ Open any monitor for its live risk score, score history and one-tap printer cont
 
 ## Printers, cameras and alerts
 
-Register your printer, bind it to a monitor, and choose what a sustained defect does: alert,
-pause or cancel. If a printer exposes a webcam, PrintGuard adds it as a camera for you.
+Register your printer, bind it to a monitor and choose whether a sustained defect alerts you,
+pauses the print or cancels it. If a printer exposes a webcam, PrintGuard adds it as a camera
+for you.
 
 | | Supported |
 |---|---|
@@ -169,9 +167,8 @@ pause or cancel. If a printer exposes a webcam, PrintGuard adds it as a camera f
 | **Cameras** | Printer webcams, RTSP, RTMP, HTTP/MJPEG, WHEP, anything pushed to the bundled MediaMTX, and the browser's own camera |
 | **Alerts** | ntfy, Telegram, Discord, and native notifications in the desktop app |
 
-Connecting over Docker or HTTPS, and linking an Elegoo, Prusa or Bambu printer, each have a
-gotcha or two. The full walk-through is in
-**[docs/printers.md](docs/printers.md)**.
+Connecting over Docker or HTTPS has a gotcha or two, as does linking an Elegoo, Prusa or Bambu
+printer. The full walk-through is in **[docs/printers.md](docs/printers.md)**.
 
 ## Hardware acceleration
 
@@ -185,24 +182,24 @@ ghcr.io/oliverbravery/printguard:latest-intel    # with --device /dev/dri
 ghcr.io/oliverbravery/printguard:latest-nvidia   # with --runtime=nvidia
 ```
 
-Which tag to pull, what each provider needs and how to pin a runtime:
-**[docs/hardware.md](docs/hardware.md)**.
+**[docs/hardware.md](docs/hardware.md)** covers which tag to pull, what each provider needs and
+how to pin a runtime.
 
 ## Exposing a hub safely
 
 > [!WARNING]
-> PrintGuard ships no authentication. Anyone who can reach the hub sees every camera and can
-> pause or cancel your printers. Never port-forward it.
+> PrintGuard has no authentication of its own. Anyone who can reach the hub sees every camera
+> and can pause or cancel your printers. Never port-forward it.
 
-Put an identity layer in front instead. **[docs/deployment.md](docs/deployment.md)** has
-step-by-step setups for **Tailscale**, which is the recommendation for a private hub,
-**Cloudflare Tunnel with Access**, and **oauth2-proxy**, plus a hardening checklist.
+Put an identity layer in front instead. **[docs/deployment.md](docs/deployment.md)** walks
+through Tailscale, which is what I would use for a private hub, alongside Cloudflare Tunnel
+with Access and oauth2-proxy, and it ends with a hardening checklist.
 
 ## Home Assistant
 
-Point the hub at your MQTT broker under **Settings → Home Assistant** and every monitor
-appears in Home Assistant automatically through MQTT discovery: a defect sensor, the defect
-score, the latest failure snapshot, an **Enabled** switch, and for linked printers live
+Point the hub at your MQTT broker under Settings, in the Home Assistant tab, and every monitor
+appears in Home Assistant through MQTT discovery. You get a defect sensor, the defect score,
+the latest failure snapshot and an **Enabled** switch, and a linked printer also gets live
 status with **Pause**, **Resume** and **Cancel**. Control is two-way, so your automations can
 drive PrintGuard. The broker is yours and the bridge runs on the hub, so no frames leave your
 hardware.
@@ -210,29 +207,29 @@ hardware.
 ## Automate it with MCP and the API
 
 A hub exposes its engine to agents and scripts over the same protocol the dashboard uses, so
-anything the UI can do is automatable. Point an MCP client at `https://<host>/mcp/`, or use
-the REST API at `/api/v1`. Both read printer and camera status, fetch the **current frame as
-an image**, and pause, resume or cancel.
+anything the UI can do can be automated. Point an MCP client at `https://<host>/mcp/`, or use
+the REST API at `/api/v1`. Both read printer and camera status, fetch the current frame as an
+image, and pause, resume or cancel.
 
-Capability is per token: issue scoped bearer tokens, `read` ⊂ `control` ⊂ `manage`, from
-**Settings**, and an agent only gets what you grant. Uptime monitors can poll the
-unauthenticated `GET /api/health` for readiness and the installed version. Full reference:
-**[docs/api.md](docs/api.md)**.
+You issue scoped bearer tokens from Settings, so an agent only gets what you grant it. `read`
+is status only, `control` adds the printer actions and `manage` adds the rest. Uptime monitors
+can poll the unauthenticated `GET /api/health` for readiness and the installed version.
+**[docs/api.md](docs/api.md)** has the full reference.
 
 ## Plugins
 
-**Settings → Plugins** installs extensions from the catalogue, from any GitHub repository, or
-from a file. A plugin is plain JavaScript that draws a panel on your dashboard, runs a job on
-the hub, or both, and it ships with **picture-in-picture**, which floats your live feeds in a
-window that stays on top of other apps.
+Plugins are written in JavaScript and run in a sandbox. You can install verified plugins from
+the store under Settings, or install them from a GitHub repo or a zip. They can be granted
+fine-grained permissions to reach an internal API, so developers can safely add features to
+PrintGuard. The first one is picture-in-picture, which floats your live feeds above your other
+windows.
 
-Plugins are third-party code, so none of it is trusted. A panel runs in a sandboxed frame with
-no network and no access to the page; anything on the hub runs in QuickJS compiled to
-WebAssembly, with no filesystem, no sockets, a memory cap and a CPU budget. A plugin gets no
-credentials, no tokens and no camera frames, and only does what you grant it, which you can
-revoke at any time. Ones I have reviewed are pinned by hash and show as **verified**;
-everything else installs as **third party**. Writing one takes no build step and no
-dependencies: **[docs/plugins.md](docs/plugins.md)**.
+A panel runs in a sandboxed frame with no network and no access to the page, and anything on
+the hub runs in QuickJS compiled to WebAssembly with no filesystem, no sockets, a memory cap
+and a CPU budget. A plugin never sees your credentials, tokens or camera frames, and you can
+take away what you granted at any time. Ones I have reviewed are pinned by hash and show as
+verified, and everything else installs as third party. Writing one takes no build step and no
+dependencies, which **[docs/plugins.md](docs/plugins.md)** goes through.
 
 ## How the detector works
 
@@ -262,14 +259,14 @@ provider are in **[CONTRIBUTING.md](CONTRIBUTING.md)**. Issues and pull requests
 
 ## Sponsor
 
-PrintGuard is free, GPL-2.0, and has no paid tier. It has one cost I cannot design around:
+PrintGuard is free, GPL-2.0, and has no paid tier. It has one cost I cannot design around.
 Apple charges $99 a year for the Developer Program, and without it the macOS app cannot be
 signed or notarised. That is why macOS warns you that PrintGuard is from an unidentified
 developer, and why the first launch takes a trip through System Settings.
 
 [**Sponsoring the project**](https://github.com/sponsors/oliverbravery) fixes that. Sustained
 sponsorship of $10 a month covers the licence across the year and removes that warning for
-everyone; anything past it goes on the hardware the integrations get tested against. One-off
+everyone. Anything past it goes on the hardware the integrations get tested against. One-off
 and monthly both work, and nothing in PrintGuard is ever locked behind it.
 
 ## Licence
