@@ -111,9 +111,10 @@ async def test_failed_startup_stops_the_streaming_server(monkeypatch, tmp_path) 
 class StubRuntime:
     """Stands in for the plugin sandbox to exercise the hub's wiring."""
 
-    def __init__(self, answer=None, verdict=None) -> None:
+    def __init__(self, answer=None, verdict=None, gate: str = "accounts") -> None:
         self.answer = answer
         self.verdict = verdict
+        self.gate = gate
         self.seen: list[dict] = []
 
     async def serve(self, plugin_id: str, request: dict):
@@ -123,6 +124,9 @@ class StubRuntime:
     async def authorise(self, request: dict):
         self.seen.append(request)
         return self.verdict
+
+    def gate_paths(self) -> tuple[str, ...]:
+        return (f"/plugins/{self.gate}/",)
 
 
 def app_with(runtime: StubRuntime):
@@ -152,8 +156,10 @@ async def test_a_gating_plugin_can_refuse_a_request_but_never_its_own_routes() -
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         refused = await client.get("/")
         own = await client.get("/plugins/accounts/login")
+        other = await client.get("/plugins/reports/index")
         health = await client.get("/api/health")
 
     assert refused.status_code == 403
     assert own.status_code == 200, "the gate locked out the very page that signs you in"
+    assert other.status_code == 403, "another plugin's pages went out without the gate seeing them"
     assert health.status_code == 200, "readiness is never gated, so an uptime check still works"

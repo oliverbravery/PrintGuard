@@ -80,7 +80,7 @@ remove the plugin.
 | `printer:control` | Pause, resume and cancel prints | |
 | `notify` | Raise a message in the dashboard | |
 | `net` | Reach the hosts its manifest lists, and nowhere else | |
-| `routes` | Answer requests under `/plugins/<id>/` | ✅ |
+| `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers | ✅ |
 | `gate` | See and refuse every other request to the hub | ✅ |
 
 Storing its own data needs no permission. The store is the plugin's own, capped at 16 KB, and
@@ -185,8 +185,8 @@ These are the events a worker can name in `events`:
 | Event | Fires | Carries |
 |---|---|---|
 | `result` | Every inference on a watched monitor, capped at 5 per second per monitor | `monitor_id`, `camera_id`, `score`, `prediction`, `margin`, `ms`, `ts` |
-| `alert` | A defect held long enough to act on | `monitor_id`, `score`, `action` |
-| `warning` | A watchdog condition, and its recovery | `message`, `recovered` |
+| `alert` | A defect held long enough to act on | `monitor_id`, `score`, `action`, `ts` |
+| `warning` | A watchdog condition, and its recovery | `monitor_id`, `message`, `recovered` |
 | `device` | A printer's status changed | `printer_id`, `status`, `progress`, `job` |
 | `error` | Anything that failed | `message` |
 | `state` | The full snapshot, once a second | Everything your permissions allow |
@@ -231,7 +231,8 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 so they can render and script themselves but can never act as the dashboard.
 
 `gate` is consulted for every other request when the plugin holds that permission, apart from
-`/api/health`, which stays open so uptime checks keep working. Answers are cached briefly per
+`/api/health`, which stays open so uptime checks keep working, and its own pages, which stay
+open so it can serve a sign-in page it would otherwise refuse. Answers are cached briefly per
 session and path. Anything but `true` refuses, and a gate that cannot answer refuses too, so a
 broken plugin cannot open the hub up.
 

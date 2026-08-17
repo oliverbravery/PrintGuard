@@ -76,7 +76,7 @@ def origin_allowed(websocket: WebSocket, allowed: set[str]) -> bool:
     return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
 
 
-GATE_EXEMPT_PREFIXES = ("/plugins/", "/api/health")
+GATE_EXEMPT_PREFIXES = ("/api/health",)
 GATE_CACHE_TTL_S = 10.0
 PLUGIN_REQUEST_HEADERS = ("cookie", "authorization", "accept", "content-type", "x-forwarded-for", "user-agent")
 PLUGIN_RESPONSE_HEADERS = ("set-cookie", "location", "cache-control")
@@ -161,7 +161,7 @@ def create_app() -> FastAPI:
         Refusals are never cached, so signing in takes effect at once.
         """
         runtime = app.state.engine.platform.plugin_runtime
-        if runtime is None or request.url.path.startswith(GATE_EXEMPT_PREFIXES):
+        if runtime is None or request.url.path.startswith(GATE_EXEMPT_PREFIXES + runtime.gate_paths()):
             return True
         key = (request.headers.get("cookie", ""), request.headers.get("authorization", ""), request.method, request.url.path)
         if gate_cache.get(key, 0.0) > time.monotonic():
