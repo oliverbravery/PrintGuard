@@ -11,29 +11,17 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
-- **A plugin store, under Settings → Plugins.** You can extend PrintGuard at runtime now: a
-  panel on your dashboard, a job that runs on the hub, or both. Install from the catalogue of
-  ones I have reviewed, from any GitHub repository (`owner/repo`, pinned to the commit it
-  resolves to), or from a zip. **Picture in picture** ships as the first one: pick your live
-  feeds and pop them into a window that floats above other apps.
-
-  Plugins are third-party code, so none of it is trusted. A panel runs in a sandboxed frame
-  with no network and no access to the page; anything running on the hub runs in QuickJS
-  compiled to WebAssembly, with no filesystem, no sockets, a memory cap and a CPU budget, so
-  a plugin that hangs is stopped in milliseconds rather than taking the hub with it. No
-  plugin ever receives your printer credentials, notifier settings, API tokens or camera
-  frames: a feed in a plugin's panel is drawn by PrintGuard, not by the plugin. Everything
-  else is a permission you grant at install and can revoke at any time, and each one says
-  plainly what it allows. Plugins I have reviewed are pinned by SHA-256 and show as
-  **verified**; anything else installs as **third party**, so read it first.
-
-  Writing one takes no build step and no dependencies: a `plugin.json` and a plain JavaScript
-  file. [docs/plugins.md](docs/plugins.md) has the whole API and a worked example, and
-  [CONTRIBUTING.md](CONTRIBUTING.md) covers getting one listed in the catalogue.
-
-  A plugin can also serve its own pages under `/plugins/<id>/` and, if you grant it, authorise
-  every request to the hub, which is what lets an accounts plugin protect one. That last one
-  can lock you out, so `PRINTGUARD_PLUGINS=off` starts the hub with every plugin inert.
+- **A plugin store, in the Plugins tab in Settings.** Plugins are written in JavaScript and
+  run in a sandbox, and one can draw a panel on your dashboard, run a job on the hub, or do
+  both. You can install verified plugins from the catalogue, or install them from a GitHub
+  repo or a zip. They can be granted fine-grained permissions to reach an internal API, so
+  developers can safely add features to PrintGuard without waiting on a release, and you can
+  take a permission back at any time. A plugin never sees your printer credentials, notifier
+  settings, API tokens or camera frames. The first one is picture-in-picture, which floats
+  your live feeds above your other windows. To start the hub with every plugin switched off,
+  add `PRINTGUARD_PLUGINS=off` to its environment. [docs/plugins.md](docs/plugins.md) has the
+  whole API and a worked example, and [CONTRIBUTING.md](CONTRIBUTING.md) covers getting one
+  listed in the catalogue.
 
 ### Fixed
 
@@ -42,7 +30,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   a loop pushed an "offline" alert and a "back" alert on every cycle, on ntfy and every other
   channel alike. Raising the monitor's cooldown did not help, because that setting is the
   quiet window after a defect alert and never covered these warnings. One unstable episode is
-  now one warning: a recovery is only announced once the feed has held for a minute, and each
+  now one warning. A recovery is only announced once the feed has held for a minute, and each
   recovery doubles what the next one has to hold for, up to fifteen minutes, so a source that
   keeps flapping gets quieter rather than louder. Outages themselves are never delayed. Worth
   pulling if you run a camera on marginal wifi. Thanks to @subpanel0576 for the report.
@@ -54,7 +42,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   to Gen11 graphics, so a pre-Tiger-Lake iGPU stays on the OpenVINO CPU path. Thanks for the
   report.
 - **The compute readout now names the hardware, not the provider.** `intel openvino` meant
-  either the GPU or the processor; it now reads `intel gpu` or `intel cpu`, and the log lists
+  either the GPU or the processor, and it now reads `intel gpu` or `intel cpu`, and the log lists
   what the providers offered at start, so a GPU that was never handed over is visible rather
   than guessed at.
 
