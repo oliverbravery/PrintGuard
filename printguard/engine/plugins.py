@@ -36,11 +36,11 @@ GITHUB_RAW_URL = "https://raw.githubusercontent.com/{repo}/{sha}/{path}"
 GITHUB_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 TIMEOUT_S = 20.0
 
-_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
+ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
 _REPO_PATTERN = re.compile(r"^[\w.-]+/[\w.-]+$")
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PATH_PATTERN = re.compile(r"^[\w./-]*$")
-_VERSION_PATTERN = re.compile(r"^[\w.+-]{1,32}$")
+VERSION_PATTERN = re.compile(r"^[\w.+-]{1,32}$")
 
 PERMISSIONS: dict[str, dict[str, Any]] = {
     "state:read": {
@@ -178,10 +178,10 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("plugin.json is not an object")
     plugin_id = str(raw.get("id", "")).strip().lower()
-    if not _ID_PATTERN.match(plugin_id):
+    if not ID_PATTERN.match(plugin_id):
         raise ValueError("plugin id must be 3-40 lowercase letters, digits or hyphens")
     version = str(raw.get("version", "")).strip()
-    if not _VERSION_PATTERN.match(version):
+    if not VERSION_PATTERN.match(version):
         raise ValueError("plugin version is missing or unusable")
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
     hosts = sorted({str(h).strip().lower() for h in raw.get("hosts", []) if str(h).strip()})
@@ -326,7 +326,7 @@ async def fetch_catalogue(http: HttpFn, url: str) -> list[dict[str, Any]]:
         raise RuntimeError(f"catalogue at {url} returned {status}")
     if not isinstance(body, dict) or not isinstance(body.get("plugins"), list):
         raise RuntimeError(f"catalogue at {url} is not a plugin catalogue")
-    return [entry for entry in body["plugins"] if isinstance(entry, dict) and _ID_PATTERN.match(str(entry.get("id", "")))]
+    return [entry for entry in body["plugins"] if isinstance(entry, dict) and ID_PATTERN.match(str(entry.get("id", "")))]
 
 
 def verified_by(catalogue: list[dict[str, Any]], plugin_id: str, hashed: dict[str, str]) -> dict[str, Any] | None:

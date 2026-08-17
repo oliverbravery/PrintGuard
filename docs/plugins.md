@@ -100,6 +100,7 @@ my-plugin/
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.schema.json",
   "id": "bed-clearance",
   "name": "Bed clearance",
   "version": "1.0.0",
@@ -139,6 +140,23 @@ Both files get `plugin` to register with, and every handler gets a `ctx`:
 
 Each file runs inside a function with nothing else in scope, so there's no `import`, no
 `fetch`, no DOM and no storage. Everything you need arrives on `ctx`.
+
+### Your editor
+
+The `$schema` key above is what completes and checks the manifest as you type it, in VS Code,
+JetBrains, Zed or anything else speaking to a JSON language server. Nothing to install.
+
+For the JavaScript, drop these two next to your plugin and every editor with TypeScript in it
+completes `plugin` and `ctx` and marks a typo as you make it. There's still no build step,
+since nothing here is compiled.
+
+```bash
+curl -O https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.d.ts
+curl -O https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/jsconfig.json
+```
+
+Without a `jsconfig.json`, a `// @ts-check` line at the top of a file does the same for that
+file alone.
 
 Install it with **Import a .zip** while you work on it, or point PrintGuard at your repo
 and press **Update** as you push.

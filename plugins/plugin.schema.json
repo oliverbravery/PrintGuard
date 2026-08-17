@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.schema.json",
+  "title": "PrintGuard plugin",
+  "description": "The manifest of a PrintGuard plugin. See https://github.com/oliverbravery/PrintGuard/blob/main/docs/plugins.md",
+  "type": "object",
+  "required": [
+    "id",
+    "version"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$",
+      "description": "Identifies the plugin everywhere, 3 to 40 lowercase letters, digits or hyphens."
+    },
+    "name": {
+      "type": "string",
+      "description": "Shown on the panel and in Settings. Defaults to the id."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[\\w.+-]{1,32}$",
+      "description": "Your own version, shown beside the name."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 400,
+      "description": "One line about what it does."
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "homepage": {
+      "type": "string",
+      "maxLength": 200,
+      "format": "uri"
+    },
+    "permissions": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "What it asks for at install. Anything not granted is refused at the sandbox edge.",
+      "items": {
+        "anyOf": [
+          {
+            "const": "state:read",
+            "description": "Monitor names, scores and alerts, camera and printer names and status. Never credentials or tokens."
+          },
+          {
+            "const": "camera:view",
+            "description": "Place a camera feed in its own panel. The plugin never receives the video itself."
+          },
+          {
+            "const": "monitor:control",
+            "description": "Enable, disable and retune any monitor, including its defect threshold."
+          },
+          {
+            "const": "printer:control",
+            "description": "Pause, resume and cancel prints on any connected printer."
+          },
+          {
+            "const": "notify",
+            "description": "Raise a message in this dashboard. Does not use your alert channels."
+          },
+          {
+            "const": "net",
+            "description": "Send requests to the hosts the plugin lists, and nowhere else."
+          },
+          {
+            "const": "routes",
+            "description": "Answer requests under /plugins/<id>/ on the hub, reading the headers each one carries, including your session cookie."
+          },
+          {
+            "const": "gate",
+            "description": "See and approve or refuse every request to the hub, including the dashboard and the API. A plugin holding this can lock you out."
+          }
+        ]
+      }
+    },
+    "surfaces": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Where plugin.js draws. Defaults to a dashboard panel.",
+      "items": {
+        "anyOf": [
+          {
+            "const": "panel",
+            "description": "A panel of its own on the dashboard."
+          },
+          {
+            "const": "float",
+            "description": "A window that floats above other apps, holding whatever render last returned."
+          },
+          {
+            "const": "monitor",
+            "description": "A button on every monitor tile, calling your action with the monitor's id."
+          }
+        ]
+      }
+    },
+    "hosts": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "The only hosts ctx.http may reach, each a bare hostname.",
+      "items": {
+        "type": "string",
+        "pattern": "^[^/:\\s]+$"
+      }
+    },
+    "events": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "The engine events that wake worker.js.",
+      "items": {
+        "anyOf": [
+          {
+            "const": "result",
+            "description": "Carries monitor_id, camera_id, score, prediction, margin, ms, ts."
+          },
+          {
+            "const": "alert",
+            "description": "Carries monitor_id, score, action, ts."
+          },
+          {
+            "const": "warning",
+            "description": "Carries monitor_id, message, recovered."
+          },
+          {
+            "const": "device",
+            "description": "Carries printer_id, status, progress, job."
+          },
+          {
+            "const": "error",
+            "description": "Carries message."
+          },
+          {
+            "const": "state",
+            "description": "The snapshot your permissions allow."
+          }
+        ]
+      }
+    },
+    "tick_s": {
+      "type": "number",
+      "description": "Run worker.js this often as well, in seconds. 0, or 5 at the least.",
+      "anyOf": [
+        {
+          "const": 0
+        },
+        {
+          "minimum": 5.0,
+          "maximum": 86400
+        }
+      ]
+    }
+  }
+}

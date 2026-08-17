@@ -20,8 +20,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   settings, API tokens or camera frames. The first one is picture-in-picture, which puts a
   pop-out button on every monitor and floats that camera above your other windows. To start
   the hub with every plugin switched off, add `PRINTGUARD_PLUGINS=off` to its environment.
-  [docs/plugins.md](docs/plugins.md) has the
-  whole API and a worked example, and [CONTRIBUTING.md](CONTRIBUTING.md) covers getting one
+  [docs/plugins.md](docs/plugins.md) has the whole API, a worked example and the schema and
+  types your editor reads, and [CONTRIBUTING.md](CONTRIBUTING.md) covers getting one
   listed in the catalogue.
 
 ### Fixed

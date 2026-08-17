@@ -146,6 +146,11 @@ a plugin show as **verified**.
    commit the plugin last changed in and the hash of every file, so it has to run after
    the plugin is committed, and again after every change to it.
 
+Changing a permission, a surface or an event means rerunning `uv run python plugins/schema.py`
+and committing [plugins/plugin.schema.json](plugins/plugin.schema.json), which is what
+completes a manifest in an author's editor. The tests fail until you do. Hand-edit
+[plugins/plugin.d.ts](plugins/plugin.d.ts) to match, since it types what a plugin is handed.
+
 What I look for is that it asks for no permission it does not use, does nothing surprising
 with the ones it does, and declares the network hosts you would expect.
 
