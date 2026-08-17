@@ -94,6 +94,21 @@ PERMISSION_COMMANDS = {
     command: name for name, spec in PERMISSIONS.items() for command in spec.get("commands", [])
 }
 
+PLATFORMS: dict[str, str] = {
+    "docker": "Docker",
+    "docker-nvidia": "NVIDIA image",
+    "docker-intel": "Intel image",
+    "macos": "macOS",
+    "windows": "Windows",
+    "browser": "Browser",
+}
+"""Where PrintGuard runs, as a plugin declares it and a deployment reports it.
+
+An id extends the one before its hyphen, so a plugin naming ``docker`` runs on
+every image and one naming ``docker-nvidia`` runs only on that one. A plugin
+naming none of them runs everywhere.
+"""
+
 EVENTS: dict[str, list[str]] = {
     "result": ["monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts"],
     "alert": ["monitor_id", "score", "action", "ts"],
@@ -109,6 +124,20 @@ credentials in a state snapshot or a new API token's secret, so a plugin is
 handed these fields and nothing else, and an event missing from here never
 reaches one at all.
 """
+
+
+def runs_here(platforms: list[str], host: str) -> bool:
+    """Whether a plugin's declared platforms cover the deployment running it.
+
+    Args:
+        platforms: What the manifest declared, empty for everywhere.
+        host: The deployment's own id, the most specific one it has.
+
+    Returns:
+        True when the plugin declared nothing, the host itself, or a platform
+        the host extends.
+    """
+    return not platforms or any(host == name or host.startswith(f"{name}-") for name in platforms)
 
 
 def permissions_meta() -> list[dict[str, Any]]:
@@ -190,6 +219,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     if not VERSION_PATTERN.match(version):
         raise ValueError("plugin version is missing or unusable")
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
+    platforms = sorted({str(p).strip() for p in raw.get("platforms", [])} & set(PLATFORMS))
     hosts = sorted({str(h).strip().lower() for h in raw.get("hosts", []) if str(h).strip()})
     events = sorted({str(e).strip() for e in raw.get("events", [])} & set(EVENTS))
     try:
@@ -205,6 +235,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "homepage": str(raw.get("homepage", "")).strip()[:200],
         "permissions": [p for p in PERMISSIONS if p in raw.get("permissions", [])],
         "surfaces": surfaces,
+        "platforms": platforms,
         "hosts": hosts,
         "events": events,
         "tick_s": min(tick_s, 86400.0) if tick_s >= MIN_TICK_S else 0.0,

@@ -39,6 +39,7 @@ class FakePlatform:
     """In-memory platform with deterministic latency and HTTP."""
 
     mode = "test"
+    host = "docker"
     workers = 1
     inference_device = "test"
     version = "2.1.0"

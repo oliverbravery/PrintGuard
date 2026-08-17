@@ -92,6 +92,10 @@ class Platform(Protocol):
     """Runtime services the engine needs but cannot implement portably."""
 
     mode: str
+    host: str
+    """Which deployment this is, one of ``plugins.PLATFORMS``. A plugin declares
+    the ones it runs on, and the store offers what matches."""
+
     workers: int
     inference_device: str
     version: str

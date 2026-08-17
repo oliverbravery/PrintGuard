@@ -96,6 +96,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
+            VARIANT=${{ matrix.suffix }}
             INFERENCE_EXTRA=${{ matrix.extra }}
             GPU_RUNTIME_DEBS=${{ matrix.gpu_runtime_debs }}
             NVIDIA_VISIBLE_DEVICES=${{ matrix.gpu_visible_devices }}

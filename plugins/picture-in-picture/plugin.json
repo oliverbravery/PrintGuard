@@ -7,5 +7,6 @@
   "author": "oliverbravery",
   "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/picture-in-picture",
   "permissions": ["state:read", "camera:view"],
-  "surfaces": ["monitor", "float"]
+  "surfaces": ["monitor", "float"],
+  "platforms": ["docker", "windows", "browser"]
 }

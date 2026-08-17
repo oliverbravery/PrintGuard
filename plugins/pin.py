@@ -47,6 +47,8 @@ def entry(directory: Path) -> dict:
         "author": manifest["author"],
         "version": manifest["version"],
         "permissions": manifest["permissions"],
+        "surfaces": manifest["surfaces"],
+        "platforms": manifest["platforms"],
         "repo": REPO,
         "path": f"plugins/{directory.name}",
         "ref": last_commit(directory),

@@ -37,7 +37,8 @@ const history: Record<string, ScorePoint[]> = {
 
 function engine(): EngineState {
   return {
-    mode: "hub", version: VERSION, update: null,
+    mode: "hub",
+    host: "docker", version: VERSION, update: null,
     cameras: [
       camera("c1", "Workshop · Prusa", { kind: "rtsp", url: "rtsp://10.0.0.21:8554/prusa" }, true),
       camera("c2", "Garage · Ender", { kind: "rtsp", url: "rtsp://10.0.0.22:8554/ender" }),
@@ -54,9 +55,14 @@ function engine(): EngineState {
     ],
     settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "" },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: [], notifiers: [],
-    plugins: [], plugin_permissions: PERMISSIONS, plugin_host: true,
+    plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS, plugin_host: true,
   };
 }
+
+const PLATFORMS = {
+  docker: "Docker", "docker-nvidia": "NVIDIA image", "docker-intel": "Intel image",
+  macos: "macOS", windows: "Windows", browser: "Browser",
+};
 
 const PERMISSIONS = [
   { id: "state:read", label: "Read the dashboard", description: "Monitor names, scores and alerts, camera and printer names and status. Never credentials or tokens." },
@@ -69,13 +75,13 @@ const CATALOGUE = [
     id: "picture-in-picture", name: "Picture in picture", version: "1.1.0", author: "oliverbravery",
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
     repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40),
-    permissions: ["state:read", "camera:view"], digests: {},
+    permissions: ["state:read", "camera:view"], platforms: ["docker", "windows", "browser"], surfaces: ["monitor", "float"], digests: {},
   },
   {
     id: "print-log", name: "Print log", version: "0.3.0", author: "community",
     description: "Writes every alert to a webhook so you can keep a record outside PrintGuard.",
     repo: "someone/printguard-print-log", ref: "b".repeat(40),
-    permissions: ["state:read", "notify"], digests: {},
+    permissions: ["state:read", "notify"], platforms: [], surfaces: ["panel"], digests: {},
   },
 ];
 
@@ -84,7 +90,8 @@ const INSTALLED = {
   manifest: {
     id: "picture-in-picture", name: "Picture in picture", version: "1.1.0", author: "oliverbravery", homepage: "",
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
-    permissions: ["state:read", "camera:view"], surfaces: ["monitor", "float"], hosts: [], events: [], tick_s: 0,
+    permissions: ["state:read", "camera:view"], surfaces: ["monitor", "float"],
+    platforms: ["docker", "windows", "browser"], hosts: [], events: [], tick_s: 0,
   },
   files: ["plugin.js"], digests: {},
   source: { kind: "github", repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40) },

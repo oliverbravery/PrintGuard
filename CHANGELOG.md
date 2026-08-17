@@ -17,7 +17,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   repo or a zip. They can be granted fine-grained permissions to reach an internal API, so
   developers can safely add features to PrintGuard without waiting on a release, and you can
   take a permission back at any time. A plugin never sees your printer credentials, notifier
-  settings, API tokens or camera frames. The first one is picture-in-picture, which puts a
+  settings, API tokens or camera frames. A plugin says which platforms it runs on, and the
+  store filters the catalogue by the one you are on. The first one is picture-in-picture, which puts a
   pop-out button on every monitor and floats that camera above your other windows. To start
   the hub with every plugin switched off, add `PRINTGUARD_PLUGINS=off` to its environment.
   [docs/plugins.md](docs/plugins.md) has the whole API, a worked example and the schema and

@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends binutils \
     && find .venv \( -name '*.cpython-*.so' -o -name '*.abi3.so' \) -exec strip --strip-debug {} +
 
 FROM python:3.13-slim-trixie
+ARG VARIANT
 ARG GPU_RUNTIME_DEBS
 ARG NVIDIA_VISIBLE_DEVICES
 WORKDIR /app
@@ -42,6 +43,7 @@ COPY mediamtx.yml mediamtx.yml
 COPY THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
 COPY --from=web /build/web/dist static/
 ENV PATH="/app/.venv/bin:$PATH" \
+    PRINTGUARD_VARIANT=$VARIANT \
     MODEL_DIR=/app/models \
     DATA_DIR=/data \
     STATIC_DIR=/app/static \

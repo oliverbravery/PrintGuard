@@ -86,6 +86,12 @@ def schema() -> dict:
                 "description": "Where plugin.js draws. Defaults to a dashboard panel.",
                 "items": {"anyOf": choices({name: SURFACE_HELP[name] for name in plugins.SURFACES})},
             },
+            "platforms": {
+                "type": "array",
+                "uniqueItems": True,
+                "description": "Where it runs. Leave it out for everywhere, and name a bare platform to cover its variants.",
+                "items": {"anyOf": choices(plugins.PLATFORMS)},
+            },
             "hosts": {
                 "type": "array",
                 "uniqueItems": True,

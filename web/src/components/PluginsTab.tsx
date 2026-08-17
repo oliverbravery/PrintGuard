@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { runsHere } from "../plugins";
 import { useStore } from "../store";
 import type { CatalogueEntry, Permission, PluginRecord } from "../types";
+import { popOutSupported } from "./PopOut";
 import { Toggle } from "./Toggle";
 
 const REPO_HINT = "owner/repo, or owner/repo/path@branch";
@@ -19,6 +21,26 @@ function readZip(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+function Runs({ platforms, surfaces }: { platforms: string[] | undefined; surfaces: string[] | undefined }) {
+  const engine = useStore((s) => s.engine);
+  const labels = engine?.plugin_platforms ?? {};
+  const host = engine?.host ?? "";
+  const here = runsHere(platforms, host);
+  const floats = surfaces?.includes("float") && !popOutSupported();
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {(platforms ?? []).map((platform) => (
+        <span key={platform} className={`chip ${runsHere([platform], host) ? "chip-ok" : ""}`}>
+          {labels[platform] ?? platform}
+        </span>
+      ))}
+      {!here && <span className="chip chip-bad">Not on {labels[host] ?? host}</span>}
+      {here && floats && <span className="chip chip-warn">No floating window in this browser</span>}
+    </div>
+  );
 }
 
 function Permissions({
@@ -83,7 +105,7 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
       : (plugin.source.filename ?? "imported file");
 
   return (
-    <div className="rounded border border-line-0 p-3 space-y-2">
+    <div className="rounded border border-line-0 bg-ink-1 p-3 space-y-2.5">
       <div className="flex items-center gap-2">
         <span className="text-xs text-text-0 truncate flex-1">
           {plugin.manifest.name} <span className="text-text-2">v{plugin.manifest.version}</span>
@@ -96,6 +118,7 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
           onChange={(on) => send({ cmd: "plugin.update", id: plugin.id, patch: { enabled: on } })}
         />
       </div>
+      <Runs platforms={plugin.manifest.platforms} surfaces={plugin.manifest.surfaces} />
       {plugin.failure && <span className="block text-[0.7rem] text-bad">Stopped: {plugin.failure}</span>}
       <span className="mono block truncate text-[0.65rem] text-text-2">{origin}</span>
       <div className="flex items-center gap-2">
@@ -124,29 +147,32 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
 function Available({ entry, installed, permissions }: { entry: CatalogueEntry; installed: boolean; permissions: Permission[] }) {
   const installPlugin = useStore((s) => s.installPlugin);
   const isPending = useStore((s) => s.isPending);
+  const host = useStore((s) => s.engine?.host ?? "");
   const [asking, setAsking] = useState(false);
   const wants = permissions.filter((p) => (entry.permissions ?? []).includes(p.id));
+  const here = runsHere(entry.platforms, host);
 
   const install = () =>
     installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref }, undefined, entry.permissions);
 
   return (
-    <div className="rounded border border-line-0 p-3 space-y-2">
+    <div className="rounded border border-line-0 bg-ink-1 p-3 space-y-2.5">
       <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 space-y-1">
           <span className="block truncate text-xs text-text-0">
             {entry.name} {entry.version && <span className="text-text-2">v{entry.version}</span>}
           </span>
-          <span className="block text-[0.7rem] text-text-2">{entry.description}</span>
+          <span className="block text-[0.7rem] leading-relaxed text-text-2">{entry.description}</span>
         </div>
         <button
           className="btn btn-primary"
-          disabled={installed || isPending("plugin.install")}
+          disabled={installed || !here || isPending("plugin.install")}
           onClick={() => (wants.length === 0 ? install() : setAsking(!asking))}
         >
           {installed ? "Installed" : "Install"}
         </button>
       </div>
+      <Runs platforms={entry.platforms} surfaces={entry.surfaces} />
       {asking && !installed && (
         <div className="space-y-2 border-t border-line-0 pt-2">
           <span className="block text-[0.7rem] text-text-1">Installing lets it:</span>
@@ -175,13 +201,21 @@ function Available({ entry, installed, permissions }: { entry: CatalogueEntry; i
 export function PluginsTab() {
   const { engine, catalogue, fetchCatalogue, installPlugin, isPending, toast } = useStore();
   const [repo, setRepo] = useState("");
+  const [platform, setPlatform] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const plugins = engine?.plugins ?? [];
   const permissions = engine?.plugin_permissions ?? [];
+  const labels = engine?.plugin_platforms ?? {};
+  const host = engine?.host ?? "";
 
   useEffect(() => {
     if (catalogue === null) fetchCatalogue();
   }, []);
+
+  const bases = Object.keys(labels).filter((id) => !id.includes("-"));
+  const chosen = platform ?? bases.find((id) => runsHere([id], host)) ?? "";
+  const target = chosen === "" ? "" : runsHere([chosen], host) ? host : chosen;
+  const listed = (catalogue ?? []).filter((entry) => target === "" || runsHere(entry.platforms, target));
 
   const installFromRepo = () => {
     const source = parseRepo(repo);
@@ -209,14 +243,38 @@ export function PluginsTab() {
         </div>
       )}
 
-      <span className="label block">Catalogue</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="label flex-1">Catalogue</span>
+        {bases.map((id) => (
+          <button
+            key={id}
+            className={`chip cursor-pointer hover:opacity-80 ${chosen === id ? "chip-accent" : ""}`}
+            aria-pressed={chosen === id}
+            onClick={() => setPlatform(id)}
+          >
+            {labels[id]}
+          </button>
+        ))}
+        <button
+          className={`chip cursor-pointer hover:opacity-80 ${chosen === "" ? "chip-accent" : ""}`}
+          aria-pressed={chosen === ""}
+          onClick={() => setPlatform("")}
+        >
+          Everything
+        </button>
+      </div>
+
       {catalogue === null ? (
         <span className="block text-[0.7rem] text-text-2">Loading the catalogue…</span>
-      ) : catalogue.length === 0 ? (
-        <span className="block text-[0.7rem] text-text-2">No plugins listed, or the catalogue could not be reached.</span>
+      ) : listed.length === 0 ? (
+        <span className="block text-[0.7rem] text-text-2">
+          {catalogue.length === 0
+            ? "No plugins listed, or the catalogue could not be reached."
+            : `Nothing listed for ${labels[chosen] ?? chosen}.`}
+        </span>
       ) : (
         <div className="space-y-2">
-          {catalogue.map((entry) => (
+          {listed.map((entry) => (
             <Available
               key={entry.id}
               entry={entry}

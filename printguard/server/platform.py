@@ -51,6 +51,22 @@ full frame rate are requested by name instead."""
 logger = logging.getLogger(__name__)
 
 
+def deployment(packaged: bool) -> str:
+    """Names the deployment a plugin's declared platforms are matched against.
+
+    Args:
+        packaged: Whether this is the desktop app, which is the only build
+            carrying its own installer to update with.
+
+    Returns:
+        A ``PLATFORMS`` id. The image build arg carries the variant, so the
+        Intel and NVIDIA images name themselves and the plain one does not.
+    """
+    if packaged:
+        return "macos" if sys.platform == "darwin" else "windows"
+    return f"docker{os.environ.get('PRINTGUARD_VARIANT', '')}"
+
+
 def _video_devices() -> list[tuple[str, str]]:
     """Names the host's attachable video capture devices as (device_id, label).
 
@@ -399,6 +415,7 @@ class ServerPlatform:
     ) -> None:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
+        self.host = deployment(update_asset is not None)
         data_dir.mkdir(parents=True, exist_ok=True)
         self._model_dir = model_dir
         self._inference: Inference | None = None

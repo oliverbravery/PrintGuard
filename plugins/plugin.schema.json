@@ -103,6 +103,39 @@
         ]
       }
     },
+    "platforms": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Where it runs. Leave it out for everywhere, and name a bare platform to cover its variants.",
+      "items": {
+        "anyOf": [
+          {
+            "const": "docker",
+            "description": "Docker"
+          },
+          {
+            "const": "docker-nvidia",
+            "description": "NVIDIA image"
+          },
+          {
+            "const": "docker-intel",
+            "description": "Intel image"
+          },
+          {
+            "const": "macos",
+            "description": "macOS"
+          },
+          {
+            "const": "windows",
+            "description": "Windows"
+          },
+          {
+            "const": "browser",
+            "description": "Browser"
+          }
+        ]
+      }
+    },
     "hosts": {
       "type": "array",
       "uniqueItems": true,

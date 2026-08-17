@@ -11,11 +11,20 @@
         "state:read",
         "camera:view"
       ],
+      "surfaces": [
+        "monitor",
+        "float"
+      ],
+      "platforms": [
+        "browser",
+        "docker",
+        "windows"
+      ],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/picture-in-picture",
-      "ref": "3cf54fa9184019b7b21c84084644c47e89c19698",
+      "ref": "14fa992d1dbf5cf56c60b8a9ea1c05d60ab1b9b1",
       "digests": {
-        "plugin.json": "b89c7c2619e8dc1ca3370c9ea5d0406a4fac4363a27ecab9e7a110e42a71caf4",
+        "plugin.json": "76d44aa72df4180cc37507d5265d7f04eefc03370a14107287f82c42c67fa3ef",
         "plugin.js": "6bcbed13a51804063e8b56c693769bd1dde44a2526a652bc8a42977a64b4c371"
       }
     }

@@ -52,6 +52,10 @@ export function outboundRequest(id: string, request: Record<string, unknown> | u
   };
 }
 
+export function runsHere(platforms: string[] | undefined, host: string): boolean {
+  return !platforms?.length || platforms.some((name) => host === name || host.startsWith(`${name}-`));
+}
+
 export function commandAllowed(command: string, granted: string[], permissions: Permission[]): boolean {
   const owner = permissions.find((p) => p.commands?.includes(command));
   return owner !== undefined && granted.includes(owner.id);

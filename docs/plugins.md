@@ -109,6 +109,7 @@ my-plugin/
   "homepage": "https://github.com/you/bed-clearance",
   "permissions": ["state:read", "notify"],
   "surfaces": ["panel"],
+  "platforms": ["docker", "windows"],
   "hosts": ["api.example.com"],
   "events": ["alert"],
   "tick_s": 300
@@ -122,6 +123,21 @@ my-plugin/
 | `panel` | A panel of its own on the dashboard |
 | `monitor` | A button on every monitor tile, which calls `action` with `"monitor"` and the monitor's id |
 | `float` | A window that floats above other apps, holding whatever `render` last returned |
+
+`platforms` says where it runs, and leaving it out means everywhere. The store filters the
+catalogue by the one you are on, so anything that would not work is out of the way.
+
+| Platform | |
+|---|---|
+| `docker` | The self-hosted hub, on any image |
+| `docker-nvidia`, `docker-intel` | Only that image, for a plugin that needs the GPU it brings |
+| `macos`, `windows` | The desktop app |
+| `browser` | Local mode |
+
+Naming `docker` covers the images built from it, so declare a variant only when a plainer
+image would not do. A panel needing a browser feature is a different question, since the
+dashboard is a web page everywhere: declare the `float` surface and PrintGuard says when the
+browser in front of it has no floating window, which Safari has not.
 
 `hosts` lists the only hosts `ctx.http` may reach. `events` and `tick_s` are the worker's,
 naming which engine events wake it and how often to run it anyway.

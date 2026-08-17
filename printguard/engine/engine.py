@@ -223,6 +223,7 @@ class Engine:
         return {
             "event": "state",
             "mode": self.platform.mode,
+            "host": self.platform.host,
             "version": self.platform.version,
             "update": self.update,
             "cameras": [c.public() for c in self.cameras.values()],
@@ -243,6 +244,7 @@ class Engine:
             "plugins": [p.public() for p in self.plugins.values()],
             "plugin_permissions": plugins.permissions_meta(),
             "plugin_events": plugins.EVENTS,
+            "plugin_platforms": plugins.PLATFORMS,
             "plugin_host": self.platform.plugin_runtime is not None,
         }
 

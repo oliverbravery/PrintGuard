@@ -23,10 +23,12 @@ jobs:
       matrix:
         include:
           - name: standard
+            suffix: ""
             extra: ""
             gpu_runtime_debs: ""
             gpu_visible_devices: ""
           - name: Intel
+            suffix: -intel
             extra: ""
             gpu_runtime_debs: >-
               https://github.com/intel/intel-graphics-compiler/releases/download/v2.38.2/intel-igc-core-2_2.38.2+22051_amd64.deb
@@ -35,6 +37,7 @@ jobs:
               https://github.com/intel/compute-runtime/releases/download/26.27.39122.11/intel-opencl-icd_26.27.39122.11-0_amd64.deb
             gpu_visible_devices: ""
           - name: NVIDIA
+            suffix: -nvidia
             extra: --extra nvidia
             gpu_runtime_debs: ""
             gpu_visible_devices: all
@@ -46,6 +49,7 @@ jobs:
           context: .
           push: false
           build-args: |
+            VARIANT=${{ matrix.suffix }}
             INFERENCE_EXTRA=${{ matrix.extra }}
             GPU_RUNTIME_DEBS=${{ matrix.gpu_runtime_debs }}
             NVIDIA_VISIBLE_DEVICES=${{ matrix.gpu_visible_devices }}

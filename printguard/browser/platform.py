@@ -59,6 +59,7 @@ class BrowserPlatform:
     """Local mode platform, with LiteRT.js in WASM and cameras via getUserMedia."""
 
     mode = "local"
+    host = "browser"
     workers = 1
     inference_device = "WASM"
     version = ""

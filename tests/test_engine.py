@@ -822,6 +822,24 @@ async def test_plugin_state_view_carries_no_credentials() -> None:
     assert "settings" not in view and "tokens" not in view
 
 
+def test_a_platform_covers_its_own_variants_and_nothing_else() -> None:
+    """A plugin naming a platform runs on the images built from it."""
+    assert plugins.runs_here([], "macos"), "a plugin naming nowhere runs everywhere"
+    assert plugins.runs_here(["docker"], "docker-nvidia")
+    assert not plugins.runs_here(["docker-nvidia"], "docker")
+    assert not plugins.runs_here(["docker", "windows"], "macos")
+
+
+async def test_a_manifest_keeps_only_platforms_printguard_runs_on() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "platforms": ["windows", "toaster"]}
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
+        record = engine.plugins.get("demo").public()
+
+    assert record["manifest"]["platforms"] == ["windows"]
+
+
 async def test_plugins_survive_a_restart() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[]) as (engine, _):

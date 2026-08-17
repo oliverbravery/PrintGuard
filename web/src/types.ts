@@ -213,6 +213,7 @@ export interface PluginManifest {
   homepage: string;
   permissions: string[];
   surfaces: ("panel" | "float" | "monitor")[];
+  platforms: string[];
   hosts: string[];
   events: string[];
   tick_s: number;
@@ -242,6 +243,8 @@ export interface CatalogueEntry {
   ref: string;
   version?: string;
   permissions?: string[];
+  surfaces?: string[];
+  platforms?: string[];
   digests: Record<string, string>;
 }
 
@@ -291,6 +294,7 @@ export interface UpdateInfo {
 
 export interface EngineState {
   mode: string;
+  host: string;
   version: string;
   update: UpdateInfo | null;
   cameras: Camera[];
@@ -313,6 +317,7 @@ export interface EngineState {
   plugins: PluginRecord[];
   plugin_permissions: Permission[];
   plugin_events: Record<string, string[]>;
+  plugin_platforms: Record<string, string>;
   plugin_host: boolean;
 }
 
