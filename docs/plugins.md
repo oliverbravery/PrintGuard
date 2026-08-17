@@ -107,16 +107,23 @@ my-plugin/
   "author": "you",
   "homepage": "https://github.com/you/bed-clearance",
   "permissions": ["state:read", "notify"],
-  "surfaces": ["panel", "float"],
+  "surfaces": ["panel"],
   "hosts": ["api.example.com"],
   "events": ["alert"],
   "tick_s": 300
 }
 ```
 
-`surfaces` says where the panel appears, `panel` on the dashboard and `float` to offer a
-pop-out window. `hosts` lists the only hosts `ctx.http` may reach. `events` and `tick_s` are
-the worker's, naming which engine events wake it and how often to run it anyway.
+`surfaces` says where the panel appears.
+
+| Surface | Where it puts you |
+|---|---|
+| `panel` | A panel of its own on the dashboard |
+| `monitor` | A button on every monitor tile, which calls `action` with `"monitor"` and the monitor's id |
+| `float` | A window that floats above other apps, holding whatever `render` last returned |
+
+`hosts` lists the only hosts `ctx.http` may reach. `events` and `tick_s` are the worker's,
+naming which engine events wake it and how often to run it anyway.
 
 Both files get `plugin` to register with, and every handler gets a `ctx`:
 
@@ -127,6 +134,7 @@ Both files get `plugin` to register with, and every handler gets a `ctx`:
 | `ctx.command(cmd)` | Ask PrintGuard to run an engine command |
 | `ctx.http(request)` | Ask PrintGuard to make a request, to a host you declared |
 | `ctx.notify(text)` | Raise a message in the dashboard |
+| `ctx.float(on)` | Open or close your floating window, if you declared the `float` surface |
 | `ctx.log(text)` | Write a line to PrintGuard's log |
 
 Each file runs inside a function with nothing else in scope, so there's no `import`, no
@@ -171,8 +179,9 @@ plugin.render((ctx) => ({
 }));
 ```
 
-[`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in about 25
-lines.
+[`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in nine
+lines. It takes the `monitor` and `float` surfaces, so its button sits on each monitor and
+its view is only ever the floating window.
 
 ## The worker half
 

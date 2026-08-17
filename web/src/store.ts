@@ -223,6 +223,8 @@ export const useStore = create<PgStore>((set, get) => {
         sendSilent(outboundRequest(id, effect.request));
       } else if (effect.kind === "notify") {
         if (plugin.granted.includes("notify")) get().toast("info", `${plugin.manifest.name}: ${effect.text}`);
+      } else if (effect.kind === "float") {
+        if (plugin.manifest.surfaces.includes("float")) get().popPlugin(effect.on ? id : null);
       } else if (effect.kind === "log") {
         log("info", `plugin ${id}:`, effect.text);
       }

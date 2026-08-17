@@ -1,8 +1,8 @@
-import { cardButton } from "../a11y";
 import { section, toggleHidden, togglePinned } from "../layout";
 import { useStore } from "../store";
 import type { DeviceState, Monitor } from "../types";
 import { Feed } from "./Feed";
+import { popOutSupported } from "./PopOut";
 import { RiskGauge } from "./RiskGauge";
 import { SortableItem, type SortableHandle } from "./Sortable";
 
@@ -19,13 +19,20 @@ export function DeviceChip({ state }: { state: DeviceState | undefined }) {
 }
 
 export function MonitorTile({ monitor, index }: { monitor: Monitor; index: number }) {
-  const { engine, history, openDetail, customising, mutateLayout, dialog, detailId, statsMonitorId } = useStore();
+  const { engine, history, openDetail, customising, mutateLayout, dialog, detailId, statsMonitorId, pluginAct } = useStore();
   const covered = dialog !== null || detailId !== null || statsMonitorId !== null;
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   const score = history[monitor.id]?.at(-1)?.score ?? 0;
   const alerting = Boolean(monitor.alert);
   const pinned = section(engine?.settings.layout, "monitors").pinned.includes(monitor.id);
+  const tools = (engine?.plugins ?? []).filter(
+    (plugin) =>
+      plugin.enabled &&
+      plugin.files.includes("plugin.js") &&
+      plugin.manifest.surfaces.includes("monitor") &&
+      (!plugin.manifest.surfaces.includes("float") || popOutSupported()),
+  );
 
   const content = (handle?: SortableHandle) => (
     <>
@@ -72,6 +79,17 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
           <>
             <DeviceChip state={printer?.device_state ?? undefined} />
             {!monitor.watching && <span className="chip">standby</span>}
+            {tools.map((plugin) => (
+              <button
+                key={plugin.id}
+                className="chip relative z-[3] grid place-items-center min-h-6 min-w-6 cursor-pointer hover:opacity-80"
+                aria-label={`${plugin.manifest.name} for ${monitor.name}`}
+                title={plugin.manifest.name}
+                onClick={() => pluginAct(plugin.id, "monitor", monitor.id)}
+              >
+                ⧉
+              </button>
+            ))}
           </>
         )}
       </div>
@@ -104,10 +122,14 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
   if (!customising)
     return (
       <article
-        {...cardButton(() => openDetail(monitor.id), `Open ${monitor.name} monitor details`)}
         className={`panel tile reveal relative cursor-pointer transition-colors hover:border-line-1 ${alerting ? "tile-alert" : ""}`}
         style={{ "--i": index } as React.CSSProperties}
       >
+        <button
+          className="absolute inset-0 z-[2] cursor-pointer"
+          aria-label={`Open ${monitor.name} monitor details`}
+          onClick={() => openDetail(monitor.id)}
+        />
         {content()}
       </article>
     );

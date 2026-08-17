@@ -141,13 +141,33 @@ const PLUGIN = {
   failure: null,
 };
 
+const MONITOR_PIP = `
+plugin.action((name, arg, ctx) => {
+  if (name !== "monitor") return;
+  const monitor = (ctx.state.monitors || []).find((candidate) => candidate.id === arg);
+  ctx.store.picked = monitor.camera_id;
+  ctx.float(true);
+});
+plugin.render((ctx) => ({ type: "camera", camera_id: ctx.store.picked }));
+`;
+
+const MONITOR = {
+  id: "m1", name: "Bench", camera_id: "c1", printer_id: "", enabled: true, threshold: 0.6, sensitivity: 1,
+  consecutive: 3, notify: true, on_defect: "pause", cooldown_s: 30, alert: null, watching: true, result: null,
+};
+
 const PERMISSIONS = [
-  { id: "state:read", label: "Read", description: "", fields: { cameras: ["id", "name", "online"], monitors: ["id", "name"] } },
+  { id: "state:read", label: "Read", description: "", fields: { cameras: ["id", "name", "online"], monitors: ["id", "name", "camera_id"] } },
   { id: "camera:view", label: "Cameras", description: "" },
   { id: "printer:control", label: "Control printers", description: "", commands: ["printer.action"] },
 ];
 
-async function dashboardWithPlugin(page: import("@playwright/test").Page, code: string, granted = PLUGIN.granted) {
+async function dashboardWithPlugin(
+  page: import("@playwright/test").Page,
+  code: string,
+  granted = PLUGIN.granted,
+  surfaces = PLUGIN.manifest.surfaces,
+) {
   await page.addInitScript(() => {
     class Offline extends EventTarget {
       readyState = 0;
@@ -158,7 +178,7 @@ async function dashboardWithPlugin(page: import("@playwright/test").Page, code: 
   });
   await page.goto("/");
   await page.evaluate(
-    ({ plugin, permissions, code, granted }) => {
+    ({ plugin, permissions, code, granted, surfaces, monitor }) => {
       const win = window as any;
       const sent: any[] = [];
       win.__sent = sent;
@@ -175,17 +195,20 @@ async function dashboardWithPlugin(page: import("@playwright/test").Page, code: 
               target_fps: 30, achieved_fps: 29.8, inferring: false, in_use: true, online: true, standby: false, last_result: null,
             },
           ],
-          printers: [], monitors: [], tokens: [], integrations: [], notifiers: [],
+          printers: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
           settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
           stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
-          plugins: [{ ...plugin, granted }], plugin_permissions: permissions, plugin_host: true,
+          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces }, granted }],
+          plugin_permissions: permissions,
+          plugin_events: { state: [] },
+          plugin_host: true,
         },
       });
       win.__pgEvent({ event: "state", ...win.__pg.getState().engine });
       const request = sent.find((c) => c.cmd === "plugin.code");
       win.__pgEvent({ event: "plugin_code", id: "pip", sources: { "plugin.js": code }, req_id: request?.req_id });
     },
-    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted },
+    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR },
   );
 }
 
@@ -216,6 +239,23 @@ test("a command the plugin was not granted never reaches the engine", async ({ p
   const sent = await page.evaluate(() => (window as any).__sent.map((c: any) => c.cmd));
   expect(sent).not.toContain("printer.action");
   await expect(page.getByText("without permission")).toBeVisible();
+});
+
+test("a monitor surface puts a pop-out button on each monitor and nothing on the dashboard", async ({ page }) => {
+  await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor", "float"]);
+  test.skip(!(await page.evaluate(() => "documentPictureInPicture" in window)), "no Document Picture-in-Picture here");
+
+  await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Picture in picture for Bench" }).click();
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const pip = (window as any).documentPictureInPicture.window;
+        return pip ? pip.document.querySelectorAll("video").length : 0;
+      }),
+    )
+    .toBe(1);
 });
 
 test("pop-out puts the panel in a picture-in-picture window, themed", async ({ page }) => {

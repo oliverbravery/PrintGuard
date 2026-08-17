@@ -58,6 +58,9 @@
             notify(text) {
               effects.push({ kind: "notify", text: String(text) });
             },
+            float(on) {
+              effects.push({ kind: "float", on: on !== false });
+            },
             log(text) {
               effects.push({ kind: "log", text: String(text) });
             },

@@ -66,8 +66,8 @@ const PERMISSIONS = [
 
 const CATALOGUE = [
   {
-    id: "picture-in-picture", name: "Picture in picture", version: "1.0.0", author: "oliverbravery",
-    description: "Keeps chosen camera feeds in a floating window that stays on top of other apps.",
+    id: "picture-in-picture", name: "Picture in picture", version: "1.1.0", author: "oliverbravery",
+    description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
     repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40),
     permissions: ["state:read", "camera:view"], digests: {},
   },
@@ -82,9 +82,9 @@ const CATALOGUE = [
 const INSTALLED = {
   id: "picture-in-picture",
   manifest: {
-    id: "picture-in-picture", name: "Picture in picture", version: "1.0.0", author: "oliverbravery", homepage: "",
-    description: "Keeps chosen camera feeds in a floating window that stays on top of other apps.",
-    permissions: ["state:read", "camera:view"], surfaces: ["panel", "float"], hosts: [], events: [], tick_s: 0,
+    id: "picture-in-picture", name: "Picture in picture", version: "1.1.0", author: "oliverbravery", homepage: "",
+    description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
+    permissions: ["state:read", "camera:view"], surfaces: ["monitor", "float"], hosts: [], events: [], tick_s: 0,
   },
   files: ["plugin.js"], digests: {},
   source: { kind: "github", repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40) },

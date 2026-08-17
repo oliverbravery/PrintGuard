@@ -26,7 +26,7 @@ from .adapters import HttpFn
 
 MANIFEST_FILE = "plugin.json"
 SOURCE_FILES = ("plugin.js", "worker.js")
-SURFACES = ("panel", "float")
+SURFACES = ("panel", "float", "monitor")
 MAX_SOURCE_BYTES = 64 * 1024
 MAX_CONFIG_BYTES = 16 * 1024
 MIN_TICK_S = 5.0

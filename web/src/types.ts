@@ -212,7 +212,7 @@ export interface PluginManifest {
   author: string;
   homepage: string;
   permissions: string[];
-  surfaces: ("panel" | "float")[];
+  surfaces: ("panel" | "float" | "monitor")[];
   hosts: string[];
   events: string[];
   tick_s: number;
@@ -263,6 +263,7 @@ export interface PluginEffect {
   cmd?: Record<string, unknown>;
   request?: Record<string, unknown>;
   text?: string;
+  on?: boolean;
 }
 
 export interface EngineStats {
