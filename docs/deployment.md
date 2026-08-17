@@ -6,7 +6,7 @@
 
 </div>
 
-PrintGuard ships **no authentication**. Anyone who can reach `:8000` sees every camera and
+PrintGuard has no authentication of its own. Anyone who can reach `:8000` sees every camera and
 can pause or cancel your printers. Put an identity layer in front before anything leaves
 your trusted network.
 
@@ -45,11 +45,11 @@ flowchart LR
 | Port | Direction | Publish it when |
 |---|---|---|
 | `8000` | In | Always. Dashboard, engine WebSocket, live video, device publishing |
-| `8554` | In | A camera *pushes* RTSP into PrintGuard |
+| `8554` | In | A camera pushes RTSP into PrintGuard |
 | `1935` | In | A camera pushes RTMP |
 | `9997`, `8888` | Internal | Never. They bind to `127.0.0.1` inside the container |
 
-Cameras that PrintGuard *pulls* from, and printers it talks to, need no published ports at
+Cameras that PrintGuard pulls from, and printers it talks to, need no published ports at
 all.
 
 ## Choosing an approach
@@ -72,8 +72,8 @@ authentication is your tailnet identity.
    then run `tailscale up` on each.
 2. Open `http://<hub-machine-name>:8000` from any device on the tailnet. Invite others from
    the Tailscale admin console if they should have access.
-3. For HTTPS, which browsers require before granting camera access, so it is needed for
-   local mode and **This device** publishing from phones:
+3. Browsers only grant camera access on secure pages, so local mode and **This device**
+   publishing from phones both need HTTPS:
 
    ```bash
    sudo tailscale serve --bg --https=443 8000
@@ -86,8 +86,8 @@ authentication is your tailnet identity.
 A public HTTPS URL with no open ports. Every request, WebSockets and video included, must
 pass a Cloudflare Access policy first.
 
-1. In [Zero Trust](https://one.dash.cloudflare.com) → Networks → Tunnels, create a tunnel
-   and copy its token, then add the connector to `docker-compose.yaml`:
+1. In [Zero Trust](https://one.dash.cloudflare.com), under Networks and then Tunnels, create
+   a tunnel and copy its token, then add the connector to `docker-compose.yaml`:
 
    ```yaml
      cloudflared:
@@ -98,8 +98,8 @@ pass a Cloudflare Access policy first.
 
 2. Give the tunnel a public hostname, for example `hub.example.com`, pointing at
    `http://printguard:8000`.
-3. In Zero Trust → Access → Applications, add a self-hosted application for that hostname
-   with a policy such as *Allow → Emails →* the people you trust. Visitors now authenticate
+3. In Zero Trust, under Access and then Applications, add a self-hosted application for that
+   hostname, with a policy that allows the emails of the people you trust. Visitors now authenticate
    before anything reaches PrintGuard.
 4. If the host machine sits on a network you do not fully trust, bind the local port so
    only the tunnel can reach the app: `"127.0.0.1:8000:8000"`.
@@ -138,7 +138,7 @@ PrintGuard's own port to localhost so the proxy is the only way in.
 
 The hub rejects any WebSocket whose `Origin` is not its own. This matters because an auth
 proxy checks the session cookie, and the browser attaches that cookie to sockets opened by
-*other* sites too, so origin checking is what stops a logged-in user's unrelated tabs from
+other sites too, so origin checking is what stops a logged-in user's unrelated tabs from
 driving the engine.
 
 The hub recognises the dashboard automatically when the proxy preserves `Host` or sends
@@ -152,15 +152,15 @@ host, list your public origin:
 
 ## Plugins
 
-Plugins are third-party code, and they run sandboxed with no network and no reach into your
-credentials, cameras or tokens. Two permissions still change what an exposed hub looks like:
+Plugins run in a sandbox with no network and no reach into your credentials, cameras or
+tokens. Two permissions still change what an exposed hub looks like:
 
 | Permission | What it means for an exposed hub |
 |---|---|
 | **Serve its own pages** | The plugin answers requests under `/plugins/<id>/`. Those responses go out through your proxy like anything else, so whatever it serves is as exposed as the dashboard. It is served into a sandboxed origin, so it can never act as the dashboard |
 | **Authorise every request** | The plugin sees every request to the hub, headers included, and can refuse it. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out |
 
-If a plugin locks you out, start the hub with plugins inert and remove it:
+To start the hub with every plugin switched off, add this and then remove the plugin:
 
 ```yaml
     environment:
@@ -176,9 +176,9 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | Check | Why |
 |---|---|
 | No router port-forwards for `8000`, `8554` or `1935` | The hub has no authentication of its own |
-| Only admit people you would hand the printer to | There are no per-user roles: anyone who authenticates sees every camera and controls every printer |
+| Only admit people you would hand the printer to | There are no per-user roles, so anyone who authenticates sees every camera and controls every printer |
 | Bind ports to `127.0.0.1:…` when a proxy on the same host is the only client | Keeps the app unreachable except through the proxy |
-| Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback inside the container; the hub proxies HLS out through `:8000` |
+| Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback inside the container, and the hub proxies HLS out through `:8000` |
 | Set `PRINTGUARD_ORIGINS` only if your proxy rewrites the host header | Otherwise the automatic origin check already covers you |
 | Serve over HTTPS if you issue API tokens | Bearer tokens must never travel in clear. See [API & MCP](api.md) |
 | Grant a plugin nothing you would not grant its author | Especially **Control printers** and **Authorise every request**. `PRINTGUARD_PLUGINS=off` is the way back from a lockout |
@@ -194,7 +194,7 @@ docker compose pull && docker compose up -d
 ```
 
 PrintGuard never updates its own container, and deliberately never asks for the Docker
-socket: a process with the socket has root-equivalent control of the host, which is not a
+socket. A process with that socket has root-equivalent control of the host, which is not a
 trade worth making for a camera watcher. If you want unattended updates, run an external
 image-update tool alongside your stack, or use your NAS platform's own update check.
 

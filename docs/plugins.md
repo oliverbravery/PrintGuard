@@ -6,10 +6,10 @@
 
 </div>
 
-Plugins extend PrintGuard at runtime: a panel on the dashboard, a job that runs on the hub,
-or both. They are third-party code, so none of it is trusted. Everything a plugin does runs
-in a sandbox with no network and no way to reach your credentials, your cameras or your
-tokens, and it only does what you have granted it.
+Plugins are written in JavaScript and run in a sandbox. One can draw a panel on your
+dashboard, run a job on the hub, or do both. They can be granted fine-grained permissions to
+reach an internal API, so developers can safely add features to PrintGuard without waiting on
+a release. A plugin never reaches your credentials, your cameras or your tokens.
 
 - [Installing a plugin](#installing-a-plugin)
 - [What a plugin can and cannot do](#what-a-plugin-can-and-cannot-do)
@@ -21,10 +21,10 @@ tokens, and it only does what you have granted it.
 
 ## Installing a plugin
 
-![Settings → Plugins: an installed plugin, the catalogue, and installing from a repository or a file](assets/plugins.png)
+![The Plugins tab in Settings, with an installed plugin, the catalogue, and installing from a repository or a file](assets/plugins.png)
 
-**Settings → Plugins** lists what you have installed and what the catalogue offers. There
-are three ways in:
+The Plugins tab in Settings lists what you have installed and what the catalogue offers. You
+can install one three ways.
 
 | From | How |
 |---|---|
@@ -32,9 +32,9 @@ are three ways in:
 | A GitHub repository | Paste `owner/repo`, or `owner/repo/path@branch` for one inside a larger repo |
 | A file | Import a `.zip` of the plugin's folder |
 
-A plugin shows as **verified** when the manifest and every source file hash to exactly what
-the catalogue pins at a specific commit. Anything else shows as **third party**: it is not
-reviewed, so read it first. Both run under the same restrictions either way.
+A plugin shows as verified when the manifest and every source file hash to exactly what the
+catalogue pins at a specific commit. Anything else shows as third party, which means nobody
+has reviewed it, so read it first. Both run under the same restrictions either way.
 
 A repository install pins the commit it resolved to, so a plugin never changes underneath
 you. **Update** re-resolves the branch and re-checks the hashes.
@@ -44,16 +44,16 @@ which takes effect immediately.
 
 ## What a plugin can and cannot do
 
-A plugin is a pure function. PrintGuard hands it the state its permissions allow, and it
-hands back what to draw and a list of things it would like done. PrintGuard does them, or
-refuses. The plugin performs nothing itself.
+PrintGuard hands a plugin the state its permissions allow, and gets back what to draw and a
+list of things to do. PrintGuard is what does them, and it checks each one against your
+permissions first.
 
 | Half | Runs in | On a hub | In local mode |
 |---|---|---|---|
 | `plugin.js` | An iframe with an opaque origin and `default-src 'none'` | ✅ | ✅ |
 | `worker.js` | [QuickJS](https://github.com/quickjs-ng/quickjs) compiled to WebAssembly, under wasmtime | ✅ | The browser sandbox, headless |
 
-Only the hub can serve a plugin's own routes or let one gate requests: local mode has no
+Only the hub can serve a plugin's own routes or let one gate requests, since local mode has no
 server for either to mean anything.
 
 | Attack | What stops it |
@@ -63,12 +63,12 @@ server for either to mean anything.
 | Read your camera frames | A `camera` node is a placeholder PrintGuard fills with its own player. The video never enters the sandbox, and a cross-origin frame cannot read it |
 | Hang or exhaust the hub | The worker runs against a memory cap and a CPU budget, and traps in milliseconds. A plugin that fails is disabled and reported |
 | Do something it was not granted | Every command maps to a permission, checked at the sandbox edge before it goes anywhere |
-| Pretend to be PrintGuard | Plugins have no styling and no markup of their own; PrintGuard draws every node itself. A plugin's own pages are served into a sandboxed origin that is not the dashboard's |
+| Pretend to be PrintGuard | Plugins have no styling and no markup of their own, and PrintGuard draws every node itself. A plugin's own pages are served into a sandboxed origin that is not the dashboard's |
 | Change after review | The manifest and every source file are pinned by SHA-256 at a commit |
 
-A plugin that holds **Authorise every request** can lock you out of your own hub. Start it
-with `PRINTGUARD_PLUGINS=off` to bring it up with every plugin inert, then remove the
-plugin.
+A plugin that holds **Authorise every request** can lock you out of your own hub. To start the
+hub with every plugin switched off, add `PRINTGUARD_PLUGINS=off` to its environment, then
+remove the plugin.
 
 ## Permissions
 
@@ -83,13 +83,13 @@ plugin.
 | `routes` | Answer requests under `/plugins/<id>/` | ✅ |
 | `gate` | See and refuse every other request to the hub | ✅ |
 
-Storing its own data needs no permission: it is the plugin's, capped at 16 KB, and part of
-your PrintGuard state.
+Storing its own data needs no permission. The store is the plugin's own, capped at 16 KB, and
+saved as part of your PrintGuard state.
 
 ## Writing a plugin
 
-A plugin is a folder with a manifest and one or two JavaScript files. No build step, no
-dependencies, no minifying: what you publish is what people read before they install it.
+A plugin is a folder with a manifest and one or two JavaScript files. There's no build step
+and nothing to minify, so what you publish is what people read before they install it.
 
 ```
 my-plugin/
@@ -114,9 +114,9 @@ my-plugin/
 }
 ```
 
-`surfaces` says where the panel appears: `panel` on the dashboard, `float` to offer a
-pop-out window. `hosts` lists the only hosts `ctx.http` may reach. `events` and `tick_s`
-are the worker's: which engine events wake it, and how often to run it anyway.
+`surfaces` says where the panel appears, `panel` on the dashboard and `float` to offer a
+pop-out window. `hosts` lists the only hosts `ctx.http` may reach. `events` and `tick_s` are
+the worker's, naming which engine events wake it and how often to run it anyway.
 
 Both files get `plugin` to register with, and every handler gets a `ctx`:
 
@@ -129,8 +129,8 @@ Both files get `plugin` to register with, and every handler gets a `ctx`:
 | `ctx.notify(text)` | Raise a message in the dashboard |
 | `ctx.log(text)` | Write a line to PrintGuard's log |
 
-Each file runs inside a function with nothing else in scope. There is no `import`, no
-`fetch`, no DOM and no storage, by design: everything you need arrives on `ctx`.
+Each file runs inside a function with nothing else in scope, so there's no `import`, no
+`fetch`, no DOM and no storage. Everything you need arrives on `ctx`.
 
 Install it with **Import a .zip** while you work on it, or point PrintGuard at your repo
 and press **Update** as you push.
@@ -171,13 +171,13 @@ plugin.render((ctx) => ({
 }));
 ```
 
-[`plugins/picture-in-picture`](../plugins/picture-in-picture) is the whole of a shipped
-plugin, in about 25 lines.
+[`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in about 25
+lines.
 
 ## The worker half
 
-`worker.js` runs without a UI: on the engine events its manifest lists, on its own timer,
-and for requests to its routes. It gets a fresh VM each time, so anything it needs to
+`worker.js` runs without a UI. It wakes on the engine events its manifest lists, on its own
+timer, and for requests to its routes. It gets a fresh VM each time, so anything it needs to
 remember goes in `ctx.store`.
 
 These are the events a worker can name in `events`:
@@ -191,7 +191,7 @@ These are the events a worker can name in `events`:
 | `error` | Anything that failed | `message` |
 | `state` | The full snapshot, once a second | Everything your permissions allow |
 
-`result` is the one to use for "do something whenever the risk goes over *x*": it fires per
+`result` is the one to use for "do something whenever the risk goes over x". It fires per
 inference, with the raw score, before any threshold or streak logic the monitor applies. A
 worker still busy with the previous event is skipped rather than queued behind it, so a slow
 plugin drops events instead of falling further behind.
@@ -206,7 +206,7 @@ plugin.on("result", (event, ctx) => {
 
 That needs `printer:control` and `notify`, and it fires on a single frame. A monitor's own
 defect response waits for a streak, so a plugin acting on one frame will be twitchier than
-PrintGuard is by default: count consecutive hits in `ctx.store` if you want the same
+PrintGuard is by default. Count consecutive hits in `ctx.store` if you want the same
 steadiness.
 
 ```js
@@ -232,8 +232,8 @@ so they can render and script themselves but can never act as the dashboard.
 
 `gate` is consulted for every other request when the plugin holds that permission, apart from
 `/api/health`, which stays open so uptime checks keep working. Answers are cached briefly per
-session and path. Anything but `true` refuses. A gate that
-cannot answer refuses too, so a broken plugin cannot open the hub up.
+session and path. Anything but `true` refuses, and a gate that cannot answer refuses too, so a
+broken plugin cannot open the hub up.
 
 ## Publishing
 
@@ -246,8 +246,8 @@ uv run python plugins/pin.py
 ```
 
 That rewrites `plugins/catalogue.json` with the commit the plugin last changed in and the
-hash of every file. Commit the plugin first: a pin has to describe bytes already in
+hash of every file. Commit the plugin first, since a pin has to describe bytes already in
 history. Run it again after every change, or the plugin stops verifying.
 
-Anyone can run their own catalogue: point `catalogue_url` in settings at a JSON file of the
+You can run your own catalogue by pointing `catalogue_url` in settings at a JSON file of the
 same shape.
