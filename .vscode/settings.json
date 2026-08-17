@@ -1,0 +1,8 @@
+{
+  "json.schemas": [
+    {
+      "fileMatch": ["/plugins/*/plugin.json"],
+      "url": "./plugins/plugin.schema.json"
+    }
+  ]
+}
