@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { log } from "./log";
-import { commandAllowed, outboundRequest, PluginHost, projectState } from "./plugins";
+import { commandAllowed, outboundRequest, PluginHost, projectEvent, projectState } from "./plugins";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
 import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
@@ -276,9 +276,12 @@ export const useStore = create<PgStore>((set, get) => {
   };
 
   const forwardToWorker = (id: string, event: Record<string, unknown>) => {
-    const plugin = get().engine?.plugins.find((p) => p.id === id);
+    const engine = get().engine;
+    const plugin = engine?.plugins.find((p) => p.id === id);
     const host = hosts.get(`${id}:worker.js`);
-    if (plugin && host) void host.event(event, pluginState(plugin));
+    if (!engine || !plugin || !host) return;
+    const seen = projectEvent(event, engine.plugin_events, plugin.granted, engine.plugin_permissions);
+    if (seen) void host.event(seen, pluginState(plugin));
   };
 
   const startPlugin = (id: string, sources: Record<string, string>) => {

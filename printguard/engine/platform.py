@@ -79,6 +79,10 @@ class PluginRuntime(Protocol):
         """Asks any gating plugin to allow a request, returning None when none gates."""
         ...
 
+    def gate_paths(self) -> tuple[str, ...]:
+        """Returns the route prefixes a gating plugin's own pages are served on."""
+        ...
+
     async def close(self) -> None:
         """Tears every sandbox down."""
         ...

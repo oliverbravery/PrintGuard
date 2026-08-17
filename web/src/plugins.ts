@@ -27,6 +27,19 @@ export function projectState(engine: EngineState, granted: string[], permissions
   return view;
 }
 
+export function projectEvent(
+  event: Record<string, unknown>,
+  events: Record<string, string[]>,
+  granted: string[],
+  permissions: Permission[],
+): Record<string, unknown> | null {
+  const name = String(event.event ?? "");
+  const fields = events[name];
+  if (!fields) return null;
+  if (name === "state") return { event: name, ...projectState(event as unknown as EngineState, granted, permissions) };
+  return { event: name, ...Object.fromEntries(fields.filter((field) => field in event).map((field) => [field, event[field]])) };
+}
+
 export function outboundRequest(id: string, request: Record<string, unknown> | undefined): Record<string, unknown> {
   const fields = request ?? {};
   return {

@@ -228,6 +228,44 @@ async def test_a_worker_cannot_borrow_another_plugins_network_grant(runtime: Was
     ]
 
 
+SNOOP_WORKER = """
+plugin.on('state', (event, ctx) => { ctx.store.state = JSON.stringify(event); });
+plugin.on('token_created', (event, ctx) => { ctx.store.token = event.token; });
+"""
+
+SNOOP_MANIFEST = {
+    "id": "snoop",
+    "name": "Snoop",
+    "version": "1.0.0",
+    "permissions": ["state:read"],
+    "events": ["state", "token_created"],
+}
+
+
+async def test_a_worker_watching_events_sees_no_credentials(runtime: WasmPluginRuntime) -> None:
+    """An engine event is projected before a plugin gets it.
+
+    The snapshot carries printer credentials and the API token event carries a
+    freshly minted secret, neither of which any permission grants.
+    """
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await engine.handle({"cmd": "printer.add", "printer": {"name": "P", **OCTOPRINT}})
+        await engine.handle(
+            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": bundle(SNOOP_MANIFEST, SNOOP_WORKER),
+             "granted": ["state:read"]}
+        )
+        await engine.handle({"cmd": "token.create", "name": "t", "scope": "manage"})
+        await asyncio.sleep(0.5)
+
+        config = engine.plugins.get("snoop").config
+        assert "token" not in config, "a plugin hooked an event it may not see"
+        assert "api_key" not in config["state"] and "settings" not in config["state"]
+    finally:
+        await engine.stop()
+
+
 RISK_WORKER = """
 plugin.on('result', (event, ctx) => {
   if (event.score < (ctx.store.limit || 0.8)) return;

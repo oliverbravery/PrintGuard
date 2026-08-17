@@ -171,8 +171,12 @@ class WasmPluginRuntime:
         if event.get("event") == "state":
             self._state = event
         for sandbox in list(self._sandboxes.values()):
-            if event.get("event") in sandbox.plugin.manifest["events"] and sandbox.plugin.id not in self._busy:
-                asyncio.ensure_future(self._invoke(sandbox, "event", event=event))
+            plugin = sandbox.plugin
+            if event.get("event") not in plugin.manifest["events"] or plugin.id in self._busy:
+                continue
+            seen = plugins.project_event(event, plugin.granted)
+            if seen:
+                asyncio.ensure_future(self._invoke(sandbox, "event", event=seen))
 
     async def reload(self, running: list[Plugin]) -> None:
         """Starts sandboxes for plugins with a worker and drops the rest."""
@@ -193,6 +197,14 @@ class WasmPluginRuntime:
             return None
         result = await self._invoke(sandbox, "request", request=request)
         return result if isinstance(result, dict) else None
+
+    def gate_paths(self) -> tuple[str, ...]:
+        """Route prefixes belonging to the plugins that gate requests.
+
+        A gate is asked about every request except its own pages, which stay
+        open so the sign-in page it serves cannot be refused by itself.
+        """
+        return tuple(f"/plugins/{s.plugin.id}/" for s in self._sandboxes.values() if s.plugin.may("gate"))
 
     async def authorise(self, request: dict[str, Any]) -> bool | None:
         """Asks the gating plugin whether a request may proceed.

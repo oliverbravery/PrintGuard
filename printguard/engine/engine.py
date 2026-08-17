@@ -242,6 +242,7 @@ class Engine:
             "notifiers": notifiers_meta(),
             "plugins": [p.public() for p in self.plugins.values()],
             "plugin_permissions": plugins.permissions_meta(),
+            "plugin_events": plugins.EVENTS,
             "plugin_host": self.platform.plugin_runtime is not None,
         }
 

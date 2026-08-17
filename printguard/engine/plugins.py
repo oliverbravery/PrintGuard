@@ -79,7 +79,7 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
     },
     "routes": {
         "label": "Serve its own pages",
-        "description": "Answer requests under /plugins/<id>/ on the hub.",
+        "description": "Answer requests under /plugins/<id>/ on the hub, reading the headers each one carries, including your session cookie.",
         "hub_only": True,
     },
     "gate": {
@@ -93,6 +93,22 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
 PERMISSION_COMMANDS = {
     command: name for name, spec in PERMISSIONS.items() for command in spec.get("commands", [])
 }
+
+EVENTS: dict[str, list[str]] = {
+    "result": ["monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts"],
+    "alert": ["monitor_id", "score", "action", "ts"],
+    "warning": ["monitor_id", "message", "recovered"],
+    "device": ["printer_id", "status", "progress", "job"],
+    "error": ["message"],
+    "state": [],
+}
+"""The events a plugin may hook, and the fields each one hands it.
+
+Engine events carry far more than a plugin's grants allow, a printer's
+credentials in a state snapshot or a new API token's secret, so a plugin is
+handed these fields and nothing else, and an event missing from here never
+reaches one at all.
+"""
 
 
 def permissions_meta() -> list[dict[str, Any]]:
@@ -112,6 +128,22 @@ def project_state(state: dict[str, Any], granted: list[str]) -> dict[str, Any]:
         for collection, fields in PERMISSIONS.get(name, {}).get("fields", {}).items():
             view[collection] = [{k: item[k] for k in fields if k in item} for item in state.get(collection, [])]
     return view
+
+
+def project_event(event: dict[str, Any], granted: list[str]) -> dict[str, Any] | None:
+    """Cuts an engine event down to what a plugin may see, or None if it may not.
+
+    The state event is replaced by the projection its grants allow, so a plugin
+    watching it reads the same fields it gets on ``ctx.state`` rather than the
+    whole snapshot.
+    """
+    name = str(event.get("event", ""))
+    fields = EVENTS.get(name)
+    if fields is None:
+        return None
+    if name == "state":
+        return {"event": name, **project_state(event, granted)}
+    return {"event": name, **{field: event[field] for field in fields if field in event}}
 
 
 def canonical(value: Any) -> bytes:
@@ -153,7 +185,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         raise ValueError("plugin version is missing or unusable")
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
     hosts = sorted({str(h).strip().lower() for h in raw.get("hosts", []) if str(h).strip()})
-    events = sorted({str(e).strip() for e in raw.get("events", []) if str(e).strip()})
+    events = sorted({str(e).strip() for e in raw.get("events", [])} & set(EVENTS))
     try:
         tick_s = max(0.0, float(raw.get("tick_s", 0)))
     except (TypeError, ValueError):

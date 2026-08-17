@@ -311,6 +311,7 @@ export interface EngineState {
   notifiers: AdapterMeta[];
   plugins: PluginRecord[];
   plugin_permissions: Permission[];
+  plugin_events: Record<string, string[]>;
   plugin_host: boolean;
 }
 
