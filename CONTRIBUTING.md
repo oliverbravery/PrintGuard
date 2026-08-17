@@ -163,7 +163,8 @@ with the ones it does, and declares the network hosts you would expect.
 - Keep it minimal. Prefer consolidating existing code over adding parallel variants, and leave
   out speculative abstractions and defensive defaults.
 - Write no comments in the UI. The TypeScript and React code carries none, since names document
-  intent. Python modules, classes and public methods get docstrings, but inline comments only
+  intent. [plugins/plugin.d.ts](plugins/plugin.d.ts) is the exception, where TSDoc on every
+  member is what a plugin author reads on hover. Python modules, classes and public methods get docstrings, but inline comments only
   where the why is genuinely non-obvious.
 - Write docstrings in Google style, with `Args:`, `Returns:` and `Raises:` whenever a function
   takes arguments, gives something back or fails. Types belong in the signature, so a docstring
