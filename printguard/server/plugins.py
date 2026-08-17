@@ -43,9 +43,9 @@ SHIM = """
 import * as __io from "qjs:std";
 const __input = JSON.parse(__io.in.readAsString());
 const __effects = [];
-const __hooks = { events: {}, route: null, gate: null };
+const __hooks = { events: new Map(), route: null, gate: null };
 const plugin = {
-  on(name, fn) { __hooks.events[name] = fn; },
+  on(name, fn) { __hooks.events.set(String(name), fn); },
   route(fn) { __hooks.route = fn; },
   gate(fn) { __hooks.gate = fn; },
 };
@@ -64,7 +64,7 @@ DRIVER = """
 })(plugin);
 let __result = null;
 if (__input.kind === "event" || __input.kind === "tick") {
-  const handler = __hooks.events[__input.event.event];
+  const handler = __hooks.events.get(String(__input.event.event));
   if (handler) handler(__input.event, ctx);
 } else if (__input.kind === "request" && __hooks.route) {
   __result = __hooks.route(__input.request, ctx);

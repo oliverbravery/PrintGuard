@@ -41,7 +41,7 @@
           /* as above */
         }
 
-        let hooks = { view: null, action: null, events: {} };
+        let hooks = { view: null, action: null, events: new Map() };
         let effects = [];
         let store = {};
 
@@ -65,7 +65,7 @@
         }
 
         function load(code) {
-          hooks = { view: null, action: null, events: {} };
+          hooks = { view: null, action: null, events: new Map() };
           new Function("plugin", code)({
             render(fn) {
               hooks.view = fn;
@@ -74,7 +74,7 @@
               hooks.action = fn;
             },
             on(name, fn) {
-              hooks.events[name] = fn;
+              hooks.events.set(String(name), fn);
             },
           });
         }
@@ -84,7 +84,7 @@
           effects = [];
           let tree = null;
           if (message.t === "action" && hooks.action) hooks.action(message.name, message.arg, ctx);
-          else if (message.t === "event" && hooks.events[message.event.event]) hooks.events[message.event.event](message.event, ctx);
+          else if (message.t === "event") hooks.events.get(String(message.event.event))?.(message.event, ctx);
           if (hooks.view) tree = hooks.view(ctx);
           store = ctx.store;
           return { tree, store, effects };
