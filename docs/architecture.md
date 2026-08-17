@@ -9,7 +9,7 @@
 PrintGuard is a monolith whose engine is shared code, running unchanged on CPython in hub
 mode and on Pyodide in the browser in local mode. Everything mode-specific is confined to
 one `Platform` implementation per runtime. The two modes cannot drift apart because there is
-nothing to drift: they execute the same files.
+nothing to drift, since they execute the same files.
 
 - [The shape of it](#the-shape-of-it)
 - [The platform contract](#the-platform-contract)
@@ -80,7 +80,7 @@ transport it is on.
 > [!IMPORTANT]
 > **Never add mode-specific logic anywhere else.** If a feature needs a runtime service,
 > extend the Platform contract on both sides with identical signatures. Where a mode merely
-> lacks a capability, express that as platform *data*, such as `update_repo` being `None` in
+> lacks a capability, express that as platform data, such as `update_repo` being `None` in
 > the browser, rather than a mode check.
 
 ## The protocol
@@ -121,13 +121,13 @@ command responses are never evicted by telemetry.
 
 ## Resources and monitors
 
-A **camera** is a video source and a **printer** is a control-service connection. Both are
-registered resources, created and deleted only in their own registry. A **monitor** binds
-one of each, the printer optionally, and carries the inference thresholds and the
+A camera is a video source and a printer is a control-service connection. Both are
+registered resources, created and deleted only in their own registry. A monitor binds one of
+each, the printer optionally, and carries the inference thresholds and the
 defect-response policy.
 
 A printer integration that exposes a webcam registers it automatically as a camera owned by
-that printer through `Camera.printer_id`: the OctoPrint and Moonraker stream URLs, the
+that printer through `Camera.printer_id`, covering the OctoPrint and Moonraker stream URLs, the
 Elegoo Centauri chamber camera, and the Bambu chamber camera, over RTSP on the X1 and H2
 series or the proprietary port 6000 protocol on the A1 and P1. The adapter's optional
 `cameras()` declares them, and the engine reconciles them on printer add and update, and on
@@ -144,11 +144,11 @@ together dwarf the rest of the snapshot and the history is wanted only while tha
 open.
 
 `report.send` is the anonymous bug report
-([`engine/reports.py`](../printguard/engine/reports.py)): one user-initiated POST of a Sentry
-feedback envelope carrying the description, an optional contact email, user-attached files,
+([`engine/reports.py`](../printguard/engine/reports.py)). It is one user-initiated POST of a
+Sentry feedback envelope carrying the description, an optional contact email, user-attached files,
 a diagnostics bundle and the engine and UI log tails, with every credential redacted, sent
 through `platform.http` so it works identically in both modes. There is no SDK and no
-automatic telemetry; nothing is sent unless the user submits a report. `report.bundle` packs
+automatic telemetry, and nothing is sent unless the user submits a report. `report.bundle` packs
 those same scrubbed files into a zip the UI downloads instead, for a user who would rather
 read the diagnostics or take them somewhere else.
 
@@ -160,8 +160,8 @@ no console exists, since the desktop app sets `LOG_FILE` in its data directory, 
 bounded in-memory tail.
 
 Emitted alert, warning, error and device events are logged as they broadcast, so the tail
-carries the same timeline the UI shows plus the lifecycle around it: boot, camera attach and
-drop, resource registration, printer actions, API and socket denials. Uvicorn runs without
+carries the same timeline the UI shows plus the lifecycle around it, so boot, camera attach
+and drop, resource registration, printer actions, and API and socket denials. Uvicorn runs without
 its own log config so its records land in the same handlers. The UI keeps its own ring
 ([`web/src/log.ts`](../web/src/log.ts)) of boot milestones, socket drops, toasts, console
 warnings and errors, and uncaught exceptions.
@@ -177,7 +177,7 @@ the same commands the UI sends, so they add no logic of their own and cannot dri
 dashboard. Local mode never mounts them.
 
 - [`engine.request()`](../printguard/engine/engine.py) turns the broadcast protocol into
-  request and response by correlating a `req_id`; `engine.snapshot()` encodes a camera's
+  request and response by correlating a `req_id`, and `engine.snapshot()` encodes a camera's
   freshest frame as JPEG. Both are mode-agnostic engine methods.
 - [`server/api.py`](../printguard/server/api.py) is a FastAPI sub-app at `/api/v1` whose
   routes delegate to those methods, each tagged with the scope it requires.
@@ -191,15 +191,16 @@ dashboard. Local mode never mounts them.
   command routing are pure functions, wrapped in an `aiomqtt` session that reconnects on
   failure and on a settings change. Control is gated by broker access, not by a token.
 
-REST and MCP are gated by cumulative scopes, `read` ⊂ `control` ⊂ `manage`. See
+REST and MCP are gated by cumulative scopes, where `control` includes `read` and `manage`
+includes both. See
 [API & MCP](api.md).
 
 ## Plugins
 
 Plugins are third-party code, so the engine never runs any of it.
-[`engine/plugins.py`](../printguard/engine/plugins.py) only sources it: fetch from GitHub at
-a resolved commit or unpack a zip, validate the manifest, hash the manifest and every source
-file, and compare that against the reviewed catalogue. The registry holds the result beside
+[`engine/plugins.py`](../printguard/engine/plugins.py) only sources it. It fetches from
+GitHub at a resolved commit or unpacks a zip, validates the manifest, hashes the manifest and
+every source file, and compares that against the reviewed catalogue. The registry holds the result beside
 the cameras, printers and tokens, and persists through the same `save_state`.
 
 Execution is a sandbox on each side, and the permission table in `PERMISSIONS` is the one
@@ -215,10 +216,9 @@ flowchart LR
     ui -- "checked effects" --> engine
 ```
 
-Neither sandbox performs anything itself. Both return a list of effects, and each side
-checks every one against what the user granted before it goes anywhere. Enforcement has to
-sit at the sandbox edge: by the time a command reaches the engine it is indistinguishable
-from one the dashboard sent.
+A sandbox asks for effects and PrintGuard is what carries them out, checking each one against
+what the user granted first. That check has to happen at the sandbox edge, because by the
+time a command reaches the engine it is indistinguishable from one the dashboard sent.
 
 A plugin's source never rides in the state snapshot, which broadcasts every second. It
 travels on request through `plugin.code`, like `snapshot.get` and `history.get`. Since that
@@ -226,8 +226,8 @@ response is broadcast to every connected client, a tab must ignore one whose `re
 its own, or a second tab's response starts a duplicate sandbox.
 
 The hub also mounts `/plugins/<id>/` onto a plugin's route handler, and, for a plugin holding
-`gate`, consults it before serving anything else. `PRINTGUARD_PLUGINS=off` brings the hub up
-with all of it inert. See [plugins](plugins.md).
+`gate`, consults it before serving anything else. `PRINTGUARD_PLUGINS=off` starts the hub with every
+plugin switched off. See [plugins](plugins.md).
 
 ## Scheduling inference
 
@@ -239,9 +239,9 @@ is fully dynamic:
    adding concurrency until throughput stops growing, so the division holds rather than
    extrapolating past a ceiling the host cannot reach. See
    [model runtimes](hardware.md#model-runtimes).
-2. That capacity is water-filled across in-use cameras with max-min fairness: no camera is
-   allocated beyond its native fps, and surplus flows to cameras that can use it.
-3. A free worker takes the most overdue camera and grabs its **freshest** frame at dispatch
+2. That capacity is water-filled across in-use cameras with max-min fairness, so no camera is
+   allocated beyond its native fps and surplus flows to cameras that can use it.
+3. A free worker takes the most overdue camera and grabs its freshest frame at dispatch
    time. Frames carry a sequence identity, so the same frame is never inferred twice and
    results always describe the present, not a backlog.
 
@@ -292,7 +292,7 @@ push notification.
 
 ## Failing safely
 
-A monitor's **watching** state gates inference
+A monitor's watching state gates inference
 ([`monitors.monitor_watching`](../printguard/engine/monitors.py)):
 
 | Linked printer reports | Watched? | Why |
@@ -303,9 +303,9 @@ A monitor's **watching** state gates inference
 | `offline`, unreachable | Yes | Losing the signal must not stop monitoring |
 | `idle`, `paused`, `error` | No, standby | Positively not printing |
 
-Only a *positive* "not printing" stands inference down. The watchdog loop then keeps the
-pipeline honest: each sustained condition warns exactly once, after a grace period so a
-brief outage passes unremarked, and announces recovery once health has held.
+Only a positive "not printing" stands inference down. The watchdog loop then keeps the
+pipeline honest. Each sustained condition warns exactly once, after a grace period so a brief
+outage passes unremarked, and announces recovery once health has held.
 
 ```mermaid
 stateDiagram-v2
@@ -323,14 +323,13 @@ stateDiagram-v2
     end note
 ```
 
-The three watchdog conditions are a watched camera going **offline**, a watched camera
-staying online but producing no fresh frames, since a frozen RTSP feed must not pass for
-monitoring, and a linked printer service becoming **unreachable**, since defects could no
-longer pause it.
+The three watchdog conditions are a watched camera going offline, a watched camera staying
+online but producing no fresh frames, since a frozen RTSP feed must not pass for monitoring,
+and a linked printer service becoming unreachable, since defects could no longer pause it.
 
 Warnings surface as dashboard toasts and go out through the notification channels, so the
-watchdog suppresses flapping rather than repeating itself: a source that reconnects and
-drops again is still the same warning, and each announced recovery doubles how long the
+watchdog suppresses flapping rather than repeating itself. A source that reconnects and drops
+again is still the same warning, and each announced recovery doubles how long the
 next one must hold before it is announced, up to fifteen minutes. Outages are never
 delayed, only recoveries. Notifier delivery failures and inference crashes emit `error`
 events. There is no silent `except: pass` anywhere in the alert path.
@@ -378,5 +377,5 @@ and when no hub answers the hub card becomes a Docker self-host link.
 Because the demo is most people's first contact with PrintGuard, local mode opens a notice
 listing what a hub adds (`web/src/components/DemoDialog.tsx`). It shows once per browser,
 keyed on `pg.demo.seen` in `localStorage`, and the header's **local** chip reopens it. The
-list is copy, not capability data: the dialogs already hide what a mode cannot do, through
-each adapter's `browser_ok` flag.
+list is copy, not capability data, since the dialogs already hide what a mode cannot do
+through each adapter's `browser_ok` flag.

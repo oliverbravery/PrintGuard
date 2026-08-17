@@ -51,8 +51,8 @@ node renderer.
 ## Documentation is part of the change
 
 A change is not finished while a doc still describes the old behaviour. Treat the docs like
-the tests: if your change touches something a page below covers, update that page in the
-same pull request, and delete anything the change makes wrong or redundant.
+the tests. If your change touches something a page below covers, update that page in the same
+pull request, and delete anything the change makes wrong or redundant.
 
 | If you change | Update |
 |---|---|
@@ -69,10 +69,12 @@ same pull request, and delete anything the change makes wrong or redundant.
 
 Writing style for docs and release notes:
 
-- British English. Concise and factual: no filler, no salesmanship, no emoji in prose.
-- **No em dashes.** Use a comma, a colon, brackets, or a spaced hyphen.
-- Prefer a table or a diagram over a long paragraph. Mermaid renders on GitHub, so use it
-  for flows, sequences and state.
+- British English, concise and factual, with no filler, no salesmanship and no emoji in prose.
+- Only punctuation you would type. No em dashes and no arrows, so write "the Plugins tab in
+  Settings" rather than drawing a path with symbols.
+- Start a new sentence instead of hanging a list or an explanation off a colon.
+- Prefer a table or a diagram over a long paragraph. Mermaid renders on GitHub, so use it for
+  flows, sequences and state.
 - Link to the page that explains a thing rather than restating it. Duplicated docs rot.
 
 ## Regenerating the docs screenshots
@@ -98,10 +100,10 @@ HTTP function.
 1. Create `printguard/engine/integrations/<service>.py` subclassing
    [`IntegrationAdapter`](printguard/engine/integrations/base.py):
    - implement `fetch_state()`, normalising to the canonical `DeviceStatus` values.
-     `offline` must mean "unreachable", not "idle", because it keeps inference watching;
-   - implement `send()` for pause, resume and cancel, raising `RuntimeError` on rejection;
+     `offline` must mean "unreachable", not "idle", because it keeps inference watching.
+   - implement `send()` for pause, resume and cancel, raising `RuntimeError` on rejection.
    - describe the config form as a JSON Schema, where `secret: true` masks fields and
-     `placeholder` hints at the expected value;
+     `placeholder` hints at the expected value.
    - set `docs_url` to the official API reference. It is required for review.
 2. Register an instance in
    [`integrations/__init__.py`](printguard/engine/integrations/__init__.py).
@@ -119,9 +121,9 @@ Notifiers deliver defect snapshots and watchdog warnings.
    [`NotifierAdapter`](printguard/engine/notifiers/base.py):
    - implement `send(http, config, title, body, image)`. Attach the JPEG `image` when the
      service supports uploads, where `multipart_form()` in the same module builds the body,
-     and raise `RuntimeError` with the service's error detail on rejection;
+     and raise `RuntimeError` with the service's error detail on rejection.
    - set `browser_ok = False` if the service sends no CORS headers, which offers it in hub
-     mode only. Check from a browser console before assuming;
+     mode only. Check from a browser console before assuming.
    - JSON-schema config and `docs_url`, exactly as for integrations.
 2. Register an instance in
    [`notifiers/__init__.py`](printguard/engine/notifiers/__init__.py).
@@ -132,37 +134,38 @@ adapter.
 
 ## Adding a plugin to the catalogue
 
-Plugins live outside the release cycle: anyone can publish one to a GitHub repository and
+Plugins live outside the release cycle, so anyone can publish one to a GitHub repository and
 anyone can install it. The catalogue is the list I have read, and being on it is what makes
 a plugin show as **verified**.
 
-1. Write it as [docs/plugins.md](docs/plugins.md#writing-a-plugin) describes. Plain
-   JavaScript, no build step, no minifying: it has to be readable to be reviewed.
+1. Write it as [docs/plugins.md](docs/plugins.md#writing-a-plugin) describes. It is plain
+   JavaScript with no build step and nothing minified, since it has to be readable to be
+   reviewed.
 2. Open a pull request adding the folder under `plugins/`.
 3. Run `uv run python plugins/pin.py` and commit the catalogue it rewrites. It pins the
-   commit the plugin last changed in and the hash of every file, so it has to run *after*
+   commit the plugin last changed in and the hash of every file, so it has to run after
    the plugin is committed, and again after every change to it.
 
-What I look for: it asks for no permission it does not use, it does nothing surprising with
-the ones it does, and its network hosts are declared and expected.
+What I look for is that it asks for no permission it does not use, does nothing surprising
+with the ones it does, and declares the network hosts you would expect.
 
 ## Ground rules
 
-- **No mode forks.** If shared code needs something runtime-specific, extend the `Platform`
-  protocol on both sides with identical signatures. Never branch on mode.
-- **Fail loudly.** Anything on the alert path that can fail must emit an `error` or `warning`
-  event. No bare `except: pass` where a user would want to know.
-- **Minimal code.** Prefer consolidating existing code over adding parallel variants. No
-  speculative abstractions or defensive defaults.
-- **No comments in the UI.** The TypeScript and React code carries none: names document
+- Never fork on mode. If shared code needs something runtime-specific, extend the `Platform`
+  protocol on both sides with identical signatures.
+- Fail loudly. Anything on the alert path that can fail must emit an `error` or `warning`
+  event, so no bare `except: pass` where a user would want to know.
+- Keep it minimal. Prefer consolidating existing code over adding parallel variants, and leave
+  out speculative abstractions and defensive defaults.
+- Write no comments in the UI. The TypeScript and React code carries none, since names document
   intent. Python modules, classes and public methods get docstrings, but inline comments only
-  where the *why* is genuinely non-obvious.
-- **Docs travel with the code.** See [above](#documentation-is-part-of-the-change).
+  where the why is genuinely non-obvious.
+- Docs travel with the code. See [above](#documentation-is-part-of-the-change).
 
 ## Release cycle
 
 Merging to `main` starts the release process, so every pull request carries its own release
-metadata: a version bump and a changelog entry.
+metadata, meaning a version bump and a changelog entry.
 
 ```bash
 uv version --bump patch   # or minor / major (also updates uv.lock)
@@ -193,15 +196,14 @@ A pull request can only merge once three required checks pass:
 On merge, the [release workflow](.github/workflows/release.yml):
 
 1. builds and pushes the images to `ghcr.io/oliverbravery/printguard`, tagged `X.Y.Z`, `X.Y`
-   and `latest`, plus the `-intel` and `-nvidia` variants;
+   and `latest`, plus the `-intel` and `-nvidia` variants.
 2. only once the images are published, tags the merge commit `vX.Y.Z` and creates the GitHub
-   release with the changelog section as its notes, so a failed build never becomes a
-   release;
-3. deploys the in-browser demo to GitHub Pages;
+   release with the changelog section as its notes, so a failed build never becomes a release.
+3. deploys the in-browser demo to GitHub Pages.
 4. builds the macOS and Windows desktop apps and attaches them to the release.
 
-Docker, for servers and NAS boxes, and the desktop app, for personal computers, are the
-supported distributions.
+Docker is the supported distribution for servers and NAS boxes, and the desktop app is the
+one for personal computers.
 
 ## What a merge does to the issues it fixes
 
