@@ -22,7 +22,7 @@
       ],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/picture-in-picture",
-      "ref": "14fa992d1dbf5cf56c60b8a9ea1c05d60ab1b9b1",
+      "ref": "9cc35d7df3baa42379be21942815ef9f67e375db",
       "digests": {
         "plugin.json": "76d44aa72df4180cc37507d5265d7f04eefc03370a14107287f82c42c67fa3ef",
         "plugin.js": "6bcbed13a51804063e8b56c693769bd1dde44a2526a652bc8a42977a64b4c371"
