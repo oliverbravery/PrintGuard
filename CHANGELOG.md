@@ -11,7 +11,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
-- **A plugin store, in the Plugins tab in Settings.** Plugins are written in JavaScript and
+- A plugin store, in the Plugins tab in Settings. Plugins are written in JavaScript and
   run in a sandbox, and one can draw a panel on your dashboard, run a job on the hub, or do
   both. You can install verified plugins from the catalogue, or install them from a GitHub
   repo or a zip. They can be granted fine-grained permissions to reach an internal API, so
@@ -25,7 +25,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Fixed
 
-- **A camera that keeps dropping out no longer notifies you every time it reconnects.** The
+- A camera that keeps dropping out no longer notifies you every time it reconnects. The
   watchdog announced a recovery the moment a feed came back, so a source that reconnected in
   a loop pushed an "offline" alert and a "back" alert on every cycle, on ntfy and every other
   channel alike. Raising the monitor's cooldown did not help, because that setting is the
@@ -34,14 +34,14 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   recovery doubles what the next one has to hold for, up to fifteen minutes, so a source that
   keeps flapping gets quieter rather than louder. Outages themselves are never delayed. Worth
   pulling if you run a camera on marginal wifi. Thanks to @subpanel0576 for the report.
-- **The `latest-intel` image could not use most Intel GPUs.** It carried Debian's Intel GPU
+- The `latest-intel` image could not use most Intel GPUs. It carried Debian's Intel GPU
   driver, which is from late 2022 and predates Meteor Lake, Lunar Lake, Arrow Lake and
   Battlemage, so OpenVINO was handed no GPU on that hardware and inference quietly stayed on
   the CPU. The image now carries Intel's own current runtime, covering Arc, Battlemage and
   every iGPU from Tiger Lake (11th gen) onwards. Intel publishes no current driver for Gen8
   to Gen11 graphics, so a pre-Tiger-Lake iGPU stays on the OpenVINO CPU path. Thanks for the
   report.
-- **The compute readout now names the hardware, not the provider.** `intel openvino` meant
+- The compute readout now names the hardware, not the provider. `intel openvino` meant
   either the GPU or the processor, and it now reads `intel gpu` or `intel cpu`, and the log lists
   what the providers offered at start, so a GPU that was never handed over is visible rather
   than guessed at.
