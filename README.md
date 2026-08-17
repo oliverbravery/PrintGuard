@@ -36,6 +36,7 @@ frames never leave hardware you own.
 - [Exposing a hub safely](#exposing-a-hub-safely)
 - [Home Assistant](#home-assistant)
 - [Automate it with MCP and the API](#automate-it-with-mcp-and-the-api)
+- [Plugins](#plugins)
 - [How the detector works](#how-the-detector-works)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
@@ -218,6 +219,21 @@ Capability is per token: issue scoped bearer tokens, `read` ⊂ `control` ⊂ `m
 unauthenticated `GET /api/health` for readiness and the installed version. Full reference:
 **[docs/api.md](docs/api.md)**.
 
+## Plugins
+
+**Settings → Plugins** installs extensions from the catalogue, from any GitHub repository, or
+from a file. A plugin is plain JavaScript that draws a panel on your dashboard, runs a job on
+the hub, or both, and it ships with **picture-in-picture**, which floats your live feeds in a
+window that stays on top of other apps.
+
+Plugins are third-party code, so none of it is trusted. A panel runs in a sandboxed frame with
+no network and no access to the page; anything on the hub runs in QuickJS compiled to
+WebAssembly, with no filesystem, no sockets, a memory cap and a CPU budget. A plugin gets no
+credentials, no tokens and no camera frames, and only does what you grant it, which you can
+revoke at any time. Ones I have reviewed are pinned by hash and show as **verified**;
+everything else installs as **third party**. Writing one takes no build step and no
+dependencies: **[docs/plugins.md](docs/plugins.md)**.
+
 ## How the detector works
 
 The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained for few-shot
@@ -235,6 +251,7 @@ the prototype distances, so you can tune for your camera and lighting without re
 | [docs/deployment.md](docs/deployment.md) | Reaching a hub from outside your LAN, and hardening it |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Symptom-first fixes, and how to pull logs and diagnostics |
 | [docs/api.md](docs/api.md) | REST API and MCP server, scoped tokens, every endpoint and tool |
+| [docs/plugins.md](docs/plugins.md) | Installing plugins, what they can reach, and writing your own |
 | [docs/architecture.md](docs/architecture.md) | One engine on two runtimes, the platform contract, the scheduler, the fail-safe design |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in every release |
 

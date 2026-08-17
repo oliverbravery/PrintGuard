@@ -31,15 +31,22 @@ bash packaging/build.sh                      # build a .dmg (macOS) / .zip (Wind
 Run the tests before and after your change:
 
 ```bash
-uv run pytest                        # engine simulation + adapter contract tests
+uv run pytest                        # engine simulation, adapter contracts, plugin sandbox
 cd web && npm run typecheck          # strict TypeScript over the UI
+cd web && npm run test:sandbox       # the browser plugin sandbox, in chromium and webkit
 ```
 
 `tests/test_engine.py` simulates cameras and printers against a fake platform, covering
 fairness, gating, the watchdog, alerts and the protocol. `tests/test_adapters.py` pins the
-exact request shapes of every integration and notifier. If you touch the scheduler, monitor
-or printer state handling, extend the former; a new adapter gets its payloads tested in the
-latter.
+exact request shapes of every integration and notifier. `tests/test_plugin_runtime.py` runs
+real JavaScript in the shipped QuickJS build to hold the hub sandbox to what it promises. If
+you touch the scheduler, monitor or printer state handling, extend the first; a new adapter
+gets its payloads tested in the second.
+
+The browser half of the plugin sandbox is only meaningful in a real engine, so
+`web/tests/sandbox.spec.ts` drives it through Playwright in both chromium and webkit. Run it
+if you touch anything under `web/public/plugin-sandbox.html`, `web/src/plugins.ts` or the
+node renderer.
 
 ## Documentation is part of the change
 
@@ -55,6 +62,7 @@ same pull request, and delete anything the change makes wrong or redundant.
 | Model runtimes, execution providers, image variants, GPU setup | [docs/hardware.md](docs/hardware.md) |
 | Exposure, proxies, origin checks, ports, hardening | [docs/deployment.md](docs/deployment.md) |
 | A REST endpoint, MCP tool, scope, or a response shape | [docs/api.md](docs/api.md) |
+| The plugin API, a permission, the sandbox, or the catalogue | [docs/plugins.md](docs/plugins.md) |
 | A failure mode users will hit, or its fix | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Anything user-visible | [CHANGELOG.md](CHANGELOG.md), see [Release cycle](#release-cycle) |
 | The UI's appearance | The screenshots, see below |
@@ -121,6 +129,22 @@ Notifiers deliver defect snapshots and watchdog warnings.
 
 The settings form, test button, and delivery of alerts and warnings all follow from the
 adapter.
+
+## Adding a plugin to the catalogue
+
+Plugins live outside the release cycle: anyone can publish one to a GitHub repository and
+anyone can install it. The catalogue is the list I have read, and being on it is what makes
+a plugin show as **verified**.
+
+1. Write it as [docs/plugins.md](docs/plugins.md#writing-a-plugin) describes. Plain
+   JavaScript, no build step, no minifying: it has to be readable to be reviewed.
+2. Open a pull request adding the folder under `plugins/`.
+3. Run `uv run python plugins/pin.py` and commit the catalogue it rewrites. It pins the
+   commit the plugin last changed in and the hash of every file, so it has to run *after*
+   the plugin is committed, and again after every change to it.
+
+What I look for: it asks for no permission it does not use, it does nothing surprising with
+the ones it does, and its network hosts are declared and expected.
 
 ## Ground rules
 

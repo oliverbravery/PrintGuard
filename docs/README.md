@@ -2,7 +2,7 @@
 
 # PrintGuard documentation
 
-**Docs** · [Architecture](architecture.md) · [Printers & cameras](printers.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Troubleshooting](troubleshooting.md)
+**Docs** · [Architecture](architecture.md) · [Printers & cameras](printers.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -15,6 +15,7 @@ Start at the [README](../README.md) to install PrintGuard. These pages cover eve
 | [Deployment](deployment.md) | Reach a hub from outside your LAN without exposing it, and harden what you run |
 | [Troubleshooting](troubleshooting.md) | Fix a specific symptom: a dead feed, a failing printer test, a port already in use |
 | [API & MCP](api.md) | Drive the hub from a script or an agent, with scoped access tokens |
+| [Plugins](plugins.md) | Install an extension, understand what it can reach, or write one |
 | [Architecture](architecture.md) | Understand how one engine runs in two places, or change the code |
 | [Contributing](../CONTRIBUTING.md) | Set up a dev environment, run the tests, add an integration or notifier |
 

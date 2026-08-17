@@ -2,7 +2,7 @@
 
 # Deploying a hub securely
 
-[Docs](README.md) · [Architecture](architecture.md) · [Printers & cameras](printers.md) · [Hardware](hardware.md) · **Deployment** · [API & MCP](api.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Architecture](architecture.md) · [Printers & cameras](printers.md) · [Hardware](hardware.md) · **Deployment** · [API & MCP](api.md) · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -16,6 +16,7 @@ your trusted network.
 - [Option 2: Cloudflare Tunnel and Access](#option-2-cloudflare-tunnel-and-access)
 - [Option 3: oauth2-proxy on your own domain](#option-3-oauth2-proxy-on-your-own-domain)
 - [Origin checking](#origin-checking)
+- [Plugins](#plugins)
 - [Hardening checklist](#hardening-checklist)
 - [Staying up to date](#staying-up-to-date)
 
@@ -149,6 +150,27 @@ host, list your public origin:
       PRINTGUARD_ORIGINS: "https://hub.example.com"   # comma-separate several
 ```
 
+## Plugins
+
+Plugins are third-party code, and they run sandboxed with no network and no reach into your
+credentials, cameras or tokens. Two permissions still change what an exposed hub looks like:
+
+| Permission | What it means for an exposed hub |
+|---|---|
+| **Serve its own pages** | The plugin answers requests under `/plugins/<id>/`. Those responses go out through your proxy like anything else, so whatever it serves is as exposed as the dashboard. It is served into a sandboxed origin, so it can never act as the dashboard |
+| **Authorise every request** | The plugin sees every request to the hub, headers included, and can refuse it. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out |
+
+If a plugin locks you out, start the hub with plugins inert and remove it:
+
+```yaml
+    environment:
+      PRINTGUARD_PLUGINS: "off"
+```
+
+Install only plugins you trust as far as the permissions you grant them, and prefer
+**verified** ones, which match a reviewed entry in the catalogue by hash. See
+[Plugins](plugins.md).
+
 ## Hardening checklist
 
 | Check | Why |
@@ -159,6 +181,7 @@ host, list your public origin:
 | Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback inside the container; the hub proxies HLS out through `:8000` |
 | Set `PRINTGUARD_ORIGINS` only if your proxy rewrites the host header | Otherwise the automatic origin check already covers you |
 | Serve over HTTPS if you issue API tokens | Bearer tokens must never travel in clear. See [API & MCP](api.md) |
+| Grant a plugin nothing you would not grant its author | Especially **Control printers** and **Authorise every request**. `PRINTGUARD_PLUGINS=off` is the way back from a lockout |
 | Keep the image current | `latest` moves on every release |
 
 ## Staying up to date

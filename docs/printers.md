@@ -2,7 +2,7 @@
 
 # Printers, cameras and notifications
 
-[Docs](README.md) · [Architecture](architecture.md) · **Printers & cameras** · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Architecture](architecture.md) · **Printers & cameras** · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 

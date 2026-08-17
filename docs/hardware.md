@@ -2,7 +2,7 @@
 
 # Hardware and model runtimes
 
-[Docs](README.md) · [Architecture](architecture.md) · [Printers & cameras](printers.md) · **Hardware** · [Deployment](deployment.md) · [API & MCP](api.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Architecture](architecture.md) · [Printers & cameras](printers.md) · **Hardware** · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 

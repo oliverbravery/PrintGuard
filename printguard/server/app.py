@@ -16,6 +16,7 @@ import secrets
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -75,6 +76,28 @@ def origin_allowed(websocket: WebSocket, allowed: set[str]) -> bool:
     return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
 
 
+GATE_EXEMPT_PREFIXES = ("/plugins/", "/api/health")
+GATE_CACHE_TTL_S = 10.0
+PLUGIN_REQUEST_HEADERS = ("cookie", "authorization", "accept", "content-type", "x-forwarded-for", "user-agent")
+PLUGIN_RESPONSE_HEADERS = ("set-cookie", "location", "cache-control")
+PLUGIN_BODY_LIMIT = 64 * 1024
+PLUGIN_PAGE_CSP = "sandbox allow-forms allow-scripts; frame-ancestors 'none'"
+"""A plugin's own pages are served into a sandboxed, opaque origin. They may
+render and script themselves, but they are not the dashboard's origin, so they
+cannot read its storage, and the engine socket's origin check turns them away."""
+
+
+def plugin_request(request: Request, body: str | None = None) -> dict[str, Any]:
+    """Describes an HTTP request for a plugin's route or gate handler."""
+    return {
+        "method": request.method,
+        "path": request.url.path,
+        "query": dict(request.query_params),
+        "headers": {k: v for k, v in request.headers.items() if k.lower() in PLUGIN_REQUEST_HEADERS},
+        "body": body,
+    }
+
+
 def create_app() -> FastAPI:
     """Builds the application with the engine attached to its lifespan."""
     logs.setup_from_env()
@@ -128,6 +151,69 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="PrintGuard", lifespan=lifespan)
     pysrc = build_pysrc()
+    gate_cache: dict[tuple[str, ...], float] = {}
+
+    async def gate_allows(request: Request) -> bool:
+        """Asks a gating plugin whether a request may proceed.
+
+        Answers are cached per credential and path for a few seconds so a
+        dashboard polling HLS does not wake the sandbox on every segment.
+        Refusals are never cached, so signing in takes effect at once.
+        """
+        runtime = app.state.engine.platform.plugin_runtime
+        if runtime is None or request.url.path.startswith(GATE_EXEMPT_PREFIXES):
+            return True
+        key = (request.headers.get("cookie", ""), request.headers.get("authorization", ""), request.method, request.url.path)
+        if gate_cache.get(key, 0.0) > time.monotonic():
+            return True
+        verdict = await runtime.authorise(plugin_request(request))
+        if verdict is None or verdict:
+            gate_cache[key] = time.monotonic() + GATE_CACHE_TTL_S
+            return True
+        return False
+
+    async def socket_allowed(websocket: WebSocket) -> bool:
+        """Runs a gating plugin over a WebSocket handshake.
+
+        HTTP middleware never sees these, so the sockets ask for themselves,
+        the same way they already check the request's origin.
+        """
+        runtime = app.state.engine.platform.plugin_runtime
+        if runtime is None:
+            return True
+        request = {
+            "method": "GET",
+            "path": websocket.url.path,
+            "query": dict(websocket.query_params),
+            "headers": {k: v for k, v in websocket.headers.items() if k.lower() in PLUGIN_REQUEST_HEADERS},
+            "body": None,
+        }
+        return await runtime.authorise(request) is not False
+
+    @app.middleware("http")
+    async def plugin_gate(request: Request, call_next):
+        """Lets a plugin holding the gate permission refuse requests."""
+        if await gate_allows(request):
+            return await call_next(request)
+        return Response("refused by a plugin", status_code=403)
+
+    @app.api_route("/plugins/{plugin_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+    async def plugin_route(plugin_id: str, path: str, request: Request) -> Response:
+        """Serves a plugin's own pages and endpoints from its sandbox."""
+        runtime = app.state.engine.platform.plugin_runtime
+        if runtime is None:
+            raise HTTPException(404, "plugins are not running")
+        body = (await request.body())[:PLUGIN_BODY_LIMIT].decode("utf-8", "replace")
+        answer = await runtime.serve(plugin_id, plugin_request(request, body))
+        if answer is None:
+            raise HTTPException(404, f"plugin {plugin_id!r} serves no routes")
+        headers = {k: str(v) for k, v in (answer.get("headers") or {}).items() if k.lower() in PLUGIN_RESPONSE_HEADERS}
+        return Response(
+            str(answer.get("body", "")),
+            status_code=int(answer.get("status", 200)),
+            media_type=str(answer.get("type", "text/plain")),
+            headers={**headers, "Content-Security-Policy": PLUGIN_PAGE_CSP, "X-Content-Type-Options": "nosniff"},
+        )
 
     @app.get("/api/health")
     def health(response: Response) -> dict[str, bool | str]:
@@ -146,6 +232,9 @@ def create_app() -> FastAPI:
         if not origin_allowed(websocket, allowed_origins):
             logger.warning("rejected cross-origin engine socket (origin=%s)", websocket.headers.get("origin"))
             await websocket.close(code=1008, reason="origin not allowed")
+            return
+        if not await socket_allowed(websocket):
+            await websocket.close(code=1008, reason="refused by a plugin")
             return
         await websocket.accept()
         logger.info("UI connected")
@@ -208,7 +297,7 @@ def create_app() -> FastAPI:
     @app.websocket("/api/publish/{path}")
     async def publish_socket(websocket: WebSocket, path: str) -> None:
         """Receives a browser camera recording and republishes it over RTSP."""
-        if not re.fullmatch(r"[\w-]+", path) or not origin_allowed(websocket, allowed_origins):
+        if not re.fullmatch(r"[\w-]+", path) or not origin_allowed(websocket, allowed_origins) or not await socket_allowed(websocket):
             logger.warning("rejected publish socket (path=%r, origin=%s)", path, websocket.headers.get("origin"))
             await websocket.close(code=1008, reason="invalid request")
             return

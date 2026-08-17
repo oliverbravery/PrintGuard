@@ -193,6 +193,78 @@ export interface Layout {
   cameras: LayoutSection;
 }
 
+export interface Permission {
+  id: string;
+  label: string;
+  description: string;
+  risky?: boolean;
+  hub_only?: boolean;
+  hosts?: boolean;
+  commands?: string[];
+  fields?: Record<string, string[]>;
+}
+
+export interface PluginManifest {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  homepage: string;
+  permissions: string[];
+  surfaces: ("panel" | "float")[];
+  hosts: string[];
+  events: string[];
+  tick_s: number;
+}
+
+export interface PluginRecord {
+  id: string;
+  manifest: PluginManifest;
+  files: string[];
+  digests: Record<string, string>;
+  source: { kind: string; repo?: string; path?: string; ref?: string; filename?: string };
+  granted: string[];
+  config: Record<string, unknown>;
+  verified: boolean;
+  enabled: boolean;
+  installed: number;
+  failure: string | null;
+}
+
+export interface CatalogueEntry {
+  id: string;
+  name: string;
+  description?: string;
+  author?: string;
+  repo: string;
+  path?: string;
+  ref: string;
+  version?: string;
+  permissions?: string[];
+  digests: Record<string, string>;
+}
+
+export interface PluginNode {
+  type: string;
+  value?: string;
+  label?: string;
+  tone?: string;
+  muted?: boolean;
+  camera_id?: string;
+  action?: string;
+  arg?: unknown;
+  options?: { value: string; label: string }[];
+  children?: PluginNode[];
+}
+
+export interface PluginEffect {
+  kind: string;
+  cmd?: Record<string, unknown>;
+  request?: Record<string, unknown>;
+  text?: string;
+}
+
 export interface EngineStats {
   inference_device: string;
   infer_ms: number;
@@ -231,11 +303,15 @@ export interface EngineState {
     themes: CustomTheme[];
     layout?: Layout;
     inference_runtime: "auto" | "litert" | "onnx";
+    catalogue_url: string;
   };
   tokens: ApiToken[];
   stats: EngineStats;
   integrations: AdapterMeta[];
   notifiers: AdapterMeta[];
+  plugins: PluginRecord[];
+  plugin_permissions: Permission[];
+  plugin_host: boolean;
 }
 
 export interface ScorePoint {

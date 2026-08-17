@@ -3,6 +3,7 @@ import { type SettingsTabId, useStore } from "../store";
 import { applyTheme, beginPreview, endPreview, PALETTES } from "../theme";
 import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
 import { Dialog } from "./Dialog";
+import { PluginsTab } from "./PluginsTab";
 import { SaveStatus } from "./SaveStatus";
 import { SchemaForm } from "./SchemaForm";
 import { ThemeEditor } from "./ThemeEditor";
@@ -95,6 +96,7 @@ export function SettingsDialog() {
   const tabs: { id: SettingsTabId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
     { id: "alerts", label: "Alerts" },
+    { id: "plugins", label: "Plugins" },
     ...(engine?.mode === "hub"
       ? ([
           { id: "mqtt", label: "Home Assistant" },
@@ -268,6 +270,12 @@ export function SettingsDialog() {
             <span className="text-[0.7rem] text-text-2 block">
               Channels hold credentials, so they apply on Save rather than automatically.
             </span>
+          </div>
+        )}
+
+        {tab === "plugins" && (
+          <div role="tabpanel" id="settings-panel-plugins" aria-labelledby="settings-tab-plugins" tabIndex={0}>
+            <PluginsTab />
           </div>
         )}
 

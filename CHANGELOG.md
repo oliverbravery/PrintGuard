@@ -9,6 +9,32 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.4.0] - 2026-08-15
 
+### Added
+
+- **A plugin store, under Settings → Plugins.** You can extend PrintGuard at runtime now: a
+  panel on your dashboard, a job that runs on the hub, or both. Install from the catalogue of
+  ones I have reviewed, from any GitHub repository (`owner/repo`, pinned to the commit it
+  resolves to), or from a zip. **Picture in picture** ships as the first one: pick your live
+  feeds and pop them into a window that floats above other apps.
+
+  Plugins are third-party code, so none of it is trusted. A panel runs in a sandboxed frame
+  with no network and no access to the page; anything running on the hub runs in QuickJS
+  compiled to WebAssembly, with no filesystem, no sockets, a memory cap and a CPU budget, so
+  a plugin that hangs is stopped in milliseconds rather than taking the hub with it. No
+  plugin ever receives your printer credentials, notifier settings, API tokens or camera
+  frames: a feed in a plugin's panel is drawn by PrintGuard, not by the plugin. Everything
+  else is a permission you grant at install and can revoke at any time, and each one says
+  plainly what it allows. Plugins I have reviewed are pinned by SHA-256 and show as
+  **verified**; anything else installs as **third party**, so read it first.
+
+  Writing one takes no build step and no dependencies: a `plugin.json` and a plain JavaScript
+  file. [docs/plugins.md](docs/plugins.md) has the whole API and a worked example, and
+  [CONTRIBUTING.md](CONTRIBUTING.md) covers getting one listed in the catalogue.
+
+  A plugin can also serve its own pages under `/plugins/<id>/` and, if you grant it, authorise
+  every request to the hub, which is what lets an accounts plugin protect one. That last one
+  can lock you out, so `PRINTGUARD_PLUGINS=off` starts the hub with every plugin inert.
+
 ### Fixed
 
 - **A camera that keeps dropping out no longer notifies you every time it reconnects.** The

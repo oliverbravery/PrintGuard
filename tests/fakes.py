@@ -44,6 +44,7 @@ class FakePlatform:
     version = "2.1.0"
     update_repo: str | None = None
     update_asset: str | None = None
+    plugin_runtime = None
 
     def __init__(self, infer_s: float = 0.05, failing: bool = False) -> None:
         self.infer_s = infer_s
@@ -58,6 +59,7 @@ class FakePlatform:
         self.http_calls: list[tuple[str, str]] = []
         self.http_requests: list[dict[str, Any]] = []
         self.releases: list[dict[str, Any]] = []
+        self.files: dict[str, tuple[int, Any]] = {}
         self.released_cameras: list[str] = []
         self.state: dict[str, Any] = {}
         self.inference_runtime = "auto"
@@ -87,6 +89,8 @@ class FakePlatform:
         self.http_calls.append((method, url))
         self.http_requests.append({"method": method, "url": url, **kwargs})
         hostname = urlparse(url).hostname or ""
+        if url in self.files:
+            return self.files[url]
         if hostname == "api.github.com":
             return 200, self.releases
         if hostname == "sentry.io" or hostname.endswith(".sentry.io"):
