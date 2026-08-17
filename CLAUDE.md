@@ -90,6 +90,9 @@ essentials a change must respect:
   or JSDoc - never narrate what the code does. In the Python engine/server, every module, class
   and public method gets a docstring, but still no inline comments unless the *why* is genuinely
   non-obvious.
+- **Docstrings are Google style.** A summary line, then `Args:`, `Returns:` and `Raises:`
+  whenever the function takes arguments, gives something back or fails. Never repeat a type
+  there: the signature is annotated, so say what a value means, not what it is.
 - **Minimal and consolidated.** No fallbacks, defensive guards or speculative abstractions
   unless asked. Prefer extending/refactoring existing code over adding parallel variants;
   delete code a change makes dead.

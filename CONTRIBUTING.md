@@ -165,6 +165,9 @@ with the ones it does, and declares the network hosts you would expect.
 - Write no comments in the UI. The TypeScript and React code carries none, since names document
   intent. Python modules, classes and public methods get docstrings, but inline comments only
   where the why is genuinely non-obvious.
+- Write docstrings in Google style, with `Args:`, `Returns:` and `Raises:` whenever a function
+  takes arguments, gives something back or fails. Types belong in the signature, so a docstring
+  says what a value means rather than repeating what it is.
 - Docs travel with the code. See [above](#documentation-is-part-of-the-change).
 
 ## Release cycle

@@ -131,11 +131,17 @@ def project_state(state: dict[str, Any], granted: list[str]) -> dict[str, Any]:
 
 
 def project_event(event: dict[str, Any], granted: list[str]) -> dict[str, Any] | None:
-    """Cuts an engine event down to what a plugin may see, or None if it may not.
+    """Cuts an engine event down to what a plugin may see.
 
-    The state event is replaced by the projection its grants allow, so a plugin
-    watching it reads the same fields it gets on ``ctx.state`` rather than the
-    whole snapshot.
+    Args:
+        event: The event as the engine broadcast it.
+        granted: Permissions the user gave the plugin.
+
+    Returns:
+        The event carrying only the fields ``EVENTS`` lists for it, or None
+        for one no plugin may hook. A state event comes back as the projection
+        the grants allow, so a plugin watching it reads what it gets on
+        ``ctx.state`` rather than the whole snapshot.
     """
     name = str(event.get("event", ""))
     fields = EVENTS.get(name)

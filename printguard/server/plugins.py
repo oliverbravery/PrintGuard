@@ -199,10 +199,12 @@ class WasmPluginRuntime:
         return result if isinstance(result, dict) else None
 
     def gate_paths(self) -> tuple[str, ...]:
-        """Route prefixes belonging to the plugins that gate requests.
+        """Finds the route prefixes belonging to the plugins that gate requests.
 
-        A gate is asked about every request except its own pages, which stay
-        open so the sign-in page it serves cannot be refused by itself.
+        Returns:
+            One prefix per gating plugin. A gate is asked about every request
+            except those, which stay open so the sign-in page a gate serves
+            cannot be refused by itself.
         """
         return tuple(f"/plugins/{s.plugin.id}/" for s in self._sandboxes.values() if s.plugin.may("gate"))
 

@@ -29,12 +29,25 @@ SURFACE_HELP = {
 
 
 def choices(described: dict[str, str]) -> list[dict[str, str]]:
-    """Turns a name to help mapping into enum entries an editor can describe."""
+    """Turns names and their help into enum entries an editor can describe.
+
+    Args:
+        described: Each accepted value mapped to the line shown beside it.
+
+    Returns:
+        One constant subschema per value, which is how an editor offers a
+        description with each completion.
+    """
     return [{"const": name, "description": text} for name, text in described.items()]
 
 
 def schema() -> dict:
-    """Builds the schema a plugin.json is completed and validated against."""
+    """Builds the schema a plugin.json is completed and validated against.
+
+    Returns:
+        The whole document, with the permission, surface and event tables read
+        straight from the engine so the two cannot disagree.
+    """
     permissions = {name: spec["description"] for name, spec in plugins.PERMISSIONS.items()}
     events = {name: f"Carries {', '.join(fields)}." if fields else "The snapshot your permissions allow." for name, fields in plugins.EVENTS.items()}
     return {
