@@ -17,6 +17,8 @@ import pytest
 from fakes import FakePlatform
 
 from printguard.engine.engine import Engine
+
+OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
 from printguard.engine.registry import Plugin
 from printguard.server.plugins import Sandbox, WasmPluginRuntime
 
@@ -138,11 +140,12 @@ WORKER_MANIFEST = {
 }
 
 
-def worker_zip() -> str:
+def bundle(manifest: dict, worker: str) -> str:
+    """Packs a worker-only plugin the way an imported file arrives."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("plugin.json", json.dumps(WORKER_MANIFEST))
-        archive.writestr("worker.js", WORKER)
+        archive.writestr("plugin.json", json.dumps(manifest))
+        archive.writestr("worker.js", worker)
     return base64.b64encode(buffer.getvalue()).decode()
 
 
@@ -160,7 +163,7 @@ async def engine_with_worker(runtime: WasmPluginRuntime):
     await engine.start()
     try:
         await engine.handle(
-            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": worker_zip(), "granted": WORKER_MANIFEST["permissions"]}
+            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": bundle(WORKER_MANIFEST, WORKER), "granted": WORKER_MANIFEST["permissions"]}
         )
         yield engine
     finally:
@@ -223,3 +226,44 @@ async def test_a_worker_cannot_borrow_another_plugins_network_grant(runtime: Was
     assert performed == [
         {"cmd": "plugin.http", "method": "GET", "url": "https://hooks.example.com/x", "headers": None, "json": None, "id": "demo"}
     ]
+
+
+RISK_WORKER = """
+plugin.on('result', (event, ctx) => {
+  if (event.score < (ctx.store.limit || 0.8)) return;
+  ctx.store.hits = (ctx.store.hits || 0) + 1;
+  if (ctx.store.hits === 1) ctx.command({ cmd: 'printer.action', id: ctx.store.printer, action: 'pause' });
+});
+"""
+
+RISK_MANIFEST = {
+    "id": "risk",
+    "name": "Risk watch",
+    "version": "1.0.0",
+    "permissions": ["state:read", "printer:control"],
+    "events": ["result"],
+}
+
+
+async def test_a_worker_can_act_on_a_single_inference_over_its_own_threshold(runtime: WasmPluginRuntime) -> None:
+    """The per-inference hook: every score, before any streak logic applies."""
+    platform = HostedPlatform(runtime)
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        await engine.handle({"cmd": "printer.add", "printer": {"name": "P", **OCTOPRINT}})
+        printer_id = next(iter(engine.printers.items))
+        await engine.handle(
+            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": bundle(RISK_MANIFEST, RISK_WORKER),
+             "granted": RISK_MANIFEST["permissions"]}
+        )
+        await engine.handle({"cmd": "plugin.update", "id": "risk", "patch": {"config": {"limit": 0.8, "printer": printer_id}}})
+
+        for score in (0.10, 0.55, 0.91, 0.95):
+            engine.emit({"event": "result", "monitor_id": "m1", "camera_id": "c1", "score": score, "ts": 1.0})
+            await asyncio.sleep(0.3)
+
+        assert engine.plugins.get("risk").config["hits"] == 2, "scores under the plugin's own limit were acted on"
+        assert [m for m, url in platform.http_calls if "/api/job" in url].count("POST") == 1, "the printer was not paused once"
+    finally:
+        await engine.stop()

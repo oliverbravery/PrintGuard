@@ -290,8 +290,10 @@ async def fetch_catalogue(http: HttpFn, url: str) -> list[dict[str, Any]]:
         RuntimeError: If the catalogue cannot be read.
     """
     status, body = await http("GET", url, timeout=TIMEOUT_S)
-    if status != 200 or not isinstance(body, dict) or not isinstance(body.get("plugins"), list):
+    if status != 200:
         raise RuntimeError(f"catalogue at {url} returned {status}")
+    if not isinstance(body, dict) or not isinstance(body.get("plugins"), list):
+        raise RuntimeError(f"catalogue at {url} is not a plugin catalogue")
     return [entry for entry in body["plugins"] if isinstance(entry, dict) and _ID_PATTERN.match(str(entry.get("id", "")))]
 
 

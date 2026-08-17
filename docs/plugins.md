@@ -180,6 +180,35 @@ plugin, in about 25 lines.
 and for requests to its routes. It gets a fresh VM each time, so anything it needs to
 remember goes in `ctx.store`.
 
+These are the events a worker can name in `events`:
+
+| Event | Fires | Carries |
+|---|---|---|
+| `result` | Every inference on a watched monitor, capped at 5 per second per monitor | `monitor_id`, `camera_id`, `score`, `prediction`, `margin`, `ms`, `ts` |
+| `alert` | A defect held long enough to act on | `monitor_id`, `score`, `action` |
+| `warning` | A watchdog condition, and its recovery | `message`, `recovered` |
+| `device` | A printer's status changed | `printer_id`, `status`, `progress`, `job` |
+| `error` | Anything that failed | `message` |
+| `state` | The full snapshot, once a second | Everything your permissions allow |
+
+`result` is the one to use for "do something whenever the risk goes over *x*": it fires per
+inference, with the raw score, before any threshold or streak logic the monitor applies. A
+worker still busy with the previous event is skipped rather than queued behind it, so a slow
+plugin drops events instead of falling further behind.
+
+```js
+plugin.on("result", (event, ctx) => {
+  if (event.score < (ctx.store.limit || 0.8)) return;
+  ctx.command({ cmd: "printer.action", id: ctx.store.printer, action: "pause" });
+  ctx.notify(`${event.monitor_id} hit ${event.score}`);
+});
+```
+
+That needs `printer:control` and `notify`, and it fires on a single frame. A monitor's own
+defect response waits for a streak, so a plugin acting on one frame will be twitchier than
+PrintGuard is by default: count consecutive hits in `ctx.store` if you want the same
+steadiness.
+
 ```js
 plugin.on("alert", (event, ctx) => {
   ctx.store.alerts = (ctx.store.alerts || 0) + 1;
