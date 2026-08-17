@@ -185,9 +185,9 @@ export function Home() {
       </section>
 
       <section className="mx-auto max-w-6xl space-y-16 px-5 pb-20">
-        <Showcase src={printerDetail} alt="Monitor detail with live risk score and printer controls" w={1360} h={760} kicker="EVERY MONITOR, IN DEPTH" title="Open any monitor" body="Live risk score, score history and one-tap pause, resume or cancel — bound to the printer through your print server." />
+        <Showcase src={printerDetail} alt="Monitor detail with live risk score and printer controls" w={1360} h={760} kicker="EVERY MONITOR, IN DEPTH" title="Open any monitor" body="Live risk score, score history and one-tap pause, resume or cancel, bound to the printer through your print server." />
         <Showcase flip src={customise} alt="Customise mode: drag to reorder, pin and hide monitors and cameras" w={1360} h={860} kicker="YOUR DASHBOARD, YOUR WAY" title="Arrange it around your workflow" body="Drag monitors into any order, pin the ones that matter to the front and hide the rest. The camera rail rearranges the same way, with mouse, touch or keyboard." />
-        <Showcase src={dashboardLight} alt="PrintGuard in its light theme" w={1360} h={620} kicker="MAKE IT YOURS" title="Light, dark, or a theme you design" body="Pick System, Light or Dark from the header, or build your own in the theme editor — saved and synced to every browser that opens the hub." />
+        <Showcase src={dashboardLight} alt="PrintGuard in its light theme" w={1360} h={620} kicker="MAKE IT YOURS" title="Light, dark, or a theme you design" body="Pick System, Light or Dark from the header, or build your own in the theme editor, saved and synced to every browser that opens the hub." />
       </section>
 
       <section id="install" className="mx-auto max-w-6xl scroll-mt-20 px-5 pb-20">
