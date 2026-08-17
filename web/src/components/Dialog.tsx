@@ -2,11 +2,6 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 
 let openModals = 0;
 
-/** Modal shell built on the native `<dialog>` element: the browser owns the focus trap,
- *  Esc handling, top-layer rendering, background `inert` and focus return to the opener.
- *  Closing always flows through `onClose` (which unmounts this component); the effect
- *  cleanup calls `.close()` to restore focus. A module counter ref-locks body scroll so
- *  nested modals (a side panel opening a dialog) stay locked until the last one closes. */
 export function Modal({
   onClose,
   variant = "center",
