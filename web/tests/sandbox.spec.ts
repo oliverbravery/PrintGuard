@@ -256,6 +256,14 @@ test("a monitor surface puts a pop-out button on each monitor and nothing on the
       }),
     )
     .toBe(1);
+
+  const spare = await page.evaluate(() => {
+    const pip = (window as any).documentPictureInPicture.window;
+    const feed = pip.document.querySelector("video").parentElement.getBoundingClientRect().height;
+    return pip.document.body.getBoundingClientRect().height - feed;
+  });
+
+  expect(spare).toBeLessThanOrEqual(2);
 });
 
 test("pop-out puts the panel in a picture-in-picture window, themed", async ({ page }) => {
