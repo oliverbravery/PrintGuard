@@ -6,8 +6,8 @@
 
 </div>
 
-A hub exposes its engine to scripts and agents through two transports over one protocol: the
-same commands the dashboard sends, so nothing here can drift from the UI.
+A hub exposes its engine to scripts and agents through two transports over one protocol. Both
+send the same commands the dashboard sends, so nothing here can drift from the UI.
 
 - [Surfaces](#surfaces)
 - [Health and version](#health-and-version)
@@ -67,8 +67,8 @@ Scopes are cumulative:
 | `control` | Everything in `read`, plus pause, resume and cancel |
 | `manage` | Everything in `control`, plus adding, editing and removing cameras, printers and monitors, changing settings, testing services and discovering cameras |
 
-Issue tokens from **Settings → API & MCP access**. Name a token, choose its scope and
-**Generate**. The secret, a `pg_…` string, is shown **once**:
+Issue tokens from the API & MCP access tab in Settings. Name a token, choose its scope and
+press **Generate**. The secret, a `pg_…` string, is only shown once:
 
 ```http
 Authorization: Bearer pg_Zr8...agent
@@ -80,7 +80,7 @@ Authorization: Bearer pg_Zr8...agent
 | Any token issued | A valid bearer is required for every request, and its scope decides what it reaches. MCP additionally **hides** tools a token cannot use |
 
 > [!IMPORTANT]
-> Only a hash is stored, so a lost token cannot be recovered: revoke it and issue another.
+> Only a hash is stored, so a lost token cannot be recovered. Revoke it and issue another.
 > Revocation is immediate. Tokens are managed from the UI only, never over the API, so an
 > agent holding a `manage` token can drive printers and cameras but cannot mint or escalate
 > tokens. Serve the hub over HTTPS so tokens never travel in clear.
@@ -154,7 +154,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 # Classify a supplied frame, no registered camera needed
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: image/jpeg" \
   --data-binary @frame.jpg https://host/api/v1/classify
-# → {"prediction":"success","distances":{...},"margin":1.16,"defect_score":0.35}
+# gives {"prediction":"success","distances":{...},"margin":1.16,"defect_score":0.35}
 ```
 
 ## MCP server
@@ -166,7 +166,7 @@ filtered to the scopes its token holds.
 | Scope | Tools |
 |---|---|
 | `read` | `get_state`, `list_monitors`, `get_monitor`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `recent_events` |
-| `read` | `get_camera_frame`, which returns the frame as **image content** an agent can look at |
+| `read` | `get_camera_frame`, which returns the frame as image content an agent can look at |
 | `control` | `control_printer` |
 | `manage` | `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_settings`, `test_notifier` |
 
@@ -193,8 +193,8 @@ npx @modelcontextprotocol/inspector
 
 ## The resource model
 
-Cameras and printers are **registered resources**, created and deleted only through their
-own collection. A **monitor** binds one camera and optionally one printer by `camera_id` and
+Cameras and printers are registered resources, created and deleted only through their own
+collection. A monitor binds one camera and optionally one printer by `camera_id` and
 `printer_id`, and carries the thresholds and defect-response policy. Removing a resource
 clears it from any monitor that referenced it.
 
@@ -215,13 +215,11 @@ regardless of its service:
 
 ## Reading detection state
 
-Two facts are easy to miss:
+Two facts are easy to miss. A camera carries a per-frame classification, and the smoothed 0-1
+defect score belongs to a monitor rather than a camera, so the camera object has no numeric
+score field.
 
-- the **camera** carries a per-frame *classification*,
-- the smoothed **0-1 defect score** is a per-**monitor** quantity. The camera object has no
-  numeric score field.
-
-**Camera object**, `GET /cameras` and `GET /cameras/{id}`:
+The camera object, from `GET /cameras` and `GET /cameras/{id}`:
 
 ```jsonc
 {
@@ -241,11 +239,10 @@ Two facts are easy to miss:
 ```
 
 `last_result` is the newest raw classification, or `null` before the camera has been
-inferred. `prediction` is the **nearest class prototype** for that frame with no threshold
-applied, which makes it the quickest per-camera "failing?" read. It is `"unknown"` when the
+inferred. `prediction` is the nearest class prototype for that frame with no threshold applied, which makes it the quickest per-camera "failing?" read. It is `"unknown"` when the
 frame cannot be classified, for example when the embedding is not finite.
 
-**Monitor object**, `GET /monitors` and `GET /monitors/{id}`:
+The monitor object, from `GET /monitors` and `GET /monitors/{id}`:
 
 ```jsonc
 {
@@ -264,9 +261,11 @@ frame cannot be classified, for example when the embedding is not finite.
 }
 ```
 
-**Prediction against defect score.** The 0-1 defect score, where `0.5` is the decision
-boundary and higher is more defective, applies a monitor's `sensitivity` to the frame's
-distance margin, so it is per-monitor rather than per-camera. It appears in:
+### Prediction against defect score
+
+The 0-1 defect score, where `0.5` is the decision boundary and higher is more defective,
+applies a monitor's `sensitivity` to the frame's distance margin, so it is per-monitor rather
+than per-camera. It appears in:
 
 - `result` events on the WebSocket:
   `{ "event": "result", "monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts" }`,
@@ -274,8 +273,8 @@ distance margin, so it is per-monitor rather than per-camera. It appears in:
   monitor,
 - the monitor object's latest `result`, also carried by every full `state` snapshot,
 - a monitor's `alert.score` once it trips,
-- the MQTT *Defect score* sensor, published as 0-100.
+- the MQTT **Defect score** sensor, published as 0-100.
 
-So: to poll one camera's current verdict read `GET /cameras/{id}` and take
-`last_result.prediction`; for the smoothed score or a threshold-applied verdict, read the
+To poll one camera's current verdict, read `GET /cameras/{id}` and take
+`last_result.prediction`. For the smoothed score or a threshold-applied verdict, read the
 monitor or the `result` events.
