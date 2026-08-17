@@ -1,1 +1,1 @@
-"""Platform-independent core: runs unchanged on CPython and Pyodide."""
+"""Platform-independent core that runs unchanged on CPython and Pyodide."""

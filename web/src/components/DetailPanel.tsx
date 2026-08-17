@@ -110,7 +110,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
           </div>
           {monitor.alert && (
             <p className="mono text-[0.7rem] text-bad mt-2">
-              defect at {(monitor.alert.score * 100).toFixed(0)}% — action: {monitor.alert.action}
+              defect at {(monitor.alert.score * 100).toFixed(0)}%, action {monitor.alert.action}
             </p>
           )}
           <button className="btn w-full mt-3" onClick={() => openStats(monitor.id)}>
@@ -149,7 +149,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
             <Toggle label="Watch this monitor" on={monitor.enabled} onChange={(v) => updateMonitor(monitor.id, { enabled: v })} />
             {monitor.enabled && monitor.watching === false && (
               <p className="mono text-[0.7rem] text-text-2">
-                standby — printer is {printer?.device_state?.status ?? "not printing"}; inference resumes when it prints
+                standby, printer is {printer?.device_state?.status ?? "not printing"}, inference resumes when it prints
               </p>
             )}
             <label className="block">

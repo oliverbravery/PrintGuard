@@ -1,4 +1,4 @@
-"""Printer configuration: validation for registered integrated printers.
+"""Printer configuration, validating registered integrated printers.
 
 A printer is a connection to a control service (OctoPrint, Klipper/Moonraker,
 Elegoo, PrusaLink, Bambu, …) identified by an integration provider and its schema-driven config.

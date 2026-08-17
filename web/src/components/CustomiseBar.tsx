@@ -10,7 +10,7 @@ export function CustomiseBar() {
   return (
     <div className="mx-auto max-w-[1500px] px-4 pt-5 sm:px-6">
       <div className="panel flex items-center gap-3 px-4 py-2.5">
-        <span className="label">Customising — drag to reorder, pin or hide</span>
+        <span className="label">Customising, drag to reorder, pin or hide</span>
         <div className="flex-1" />
         <button className="btn btn-danger !py-1.5 !px-3 !text-[0.68rem]" onClick={resetLayout}>
           Reset layout

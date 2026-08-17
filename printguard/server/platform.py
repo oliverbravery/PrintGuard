@@ -45,7 +45,7 @@ DEVICE_SIZE_CAP = 1280 * 720
 DEVICE_PIXEL_FORMATS = {"420v": "nv12", "420f": "nv12", "yuvs": "yuyv422", "2vuy": "uyvy422"}
 """AVFoundation format subtypes mapped to ffmpeg pixel formats. avfoundation
 defaults to yuv420p, which it silently downgrades to the packed uyvy422 formats
-— often capped to a few fps — so the biplanar nv12 formats that carry a device's
+(often capped to a few fps) so the biplanar nv12 formats that carry a device's
 full frame rate are requested by name instead."""
 
 logger = logging.getLogger(__name__)
@@ -207,7 +207,7 @@ def _authorize_macos_camera() -> None:
         if answered.wait(CAMERA_CONSENT_WAIT_S) and granted[0]:
             return
     raise RuntimeError(
-        "macOS camera access is not granted — allow PrintGuard under System Settings → Privacy & Security → Camera"
+        "macOS camera access is not granted. Allow PrintGuard under Privacy & Security, then Camera, in System Settings"
     )
 
 
@@ -389,7 +389,7 @@ class AVSource:
 
 
 class ServerPlatform:
-    """Hub mode platform: hardware inference and frames via MediaMTX."""
+    """Hub mode platform, with hardware inference and frames via MediaMTX."""
 
     mode = "hub"
     update_repo = "oliverbravery/PrintGuard"

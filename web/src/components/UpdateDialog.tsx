@@ -34,7 +34,7 @@ export function UpdateDialog() {
             ) : (
               <>
                 Running <span className="mono text-accent">v{current}</span>
-                {update && " — the latest version"}
+                {update && " is the latest version"}
               </>
             )}
           </span>
@@ -58,7 +58,7 @@ export function UpdateDialog() {
                 {releases.map((entry) => (
                   <option key={entry.version} value={entry.version}>
                     v{entry.version}
-                    {entry.version === current ? " — installed" : entry.version === update?.latest ? " — latest" : ""}
+                    {entry.version === current ? " installed" : entry.version === update?.latest ? " latest" : ""}
                   </option>
                 ))}
               </select>

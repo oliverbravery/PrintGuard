@@ -93,7 +93,7 @@ function ThemeToggle() {
   return (
     <button
       className="chip cursor-pointer hover:opacity-80"
-      title={`Theme: ${theme} — tap to switch`}
+      title={`Theme: ${theme}, tap to switch`}
       aria-label="Switch theme"
       onClick={() => {
         const next = nextScheme(theme);

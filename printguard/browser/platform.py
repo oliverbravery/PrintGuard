@@ -56,7 +56,7 @@ class BrowserSource:
 
 
 class BrowserPlatform:
-    """Local mode platform: LiteRT.js in WASM, cameras via getUserMedia."""
+    """Local mode platform, with LiteRT.js in WASM and cameras via getUserMedia."""
 
     mode = "local"
     workers = 1
@@ -138,7 +138,7 @@ class BrowserPlatform:
         try:
             resp = await asyncio.wait_for(pyfetch(url, **kwargs), timeout)
         except (JsException, asyncio.TimeoutError) as exc:
-            raise ConnectionError(f"could not reach {url} — unreachable, or CORS is not enabled on the target service") from exc
+            raise ConnectionError(f"could not reach {url}, either unreachable or CORS is not enabled on the target service") from exc
         text = await resp.string()
         try:
             return resp.status, jsonlib.loads(text)

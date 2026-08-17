@@ -30,7 +30,7 @@ def pull_source(url: str) -> str | None:
         scheme = "wheps" if parts.scheme in ("https", "wheps") else "whep"
         return urlunsplit((scheme, parts.netloc, parts.path, parts.query, parts.fragment))
     if webrtc_endpoint(url):
-        raise ValueError("WebRTC source does not expose WHEP — use its WHEP, MJPEG or RTSP URL instead")
+        raise ValueError("WebRTC source does not expose WHEP, use its WHEP, MJPEG or RTSP URL instead")
     if parts.scheme in ("http", "https"):
         return None
     return url

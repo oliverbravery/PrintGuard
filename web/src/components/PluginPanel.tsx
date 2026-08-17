@@ -17,7 +17,7 @@ export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
     <PluginNodeView node={tree} pluginId={plugin.id} mayViewCameras={mayViewCameras} />
   ) : (
     <span className="text-[0.7rem] text-text-2">
-      {failure ?? (needsPermissions ? "Waiting for permissions in Settings → Plugins." : "Starting")}
+      {failure ?? (needsPermissions ? "Waiting for permissions in the Plugins tab in Settings." : "Starting")}
     </span>
   );
 

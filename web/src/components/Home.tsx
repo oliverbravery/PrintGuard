@@ -156,7 +156,7 @@ export function Home() {
         <p className="reveal mx-auto mb-8 max-w-2xl text-[0.95rem] text-text-1 sm:text-lg" style={{ "--i": 2 } as React.CSSProperties}>
           PrintGuard watches your printer cameras with an on-device vision model, pauses the printer through
           OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab when a defect holds, and pushes a snapshot to your phone. No
-          cloud, no subscription — your frames stay yours.
+          cloud and no subscription, so your frames stay yours.
         </p>
         <div className="reveal flex flex-wrap items-center justify-center gap-3" style={{ "--i": 3 } as React.CSSProperties}>
           <button className="btn btn-primary" onClick={launch}>Try the live demo →</button>
@@ -178,7 +178,7 @@ export function Home() {
         <p className="label mb-8 text-center">WHAT IT DOES</p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Feature index={2} led="led-infer" title="Detect" body="A compact encoder scores every frame against failure prototypes, scheduled fairly across all your cameras." />
-          <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu — and inference rests while the printer is idle." />
+          <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu, and inference rests while the printer is idle." />
           <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, a snapshot lands on your phone over ntfy, Telegram or Discord." />
           <Feature index={5} led="led-warn" title="Fail safe" body="A watchdog warns the second a camera drops, a feed freezes or your printer stops answering. Nothing fails silently." />
         </div>
@@ -202,7 +202,7 @@ export function Home() {
             <p className="label mb-1 text-accent">DESKTOP APP</p>
             <h3 className="display mb-2 text-2xl font-bold">macOS &amp; Windows</h3>
             <p className="mb-5 text-sm leading-relaxed text-text-1">
-              A native app — no Docker, no terminal. It runs the hub in its own window and keeps watching while
+              A native app with no Docker and no terminal. It runs the hub in its own window and keeps watching while
               minimised. Reach it from your phone on the same network too.
             </p>
             <div className="flex flex-wrap gap-3">
@@ -219,10 +219,10 @@ export function Home() {
               )}
             </div>
             <p className="mt-4 text-xs leading-relaxed text-text-2">
-              Unsigned for now — first launch needs a one-time approval. On macOS, open{" "}
-              <span className="text-text-1">System Settings → Privacy &amp; Security</span> and click{" "}
+              Unsigned for now, so the first launch needs a one-time approval. On macOS, open{" "}
+              <span className="text-text-1">Privacy &amp; Security in System Settings</span> and click{" "}
               <span className="text-text-1">Open Anyway</span>. On Windows, choose{" "}
-              <span className="text-text-1">More info → Run anyway</span>.
+              <span className="text-text-1">More info</span>, then <span className="text-text-1">Run anyway</span>.
             </p>
           </div>
 
@@ -234,7 +234,7 @@ export function Home() {
             <p className="label mb-1 text-accent">SELF-HOST</p>
             <h3 className="display mb-2 text-2xl font-bold">Docker, for a server or NAS</h3>
             <p className="mb-4 text-sm leading-relaxed text-text-1">
-              One container — dashboard, live video and all — on port 8000. Images for amd64 and arm64 (Raspberry Pi).
+              One container on port 8000, dashboard and live video included. Images for amd64 and arm64 (Raspberry Pi).
             </p>
             <Command command={DOCKER_CMD} />
             <p className="mb-2 mt-5 text-xs text-text-2">OR WITH COMPOSE</p>
@@ -249,7 +249,7 @@ export function Home() {
               </a>
             </p>
             <a className="mono mt-4 inline-block text-[0.7rem] text-text-2 transition-colors hover:text-accent" href={UNRAID_URL} target="_blank" rel="noreferrer">
-              Unraid — install from Community Applications ↗
+              Unraid, install from Community Applications ↗
             </a>
           </div>
         </div>
@@ -259,7 +259,7 @@ export function Home() {
         <p className="label mb-2">NO INSTALL</p>
         <h2 className="display mb-3 text-3xl font-bold sm:text-4xl">Try it in your browser</h2>
         <p className="mx-auto mb-7 max-w-xl leading-relaxed text-text-1">
-          Local mode runs the entire engine right here — point a webcam at a print and watch it score each frame live.
+          Local mode runs the entire engine right here, so point a webcam at a print and watch it score each frame live.
           Nothing is installed and no frame leaves your device.
         </p>
         <button className="btn btn-primary" onClick={launch}>Launch the demo →</button>

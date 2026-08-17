@@ -33,7 +33,7 @@ export function GuideDialog() {
       <div className="space-y-6">
         <p className="text-sm text-text-1">
           PrintGuard catches print failures for you. Here's what everything means and what you can do
-          — use a section's action to jump straight in.
+          Use a section's action to jump straight in.
         </p>
         {sections.map((section) => (
           <GuideEntry key={section.id} section={section} />

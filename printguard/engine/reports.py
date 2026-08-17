@@ -82,7 +82,7 @@ def public_source(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def deployment(platform: Platform) -> str:
-    """Names how this instance is deployed: desktop app, docker hub or local."""
+    """Names how this instance is deployed, as desktop app, docker hub or local."""
     if platform.update_asset:
         return "desktop"
     return "local" if platform.mode == "local" else "docker"
@@ -186,7 +186,7 @@ def report_files(
     secrets: set[str],
     attachments: Sequence[dict[str, Any]] = (),
 ) -> list[tuple[str, str, bytes]]:
-    """Builds a report's files: diagnostics, both log tails and user attachments.
+    """Builds a report's files, the diagnostics, both log tails and user attachments.
 
     The diagnostics JSON and both log tails are scrubbed of every value in
     ``secrets``, since an error string inside any of them may embed a

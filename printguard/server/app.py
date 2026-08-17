@@ -1,4 +1,4 @@
-"""FastAPI application: serves the UI, model assets and the engine socket.
+"""FastAPI application serving the UI, model assets and the engine socket.
 
 The same image serves both modes - hub mode runs the engine here, while
 local mode only needs the static UI, the model files and the Python
@@ -132,7 +132,7 @@ def create_app() -> FastAPI:
                 await streamer.start()
                 resources.push_async_callback(streamer.stop)
             else:
-                logger.warning("no bundled MediaMTX binary (%r) — expecting an external MediaMTX at %s", mediamtx_binary, mediamtx_api)
+                logger.warning("no bundled MediaMTX binary (%r), expecting an external MediaMTX at %s", mediamtx_binary, mediamtx_api)
             platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset)
             resources.push_async_callback(platform.close)
             engine = Engine(platform)

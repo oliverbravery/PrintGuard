@@ -19,7 +19,7 @@ class NtfyNotifier(NotifierAdapter):
     docs_url = "https://docs.ntfy.sh/publish/"
     setup_url = "https://docs.ntfy.sh/subscribe/phone/"
     setup_hint = (
-        "Subscribe to your topic in the ntfy app to receive alerts. Use a hard-to-guess name — "
+        "Subscribe to your topic in the ntfy app to receive alerts. Use a hard-to-guess name, "
         "anyone with it can read; protected topics need an access token."
     )
     schema = {

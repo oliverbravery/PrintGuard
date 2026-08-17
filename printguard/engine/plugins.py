@@ -125,7 +125,7 @@ def canonical(value: Any) -> bytes:
 
 
 def digests(manifest: dict[str, Any], sources: dict[str, str]) -> dict[str, str]:
-    """Hashes a bundle: the canonical manifest and each source file."""
+    """Hashes a bundle, the canonical manifest and each source file."""
     hashed = {MANIFEST_FILE: hashlib.sha256(canonical(manifest)).hexdigest()}
     hashed.update({name: hashlib.sha256(code.encode()).hexdigest() for name, code in sources.items()})
     return hashed

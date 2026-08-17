@@ -63,7 +63,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
         {camera.source.path && published.has(camera.source.path) && (
           <span className="chip chip-accent">publishing</span>
         )}
-        {owner && <span className="chip" title="Managed by its printer integration — remove the printer to remove this camera">via {owner.name}</span>}
+        {owner && <span className="chip" title="Managed by its printer integration, remove the printer to remove this camera">via {owner.name}</span>}
         <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
           {open ? "Hide" : "Adjust"}
         </button>
@@ -170,7 +170,7 @@ function PrinterCameras() {
       </div>
       {!hasPrinters && <p className="mono text-[0.7rem] text-text-2">register a printer first</p>}
       {hasPrinters && !cameras.length && (
-        <p className="mono text-[0.7rem] text-text-2">no printer cameras found — refresh after connecting one</p>
+        <p className="mono text-[0.7rem] text-text-2">no printer cameras found, refresh after connecting one</p>
       )}
       <CameraList cameras={cameras} />
     </div>
@@ -241,7 +241,7 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
         toast("error", `publishing stopped: ${reason}`),
       );
       if (!hlsPlayable) {
-        toast("alert", "this browser records VP8 — monitoring works and you can preview it here, but other devices can't view this camera");
+        toast("alert", "this browser records VP8, so monitoring works and you can preview it here, but other devices can't view this camera");
       }
       await new Promise((r) => setTimeout(r, 800));
       send({ cmd: "camera.add", name: name || "Published camera", source: { kind: "path", path } });

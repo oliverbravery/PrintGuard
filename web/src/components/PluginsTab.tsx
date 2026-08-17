@@ -185,7 +185,7 @@ export function PluginsTab() {
 
   const installFromRepo = () => {
     const source = parseRepo(repo);
-    if (!source) return toast("error", `${REPO_HINT} — that did not look like either`);
+    if (!source) return toast("error", `${REPO_HINT}, that did not look like either`);
     installPlugin(source);
     setRepo("");
   };

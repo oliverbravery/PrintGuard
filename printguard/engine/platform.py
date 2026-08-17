@@ -76,7 +76,7 @@ class PluginRuntime(Protocol):
         ...
 
     async def authorise(self, request: dict[str, Any]) -> bool | None:
-        """Asks any gating plugin to allow a request; None when none gates."""
+        """Asks any gating plugin to allow a request, returning None when none gates."""
         ...
 
     async def close(self) -> None:

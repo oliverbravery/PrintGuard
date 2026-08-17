@@ -145,7 +145,7 @@ function connectHub(onEvent: (event: any) => void, onDown: () => void): EngineLi
     socket.onmessage = (msg) => onEvent(JSON.parse(msg.data));
     socket.onclose = () => {
       if (!closed) {
-        log("warn", "hub socket closed — reconnecting");
+        log("warn", "hub socket closed, reconnecting");
         onDown();
         setTimeout(open, 1500);
       }
@@ -357,7 +357,7 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       case "alert": {
         const name = get().engine?.monitors.find((m) => m.id === event.monitor_id)?.name ?? "monitor";
-        get().toast("alert", `Defect on ${name} — ${(event.score * 100).toFixed(0)}% (${event.action})`);
+        get().toast("alert", `Defect on ${name}, ${(event.score * 100).toFixed(0)}% (${event.action})`);
         break;
       }
       case "history":

@@ -1,4 +1,4 @@
-"""The hub's plugin sandbox: QuickJS compiled to WebAssembly, under wasmtime.
+"""The hub's plugin sandbox, QuickJS compiled to WebAssembly under wasmtime.
 
 A plugin's ``worker.js`` runs here as a pure function. Each invocation gets a
 brand new JavaScript VM with the event, the state its permissions allow and its

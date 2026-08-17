@@ -23,7 +23,7 @@ export const GUIDE: GuideSection[] = [
     body: (
       <>
         PrintGuard watches your printer cameras with an on-device vision model, pauses or cancels the
-        print when a defect holds, and pushes a snapshot to your phone. No cloud, no subscription —
+        print when a defect holds, and pushes a snapshot to your phone. There's no cloud and no subscription,
         your frames never leave hardware you own.
       </>
     ),
@@ -35,7 +35,7 @@ export const GUIDE: GuideSection[] = [
     body: (
       <>
         <strong>Local</strong> runs the whole engine in this browser tab and uses this device's
-        cameras — nothing to install. <strong>Hub</strong> runs on your own hardware, watches RTSP and
+        cameras, with nothing to install. <strong>Hub</strong> runs on your own hardware, watches RTSP and
         published streams, and keeps monitoring with every tab closed. Switch any time from the mode
         chip in the header.
       </>
@@ -47,7 +47,7 @@ export const GUIDE: GuideSection[] = [
     title: "Cameras",
     body: (
       <>
-        A camera is any video source PrintGuard can read — a USB or CSI device, an RTSP, MJPEG or
+        A camera is any video source PrintGuard can read, so a USB or CSI device, an RTSP, MJPEG or
         WebRTC (WHEP) stream URL, or a camera published from this device. Printers that expose a
         webcam register theirs automatically.
       </>
@@ -60,8 +60,8 @@ export const GUIDE: GuideSection[] = [
     title: "Printers",
     body: (
       <>
-        Connect a printer — <strong>OctoPrint</strong>, <strong>Klipper (Moonraker)</strong>, <strong>Elegoo</strong>,{" "}
-        <strong>PrusaLink</strong> or <strong>Bambu Lab</strong> — and PrintGuard can read its status and pause or cancel a print on
+        Connect a printer, whether <strong>OctoPrint</strong>, <strong>Klipper (Moonraker)</strong>, <strong>Elegoo</strong>,{" "}
+        <strong>PrusaLink</strong> or <strong>Bambu Lab</strong>, and PrintGuard can read its status and pause or cancel a print on
         a defect. It's optional: without one, a monitor still watches and alerts.{" "}
         <a className={link} href={docs("printers.md")} target="_blank" rel="noreferrer">
           Setup guides ↗
@@ -73,7 +73,7 @@ export const GUIDE: GuideSection[] = [
   {
     id: "monitors",
     led: "led-infer",
-    title: "Monitors — the core unit",
+    title: "Monitors, the core unit",
     body: (
       <>
         A monitor binds one camera (and optionally one printer) and carries the detection thresholds
@@ -104,8 +104,8 @@ export const GUIDE: GuideSection[] = [
     title: "Alerts",
     body: (
       <>
-        Add a notification channel — <strong>ntfy</strong>, <strong>Telegram</strong>,{" "}
-        <strong>Discord</strong>, or <strong>native notifications</strong> in the desktop app — and
+        Add a notification channel, whether <strong>ntfy</strong>, <strong>Telegram</strong>,{" "}
+        <strong>Discord</strong>, or <strong>native notifications</strong> in the desktop app, and
         PrintGuard sends a snapshot the moment a defect holds. Turn notifications on per monitor in
         its detail panel.
       </>
@@ -118,7 +118,7 @@ export const GUIDE: GuideSection[] = [
     title: "Fail-safe by design",
     body: (
       <>
-        A watchdog warns the instant a camera drops, a feed freezes or a printer stops answering —
+        A watchdog warns the instant a camera drops, a feed freezes or a printer stops answering,
         nothing fails silently. Watching only stands down on a positive "not printing" signal, so a
         lost feed keeps watching rather than going blind.
       </>
@@ -177,7 +177,7 @@ export const GUIDE: GuideSection[] = [
     title: "Your frames stay yours",
     body: (
       <>
-        Inference runs entirely on your hardware — in this browser in local mode, or on your hub. No
+        Inference runs entirely on your hardware, in this browser in local mode or on your hub. No
         frames, snapshots or scores are ever sent to a third party.
       </>
     ),
@@ -188,10 +188,10 @@ export const GUIDE: GuideSection[] = [
     title: "Something broken?",
     body: (
       <>
-        Report a bug from the <BugIcon className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" /> chip in the header —
+        Report a bug from the <BugIcon className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" /> chip in the header,
         anonymously, no account needed. Describe what happened, attach screenshots if they help, and optionally
         leave an email for follow-up. A diagnostics bundle goes with it, with every credential stripped and no
-        camera frames — download the same bundle from that dialog to read it or send it somewhere else yourself.
+        camera frames. Download the same bundle from that dialog to read it or send it somewhere else yourself.
       </>
     ),
     action: { label: "Report a bug", dialog: "report" },

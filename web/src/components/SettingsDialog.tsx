@@ -332,8 +332,8 @@ export function SettingsDialog() {
                 </div>
                 <Toggle label="Use TLS" on={!!mqtt.tls} onChange={(on) => setMqttField("tls", on)} />
                 <span className="text-[0.7rem] text-text-2 block">
-                  Each monitor becomes a Home Assistant device — defect, score, state and snapshot, with an enable switch and
-                  printer pause/resume/cancel — via MQTT discovery. Anyone with broker access can control PrintGuard.
+                  Each monitor becomes a Home Assistant device with defect, score, state and snapshot, an enable switch and
+                  printer pause, resume and cancel, all through MQTT discovery. Anyone with broker access can control PrintGuard.
                 </span>
               </div>
             )}
@@ -403,7 +403,7 @@ export function SettingsDialog() {
                   ×
                 </button>
                 <span className="text-[0.7rem] text-text-1 block">
-                  Copy <span className="text-accent">{createdToken.name}</span> now — it is shown once and cannot be retrieved later.
+                  Copy <span className="text-accent">{createdToken.name}</span> now, it is shown once and cannot be retrieved later.
                 </span>
                 <div className="flex items-center gap-2">
                   <code className="mono text-[0.68rem] text-text-0 break-all flex-1">{createdToken.secret}</code>

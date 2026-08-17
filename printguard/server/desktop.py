@@ -1,4 +1,4 @@
-"""Desktop app: runs hub mode behind a tray icon on macOS and Windows.
+"""Desktop app that runs hub mode behind a tray icon on macOS and Windows.
 
 Packaged with PyInstaller, this is the install-free, no-terminal way to run a hub
 on a personal computer. The hub server and a system-tray icon live in this
@@ -149,7 +149,7 @@ def _enable_wkwebview_camera() -> None:
 
 
 def _run_webview(**contents: Any) -> None:
-    """Child-process entry point: shows the hub, or why it is not there, in a native window.
+    """Child-process entry point that shows the hub, or why it is not there, in a native window.
 
     The window owns its process's main thread, so it never contends with the
     tray's, and closing it ends only this process. The webview must keep its
@@ -301,7 +301,7 @@ def _watch_termination(window: _Window, server: _Server) -> None:
         watched = {int(signal.SIGTERM), int(signal.SIGINT)}
         while received.recv(1)[0] not in watched:
             pass
-        logger.info("termination signal received — shutting down")
+        logger.info("termination signal received, shutting down")
         notify.close()
         window.close()
         server.stop()
@@ -353,7 +353,7 @@ def _show_tray(icon: pystray.Icon) -> None:
 
 
 def main() -> None:
-    """Console entry point: serves the hub behind a tray icon on the main thread.
+    """Console entry point that serves the hub behind a tray icon on the main thread.
 
     The window runs in a child process; closing it leaves the tray and the hub
     server running so the printer stays watched, and the tray's Quit exits.

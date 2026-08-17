@@ -228,7 +228,7 @@ class Token:
 
 @dataclass
 class Plugin:
-    """An installed plugin: where it came from, what it may do, and its code.
+    """An installed plugin, where it came from, what it may do, and its code.
 
     Attributes:
         id: The manifest's plugin id, unique across installed plugins.
@@ -311,7 +311,7 @@ class CameraRegistry(Registry[Camera]):
         return camera
 
     def schedulable(self) -> list[Camera]:
-        """Cameras eligible for inference: in use, online and attached."""
+        """Cameras eligible for inference, meaning in use, online and attached."""
         return [c for c in self.values() if c.in_use and c.online]
 
     def sync_in_use(self, monitors: dict[str, dict[str, Any]], printers: "PrinterRegistry") -> None:

@@ -1,7 +1,7 @@
-"""Defect response: streak detection, printer actions, notifications and
-the health watchdog that keeps failures loud.
+"""Defect response, covering streak detection, printer actions, notifications
+and the health watchdog that keeps failures loud.
 
-Nothing in the alert path fails silently: failed printer actions, failed
+Nothing in the alert path fails silently. Failed printer actions, failed
 notification deliveries and dropped-out cameras or printer services all
 emit protocol events, and sustained outages are pushed through the
 configured notifiers so the user hears about them away from the dashboard.
@@ -118,8 +118,8 @@ class Watchdog:
                     now,
                     OFFLINE_GRACE_S,
                     monitor,
-                    f"Camera '{camera.name}' is offline — '{monitor['name']}' is NOT being monitored",
-                    f"Camera '{camera.name}' is back — '{monitor['name']}' is monitored again",
+                    f"Camera '{camera.name}' is offline, so '{monitor['name']}' is NOT being monitored",
+                    f"Camera '{camera.name}' is back, so '{monitor['name']}' is monitored again",
                 )
                 if offline:
                     await self._engine.restart_camera(camera)
@@ -135,8 +135,8 @@ class Watchdog:
                     now,
                     0.0,
                     monitor,
-                    f"Camera '{camera.name}' feed has stalled — '{monitor['name']}' is NOT being monitored",
-                    f"Camera '{camera.name}' feed recovered — '{monitor['name']}' is monitored again",
+                    f"Camera '{camera.name}' feed has stalled, so '{monitor['name']}' is NOT being monitored",
+                    f"Camera '{camera.name}' feed recovered, so '{monitor['name']}' is monitored again",
                 )
                 if stalled:
                     await self._engine.restart_camera(camera)
@@ -149,7 +149,7 @@ class Watchdog:
                         now,
                         OFFLINE_GRACE_S,
                         monitor,
-                        f"Printer service for '{monitor['name']}' is unreachable — defects cannot pause this print",
+                        f"Printer service for '{monitor['name']}' is unreachable, so defects cannot pause this print",
                         f"Printer service for '{monitor['name']}' is reachable again",
                     )
             await asyncio.sleep(WATCH_TICK_S)
@@ -259,7 +259,7 @@ class Watchdog:
         self._last_notified[monitor["id"]] = time.monotonic()
         title = f"PrintGuard: {monitor['name']} defect ({score * 100:.0f}%)"
         if action == "failed":
-            body = f"AUTOMATIC {monitor['on_defect'].upper()} FAILED — check the printer"
+            body = f"AUTOMATIC {monitor['on_defect'].upper()} FAILED, check the printer"
         elif action == "none":
             body = "Alert only: no printer action configured"
         else:

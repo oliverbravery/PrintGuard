@@ -101,7 +101,7 @@ class Scheduler:
             task.cancel()
 
     async def run(self) -> None:
-        """Dispatch loop: hands the most overdue camera to a free worker."""
+        """Dispatch loop that hands the most overdue camera to a free worker."""
         while True:
             async with self._dispatch_lock:
                 self.allocate()
