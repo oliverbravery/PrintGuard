@@ -161,7 +161,11 @@ declare global {
     http(request: { method?: string; url: string; headers?: Record<string, string>; json?: unknown }): void;
     /** Raises a message on the dashboard. Needs `notify`, and does not use the user's alert channels. */
     notify(text: string): void;
-    /** Opens or closes your floating window, which holds whatever `render` last returned. Needs the `float` surface. */
+    /**
+     * Floats the camera your view last drew, in the browser's own
+     * picture-in-picture window. Needs the `float` surface and a view that is
+     * a single `camera` node.
+     */
     float(on: boolean): void;
     /**
      * Sounds tones through the speakers of whoever is looking, one after the

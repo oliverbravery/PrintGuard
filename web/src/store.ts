@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { floatCamera, unfloat } from "./float";
 import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { log } from "./log";
@@ -535,7 +536,13 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     popPlugin(poppedPlugin) {
+      const tree = poppedPlugin ? get().pluginTrees[poppedPlugin] : null;
+      const camera = tree?.type === "camera" ? tree.camera_id : undefined;
       set({ poppedPlugin });
+      if (!poppedPlugin || !camera) return unfloat();
+      void floatCamera(camera, () => set({ poppedPlugin: null })).then((floating) => {
+        if (!floating) set({ poppedPlugin: null });
+      });
     },
 
     fetchCatalogue() {

@@ -248,29 +248,26 @@ test("a command the plugin was not granted never reaches the engine", async ({ p
   await expect(page.getByText("without permission")).toBeVisible();
 });
 
-test("a monitor surface puts a pop-out button on each monitor and nothing on the dashboard", async ({ page }) => {
+async function stubFloat(page: import("@playwright/test").Page) {
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__floated = 0;
+    Object.defineProperty(Document.prototype, "pictureInPictureEnabled", { get: () => true, configurable: true });
+    HTMLVideoElement.prototype.requestPictureInPicture = function () {
+      win.__floated += 1;
+      return Promise.resolve({} as PictureInPictureWindow);
+    };
+  });
+}
+
+test("a monitor surface draws on each monitor and nothing on the dashboard", async ({ page }) => {
+  await stubFloat(page);
   await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor", "float"]);
-  test.skip(!(await page.evaluate(() => "documentPictureInPicture" in window)), "no Document Picture-in-Picture here");
 
   await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
   await page.getByRole("button", { name: "Float Bench" }).click();
 
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const pip = (window as any).documentPictureInPicture.window;
-        return pip ? pip.document.querySelectorAll("video").length : 0;
-      }),
-    )
-    .toBe(1);
-
-  const spare = await page.evaluate(() => {
-    const pip = (window as any).documentPictureInPicture.window;
-    const feed = pip.document.querySelector("video").parentElement.getBoundingClientRect().height;
-    return pip.document.body.getBoundingClientRect().height - feed;
-  });
-
-  expect(spare).toBeLessThanOrEqual(2);
+  await expect.poll(() => page.evaluate(() => (window as any).__floated)).toBe(1);
 });
 
 async function silentAudio(page: import("@playwright/test").Page) {
@@ -361,26 +358,13 @@ test("a plugin takes input and shows the files it shipped", async ({ page }) => 
   await expect(panel.getByAltText("Logo")).toHaveJSProperty("naturalWidth", 1);
 });
 
-test("pop-out puts the panel in a picture-in-picture window, themed", async ({ page }) => {
-  await dashboardWithPlugin(page, PIP);
-  test.skip(!(await page.evaluate(() => "documentPictureInPicture" in window)), "no Document Picture-in-Picture here");
+test("popping a panel out floats the camera it drew", async ({ page }) => {
+  await stubFloat(page);
+  await dashboardWithPlugin(page, "plugin.render(() => ({ type: 'camera', camera_id: 'c1' }));");
 
   const panel = page.locator("section", { hasText: "Picture in picture" });
   await panel.getByRole("button", { name: /Pop out/ }).click();
+
   await expect(panel.getByText("Showing in a floating window")).toBeVisible();
-
-  const inside = await page.evaluate(() => {
-    const pip = (window as any).documentPictureInPicture.window;
-    return {
-      theme: pip.document.documentElement.dataset.theme,
-      styles: pip.document.querySelectorAll('style, link[rel="stylesheet"]').length,
-      videos: pip.document.querySelectorAll("video").length,
-      buttons: [...pip.document.querySelectorAll("button")].length,
-    };
-  });
-
-  expect(inside.videos).toBe(1);
-  expect(inside.buttons).toBe(1);
-  expect(inside.styles).toBeGreaterThan(0);
-  expect(inside.theme).toBeTruthy();
+  expect(await page.evaluate(() => (window as any).__floated)).toBe(1);
 });

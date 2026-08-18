@@ -73,10 +73,10 @@ const PERMISSIONS = [
 
 const CATALOGUE = [
   {
-    id: "picture-in-picture", name: "Picture in picture", version: "1.1.0", author: "oliverbravery",
+    id: "picture-in-picture", name: "Picture in picture", version: "1.2.0", author: "oliverbravery",
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
     repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40),
-    permissions: ["state:read", "camera:view"], platforms: ["docker", "windows", "browser"], surfaces: ["monitor", "float"], digests: {},
+    permissions: ["state:read", "camera:view"], platforms: [], surfaces: ["monitor", "float"], digests: {},
   },
   {
     id: "alert-sounds", name: "Alert sounds", version: "1.0.0", author: "oliverbravery",
@@ -95,10 +95,10 @@ const CATALOGUE = [
 const INSTALLED = {
   id: "picture-in-picture",
   manifest: {
-    id: "picture-in-picture", name: "Picture in picture", version: "1.1.0", author: "oliverbravery", homepage: "",
+    id: "picture-in-picture", name: "Picture in picture", version: "1.2.0", author: "oliverbravery", homepage: "",
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
     permissions: ["state:read", "camera:view"], surfaces: ["monitor", "float"],
-    platforms: ["docker", "windows", "browser"], hosts: [], events: [], tick_s: 0,
+    platforms: [], hosts: [], events: [], tick_s: 0,
   },
   files: ["plugin.js"], digests: {},
   source: { kind: "github", repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40) },

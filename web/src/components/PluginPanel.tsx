@@ -1,14 +1,14 @@
+import { floatSupported } from "../float";
 import { useStore } from "../store";
 import type { PluginRecord } from "../types";
 import { PluginNodeView } from "./PluginNode";
-import { PopOut, popOutSupported, usePopOut } from "./PopOut";
 
 export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
   const tree = useStore((s) => s.pluginTrees[plugin.id]);
   const failure = useStore((s) => s.pluginFailures[plugin.id]) ?? plugin.failure;
   const popped = useStore((s) => s.poppedPlugin === plugin.id);
   const popPlugin = useStore((s) => s.popPlugin);
-  const floatable = plugin.manifest.surfaces.includes("float") && popOutSupported();
+  const floatable = plugin.manifest.surfaces.includes("float") && floatSupported();
   const mayViewCameras = plugin.granted.includes("camera:view");
 
   const needsPermissions = plugin.granted.length === 0 && plugin.manifest.permissions.length > 0;
@@ -39,20 +39,6 @@ export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
       </div>
       {popped ? <span className="text-[0.7rem] text-text-2">Showing in a floating window.</span> : body}
     </section>
-  );
-}
-
-export function PluginFloat() {
-  const id = useStore((s) => s.poppedPlugin);
-  const plugin = useStore((s) => s.engine?.plugins.find((p) => p.id === id));
-  const tree = useStore((s) => (id ? s.pluginTrees[id] : null));
-  const popPlugin = useStore((s) => s.popPlugin);
-  const pip = usePopOut(Boolean(plugin), () => popPlugin(null));
-  if (!plugin || !pip || !tree) return null;
-  return (
-    <PopOut document={pip}>
-      <PluginNodeView node={tree} pluginId={plugin.id} mayViewCameras={plugin.granted.includes("camera:view")} />
-    </PopOut>
   );
 }
 

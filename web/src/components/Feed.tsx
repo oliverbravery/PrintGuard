@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { registerFeed } from "../float";
 import { renderVideoFrame, useVideoStream } from "../image";
 import type { Camera } from "../types";
 
@@ -14,6 +15,11 @@ export function Feed({ camera, mode, active = true }: { camera: Camera | undefin
   const useCanvas = sharpness > 0 || crop !== null || brightness !== 1 || contrast !== 1 || rotation !== 0;
 
   useVideoStream(videoRef, camera, mode, active);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    return video && camera ? registerFeed(camera.id, video) : undefined;
+  }, [camera?.id]);
 
   useEffect(() => setPlaying(false), [camera?.id, active]);
 

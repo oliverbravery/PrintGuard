@@ -29,7 +29,7 @@
       "name": "Picture in picture",
       "description": "Puts a pop-out button on every monitor that floats its camera above your other windows.",
       "author": "oliverbravery",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "permissions": [
         "state:read",
         "camera:view"
@@ -38,16 +38,12 @@
         "monitor",
         "float"
       ],
-      "platforms": [
-        "browser",
-        "docker",
-        "windows"
-      ],
+      "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/picture-in-picture",
       "ref": "3785dc78f7172ccd47d72cb390dae04c3150260b",
       "digests": {
-        "plugin.json": "77f93e42a8600584d7a8d10ffe054bc91b0db5bd658b6f1d00b1c09744a2ad09",
+        "plugin.json": "d38e595a87e409adcfd94bc18011ba06d2acec2ab470698b4b71474301051c6a",
         "plugin.js": "5bdf47ecc077d34c3fb0f4441f43987598ac8bb77042436b8bfb39009de54ead"
       }
     }

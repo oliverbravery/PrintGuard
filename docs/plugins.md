@@ -125,7 +125,7 @@ my-plugin/
 |---|---|
 | `panel` | A panel of its own on the dashboard |
 | `monitor` | Drawn on every monitor tile, with `render` called once per monitor and `ctx.target` naming which |
-| `float` | A window that floats above other apps, holding whatever `render` last returned |
+| `float` | The camera your view draws, floated above other apps in the browser's own picture-in-picture window |
 
 `platforms` says where it runs, and leaving it out means everywhere. The store filters the
 catalogue by the one you are on, so anything that would not work is out of the way.
@@ -138,9 +138,9 @@ catalogue by the one you are on, so anything that would not work is out of the w
 | `browser` | Local mode |
 
 Naming `docker` covers the images built from it, so declare a variant only when a plainer
-image would not do. A panel needing a browser feature is a different question, since the
-dashboard is a web page everywhere: declare the `float` surface and PrintGuard says when the
-browser in front of it has no floating window, which Safari has not.
+image would not do. A browser feature is a different question, since the dashboard is a web
+page everywhere. Declare the `float` surface and PrintGuard says when the browser in front of
+it cannot float a video, which every current desktop browser can.
 
 `assets` names the files it ships beside its code, which are hashed and pinned the same way,
 so a plugin brings its own sounds and images rather than asking PrintGuard for them.
@@ -240,7 +240,7 @@ plugin.render((ctx) => ({
 
 [`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in twelve
 lines. It takes the `monitor` and `float` surfaces, so it draws a button on each monitor and
-its panel view is only ever the floating window.
+its panel view is only ever the camera it floats.
 [`plugins/alert-sounds`](../plugins/alert-sounds) is the other one, watching each monitor's
 `alert` between renders and sounding a horn, a bell or an alarm when a new one appears. The
 tones are its own, since `ctx.sound` takes a list of them rather than a name PrintGuard knows:

@@ -11,7 +11,7 @@ import { GuideDialog } from "./GuideDialog";
 import { Header, MobileActionBar } from "./Header";
 import { MonitorDialog } from "./MonitorDialog";
 import { MonitorTile } from "./MonitorTile";
-import { PluginFloat, PluginSection } from "./PluginPanel";
+import { PluginSection } from "./PluginPanel";
 import { PrintersDialog } from "./PrintersDialog";
 import { ReportDialog } from "./ReportDialog";
 import { SettingsDialog } from "./SettingsDialog";
@@ -108,7 +108,6 @@ export function Dashboard() {
       {dialog === "demo" && <DemoDialog />}
       {detail && <DetailPanel monitor={detail} />}
       {stats && <StatsPage monitor={stats} />}
-      <PluginFloat />
       <Toasts />
       <MobileActionBar />
     </div>
