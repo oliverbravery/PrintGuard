@@ -277,7 +277,9 @@ async function silentAudio(page: import("@playwright/test").Page) {
     win.AudioContext = class {
       currentTime = 0;
       destination = {};
-      resume() {}
+      resume() {
+        return Promise.resolve();
+      }
       createGain() {
         return { gain: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (node: any) => node };
       }
@@ -311,12 +313,12 @@ const SOUNDS = readFileSync(new URL("../../plugins/alert-sounds/plugin.js", impo
 
 test("the sounds plugin stays quiet until a monitor is switched on and a fresh alert lands", async ({ page }) => {
   await silentAudio(page);
-  await dashboardWithPlugin(page, SOUNDS, ["state:read", "sound"], ["monitor", "panel"]);
+  await dashboardWithPlugin(page, SOUNDS, ["state:read", "sound"], ["settings"]);
 
-  const tile = page.locator("article", { hasText: "Bench" });
-  await tile.getByRole("button", { name: "🔇" }).click();
-  await expect(tile.getByRole("button", { name: "🔊" })).toBeVisible();
-  await expect(page.getByText("Sounding for Bench")).toBeVisible();
+  await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Open Bench monitor details" }).click();
+  await page.getByLabel("Sound an alert").click();
+  await expect(page.getByLabel("Alert sound")).toBeVisible();
   expect(await page.evaluate(() => (window as any).__tones)).toBe(0);
 
   await page.evaluate(() => {

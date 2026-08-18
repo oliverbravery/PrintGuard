@@ -8,6 +8,11 @@ const MAX_EFFECTS = 32;
 
 let nextCall = 0;
 
+export interface PluginTarget {
+  id: string;
+  surface: string;
+}
+
 export interface HostHandlers {
   onView(id: string, tree: PluginNode | null, targets: Record<string, PluginNode | null>): void;
   onEffects(id: string, effects: PluginEffect[]): void;
@@ -145,11 +150,11 @@ export class PluginHost {
     }
   }
 
-  update(state: Record<string, unknown>, targets: string[]): Promise<void> {
+  update(state: Record<string, unknown>, targets: PluginTarget[]): Promise<void> {
     return this.call({ t: "state", state, targets });
   }
 
-  act(name: string, arg: unknown, state: Record<string, unknown>, targets: string[]): Promise<void> {
+  act(name: string, arg: unknown, state: Record<string, unknown>, targets: PluginTarget[]): Promise<void> {
     return this.call({ t: "action", name, arg, state, targets });
   }
 

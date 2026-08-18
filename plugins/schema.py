@@ -24,7 +24,8 @@ SCHEMA_URL = "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/pl
 SURFACE_HELP = {
     "panel": "A panel of its own on the dashboard.",
     "float": "A window that floats above other apps, holding whatever render last returned.",
-    "monitor": "A button on every monitor tile, calling your action with the monitor's id.",
+    "monitor": "Drawn on every monitor tile, once per monitor.",
+    "settings": "Drawn in every monitor's settings, once per monitor.",
 }
 
 

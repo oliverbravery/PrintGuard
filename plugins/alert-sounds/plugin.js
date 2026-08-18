@@ -27,52 +27,46 @@ const SOUNDS = new Map([
 const names = [...SOUNDS.keys()];
 
 plugin.action((name, arg, ctx) => {
-  if (name === "sound") ctx.store.sound = arg;
-  if (name === "test") ctx.sound(SOUNDS.get(ctx.store.sound) || HORN);
-  if (name !== "toggle") return;
-  const on = ctx.store.on || {};
-  on[arg] = !on[arg];
-  ctx.store.on = on;
+  const [what, monitorId] = name.split(":");
+  if (what === "on") {
+    const on = ctx.store.on || {};
+    on[monitorId] = arg === true;
+    ctx.store.on = on;
+  }
+  if (what === "sound") {
+    const sound = ctx.store.sound || {};
+    sound[monitorId] = arg;
+    ctx.store.sound = sound;
+    ctx.sound(SOUNDS.get(arg) || HORN);
+  }
 });
 
 plugin.render((ctx) => {
   const on = ctx.store.on || {};
-  const monitors = ctx.state.monitors || [];
+  const sound = ctx.store.sound || {};
 
   if (ctx.target) {
-    return { type: "button", label: on[ctx.target] ? "🔊" : "🔇", action: "toggle", arg: ctx.target };
+    return {
+      type: "col",
+      children: [
+        { type: "toggle", label: "Sound an alert", on: on[ctx.target] === true, action: "on:" + ctx.target },
+        on[ctx.target] === true && {
+          type: "select",
+          label: "Alert sound",
+          value: sound[ctx.target] || names[0],
+          action: "sound:" + ctx.target,
+          options: names.map((name) => ({ value: name, label: name })),
+        },
+      ],
+    };
   }
 
   const heard = ctx.store.heard || {};
-  for (const monitor of monitors) {
+  for (const monitor of ctx.state.monitors || []) {
     const at = monitor.alert ? monitor.alert.ts : 0;
-    if (at !== heard[monitor.id] && at && on[monitor.id]) ctx.sound(SOUNDS.get(ctx.store.sound) || HORN);
+    if (at !== heard[monitor.id] && at && on[monitor.id]) ctx.sound(SOUNDS.get(sound[monitor.id]) || HORN);
     heard[monitor.id] = at;
   }
   ctx.store.heard = heard;
-
-  const listening = monitors.filter((monitor) => on[monitor.id]).map((monitor) => monitor.name);
-  return {
-    type: "col",
-    children: [
-      {
-        type: "row",
-        children: [
-          {
-            type: "select",
-            label: "Sound",
-            value: ctx.store.sound || names[0],
-            action: "sound",
-            options: names.map((sound) => ({ value: sound, label: sound })),
-          },
-          { type: "button", label: "Test", action: "test" },
-        ],
-      },
-      {
-        type: "text",
-        muted: true,
-        value: listening.length ? "Sounding for " + listening.join(", ") : "Press the speaker on a monitor to sound for it.",
-      },
-    ],
-  };
+  return null;
 });

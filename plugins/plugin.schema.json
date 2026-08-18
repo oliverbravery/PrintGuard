@@ -102,7 +102,11 @@
           },
           {
             "const": "monitor",
-            "description": "A button on every monitor tile, calling your action with the monitor's id."
+            "description": "Drawn on every monitor tile, once per monitor."
+          },
+          {
+            "const": "settings",
+            "description": "Drawn in every monitor's settings, once per monitor."
           }
         ]
       }

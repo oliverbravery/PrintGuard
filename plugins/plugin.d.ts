@@ -145,8 +145,10 @@ declare global {
   interface PluginContext {
     /** What your permissions let you read, fresh for this call. */
     state: PluginState;
-    /** The monitor this view is being drawn for on the `monitor` surface, and undefined for your panel and your floating window. */
+    /** The monitor this view is being drawn for, on the `monitor` and `settings` surfaces, and undefined for your panel. */
     target?: string;
+    /** Which surface is being drawn, `monitor` or `settings`, alongside `ctx.target`. */
+    surface?: string;
     /** The text files you shipped, keyed by name. Images and audio are not here, since only PrintGuard handles those. */
     assets: Record<string, string>;
     /** Your own data. Assign to it and PrintGuard saves it, up to 16 KB. */

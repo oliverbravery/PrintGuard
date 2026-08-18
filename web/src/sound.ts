@@ -13,8 +13,11 @@ export function playFile(url: string): void {
 }
 
 export function play(tones: PluginTone[]): void {
-  context ??= new AudioContext();
-  void context.resume();
+  const audio = (context ??= new AudioContext());
+  void audio.resume().then(() => schedule(audio, tones));
+}
+
+function schedule(context: AudioContext, tones: PluginTone[]): void {
   const gain = context.createGain();
   gain.gain.value = 0.18;
   gain.connect(context.destination);

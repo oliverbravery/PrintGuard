@@ -4,6 +4,7 @@ import type { Monitor } from "../types";
 import { Modal } from "./Dialog";
 import { Feed } from "./Feed";
 import { DeviceChip } from "./MonitorTile";
+import { PluginNodeView } from "./PluginNode";
 import { RiskGauge } from "./RiskGauge";
 import { SaveStatus } from "./SaveStatus";
 import { Sparkline } from "./Sparkline";
@@ -59,7 +60,7 @@ function Slider({
 }
 
 export function DetailPanel({ monitor }: { monitor: Monitor }) {
-  const { engine, history, send, openDetail, openStats, openDialog, isPending, updateMonitor } = useStore();
+  const { engine, history, send, openDetail, openStats, openDialog, isPending, updateMonitor, pluginViews } = useStore();
   const titleId = useId();
   const actionRef = useRef<string | null>(null);
   const removeRef = useRef(false);
@@ -217,6 +218,17 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
             <Toggle label="Push notifications" on={monitor.notify} onChange={(v) => updateMonitor(monitor.id, { notify: v })} />
           </div>
         </Section>
+
+        {(engine?.plugins ?? [])
+          .filter((plugin) => plugin.enabled && plugin.manifest.surfaces.includes("settings"))
+          .map((plugin) => {
+            const node = pluginViews[plugin.id]?.[`settings:${monitor.id}`];
+            return node ? (
+              <Section key={plugin.id} title={plugin.manifest.name}>
+                <PluginNodeView node={node} pluginId={plugin.id} mayViewCameras={plugin.granted.includes("camera:view")} />
+              </Section>
+            ) : null;
+          })}
 
         <Section title="Printer">
           <div className="space-y-3">

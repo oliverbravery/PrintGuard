@@ -124,8 +124,14 @@ my-plugin/
 | Surface | Where it puts you |
 |---|---|
 | `panel` | A panel of its own on the dashboard |
-| `monitor` | Drawn on every monitor tile, with `render` called once per monitor and `ctx.target` naming which |
+| `monitor` | Drawn on every monitor tile |
+| `settings` | Drawn in every monitor's settings, under its own heading |
 | `float` | The camera your view draws, floated above other apps in the browser's own picture-in-picture window |
+
+On `monitor` and `settings`, `render` is called once more per monitor, with `ctx.target` naming
+which and `ctx.surface` naming where, so a plugin can put a button on the tile and its own
+settings in the panel behind it. Anything that belongs to one monitor rather than all of them
+goes in `settings`.
 
 `platforms` says where it runs, and leaving it out means everywhere. The store filters the
 catalogue by the one you are on, so anything that would not work is out of the way.
@@ -241,8 +247,10 @@ plugin.render((ctx) => ({
 [`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in twelve
 lines. It takes the `monitor` and `float` surfaces, so it draws a button on each monitor and
 its panel view is only ever the camera it floats.
-[`plugins/alert-sounds`](../plugins/alert-sounds) is the other one, watching each monitor's
-`alert` between renders and sounding a horn, a bell or an alarm when a new one appears. The
+[`plugins/alert-sounds`](../plugins/alert-sounds) is the other one. It adds a switch and a
+sound picker to each monitor's settings, and watches each monitor's `alert` between renders,
+sounding the chosen tones the moment one appears. Its main view returns nothing, since a
+plugin's `render` runs whether or not it has a panel to draw. The
 tones are its own, since `ctx.sound` takes a list of them rather than a name PrintGuard knows:
 
 ```js

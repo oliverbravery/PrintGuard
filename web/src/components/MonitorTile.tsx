@@ -20,7 +20,7 @@ export function DeviceChip({ state }: { state: DeviceState | undefined }) {
 }
 
 export function MonitorTile({ monitor, index }: { monitor: Monitor; index: number }) {
-  const { engine, history, openDetail, customising, mutateLayout, dialog, detailId, statsMonitorId, pluginTiles } = useStore();
+  const { engine, history, openDetail, customising, mutateLayout, dialog, detailId, statsMonitorId, pluginViews } = useStore();
   const covered = dialog !== null || detailId !== null || statsMonitorId !== null;
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
@@ -81,7 +81,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
             <DeviceChip state={printer?.device_state ?? undefined} />
             {!monitor.watching && <span className="chip">standby</span>}
             {tools.map((plugin) => {
-              const node = pluginTiles[plugin.id]?.[monitor.id];
+              const node = pluginViews[plugin.id]?.[`monitor:${monitor.id}`];
               return node ? (
                 <span key={plugin.id} className="relative z-[3]">
                   <PluginNodeView node={node} pluginId={plugin.id} mayViewCameras={plugin.granted.includes("camera:view")} />

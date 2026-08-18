@@ -46,11 +46,12 @@
         let store = {};
         let assets = {};
 
-        function context(state, target) {
+        function context(state, target, surface) {
           return {
             store,
             state,
             target,
+            surface,
             assets,
             command(cmd) {
               effects.push({ kind: "command", cmd });
@@ -99,7 +100,9 @@
           else if (message.t === "event") hooks.events.get(String(message.event.event))?.(message.event, ctx);
           if (hooks.view) {
             tree = hooks.view(ctx);
-            for (const target of message.targets || []) targets[target] = hooks.view(context(message.state || {}, target));
+            for (const at of message.targets || []) {
+              targets[at.surface + ":" + at.id] = hooks.view(context(message.state || {}, at.id, at.surface));
+            }
           }
           store = ctx.store;
           return { tree, targets, store, effects };

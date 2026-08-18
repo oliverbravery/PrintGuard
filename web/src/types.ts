@@ -212,7 +212,7 @@ export interface PluginManifest {
   author: string;
   homepage: string;
   permissions: string[];
-  surfaces: ("panel" | "float" | "monitor")[];
+  surfaces: ("panel" | "float" | "monitor" | "settings")[];
   platforms: string[];
   hosts: string[];
   events: string[];

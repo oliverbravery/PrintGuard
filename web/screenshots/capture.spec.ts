@@ -79,10 +79,10 @@ const CATALOGUE = [
     permissions: ["state:read", "camera:view"], platforms: [], surfaces: ["monitor", "float"], digests: {},
   },
   {
-    id: "alert-sounds", name: "Alert sounds", version: "1.0.0", author: "oliverbravery",
-    description: "Sounds a horn, a bell or an alarm on the monitors you switch it on for, the moment a defect is caught.",
+    id: "alert-sounds", name: "Alert sounds", version: "1.1.0", author: "oliverbravery",
+    description: "Sounds a horn, a bell or an alarm the moment a defect is caught, on the monitors you switch it on for.",
     repo: "oliverbravery/PrintGuard", path: "plugins/alert-sounds", ref: "c".repeat(40),
-    permissions: ["state:read", "sound"], platforms: [], surfaces: ["monitor", "panel"], digests: {},
+    permissions: ["state:read", "sound"], platforms: [], surfaces: ["settings"], digests: {},
   },
   {
     id: "print-log", name: "Print log", version: "0.3.0", author: "community",

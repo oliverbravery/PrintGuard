@@ -3,7 +3,7 @@ import { floatCamera, unfloat } from "./float";
 import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { log } from "./log";
-import { commandAllowed, outboundRequest, PluginHost, projectEvent, projectState } from "./plugins";
+import { commandAllowed, outboundRequest, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
 import { play, playFile } from "./sound";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
@@ -103,7 +103,7 @@ interface PgStore {
   optimistic: Record<string, OptimisticEntry>;
   savedAt: number | null;
   pluginTrees: Record<string, PluginNode | null>;
-  pluginTiles: Record<string, Record<string, PluginNode | null>>;
+  pluginViews: Record<string, Record<string, PluginNode | null>>;
   pluginAssets: Record<string, Record<string, string>>;
   pluginFailures: Record<string, string>;
   catalogue: CatalogueEntry[] | null;
@@ -214,8 +214,10 @@ export const useStore = create<PgStore>((set, get) => {
     return engine ? projectState(engine, plugin.granted, engine.plugin_permissions) : {};
   };
 
-  const pluginTargets = (plugin: PluginRecord) =>
-    plugin.manifest.surfaces.includes("monitor") ? (get().engine?.monitors ?? []).map((m) => m.id) : [];
+  const pluginTargets = (plugin: PluginRecord): PluginTarget[] =>
+    plugin.manifest.surfaces
+      .filter((surface) => surface === "monitor" || surface === "settings")
+      .flatMap((surface) => (get().engine?.monitors ?? []).map((monitor) => ({ id: monitor.id, surface })));
 
   const perform = (id: string, effects: PluginEffect[]) => {
     const engine = get().engine;
@@ -245,7 +247,7 @@ export const useStore = create<PgStore>((set, get) => {
 
   const handlers = {
     onView: (id: string, tree: PluginNode | null, targets: Record<string, PluginNode | null>) =>
-      set((s) => ({ pluginTrees: { ...s.pluginTrees, [id]: tree }, pluginTiles: { ...s.pluginTiles, [id]: targets } })),
+      set((s) => ({ pluginTrees: { ...s.pluginTrees, [id]: tree }, pluginViews: { ...s.pluginViews, [id]: targets } })),
     onEffects: perform,
     onStore: (id: string, config: Record<string, unknown>) => {
       const serialised = JSON.stringify(config);
@@ -523,7 +525,7 @@ export const useStore = create<PgStore>((set, get) => {
     optimistic: {},
     savedAt: null,
     pluginTrees: {},
-    pluginTiles: {},
+    pluginViews: {},
     pluginAssets: {},
     pluginFailures: {},
     catalogue: null,

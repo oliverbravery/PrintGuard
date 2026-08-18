@@ -4,24 +4,23 @@
     {
       "id": "alert-sounds",
       "name": "Alert sounds",
-      "description": "Sounds a horn, a bell or an alarm on the monitors you switch it on for, the moment a defect is caught.",
+      "description": "Sounds a horn, a bell or an alarm the moment a defect is caught, on the monitors you switch it on for.",
       "author": "oliverbravery",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "permissions": [
         "state:read",
         "sound"
       ],
       "surfaces": [
-        "monitor",
-        "panel"
+        "settings"
       ],
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/alert-sounds",
       "ref": "3785dc78f7172ccd47d72cb390dae04c3150260b",
       "digests": {
-        "plugin.json": "26d7cd8baabe4fc9c7a3aab6f7e1e3e3377f19d99693559faac4acb95781e596",
-        "plugin.js": "6969acd5f569f766f52a3c69644c70a263db70ea45a2504f90ebeaa19ead03bc"
+        "plugin.json": "cb436952d6e5797cdb642812e666854de1dea491a931066fab25158f1aaa0cfc",
+        "plugin.js": "a833d0f176b2a630bfe379b1f376f3ed5ef4e3afa09a833d9a492e292191f690"
       }
     },
     {
@@ -41,7 +40,7 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/picture-in-picture",
-      "ref": "3785dc78f7172ccd47d72cb390dae04c3150260b",
+      "ref": "0704c607ac0cd3d2c77812ee00b0b31321492a80",
       "digests": {
         "plugin.json": "d38e595a87e409adcfd94bc18011ba06d2acec2ab470698b4b71474301051c6a",
         "plugin.js": "5bdf47ecc077d34c3fb0f4441f43987598ac8bb77042436b8bfb39009de54ead"
