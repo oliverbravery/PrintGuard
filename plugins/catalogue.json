@@ -2,6 +2,29 @@
   "version": 1,
   "plugins": [
     {
+      "id": "alert-sounds",
+      "name": "Alert sounds",
+      "description": "Sounds a horn, a bell or an alarm on the monitors you switch it on for, the moment a defect is caught.",
+      "author": "oliverbravery",
+      "version": "1.0.0",
+      "permissions": [
+        "state:read",
+        "sound"
+      ],
+      "surfaces": [
+        "monitor",
+        "panel"
+      ],
+      "platforms": [],
+      "repo": "oliverbravery/PrintGuard",
+      "path": "plugins/alert-sounds",
+      "ref": "3785dc78f7172ccd47d72cb390dae04c3150260b",
+      "digests": {
+        "plugin.json": "398b7a7b50a9ee1da667c8fa613a812befdcc7c4c3b6641b8a486db3786e223d",
+        "plugin.js": "6969acd5f569f766f52a3c69644c70a263db70ea45a2504f90ebeaa19ead03bc"
+      }
+    },
+    {
       "id": "picture-in-picture",
       "name": "Picture in picture",
       "description": "Puts a pop-out button on every monitor that floats its camera above your other windows.",
@@ -22,10 +45,10 @@
       ],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/picture-in-picture",
-      "ref": "9cc35d7df3baa42379be21942815ef9f67e375db",
+      "ref": "3785dc78f7172ccd47d72cb390dae04c3150260b",
       "digests": {
         "plugin.json": "76d44aa72df4180cc37507d5265d7f04eefc03370a14107287f82c42c67fa3ef",
-        "plugin.js": "6bcbed13a51804063e8b56c693769bd1dde44a2526a652bc8a42977a64b4c371"
+        "plugin.js": "5bdf47ecc077d34c3fb0f4441f43987598ac8bb77042436b8bfb39009de54ead"
       }
     }
   ]
