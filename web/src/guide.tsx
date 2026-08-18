@@ -163,8 +163,8 @@ export const GUIDE: GuideSection[] = [
         Add a panel to the dashboard, or a job that runs on the hub, from the catalogue or from any
         GitHub repository. Plugins are third-party code, so they run in a sandbox with no network
         and no access to your credentials, cameras or tokens, and only do what you grant them.{" "}
-        <strong>Picture in picture</strong> comes as one, putting a pop-out button on every monitor that
-        floats its camera above other apps.{" "}
+        <strong>Picture in picture</strong> and <strong>Alert sounds</strong> come as standard, one floating a
+        camera above your other windows and the other sounding a horn the moment a defect is caught.{" "}
         <a className={link} href={docs("plugins.md")} target="_blank" rel="noreferrer">
           Writing one ↗
         </a>

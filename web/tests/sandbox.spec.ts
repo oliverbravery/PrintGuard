@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
 const PROBE = `
@@ -143,12 +144,15 @@ const PLUGIN = {
 
 const MONITOR_PIP = `
 plugin.action((name, arg, ctx) => {
-  if (name !== "monitor") return;
-  const monitor = (ctx.state.monitors || []).find((candidate) => candidate.id === arg);
-  ctx.store.picked = monitor.camera_id;
+  if (name !== "float") return;
+  ctx.store.picked = arg;
   ctx.float(true);
 });
-plugin.render((ctx) => ({ type: "camera", camera_id: ctx.store.picked }));
+plugin.render((ctx) => {
+  if (!ctx.target) return { type: "camera", camera_id: ctx.store.picked };
+  const monitor = (ctx.state.monitors || []).find((candidate) => candidate.id === ctx.target);
+  return { type: "button", label: "Float " + monitor.name, action: "float", arg: monitor.camera_id };
+});
 `;
 
 const MONITOR = {
@@ -157,7 +161,7 @@ const MONITOR = {
 };
 
 const PERMISSIONS = [
-  { id: "state:read", label: "Read", description: "", fields: { cameras: ["id", "name", "online"], monitors: ["id", "name", "camera_id"] } },
+  { id: "state:read", label: "Read", description: "", fields: { cameras: ["id", "name", "online"], monitors: ["id", "name", "camera_id", "alert"] } },
   { id: "camera:view", label: "Cameras", description: "" },
   { id: "printer:control", label: "Control printers", description: "", commands: ["printer.action"] },
 ];
@@ -246,7 +250,7 @@ test("a monitor surface puts a pop-out button on each monitor and nothing on the
   test.skip(!(await page.evaluate(() => "documentPictureInPicture" in window)), "no Document Picture-in-Picture here");
 
   await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Picture in picture for Bench" }).click();
+  await page.getByRole("button", { name: "Float Bench" }).click();
 
   await expect
     .poll(() =>
@@ -264,6 +268,64 @@ test("a monitor surface puts a pop-out button on each monitor and nothing on the
   });
 
   expect(spare).toBeLessThanOrEqual(2);
+});
+
+async function silentAudio(page: import("@playwright/test").Page) {
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__tones = 0;
+    win.AudioContext = class {
+      currentTime = 0;
+      destination = {};
+      resume() {}
+      createGain() {
+        return { gain: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (node: any) => node };
+      }
+      createOscillator() {
+        win.__tones += 1;
+        return { type: "", frequency: { setValueAtTime() {} }, connect: (node: any) => node, start() {}, stop() {} };
+      }
+    };
+  });
+}
+
+const NOISY = "plugin.render((ctx) => { ctx.sound([{ hz: 880, ms: 100 }]); return { type: 'text', value: 'drawn' }; });";
+
+test("a sound plays for a plugin granted it", async ({ page }) => {
+  await silentAudio(page);
+  await dashboardWithPlugin(page, NOISY, ["sound"]);
+
+  await expect(page.getByText("drawn")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__tones)).toBeGreaterThan(0);
+});
+
+test("a sound stays quiet for a plugin that was not granted it", async ({ page }) => {
+  await silentAudio(page);
+  await dashboardWithPlugin(page, NOISY, ["state:read"]);
+
+  await expect(page.getByText("drawn")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__tones)).toBe(0);
+});
+
+const SOUNDS = readFileSync(new URL("../../plugins/alert-sounds/plugin.js", import.meta.url), "utf8");
+
+test("the sounds plugin stays quiet until a monitor is switched on and a fresh alert lands", async ({ page }) => {
+  await silentAudio(page);
+  await dashboardWithPlugin(page, SOUNDS, ["state:read", "sound"], ["monitor", "panel"]);
+
+  const tile = page.locator("article", { hasText: "Bench" });
+  await tile.getByRole("button", { name: "🔇" }).click();
+  await expect(tile.getByRole("button", { name: "🔊" })).toBeVisible();
+  await expect(page.getByText("Sounding for Bench")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__tones)).toBe(0);
+
+  await page.evaluate(() => {
+    const win = window as any;
+    const engine = win.__pg.getState().engine;
+    win.__pgEvent({ event: "state", ...engine, monitors: engine.monitors.map((m: any) => ({ ...m, alert: { ts: 123, score: 0.9, action: "pause" } })) });
+  });
+
+  await expect.poll(() => page.evaluate(() => (window as any).__tones)).toBeGreaterThan(0);
 });
 
 test("pop-out puts the panel in a picture-in-picture window, themed", async ({ page }) => {

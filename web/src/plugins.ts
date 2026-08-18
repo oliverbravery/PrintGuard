@@ -9,7 +9,7 @@ const MAX_EFFECTS = 32;
 let nextCall = 0;
 
 export interface HostHandlers {
-  onView(id: string, tree: PluginNode | null): void;
+  onView(id: string, tree: PluginNode | null, targets: Record<string, PluginNode | null>): void;
   onEffects(id: string, effects: PluginEffect[]): void;
   onStore(id: string, store: Record<string, unknown>): void;
   onFailure(id: string, reason: string): void;
@@ -133,7 +133,10 @@ export class PluginHost {
     try {
       await this.booted;
       const result = await this.send(payload);
-      this.handlers.onView(this.id, normalise(result.tree));
+      const targets = Object.fromEntries(
+        Object.entries(result.targets ?? {}).map(([target, tree]) => [target, normalise(tree)]),
+      );
+      this.handlers.onView(this.id, normalise(result.tree), targets);
       this.handlers.onStore(this.id, result.store ?? {});
       this.handlers.onEffects(this.id, (result.effects ?? []).slice(0, MAX_EFFECTS));
     } catch (err) {
@@ -141,12 +144,12 @@ export class PluginHost {
     }
   }
 
-  update(state: Record<string, unknown>): Promise<void> {
-    return this.call({ t: "state", state });
+  update(state: Record<string, unknown>, targets: string[]): Promise<void> {
+    return this.call({ t: "state", state, targets });
   }
 
-  act(name: string, arg: unknown, state: Record<string, unknown>): Promise<void> {
-    return this.call({ t: "action", name, arg, state });
+  act(name: string, arg: unknown, state: Record<string, unknown>, targets: string[]): Promise<void> {
+    return this.call({ t: "action", name, arg, state, targets });
   }
 
   event(event: Record<string, unknown>, state: Record<string, unknown>): Promise<void> {

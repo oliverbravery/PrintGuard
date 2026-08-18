@@ -28,7 +28,7 @@
       (function () {
         "use strict";
 
-        for (const name of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches"]) {
+        for (const name of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches", "AudioContext", "webkitAudioContext", "speechSynthesis"]) {
           try {
             delete window[name];
           } catch {
@@ -45,10 +45,11 @@
         let effects = [];
         let store = {};
 
-        function context(state) {
+        function context(state, target) {
           return {
             store,
             state,
+            target,
             command(cmd) {
               effects.push({ kind: "command", cmd });
             },
@@ -60,6 +61,9 @@
             },
             float(on) {
               effects.push({ kind: "float", on: on !== false });
+            },
+            sound(tones) {
+              effects.push({ kind: "sound", tones: Array.isArray(tones) ? tones : [tones] });
             },
             log(text) {
               effects.push({ kind: "log", text: String(text) });
@@ -86,11 +90,15 @@
           const ctx = context(message.state || {});
           effects = [];
           let tree = null;
+          const targets = {};
           if (message.t === "action" && hooks.action) hooks.action(message.name, message.arg, ctx);
           else if (message.t === "event") hooks.events.get(String(message.event.event))?.(message.event, ctx);
-          if (hooks.view) tree = hooks.view(ctx);
+          if (hooks.view) {
+            tree = hooks.view(ctx);
+            for (const target of message.targets || []) targets[target] = hooks.view(context(message.state || {}, target));
+          }
           store = ctx.store;
-          return { tree, store, effects };
+          return { tree, targets, store, effects };
         }
 
         addEventListener("message", (message) => {

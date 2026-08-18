@@ -1,9 +1,12 @@
 plugin.action((name, arg, ctx) => {
-  if (name !== "monitor") return;
-  const monitor = (ctx.state.monitors || []).find((candidate) => candidate.id === arg);
-  if (!monitor || !monitor.camera_id) return;
-  ctx.store.picked = monitor.camera_id;
+  if (name !== "float") return;
+  ctx.store.picked = arg;
   ctx.float(true);
 });
 
-plugin.render((ctx) => ({ type: "camera", camera_id: ctx.store.picked }));
+plugin.render((ctx) => {
+  if (!ctx.target) return { type: "camera", camera_id: ctx.store.picked };
+  const monitor = (ctx.state.monitors || []).find((candidate) => candidate.id === ctx.target);
+  if (!monitor || !monitor.camera_id) return null;
+  return { type: "button", label: "⧉", action: "float", arg: monitor.camera_id };
+});

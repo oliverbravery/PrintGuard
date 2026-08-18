@@ -1,6 +1,18 @@
 declare global {
   /** Colour a `chip` node is drawn in. */
-  type PluginTone = "ok" | "warn" | "bad" | "accent";
+  type PluginChipTone = "ok" | "warn" | "bad" | "accent";
+
+  /** One note in a sound, played with a fast attack and a decay to silence. */
+  interface PluginTone {
+    /** Pitch in hertz, 20 to 12000. */
+    hz: number;
+    /** How long it lasts in milliseconds, 10 at the least. */
+    ms: number;
+    /** Waveform, one of `sine`, `square`, `sawtooth` or `triangle`, and `sine` by default. */
+    shape?: string;
+    /** Start it with the tone before rather than after it, which is how a chord is built. */
+    together?: boolean;
+  }
 
   /**
    * One piece of a view. PrintGuard draws every node with its own components,
@@ -12,7 +24,7 @@ declare global {
     /** A line of text. `muted` makes it secondary. */
     | { type: "text"; value: string; muted?: boolean }
     /** A small pill, for a status or a count. */
-    | { type: "chip"; value: string; tone?: PluginTone }
+    | { type: "chip"; value: string; tone?: PluginChipTone }
     /** A live feed of a registered camera. Needs `camera:view`, and the video never enters the sandbox. */
     | { type: "camera"; camera_id?: string }
     /** Calls your `action` handler with `action` as the name and `arg` as given. */
@@ -127,6 +139,8 @@ declare global {
   interface PluginContext {
     /** What your permissions let you read, fresh for this call. */
     state: PluginState;
+    /** The monitor this view is being drawn for on the `monitor` surface, and undefined for your panel and your floating window. */
+    target?: string;
     /** Your own data. Assign to it and PrintGuard saves it, up to 16 KB. */
     store: Record<string, any>;
     /**
@@ -141,6 +155,13 @@ declare global {
     notify(text: string): void;
     /** Opens or closes your floating window, which holds whatever `render` last returned. Needs the `float` surface. */
     float(on: boolean): void;
+    /**
+     * Sounds tones through the speakers of whoever is looking, one after the
+     * next unless a tone says `together`. Needs `sound`, and stays quiet until
+     * they have pressed something in the page. Four seconds is the most it
+     * will play.
+     */
+    sound(tones: PluginTone[] | PluginTone): void;
     /** Writes a line to PrintGuard's log. */
     log(text: string): void;
   }
@@ -152,10 +173,11 @@ declare global {
   interface PluginApi {
     /**
      * Draws the view, again on every state change and after every action, so
-     * keep it a plain function of `ctx`.
+     * keep it a plain function of `ctx`. On the `monitor` surface it is called
+     * once more per monitor, with `ctx.target` naming which.
      */
     render(view: (ctx: PluginContext) => PluginNode | null): void;
-    /** Handles a press or a choice, named by the node's `action`. A `monitor` surface calls it with `"monitor"` and the monitor's id. */
+    /** Handles a press or a choice, named by the node's `action` and given its `arg`. */
     action(handler: (name: string, arg: any, ctx: PluginContext) => void): void;
     /** Wakes the worker on an engine event. Name it in the manifest's `events` too, or it never fires. */
     on<K extends keyof PluginEvents>(event: K, handler: (event: PluginEvents[K], ctx: PluginContext) => void): void;

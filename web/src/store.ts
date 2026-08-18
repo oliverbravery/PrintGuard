@@ -3,6 +3,7 @@ import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { log } from "./log";
 import { commandAllowed, outboundRequest, PluginHost, projectEvent, projectState } from "./plugins";
+import { play } from "./sound";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
 import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
@@ -101,6 +102,7 @@ interface PgStore {
   optimistic: Record<string, OptimisticEntry>;
   savedAt: number | null;
   pluginTrees: Record<string, PluginNode | null>;
+  pluginTiles: Record<string, Record<string, PluginNode | null>>;
   pluginFailures: Record<string, string>;
   catalogue: CatalogueEntry[] | null;
   poppedPlugin: string | null;
@@ -210,6 +212,9 @@ export const useStore = create<PgStore>((set, get) => {
     return engine ? projectState(engine, plugin.granted, engine.plugin_permissions) : {};
   };
 
+  const pluginTargets = (plugin: PluginRecord) =>
+    plugin.manifest.surfaces.includes("monitor") ? (get().engine?.monitors ?? []).map((m) => m.id) : [];
+
   const perform = (id: string, effects: PluginEffect[]) => {
     const engine = get().engine;
     const plugin = engine?.plugins.find((p) => p.id === id);
@@ -223,6 +228,8 @@ export const useStore = create<PgStore>((set, get) => {
         sendSilent(outboundRequest(id, effect.request));
       } else if (effect.kind === "notify") {
         if (plugin.granted.includes("notify")) get().toast("info", `${plugin.manifest.name}: ${effect.text}`);
+      } else if (effect.kind === "sound") {
+        if (plugin.granted.includes("sound")) play(effect.tones ?? []);
       } else if (effect.kind === "float") {
         if (plugin.manifest.surfaces.includes("float")) get().popPlugin(effect.on ? id : null);
       } else if (effect.kind === "log") {
@@ -232,7 +239,8 @@ export const useStore = create<PgStore>((set, get) => {
   };
 
   const handlers = {
-    onView: (id: string, tree: PluginNode | null) => set((s) => ({ pluginTrees: { ...s.pluginTrees, [id]: tree } })),
+    onView: (id: string, tree: PluginNode | null, targets: Record<string, PluginNode | null>) =>
+      set((s) => ({ pluginTrees: { ...s.pluginTrees, [id]: tree }, pluginTiles: { ...s.pluginTiles, [id]: targets } })),
     onEffects: perform,
     onStore: (id: string, config: Record<string, unknown>) => {
       const serialised = JSON.stringify(config);
@@ -273,7 +281,7 @@ export const useStore = create<PgStore>((set, get) => {
     }
     for (const [key, host] of hosts) {
       const plugin = engine.plugins.find((p) => p.id === key.split(":")[0]);
-      if (plugin) void host.update(pluginState(plugin));
+      if (plugin) void host.update(pluginState(plugin), pluginTargets(plugin));
     }
   };
 
@@ -300,7 +308,7 @@ export const useStore = create<PgStore>((set, get) => {
       if (hosts.has(key) || !sources[file]) continue;
       const host = new PluginHost(plugin, file, sources[file], handlers);
       hosts.set(key, host);
-      void host.update(pluginState(plugin));
+      void host.update(pluginState(plugin), pluginTargets(plugin));
     }
   };
 
@@ -498,6 +506,7 @@ export const useStore = create<PgStore>((set, get) => {
     optimistic: {},
     savedAt: null,
     pluginTrees: {},
+    pluginTiles: {},
     pluginFailures: {},
     catalogue: null,
     poppedPlugin: null,
@@ -505,7 +514,7 @@ export const useStore = create<PgStore>((set, get) => {
     pluginAct(id, action, arg) {
       const plugin = get().engine?.plugins.find((p) => p.id === id);
       const host = hosts.get(`${id}:plugin.js`);
-      if (plugin && host) void host.act(action, arg, pluginState(plugin));
+      if (plugin && host) void host.act(action, arg, pluginState(plugin), pluginTargets(plugin));
     },
 
     popPlugin(poppedPlugin) {

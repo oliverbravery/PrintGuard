@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.schema.json",
+  "id": "alert-sounds",
+  "name": "Alert sounds",
+  "version": "1.0.0",
+  "description": "Sounds a horn, a bell or an alarm on the monitors you switch it on for, the moment a defect is caught.",
+  "author": "oliverbravery",
+  "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/alert-sounds",
+  "permissions": ["state:read", "sound"],
+  "surfaces": ["monitor", "panel"]
+}

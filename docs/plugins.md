@@ -76,6 +76,7 @@ remove the plugin.
 |---|---|---|
 | `state:read` | Read monitor names, scores and alerts, and camera and printer names and status | |
 | `camera:view` | Put a live feed in its own panel | |
+| `sound` | Sound a short alert through the speakers | |
 | `monitor:control` | Enable, disable and retune any monitor | |
 | `printer:control` | Pause, resume and cancel prints | |
 | `notify` | Raise a message in the dashboard | |
@@ -121,7 +122,7 @@ my-plugin/
 | Surface | Where it puts you |
 |---|---|
 | `panel` | A panel of its own on the dashboard |
-| `monitor` | A button on every monitor tile, which calls `action` with `"monitor"` and the monitor's id |
+| `monitor` | Drawn on every monitor tile, with `render` called once per monitor and `ctx.target` naming which |
 | `float` | A window that floats above other apps, holding whatever `render` last returned |
 
 `platforms` says where it runs, and leaving it out means everywhere. The store filters the
@@ -152,6 +153,7 @@ Both files get `plugin` to register with, and every handler gets a `ctx`:
 | `ctx.http(request)` | Ask PrintGuard to make a request, to a host you declared |
 | `ctx.notify(text)` | Raise a message in the dashboard |
 | `ctx.float(on)` | Open or close your floating window, if you declared the `float` surface |
+| `ctx.sound(tones)` | Sound your own tones through the speakers, `{ hz, ms }` each |
 | `ctx.log(text)` | Write a line to PrintGuard's log |
 
 Each file runs inside a function with nothing else in scope, so there's no `import`, no
@@ -213,9 +215,26 @@ plugin.render((ctx) => ({
 }));
 ```
 
-[`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in nine
-lines. It takes the `monitor` and `float` surfaces, so its button sits on each monitor and
-its view is only ever the floating window.
+[`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in twelve
+lines. It takes the `monitor` and `float` surfaces, so it draws a button on each monitor and
+its panel view is only ever the floating window.
+[`plugins/alert-sounds`](../plugins/alert-sounds) is the other one, watching each monitor's
+`alert` between renders and sounding a horn, a bell or an alarm when a new one appears. The
+tones are its own, since `ctx.sound` takes a list of them rather than a name PrintGuard knows:
+
+```js
+plugin.render((ctx) => {
+  ctx.sound([
+    { hz: 880, ms: 1400 },
+    { hz: 1320, ms: 1100, together: true },
+  ]);
+  return null;
+});
+```
+
+Each tone runs after the one before it unless it says `together`, which starts it alongside
+instead, and `shape` picks `sine`, `square`, `sawtooth` or `triangle`. Four seconds is the
+most PrintGuard will play in one go.
 
 ## The worker half
 

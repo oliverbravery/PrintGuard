@@ -68,6 +68,10 @@
             "description": "Raise a message in this dashboard. Does not use your alert channels."
           },
           {
+            "const": "sound",
+            "description": "Sound a short alert through this device's speakers, once you have pressed something."
+          },
+          {
             "const": "net",
             "description": "Send requests to the hosts the plugin lists, and nowhere else."
           },

@@ -72,6 +72,10 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
         "label": "Show notifications",
         "description": "Raise a message in this dashboard. Does not use your alert channels.",
     },
+    "sound": {
+        "label": "Play a sound",
+        "description": "Sound a short alert through this device's speakers, once you have pressed something.",
+    },
     "net": {
         "label": "Reach the internet",
         "description": "Send requests to the hosts the plugin lists, and nowhere else.",

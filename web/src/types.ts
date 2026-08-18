@@ -261,11 +261,19 @@ export interface PluginNode {
   children?: PluginNode[];
 }
 
+export interface PluginTone {
+  hz: number;
+  ms: number;
+  shape?: string;
+  together?: boolean;
+}
+
 export interface PluginEffect {
   kind: string;
   cmd?: Record<string, unknown>;
   request?: Record<string, unknown>;
   text?: string;
+  tones?: PluginTone[];
   on?: boolean;
 }
 
