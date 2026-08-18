@@ -17,7 +17,7 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/alert-sounds",
-      "ref": "3785dc78f7172ccd47d72cb390dae04c3150260b",
+      "ref": "923a7992621378e088a02eecfd204535271259a1",
       "digests": {
         "plugin.json": "cb436952d6e5797cdb642812e666854de1dea491a931066fab25158f1aaa0cfc",
         "plugin.js": "a833d0f176b2a630bfe379b1f376f3ed5ef4e3afa09a833d9a492e292191f690"
