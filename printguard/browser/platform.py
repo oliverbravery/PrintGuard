@@ -7,6 +7,7 @@ shared with the server.
 
 from __future__ import annotations
 
+import base64
 import json as jsonlib
 import time
 from typing import Any
@@ -122,9 +123,10 @@ class BrowserPlatform:
         headers: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
         data: bytes | None = None,
+        binary: bool = False,
         timeout: float = 10.0,
     ) -> tuple[int, Any]:
-        """Performs an HTTP request with the browser's fetch."""
+        """Performs an HTTP request with the browser's fetch, base64 encoding a binary reply."""
         import asyncio
 
         from pyodide.ffi import JsException
@@ -140,6 +142,8 @@ class BrowserPlatform:
             resp = await asyncio.wait_for(pyfetch(url, **kwargs), timeout)
         except (JsException, asyncio.TimeoutError) as exc:
             raise ConnectionError(f"could not reach {url}, either unreachable or CORS is not enabled on the target service") from exc
+        if binary:
+            return resp.status, base64.b64encode(await resp.bytes()).decode()
         text = await resp.string()
         try:
             return resp.status, jsonlib.loads(text)

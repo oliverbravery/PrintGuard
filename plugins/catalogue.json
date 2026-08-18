@@ -20,7 +20,7 @@
       "path": "plugins/alert-sounds",
       "ref": "3785dc78f7172ccd47d72cb390dae04c3150260b",
       "digests": {
-        "plugin.json": "398b7a7b50a9ee1da667c8fa613a812befdcc7c4c3b6641b8a486db3786e223d",
+        "plugin.json": "26d7cd8baabe4fc9c7a3aab6f7e1e3e3377f19d99693559faac4acb95781e596",
         "plugin.js": "6969acd5f569f766f52a3c69644c70a263db70ea45a2504f90ebeaa19ead03bc"
       }
     },
@@ -47,7 +47,7 @@
       "path": "plugins/picture-in-picture",
       "ref": "3785dc78f7172ccd47d72cb390dae04c3150260b",
       "digests": {
-        "plugin.json": "76d44aa72df4180cc37507d5265d7f04eefc03370a14107287f82c42c67fa3ef",
+        "plugin.json": "77f93e42a8600584d7a8d10ffe054bc91b0db5bd658b6f1d00b1c09744a2ad09",
         "plugin.js": "5bdf47ecc077d34c3fb0f4441f43987598ac8bb77042436b8bfb39009de54ead"
       }
     }

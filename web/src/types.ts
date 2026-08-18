@@ -255,6 +255,11 @@ export interface PluginNode {
   tone?: string;
   muted?: boolean;
   camera_id?: string;
+  asset?: string;
+  secret?: boolean;
+  kind?: string;
+  placeholder?: string;
+  on?: boolean;
   action?: string;
   arg?: unknown;
   options?: { value: string; label: string }[];
@@ -274,6 +279,7 @@ export interface PluginEffect {
   request?: Record<string, unknown>;
   text?: string;
   tones?: PluginTone[];
+  asset?: string;
   on?: boolean;
 }
 
@@ -326,6 +332,7 @@ export interface EngineState {
   plugin_permissions: Permission[];
   plugin_events: Record<string, string[]>;
   plugin_platforms: Record<string, string>;
+  plugin_assets: Record<string, string>;
   plugin_host: boolean;
 }
 

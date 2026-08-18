@@ -14,6 +14,7 @@ indistinguishable from one the dashboard sent.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -26,6 +27,8 @@ from .adapters import HttpFn
 
 MANIFEST_FILE = "plugin.json"
 SOURCE_FILES = ("plugin.js", "worker.js")
+MAX_ASSET_BYTES = 256 * 1024
+MAX_ASSETS_BYTES = 1024 * 1024
 SURFACES = ("panel", "float", "monitor")
 MAX_SOURCE_BYTES = 64 * 1024
 MAX_CONFIG_BYTES = 16 * 1024
@@ -40,6 +43,7 @@ ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
 _REPO_PATTERN = re.compile(r"^[\w.-]+/[\w.-]+$")
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PATH_PATTERN = re.compile(r"^[\w./-]*$")
+_ASSET_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
 VERSION_PATTERN = re.compile(r"^[\w.+-]{1,32}$")
 
 PERMISSIONS: dict[str, dict[str, Any]] = {
@@ -97,6 +101,38 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
 PERMISSION_COMMANDS = {
     command: name for name, spec in PERMISSIONS.items() for command in spec.get("commands", [])
 }
+
+ASSET_TYPES: dict[str, str] = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+    "gif": "image/gif",
+    "mp3": "audio/mpeg",
+    "ogg": "audio/ogg",
+    "wav": "audio/wav",
+    "json": "application/json",
+    "csv": "text/csv",
+    "txt": "text/plain",
+}
+"""What a plugin may ship beside its code, and the type each is handed over as.
+
+An allowlist rather than a blocklist, since the dangerous formats are the ones
+nobody thinks of. SVG is not here because it is markup wearing an image's
+extension, and the type is the one this table gives, never the one the file
+claims.
+"""
+
+ASSET_MAGIC: dict[str, tuple[bytes, ...]] = {
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/webp": (b"RIFF",),
+    "image/gif": (b"GIF87a", b"GIF89a"),
+    "audio/mpeg": (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"),
+    "audio/ogg": (b"OggS",),
+    "audio/wav": (b"RIFF",),
+}
+"""How each binary type starts, so a file has to be what its name says it is."""
 
 PLATFORMS: dict[str, str] = {
     "docker": "Docker",
@@ -185,6 +221,54 @@ def project_event(event: dict[str, Any], granted: list[str]) -> dict[str, Any] |
     return {"event": name, **{field: event[field] for field in fields if field in event}}
 
 
+def asset_type(name: str) -> str | None:
+    """The media type an asset is handed over as, or None if it may not ship."""
+    extension = name.rsplit(".", 1)[-1] if "." in name else ""
+    return ASSET_TYPES.get(extension) if _ASSET_PATTERN.match(name) else None
+
+
+def sanitise_assets(raw: dict[str, bytes]) -> dict[str, str]:
+    """Checks a plugin's shipped files and encodes them for the record.
+
+    Args:
+        raw: File contents keyed by the name the manifest declared.
+
+    Returns:
+        Each file base64 encoded, ready to travel as JSON.
+
+    Raises:
+        ValueError: If a name, type, size or content fails the checks.
+    """
+    assets: dict[str, str] = {}
+    total = 0
+    for name, data in raw.items():
+        media = asset_type(name)
+        if media is None:
+            raise ValueError(f"{name} is not a kind of file a plugin may ship")
+        total += len(data)
+        if len(data) > MAX_ASSET_BYTES or total > MAX_ASSETS_BYTES:
+            raise ValueError(f"{name} takes the plugin past {MAX_ASSETS_BYTES // 1024} KB of files")
+        starts = ASSET_MAGIC.get(media)
+        if starts and not data.startswith(starts):
+            raise ValueError(f"{name} is not really {media}")
+        if not starts:
+            try:
+                data.decode()
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"{name} is not text") from exc
+        assets[name] = base64.b64encode(data).decode()
+    return assets
+
+
+def text_assets(assets: dict[str, str]) -> dict[str, str]:
+    """Decodes the assets a plugin can read itself, leaving audio and images out."""
+    return {
+        name: base64.b64decode(data).decode()
+        for name, data in assets.items()
+        if not ASSET_MAGIC.get(asset_type(name) or "")
+    }
+
+
 def canonical(value: Any) -> bytes:
     """Encodes a manifest the one way both ends agree to hash it.
 
@@ -195,10 +279,11 @@ def canonical(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
-def digests(manifest: dict[str, Any], sources: dict[str, str]) -> dict[str, str]:
-    """Hashes a bundle, the canonical manifest and each source file."""
+def digests(manifest: dict[str, Any], sources: dict[str, str], assets: dict[str, str]) -> dict[str, str]:
+    """Hashes a bundle, the canonical manifest and every file that came with it."""
     hashed = {MANIFEST_FILE: hashlib.sha256(canonical(manifest)).hexdigest()}
     hashed.update({name: hashlib.sha256(code.encode()).hexdigest() for name, code in sources.items()})
+    hashed.update({name: hashlib.sha256(base64.b64decode(data)).hexdigest() for name, data in assets.items()})
     return hashed
 
 
@@ -224,6 +309,9 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         raise ValueError("plugin version is missing or unusable")
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
     platforms = sorted({str(p).strip() for p in raw.get("platforms", [])} & set(PLATFORMS))
+    assets = sorted({str(a).strip().lower() for a in raw.get("assets", [])} - {MANIFEST_FILE, *SOURCE_FILES})
+    if any(asset_type(name) is None for name in assets):
+        raise ValueError(f"a plugin may only ship {', '.join(sorted(set(ASSET_TYPES)))}")
     hosts = sorted({str(h).strip().lower() for h in raw.get("hosts", []) if str(h).strip()})
     events = sorted({str(e).strip() for e in raw.get("events", [])} & set(EVENTS))
     try:
@@ -240,6 +328,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "permissions": [p for p in PERMISSIONS if p in raw.get("permissions", [])],
         "surfaces": surfaces,
         "platforms": platforms,
+        "assets": assets,
         "hosts": hosts,
         "events": events,
         "tick_s": min(tick_s, 86400.0) if tick_s >= MIN_TICK_S else 0.0,
@@ -292,28 +381,46 @@ def host_allowed(url: str, hosts: list[str]) -> bool:
     return parsed.hostname is not None and parsed.hostname.lower() in hosts
 
 
-def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str]]:
-    """Reads a manifest and sources out of a zipped plugin bundle.
+def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes]]:
+    """Reads a manifest, sources and declared assets out of a zipped bundle.
 
     Files may sit at the root or under a single directory, which is what a
     repository archive downloaded from GitHub looks like.
+
+    Args:
+        data: The zip as uploaded.
+
+    Returns:
+        The parsed manifest, the source files as text, and every asset the
+        manifest declared as bytes.
+
+    Raises:
+        ValueError: If the zip is unreadable or carries no manifest.
     """
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
         raise ValueError("not a zip archive") from exc
-    wanted = (MANIFEST_FILE, *SOURCE_FILES)
-    found: dict[str, str] = {}
+    entries: dict[str, str] = {}
     for entry in archive.namelist():
-        name = entry.rsplit("/", 1)[-1]
-        if name in wanted and name not in found and archive.getinfo(entry).file_size <= MAX_SOURCE_BYTES:
-            found[name] = archive.read(entry).decode("utf-8", "replace")
-    if MANIFEST_FILE not in found:
+        entries.setdefault(entry.rsplit("/", 1)[-1], entry)
+    if MANIFEST_FILE not in entries:
         raise ValueError(f"bundle has no {MANIFEST_FILE}")
-    return json.loads(found.pop(MANIFEST_FILE)), found
+
+    def read(name: str, cap: int) -> bytes:
+        entry = entries[name]
+        if archive.getinfo(entry).file_size > cap:
+            raise ValueError(f"{name} is larger than {cap // 1024} KB")
+        return archive.read(entry)
+
+    manifest = json.loads(read(MANIFEST_FILE, MAX_SOURCE_BYTES))
+    sources = {name: read(name, MAX_SOURCE_BYTES).decode("utf-8", "replace") for name in SOURCE_FILES if name in entries}
+    declared = {str(name).strip().lower() for name in manifest.get("assets", []) if isinstance(manifest, dict)}
+    assets = {name: read(name, MAX_ASSET_BYTES) for name in sorted(declared) if name in entries}
+    return manifest, sources, assets
 
 
-async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[dict[str, Any], dict[str, str], str]:
+async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes], str]:
     """Downloads a plugin from a GitHub repository at an immutable commit.
 
     A branch or tag is resolved to its commit SHA first, so what gets hashed
@@ -326,7 +433,8 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
         ref: Branch, tag or commit SHA.
 
     Returns:
-        The parsed manifest, the source files, and the resolved commit SHA.
+        The parsed manifest, the source files, the assets it declared, and the
+        resolved commit SHA.
 
     Raises:
         ValueError: If the reference is unusable or the plugin is not there.
@@ -346,7 +454,17 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
         status, body = await http("GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"), timeout=TIMEOUT_S)
         if status == 200 and isinstance(body, str):
             sources[name] = body
-    return manifest, sources, sha
+    assets: dict[str, bytes] = {}
+    for name in sorted({str(a).strip().lower() for a in manifest.get("assets", [])}):
+        if asset_type(name) is None:
+            raise ValueError(f"{name} is not a kind of file a plugin may ship")
+        status, body = await http(
+            "GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"), binary=True, timeout=TIMEOUT_S
+        )
+        if status != 200 or not isinstance(body, str):
+            raise ValueError(f"no {name} at {repo}/{prefix} ({status})")
+        assets[name] = base64.b64decode(body)
+    return manifest, sources, assets, sha
 
 
 async def _resolve_commit(http: HttpFn, repo: str, ref: str) -> str:

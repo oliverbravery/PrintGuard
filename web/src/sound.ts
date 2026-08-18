@@ -6,6 +6,12 @@ const SHAPES = ["sine", "square", "sawtooth", "triangle"];
 
 let context: AudioContext | null = null;
 
+export function playFile(url: string): void {
+  const audio = new Audio(url);
+  audio.volume = 0.6;
+  void audio.play().catch(() => undefined);
+}
+
 export function play(tones: PluginTone[]): void {
   context ??= new AudioContext();
   void context.resume();

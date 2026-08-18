@@ -44,12 +44,14 @@
         let hooks = { view: null, action: null, events: new Map() };
         let effects = [];
         let store = {};
+        let assets = {};
 
         function context(state, target) {
           return {
             store,
             state,
             target,
+            assets,
             command(cmd) {
               effects.push({ kind: "command", cmd });
             },
@@ -62,8 +64,10 @@
             float(on) {
               effects.push({ kind: "float", on: on !== false });
             },
-            sound(tones) {
-              effects.push({ kind: "sound", tones: Array.isArray(tones) ? tones : [tones] });
+            sound(sound) {
+              effects.push(
+                typeof sound === "string" ? { kind: "sound", asset: sound } : { kind: "sound", tones: Array.isArray(sound) ? sound : [sound] },
+              );
             },
             log(text) {
               effects.push({ kind: "log", text: String(text) });
@@ -107,6 +111,7 @@
           try {
             if (t === "init") {
               store = message.data.store || {};
+              assets = message.data.assets || {};
               load(message.data.code);
               parent.postMessage({ id, t: "ready" }, "*");
               return;

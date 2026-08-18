@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -558,10 +559,13 @@ class ServerPlatform:
         headers: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
         data: bytes | None = None,
+        binary: bool = False,
         timeout: float = 10.0,
     ) -> tuple[int, Any]:
-        """Performs an HTTP request with httpx."""
+        """Performs an HTTP request with httpx, base64 encoding a binary reply."""
         resp = await self._client.request(method, url, headers=headers, json=json, content=data, timeout=timeout)
+        if binary:
+            return resp.status_code, base64.b64encode(resp.content).decode()
         try:
             return resp.status_code, resp.json()
         except ValueError:

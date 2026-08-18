@@ -27,6 +27,12 @@ declare global {
     | { type: "chip"; value: string; tone?: PluginChipTone }
     /** A live feed of a registered camera. Needs `camera:view`, and the video never enters the sandbox. */
     | { type: "camera"; camera_id?: string }
+    /** An image you shipped, named as it appears in the manifest's `assets`. */
+    | { type: "image"; asset: string; label?: string }
+    /** A field the user types into, committed on blur or Enter. `secret` masks it. */
+    | { type: "input"; value?: string; label?: string; action: string; kind?: "text" | "number"; placeholder?: string; secret?: boolean }
+    /** A switch, handed `true` or `false` as the arg. */
+    | { type: "toggle"; on?: boolean; label?: string; action: string }
     /** Calls your `action` handler with `action` as the name and `arg` as given. */
     | { type: "button"; label: string; action: string; arg?: unknown }
     /** Calls your `action` handler with the chosen option's value as the arg. */
@@ -141,6 +147,8 @@ declare global {
     state: PluginState;
     /** The monitor this view is being drawn for on the `monitor` surface, and undefined for your panel and your floating window. */
     target?: string;
+    /** The text files you shipped, keyed by name. Images and audio are not here, since only PrintGuard handles those. */
+    assets: Record<string, string>;
     /** Your own data. Assign to it and PrintGuard saves it, up to 16 KB. */
     store: Record<string, any>;
     /**
@@ -162,6 +170,8 @@ declare global {
      * will play.
      */
     sound(tones: PluginTone[] | PluginTone): void;
+    /** Plays an audio file you shipped, named as it appears in the manifest's `assets`. Needs `sound`. */
+    sound(asset: string): void;
     /** Writes a line to PrintGuard's log. */
     log(text: string): void;
   }

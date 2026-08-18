@@ -1,11 +1,35 @@
+import { useState } from "react";
 import { useStore } from "../store";
 import type { PluginNode as Node } from "../types";
 import { Feed } from "./Feed";
+import { Toggle } from "./Toggle";
 
 const TONES: Record<string, string> = { ok: "chip-ok", warn: "chip-warn", bad: "chip-bad", accent: "chip-accent" };
 
+function PluginInput({ node, pluginId }: { node: Node; pluginId: string }) {
+  const pluginAct = useStore((s) => s.pluginAct);
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft !== null && node.action) pluginAct(pluginId, node.action, node.kind === "number" ? Number(draft) : draft);
+    setDraft(null);
+  };
+
+  return (
+    <input
+      className="field"
+      type={node.secret ? "password" : node.kind === "number" ? "number" : "text"}
+      aria-label={node.label}
+      placeholder={node.placeholder}
+      value={draft ?? node.value ?? ""}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => event.key === "Enter" && commit()}
+    />
+  );
+}
+
 export function PluginNodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: string; mayViewCameras: boolean }) {
-  const { engine, pluginAct } = useStore();
+  const { engine, pluginAct, pluginAssets } = useStore();
 
   if (node.type === "row" || node.type === "col") {
     return (
@@ -34,6 +58,23 @@ export function PluginNodeView({ node, pluginId, mayViewCameras }: { node: Node;
       </div>
     );
   }
+
+  if (node.type === "image") {
+    const url = pluginAssets[pluginId]?.[node.asset ?? ""];
+    return url ? <img src={url} alt={node.label ?? ""} className="max-h-40 max-w-full rounded border border-line-0" /> : null;
+  }
+
+  if (node.type === "toggle") {
+    return (
+      <Toggle
+        label={node.label ?? "Toggle"}
+        on={node.on === true}
+        onChange={(on) => node.action && pluginAct(pluginId, node.action, on)}
+      />
+    );
+  }
+
+  if (node.type === "input") return <PluginInput node={node} pluginId={pluginId} />;
 
   if (node.type === "button") {
     return (

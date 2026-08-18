@@ -92,6 +92,12 @@ def schema() -> dict:
                 "description": "Where it runs. Leave it out for everywhere, and name a bare platform to cover its variants.",
                 "items": {"anyOf": choices(plugins.PLATFORMS)},
             },
+            "assets": {
+                "type": "array",
+                "uniqueItems": True,
+                "description": "Files it ships beside its code, each named here and sitting next to plugin.js.",
+                "items": {"type": "string", "pattern": r"^[a-z0-9][a-z0-9._-]{0,39}\.(" + "|".join(sorted(plugins.ASSET_TYPES)) + ")$"},
+            },
             "hosts": {
                 "type": "array",
                 "uniqueItems": True,

@@ -245,6 +245,7 @@ class Engine:
             "plugin_permissions": plugins.permissions_meta(),
             "plugin_events": plugins.EVENTS,
             "plugin_platforms": plugins.PLATFORMS,
+            "plugin_assets": plugins.ASSET_TYPES,
             "plugin_host": self.platform.plugin_runtime is not None,
         }
 
@@ -739,18 +740,21 @@ class Engine:
         """
         source = dict(message.get("source") or {})
         if source.get("kind") == "github":
-            manifest, sources, sha = await plugins.fetch_github(
+            manifest, sources, files, sha = await plugins.fetch_github(
                 self.platform.http, str(source.get("repo", "")), str(source.get("path", "")), str(source.get("ref") or "HEAD")
             )
             source = {"kind": "github", "repo": source["repo"], "path": str(source.get("path", "")), "ref": sha}
         elif source.get("kind") == "file":
-            manifest, sources = plugins.unpack(base64.b64decode(message["zip"]))
+            manifest, sources, files = plugins.unpack(base64.b64decode(message["zip"]))
             source = {"kind": "file", "filename": str(source.get("filename", "") or "bundle.zip")}
         else:
             raise ValueError(f"unknown plugin source {source.get('kind')!r}")
         manifest = plugins.sanitise_manifest(manifest)
         sources = plugins.sanitise_sources(sources)
-        digests = plugins.digests(manifest, sources)
+        assets = plugins.sanitise_assets(files)
+        if set(manifest["assets"]) - set(assets):
+            raise ValueError(f"{manifest['id']} is missing {', '.join(sorted(set(manifest['assets']) - set(assets)))}")
+        digests = plugins.digests(manifest, sources, assets)
         await self._refresh_catalogue(quiet=True)
         entry = plugins.verified_by(self.catalogue, manifest["id"], digests)
         existing = self.plugins.get(manifest["id"])
@@ -759,6 +763,7 @@ class Engine:
                 id=manifest["id"],
                 manifest=manifest,
                 sources=sources,
+                assets=assets,
                 digests=digests,
                 source=source,
                 granted=[p for p in (existing.granted if existing else message.get("granted") or []) if p in manifest["permissions"]],
@@ -802,6 +807,7 @@ class Engine:
                 "event": "plugin_code",
                 "id": plugin.id,
                 "sources": plugin.sources,
+                "assets": plugin.assets,
                 "granted": plugin.granted,
                 "req_id": message.get("req_id"),
             }

@@ -3,7 +3,7 @@ import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { log } from "./log";
 import { commandAllowed, outboundRequest, PluginHost, projectEvent, projectState } from "./plugins";
-import { play } from "./sound";
+import { play, playFile } from "./sound";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
 import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
@@ -103,6 +103,7 @@ interface PgStore {
   savedAt: number | null;
   pluginTrees: Record<string, PluginNode | null>;
   pluginTiles: Record<string, Record<string, PluginNode | null>>;
+  pluginAssets: Record<string, Record<string, string>>;
   pluginFailures: Record<string, string>;
   catalogue: CatalogueEntry[] | null;
   poppedPlugin: string | null;
@@ -229,7 +230,10 @@ export const useStore = create<PgStore>((set, get) => {
       } else if (effect.kind === "notify") {
         if (plugin.granted.includes("notify")) get().toast("info", `${plugin.manifest.name}: ${effect.text}`);
       } else if (effect.kind === "sound") {
-        if (plugin.granted.includes("sound")) play(effect.tones ?? []);
+        const file = effect.asset ? get().pluginAssets[id]?.[effect.asset] : undefined;
+        if (!plugin.granted.includes("sound")) continue;
+        if (effect.asset) file && playFile(file);
+        else play(effect.tones ?? []);
       } else if (effect.kind === "float") {
         if (plugin.manifest.surfaces.includes("float")) get().popPlugin(effect.on ? id : null);
       } else if (effect.kind === "log") {
@@ -294,10 +298,22 @@ export const useStore = create<PgStore>((set, get) => {
     if (seen) void host.event(seen, pluginState(plugin));
   };
 
-  const startPlugin = (id: string, sources: Record<string, string>) => {
+  const startPlugin = (id: string, sources: Record<string, string>, assets: Record<string, string>) => {
     const engine = get().engine;
     const plugin = engine?.plugins.find((p) => p.id === id);
     if (!engine || !plugin) return;
+    const types = engine.plugin_assets ?? {};
+    const files: Record<string, string> = {};
+    const text: Record<string, string> = {};
+    for (const [name, data] of Object.entries(assets)) {
+      const type = types[name.split(".").pop() ?? ""];
+      if (!type) continue;
+      const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+      if (type.startsWith("image/") || type.startsWith("audio/")) files[name] = URL.createObjectURL(new Blob([bytes], { type }));
+      else text[name] = new TextDecoder().decode(bytes);
+    }
+    for (const url of Object.values(get().pluginAssets[id] ?? {})) URL.revokeObjectURL(url);
+    set((s) => ({ pluginAssets: { ...s.pluginAssets, [id]: files } }));
     savedConfigs.set(id, JSON.stringify(plugin.config));
     set((s) => {
       const { [id]: _dropped, ...rest } = s.pluginFailures;
@@ -306,7 +322,7 @@ export const useStore = create<PgStore>((set, get) => {
     for (const file of runnableFiles(plugin, engine)) {
       const key = `${id}:${file}`;
       if (hosts.has(key) || !sources[file]) continue;
-      const host = new PluginHost(plugin, file, sources[file], handlers);
+      const host = new PluginHost(plugin, file, sources[file], text, handlers);
       hosts.set(key, host);
       void host.update(pluginState(plugin), pluginTargets(plugin));
     }
@@ -351,7 +367,7 @@ export const useStore = create<PgStore>((set, get) => {
       case "plugin_code": {
         if (codeRequests.get(event.req_id) !== event.id) break;
         codeRequests.delete(event.req_id);
-        startPlugin(event.id, event.sources);
+        startPlugin(event.id, event.sources, event.assets ?? {});
         break;
       }
       case "plugin_notice":
@@ -507,6 +523,7 @@ export const useStore = create<PgStore>((set, get) => {
     savedAt: null,
     pluginTrees: {},
     pluginTiles: {},
+    pluginAssets: {},
     pluginFailures: {},
     catalogue: null,
     poppedPlugin: null,

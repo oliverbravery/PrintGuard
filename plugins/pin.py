@@ -40,6 +40,7 @@ def entry(directory: Path) -> dict:
     sources = {
         name: (directory / name).read_text() for name in plugins.SOURCE_FILES if (directory / name).exists()
     }
+    assets = plugins.sanitise_assets({name: (directory / name).read_bytes() for name in manifest["assets"]})
     return {
         "id": manifest["id"],
         "name": manifest["name"],
@@ -52,7 +53,7 @@ def entry(directory: Path) -> dict:
         "repo": REPO,
         "path": f"plugins/{directory.name}",
         "ref": last_commit(directory),
-        "digests": plugins.digests(manifest, plugins.sanitise_sources(sources)),
+        "digests": plugins.digests(manifest, plugins.sanitise_sources(sources), assets),
     }
 
 

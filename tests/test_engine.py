@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 import numpy as np
+import pytest
 from fakes import FakePlatform
 
 from printguard.engine import logs, plugins, reports, vision, watchdog
@@ -728,12 +729,14 @@ MANIFEST = {
 PLUGIN_JS = "plugin.render = (state) => ({ type: 'text', value: state.monitors.length + ' monitors' });"
 
 
-def plugin_zip(manifest: dict | None = None, code: str = PLUGIN_JS) -> str:
+def plugin_zip(manifest: dict | None = None, code: str = PLUGIN_JS, files: dict[str, bytes] | None = None) -> str:
     """Packs a plugin bundle the way an imported file arrives."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("plugin.json", json.dumps(manifest if manifest is not None else MANIFEST))
         archive.writestr("plugin.js", code)
+        for name, data in (files or {}).items():
+            archive.writestr(name, data)
     return base64.b64encode(buffer.getvalue()).decode()
 
 
@@ -786,7 +789,7 @@ async def test_plugin_installs_from_github_pinned_to_a_commit() -> None:
 
 async def test_catalogue_verifies_only_the_exact_bytes_it_pinned() -> None:
     platform = FakePlatform(infer_s=0.02)
-    digests = plugins.digests(plugins.sanitise_manifest(MANIFEST), {"plugin.js": PLUGIN_JS})
+    digests = plugins.digests(plugins.sanitise_manifest(MANIFEST), {"plugin.js": PLUGIN_JS}, {})
     platform.files = {plugins.CATALOGUE_URL: (200, {"plugins": [{"id": "demo", "name": "Demo", "digests": digests}]})}
     async with running_engine(platform, camera_fps=[]) as (engine, _):
         assert (await install_demo(engine))["verified"] is True
@@ -820,6 +823,41 @@ async def test_plugin_state_view_carries_no_credentials() -> None:
     assert view["printers"][0]["name"] == "P"
     assert "config" not in view["printers"][0], "printer credentials reached a plugin"
     assert "settings" not in view and "tokens" not in view
+
+
+PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+async def test_a_plugin_ships_its_own_files_and_they_are_hashed_with_its_code() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "assets": ["icon.png", "table.json"]}
+    files = {"icon.png": PNG, "table.json": b'{"a": 1}'}
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest, files=files)})
+        plugin = engine.plugins.get("demo")
+
+    assert sorted(plugin.assets) == ["icon.png", "table.json"]
+    assert plugin.digests["icon.png"] == hashlib.sha256(PNG).hexdigest()
+    assert plugins.text_assets(plugin.assets) == {"table.json": '{"a": 1}'}, "an image reached the sandbox"
+
+
+async def test_a_file_that_lies_about_what_it_is_never_installs() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "assets": ["icon.png"]}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle(
+            {"cmd": "plugin.install", "source": {"kind": "file"},
+             "zip": plugin_zip(manifest, files={"icon.png": b"<script>alert(1)</script>"})}
+        )
+
+    assert engine.plugins.get("demo") is None, "a script wearing an image's name was installed"
+    assert any(e.get("event") == "error" and "not really" in e["message"] for e in events)
+
+
+def test_a_manifest_refuses_a_kind_of_file_a_plugin_may_not_ship() -> None:
+    for name in ("payload.svg", "run.exe", "../escape.png", "alarm.mp3.exe"):
+        with pytest.raises(ValueError):
+            plugins.sanitise_manifest({**MANIFEST, "assets": [name]})
 
 
 def test_a_platform_covers_its_own_variants_and_nothing_else() -> None:

@@ -171,6 +171,7 @@ async function dashboardWithPlugin(
   code: string,
   granted = PLUGIN.granted,
   surfaces = PLUGIN.manifest.surfaces,
+  assets: Record<string, string> = {},
 ) {
   await page.addInitScript(() => {
     class Offline extends EventTarget {
@@ -182,7 +183,7 @@ async function dashboardWithPlugin(
   });
   await page.goto("/");
   await page.evaluate(
-    ({ plugin, permissions, code, granted, surfaces, monitor }) => {
+    ({ plugin, permissions, code, granted, surfaces, monitor, assets }) => {
       const win = window as any;
       const sent: any[] = [];
       win.__sent = sent;
@@ -205,15 +206,17 @@ async function dashboardWithPlugin(
           plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces }, granted }],
           plugin_permissions: permissions,
           plugin_events: { state: [] },
+          plugin_assets: { png: "image/png", txt: "text/plain", mp3: "audio/mpeg" },
           plugin_host: true,
         },
       });
       win.__pgEvent({ event: "state", ...win.__pg.getState().engine });
       const request = sent.find((c) => c.cmd === "plugin.code");
-      win.__pgEvent({ event: "plugin_code", id: "pip", sources: { "plugin.js": code }, req_id: request?.req_id });
+      win.__pgEvent({ event: "plugin_code", id: "pip", sources: { "plugin.js": code }, assets, req_id: request?.req_id });
     },
-    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR },
+    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets },
   );
+  await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().pluginTrees).length)).toBeGreaterThan(0);
 }
 
 test("an installed plugin draws its panel with a real camera feed", async ({ page }) => {
@@ -326,6 +329,36 @@ test("the sounds plugin stays quiet until a monitor is switched on and a fresh a
   });
 
   await expect.poll(() => page.evaluate(() => (window as any).__tones)).toBeGreaterThan(0);
+});
+
+const FIELDS = `
+plugin.action((name, arg, ctx) => { ctx.store[name] = arg; });
+plugin.render((ctx) => ({
+  type: "col",
+  children: [
+    { type: "input", label: "Webhook", action: "url", value: ctx.store.url || "", placeholder: "https://" },
+    { type: "toggle", label: "Loud", action: "loud", on: ctx.store.loud === true },
+    { type: "image", asset: "icon.png", label: "Logo" },
+    { type: "text", value: "url:" + (ctx.store.url || "") + " loud:" + (ctx.store.loud === true) + " read:" + (ctx.assets["notes.txt"] || "") },
+  ],
+}));
+`;
+
+test("a plugin takes input and shows the files it shipped", async ({ page }) => {
+  const PNG =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  await dashboardWithPlugin(page, FIELDS, ["state:read"], ["panel"], {
+    "icon.png": PNG,
+    "notes.txt": btoa("hello"),
+  });
+
+  const panel = page.locator("section", { hasText: "Picture in picture" });
+  await panel.getByLabel("Webhook").fill("https://hooks.example.com/x");
+  await panel.getByLabel("Webhook").blur();
+  await panel.getByLabel("Loud").click();
+
+  await expect(panel.getByText("url:https://hooks.example.com/x loud:true read:hello")).toBeVisible();
+  await expect(panel.getByAltText("Logo")).toHaveJSProperty("naturalWidth", 1);
 });
 
 test("pop-out puts the panel in a picture-in-picture window, themed", async ({ page }) => {

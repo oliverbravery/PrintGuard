@@ -97,6 +97,7 @@ my-plugin/
   plugin.json     the manifest
   plugin.js       draws a panel                (optional)
   worker.js       runs in the background       (optional)
+  alarm.mp3       anything it ships            (optional)
 ```
 
 ```json
@@ -111,6 +112,7 @@ my-plugin/
   "permissions": ["state:read", "notify"],
   "surfaces": ["panel"],
   "platforms": ["docker", "windows"],
+  "assets": ["alarm.mp3"],
   "hosts": ["api.example.com"],
   "events": ["alert"],
   "tick_s": 300
@@ -140,6 +142,21 @@ image would not do. A panel needing a browser feature is a different question, s
 dashboard is a web page everywhere: declare the `float` surface and PrintGuard says when the
 browser in front of it has no floating window, which Safari has not.
 
+`assets` names the files it ships beside its code, which are hashed and pinned the same way,
+so a plugin brings its own sounds and images rather than asking PrintGuard for them.
+
+| Kind | |
+|---|---|
+| Images | `png`, `jpg`, `webp`, `gif`, drawn by an `image` node |
+| Audio | `mp3`, `ogg`, `wav`, played by `ctx.sound("alarm.mp3")` |
+| Text | `json`, `csv`, `txt`, read from `ctx.assets` as a string |
+
+An asset is 256 KB at most and a plugin ships 1 MB in total. The type comes from the
+extension and the file has to start like the format it claims, so a script renamed to `.png`
+is refused at install. SVG is not on the list, since an SVG is markup and would run as the
+dashboard's own. Images and audio never enter the sandbox: it names one and PrintGuard draws
+or plays it.
+
 `hosts` lists the only hosts `ctx.http` may reach. `events` and `tick_s` are the worker's,
 naming which engine events wake it and how often to run it anyway.
 
@@ -153,7 +170,8 @@ Both files get `plugin` to register with, and every handler gets a `ctx`:
 | `ctx.http(request)` | Ask PrintGuard to make a request, to a host you declared |
 | `ctx.notify(text)` | Raise a message in the dashboard |
 | `ctx.float(on)` | Open or close your floating window, if you declared the `float` surface |
-| `ctx.sound(tones)` | Sound your own tones through the speakers, `{ hz, ms }` each |
+| `ctx.sound(tones)` | Sound your own tones through the speakers, `{ hz, ms }` each, or name an audio asset |
+| `ctx.assets` | The text files you shipped, keyed by name |
 | `ctx.log(text)` | Write a line to PrintGuard's log |
 
 Each file runs inside a function with nothing else in scope, so there's no `import`, no
@@ -190,12 +208,17 @@ plugin looks like the rest of the dashboard and inherits the user's theme.
 | `text` | `value`, `muted` |
 | `chip` | `value`, `tone`: `ok`, `warn`, `bad`, `accent` |
 | `camera` | `camera_id` |
+| `image` | `asset`, `label` |
 | `button` | `label`, `action`, `arg` |
 | `select` | `value`, `options`, `action`, `label` |
+| `input` | `value`, `action`, `label`, `kind`: `text` or `number`, `placeholder`, `secret` |
+| `toggle` | `on`, `action`, `label` |
 
 `render` is called whenever state changes, and again after every action, so keep it a plain
 function of `ctx`. Pressing a `button` or changing a `select` calls `action` with the node's
-`action` name and `arg`.
+`action` name and `arg`. An `input` commits on blur or Enter rather than on every keystroke,
+and a `toggle` hands you `true` or `false`, which is how a plugin asks for a webhook URL or a
+key without PrintGuard knowing anything about it.
 
 ```js
 plugin.action((name, arg, ctx) => {

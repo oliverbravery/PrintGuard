@@ -139,6 +139,7 @@ class Platform(Protocol):
         headers: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
         data: bytes | None = None,
+        binary: bool = False,
         timeout: float = 10.0,
     ) -> tuple[int, Any]:
         """Performs an HTTP request and returns (status, parsed body)."""

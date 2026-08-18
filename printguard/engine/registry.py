@@ -237,7 +237,9 @@ class Plugin:
         sources: Plugin source files keyed by filename. Held here rather than
             re-fetched so an installed plugin keeps working offline and the
             bytes stay the ones that were hashed at install.
-        digests: SHA-256 of the canonical manifest and of each source file.
+        assets: The files the plugin ships beside its code, base64 encoded and
+            keyed by name, held for the same reason.
+        digests: SHA-256 of the canonical manifest and of every file with it.
         source: Where it was installed from, for reinstalling and for display.
         granted: Permissions the user has actually granted, a subset of those
             the manifest asks for.
@@ -252,6 +254,7 @@ class Plugin:
     sources: dict[str, str]
     digests: dict[str, str]
     source: dict[str, Any]
+    assets: dict[str, str] = field(default_factory=dict)
     granted: list[str] = field(default_factory=list)
     config: dict[str, Any] = field(default_factory=dict)
     verified: bool = False
@@ -285,6 +288,7 @@ class Plugin:
             "id": self.id,
             "manifest": self.manifest,
             "sources": self.sources,
+            "assets": self.assets,
             "digests": self.digests,
             "source": self.source,
             "granted": self.granted,

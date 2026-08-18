@@ -44,6 +44,7 @@ import * as __io from "qjs:std";
 const __input = JSON.parse(__io.in.readAsString());
 const __effects = [];
 const __hooks = { events: new Map(), route: null, gate: null };
+const __assets = __input.assets || {};
 const plugin = {
   on(name, fn) { __hooks.events.set(String(name), fn); },
   route(fn) { __hooks.route = fn; },
@@ -250,6 +251,7 @@ class WasmPluginRuntime:
             "request": payload.get("request", {}),
             "state": plugins.project_state(self._state, plugin.granted),
             "store": plugin.config,
+            "assets": plugins.text_assets(plugin.assets),
         }
         self._busy.add(plugin.id)
         try:

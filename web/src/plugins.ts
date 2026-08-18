@@ -72,6 +72,7 @@ export class PluginHost {
     private record: PluginRecord,
     private file: string,
     private code: string,
+    private assets: Record<string, string>,
     private handlers: HostHandlers,
   ) {
     this.id = record.id;
@@ -94,7 +95,7 @@ export class PluginHost {
         if (message.source !== this.frame.contentWindow || message.data?.t !== "booted") return;
         removeEventListener("message", onBooted);
         clearTimeout(timer);
-        this.send({ t: "init", code: this.code, store: this.record.config })
+        this.send({ t: "init", code: this.code, store: this.record.config, assets: this.assets })
           .then(() => resolve())
           .catch(reject);
       };
@@ -173,7 +174,7 @@ export class PluginHost {
 }
 
 const CONTAINERS = ["row", "col"];
-const LEAVES = ["text", "chip", "camera", "button", "select"];
+const LEAVES = ["text", "chip", "camera", "image", "button", "select", "input", "toggle"];
 const MAX_NODES = 400;
 
 export function normalise(raw: unknown, budget = { left: MAX_NODES }): PluginNode | null {
@@ -192,6 +193,11 @@ export function normalise(raw: unknown, budget = { left: MAX_NODES }): PluginNod
     tone: ["ok", "warn", "bad", "accent"].includes(String(node.tone)) ? String(node.tone) : undefined,
     muted: node.muted === true,
     camera_id: node.camera_id === undefined ? undefined : String(node.camera_id),
+    asset: node.asset === undefined ? undefined : String(node.asset),
+    secret: node.secret === true,
+    kind: node.kind === "number" ? "number" : undefined,
+    placeholder: node.placeholder === undefined ? undefined : String(node.placeholder).slice(0, 60),
+    on: node.on === true,
     action: node.action === undefined ? undefined : String(node.action).slice(0, 60),
     arg: node.arg,
     options: Array.isArray(node.options)
