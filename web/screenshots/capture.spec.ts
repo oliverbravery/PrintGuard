@@ -68,6 +68,7 @@ const PERMISSIONS = [
   { id: "state:read", label: "Read the dashboard", description: "Monitor names, scores and alerts, camera and printer names and status. Never credentials or tokens." },
   { id: "camera:view", label: "Show live camera feeds", description: "Place a camera feed in its own panel. The plugin never receives the video itself." },
   { id: "notify", label: "Show notifications", description: "Raise a message in this dashboard. Does not use your alert channels." },
+  { id: "sound", label: "Play a sound", description: "Sound a short alert through this device's speakers, once you have pressed something." },
 ];
 
 const CATALOGUE = [
@@ -76,6 +77,12 @@ const CATALOGUE = [
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
     repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40),
     permissions: ["state:read", "camera:view"], platforms: ["docker", "windows", "browser"], surfaces: ["monitor", "float"], digests: {},
+  },
+  {
+    id: "alert-sounds", name: "Alert sounds", version: "1.0.0", author: "oliverbravery",
+    description: "Sounds a horn, a bell or an alarm on the monitors you switch it on for, the moment a defect is caught.",
+    repo: "oliverbravery/PrintGuard", path: "plugins/alert-sounds", ref: "c".repeat(40),
+    permissions: ["state:read", "sound"], platforms: [], surfaces: ["monitor", "panel"], digests: {},
   },
   {
     id: "print-log", name: "Print log", version: "0.3.0", author: "community",
