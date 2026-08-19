@@ -12,6 +12,7 @@ import io
 import json
 import zipfile
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import pytest
 from fakes import FakePlatform
@@ -264,6 +265,49 @@ async def test_a_worker_watching_events_sees_no_credentials(runtime: WasmPluginR
         assert "api_key" not in config["state"] and "settings" not in config["state"]
     finally:
         await engine.stop()
+
+
+REPORTS = (Path(__file__).resolve().parent.parent / "plugins" / "progress-reports" / "worker.js").read_text()
+
+REPORTS_MANIFEST = {
+    "id": "progress-reports",
+    "name": "Progress reports",
+    "version": "1.0.0",
+    "permissions": ["state:read", "alert:send"],
+    "events": ["result", "alert"],
+    "tick_s": 5.0,
+}
+
+
+async def test_a_worker_reports_progress_and_defects_through_the_alert_channels(runtime: WasmPluginRuntime) -> None:
+    """The shipped progress reports worker, counting and then sending."""
+    platform = HostedPlatform(runtime)
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "Bench", "camera_id": "c1"}})
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"},
+                             "zip": bundle(REPORTS_MANIFEST, REPORTS), "granted": REPORTS_MANIFEST["permissions"]})
+        await engine.handle({"cmd": "plugin.update", "id": "progress-reports",
+                             "patch": {"config": {"on": {monitor_id: True}, "every": {monitor_id: 1},
+                                                  "sent": {monitor_id: 0}, "jobs": {monitor_id: None}}}})
+
+        engine.emit({"event": "result", "monitor_id": monitor_id, "camera_id": "c1", "score": 0.9,
+                     "prediction": "failure", "ts": 1.0})
+        await asyncio.sleep(0.4)
+        engine.emit({"event": "alert", "monitor_id": monitor_id, "score": 0.95, "action": "pause", "ts": 2.0})
+        await asyncio.sleep(0.8)
+
+        assert engine.plugins.get("progress-reports").config["counts"][monitor_id] == {"alerts": 1, "frames": 1}
+        await asyncio.sleep(5.5)
+    finally:
+        await engine.stop()
+
+    sent = [request for request in platform.http_requests if request["url"] == "http://ntfy/topic"]
+    assert sent, "the report never reached a notification channel"
+    assert "Bench" in sent[-1]["headers"]["Title"]
 
 
 RISK_WORKER = """

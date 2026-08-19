@@ -80,6 +80,7 @@ remove the plugin.
 | `monitor:control` | Enable, disable and retune any monitor | |
 | `printer:control` | Pause, resume and cancel prints | |
 | `notify` | Raise a message in the dashboard | |
+| `alert:send` | Send through your own ntfy, Telegram or Discord | |
 | `net` | Reach the hosts its manifest lists, and nowhere else | |
 | `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers | ✅ |
 | `gate` | See and refuse every other request to the hub | ✅ |
@@ -249,7 +250,7 @@ plugin.render((ctx) => ({
 
 [`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in five lines.
 It takes the `monitor` surface and returns one `float` node per monitor.
-[`plugins/alert-sounds`](../plugins/alert-sounds) is the other one. It adds a switch and a
+[`plugins/alert-sounds`](../plugins/alert-sounds) is another. It adds a switch and a
 sound picker to each monitor's settings, and watches each monitor's `alert` between renders,
 sounding the chosen tones the moment one appears. Its main view returns nothing, since a
 plugin's `render` runs whether or not it has a panel to draw. The
@@ -270,6 +271,12 @@ instead, and `shape` picks `sine`, `square`, `sawtooth` or `triangle`. Four seco
 most PrintGuard will play in one go.
 
 ## The worker half
+
+[`plugins/progress-reports`](../plugins/progress-reports) is the one with both halves. Its
+panel puts a switch and an interval in each monitor's settings, its worker counts alerts and
+flagged frames from the events, and on its own timer it sends the tally through your alert
+channels with `notify.send`. Both halves share one store, so either can read what the other
+wrote.
 
 `worker.js` runs without a UI. It wakes on the engine events its manifest lists, on its own
 timer, and for requests to its routes. It gets a fresh VM each time, so anything it needs to

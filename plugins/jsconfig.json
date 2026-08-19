@@ -1,10 +1,17 @@
 {
   "compilerOptions": {
     "target": "es2022",
-    "lib": ["es2022"],
+    "lib": [
+      "es2022"
+    ],
     "checkJs": true,
     "strict": true,
-    "noEmit": true
+    "noEmit": true,
+    "moduleDetection": "force",
+    "module": "esnext"
   },
-  "include": ["**/*.js", "plugin.d.ts"]
+  "include": [
+    "**/*.js",
+    "plugin.d.ts"
+  ]
 }

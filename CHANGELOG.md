@@ -21,7 +21,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   store filters the catalogue by the one you are on. Two come as standard. Picture in picture
   puts a pop-out button on every monitor and floats that camera above your other windows, and
   alert sounds plays a horn, a bell or an alarm the moment a defect is caught, switched on per
-  monitor in that monitor's settings. To start the hub with every plugin switched off, add
+  monitor in that monitor's settings, and progress reports sends how far a print has got and
+  how many defects it has seen to your usual alert channels, as often as you ask. To start the hub with every plugin switched off, add
   `PRINTGUARD_PLUGINS=off` to its environment.
   [docs/plugins.md](docs/plugins.md) has the whole API, a worked example and the schema and
   types your editor reads, and [CONTRIBUTING.md](CONTRIBUTING.md) covers getting one

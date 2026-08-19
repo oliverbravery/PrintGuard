@@ -80,6 +80,12 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
         "label": "Play a sound",
         "description": "Sound a short alert through this device's speakers, once you have pressed something.",
     },
+    "alert:send": {
+        "label": "Use your alert channels",
+        "description": "Send a message through the same ntfy, Telegram or Discord your defect alerts use, so it reaches your phone.",
+        "commands": ["notify.send"],
+        "risky": True,
+    },
     "net": {
         "label": "Reach the internet",
         "description": "Send requests to the hosts the plugin lists, and nowhere else.",

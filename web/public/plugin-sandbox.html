@@ -89,6 +89,7 @@
         }
 
         function run(message) {
+          if (message.store) store = message.store;
           const ctx = context(message.state || {});
           effects = [];
           let tree = null;

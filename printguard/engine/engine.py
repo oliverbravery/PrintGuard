@@ -91,6 +91,7 @@ class Engine:
             "history.get": self._cmd_history_get,
             "snapshot.get": self._cmd_snapshot_get,
             "notify.test": self._cmd_notify_test,
+            "notify.send": self._cmd_notify_send,
             "settings.update": self._cmd_settings_update,
             "token.create": self._cmd_token_create,
             "token.remove": self._cmd_token_remove,
@@ -730,6 +731,30 @@ class Engine:
         except Exception as exc:
             logger.warning("bug report failed to send", exc_info=True)
             self.emit({"event": "report_sent", "ok": False, "error": str(exc), "req_id": message.get("req_id")})
+
+    async def send_alerts(self, title: str, body: str, image: bytes | None) -> None:
+        """Delivers a message through every configured notification channel.
+
+        Args:
+            title: Short headline the channel shows first.
+            body: The detail beneath it.
+            image: JPEG snapshot to attach, where the channel carries one.
+        """
+        configured = {nid: config for nid, config in self.settings.get("notifiers", {}).items() if nid in NOTIFIERS}
+        for notifier_id, config in configured.items():
+            try:
+                await NOTIFIERS[notifier_id].send(self.platform.http, config, title, body, image)
+            except Exception as exc:
+                logger.debug("notifier %s delivery traceback", notifier_id, exc_info=True)
+                self.emit({"event": "error", "message": f"{NOTIFIERS[notifier_id].label} notification failed: {exc}"})
+
+    async def _cmd_notify_send(self, message: dict[str, Any]) -> None:
+        """Sends a caller's own message through the configured channels."""
+        title = str(message.get("title") or "PrintGuard").strip()[:80]
+        body = str(message.get("text", "")).strip()[:400]
+        if not body:
+            raise ValueError("a notification needs something to say")
+        await self.send_alerts(title, body, None)
 
     async def _cmd_plugin_install(self, message: dict[str, Any]) -> None:
         """Fetches, verifies and registers a plugin, or reinstalls one in place.

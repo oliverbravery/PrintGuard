@@ -177,6 +177,7 @@ async function dashboardWithPlugin(
     (window as unknown as { WebSocket: unknown }).WebSocket = Offline;
   });
   await page.goto("/");
+  await page.waitForFunction(() => Boolean((window as any).__pg.getState().link));
   await page.evaluate(
     ({ plugin, permissions, code, granted, surfaces, monitor, assets }) => {
       const win = window as any;

@@ -69,6 +69,7 @@ const PERMISSIONS = [
   { id: "camera:view", label: "Show live camera feeds", description: "Place a camera feed in its own panel. The plugin never receives the video itself." },
   { id: "notify", label: "Show notifications", description: "Raise a message in this dashboard. Does not use your alert channels." },
   { id: "sound", label: "Play a sound", description: "Sound a short alert through this device's speakers, once you have pressed something." },
+  { id: "alert:send", label: "Use your alert channels", description: "Send a message through the same ntfy, Telegram or Discord your defect alerts use, so it reaches your phone." },
 ];
 
 const CATALOGUE = [
@@ -83,6 +84,12 @@ const CATALOGUE = [
     description: "Sounds a horn, a bell or an alarm the moment a defect is caught, on the monitors you switch it on for.",
     repo: "oliverbravery/PrintGuard", path: "plugins/alert-sounds", ref: "c".repeat(40),
     permissions: ["state:read", "sound"], platforms: [], surfaces: ["settings"], digests: {},
+  },
+  {
+    id: "progress-reports", name: "Progress reports", version: "1.0.0", author: "oliverbravery",
+    description: "Sends how far a print has got and how many defects it has seen, as often as you ask, on the monitors you switch it on for.",
+    repo: "oliverbravery/PrintGuard", path: "plugins/progress-reports", ref: "d".repeat(40),
+    permissions: ["state:read", "alert:send"], platforms: [], surfaces: ["settings"], digests: {},
   },
   {
     id: "print-log", name: "Print log", version: "0.3.0", author: "community",

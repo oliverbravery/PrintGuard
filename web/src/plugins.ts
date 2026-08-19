@@ -150,8 +150,8 @@ export class PluginHost {
     }
   }
 
-  update(state: Record<string, unknown>, targets: PluginTarget[]): Promise<void> {
-    return this.call({ t: "state", state, targets });
+  update(state: Record<string, unknown>, targets: PluginTarget[], store?: Record<string, unknown>): Promise<void> {
+    return this.call({ t: "state", state, targets, store });
   }
 
   act(name: string, arg: unknown, state: Record<string, unknown>, targets: PluginTarget[]): Promise<void> {

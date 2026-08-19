@@ -202,6 +202,7 @@ export const useStore = create<PgStore>((set, get) => {
   const hosts = new Map<string, PluginHost>();
   const codeRequests = new Map<number, string>();
   const savedConfigs = new Map<string, string>();
+  const writingConfigs = new Map<string, string>();
 
   const runnableFiles = (plugin: PluginRecord, engine: EngineState): string[] =>
     plugin.files.filter((file) => file === "plugin.js" || (file === "worker.js" && !engine.plugin_host));
@@ -248,6 +249,7 @@ export const useStore = create<PgStore>((set, get) => {
       const serialised = JSON.stringify(config);
       if (savedConfigs.get(id) === serialised) return;
       savedConfigs.set(id, serialised);
+      writingConfigs.set(id, serialised);
       sendSilent({ cmd: "plugin.update", id, patch: { config } });
     },
     onFailure: (id: string, failure: string) => {
@@ -283,7 +285,12 @@ export const useStore = create<PgStore>((set, get) => {
     }
     for (const [key, host] of hosts) {
       const plugin = engine.plugins.find((p) => p.id === key.split(":")[0]);
-      if (plugin) void host.update(pluginState(plugin), pluginTargets(plugin));
+      if (!plugin) continue;
+      const landed = JSON.stringify(plugin.config);
+      if (writingConfigs.get(plugin.id) === landed) writingConfigs.delete(plugin.id);
+      const moved = !writingConfigs.has(plugin.id) && savedConfigs.get(plugin.id) !== landed;
+      if (moved) savedConfigs.set(plugin.id, landed);
+      void host.update(pluginState(plugin), pluginTargets(plugin), moved ? plugin.config : undefined);
     }
   };
 

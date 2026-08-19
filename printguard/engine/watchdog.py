@@ -200,7 +200,7 @@ class Watchdog:
     async def _warn(self, monitor: dict[str, Any], message: str, recovered: bool = False) -> None:
         self._engine.emit({"event": "warning", "monitor_id": monitor["id"], "message": message, "recovered": recovered})
         if monitor.get("notify"):
-            self._schedule(self._send_alerts(f"PrintGuard {'recovered' if recovered else 'warning'}", message, None))
+            self._schedule(self._engine.send_alerts(f"PrintGuard {'recovered' if recovered else 'warning'}", message, None))
 
     async def on_score(self, monitor: dict[str, Any], frame: Frame, score: float) -> None:
         """Advances the defect streak for a monitor and triggers responses.
@@ -264,13 +264,5 @@ class Watchdog:
             body = "Alert only: no printer action configured"
         else:
             body = f"Action taken: {action}"
-        await self._send_alerts(title, body, image)
+        await self._engine.send_alerts(title, body, image)
 
-    async def _send_alerts(self, title: str, body: str, image: bytes | None) -> None:
-        configured = {nid: config for nid, config in self._engine.settings.get("notifiers", {}).items() if nid in NOTIFIERS}
-        for notifier_id, config in configured.items():
-            try:
-                await NOTIFIERS[notifier_id].send(self._engine.platform.http, config, title, body, image)
-            except Exception as exc:
-                logger.debug("notifier %s delivery traceback", notifier_id, exc_info=True)
-                self._engine.emit({"event": "error", "message": f"{NOTIFIERS[notifier_id].label} notification failed: {exc}"})

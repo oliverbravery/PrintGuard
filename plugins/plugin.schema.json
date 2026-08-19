@@ -72,6 +72,10 @@
             "description": "Sound a short alert through this device's speakers, once you have pressed something."
           },
           {
+            "const": "alert:send",
+            "description": "Send a message through the same ntfy, Telegram or Discord your defect alerts use, so it reaches your phone."
+          },
+          {
             "const": "net",
             "description": "Send requests to the hosts the plugin lists, and nowhere else."
           },
