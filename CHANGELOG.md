@@ -18,12 +18,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   developers can safely add features to PrintGuard without waiting on a release, and you can
   take a permission back at any time. A plugin never sees your printer credentials, notifier
   settings, API tokens or camera frames. A plugin says which platforms it runs on, and the
-  store filters the catalogue by the one you are on. Two come as standard. Picture in picture
-  puts a pop-out button on every monitor and floats that camera above your other windows, and
-  alert sounds plays a horn, a bell or an alarm the moment a defect is caught, switched on per
-  monitor in that monitor's settings, and progress reports sends how far a print has got and
-  how many defects it has seen to your usual alert channels, as often as you ask. To start the hub with every plugin switched off, add
-  `PRINTGUARD_PLUGINS=off` to its environment.
+  store filters the catalogue by the one you are on. Three come as standard. Picture in
+  picture puts a pop-out button on every monitor and floats that camera above your other
+  windows. Alert sounds plays a horn, a bell or an alarm the moment a defect is caught, on the
+  monitors you switch it on for. Progress reports sends how far a print has got and how many
+  defects it has seen to your usual alert channels, as often as you ask. To start the hub with
+  every plugin switched off, add `PRINTGUARD_PLUGINS=off` to its environment.
   [docs/plugins.md](docs/plugins.md) has the whole API, a worked example and the schema and
   types your editor reads, and [CONTRIBUTING.md](CONTRIBUTING.md) covers getting one
   listed in the catalogue.
