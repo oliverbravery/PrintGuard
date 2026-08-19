@@ -62,9 +62,6 @@
             notify(text) {
               effects.push({ kind: "notify", text: String(text) });
             },
-            float(on) {
-              effects.push({ kind: "float", on: on !== false });
-            },
             sound(sound) {
               effects.push(
                 typeof sound === "string" ? { kind: "sound", asset: sound } : { kind: "sound", tones: Array.isArray(sound) ? sound : [sound] },

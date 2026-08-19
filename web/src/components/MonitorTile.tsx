@@ -1,4 +1,3 @@
-import { floatSupported } from "../float";
 import { section, toggleHidden, togglePinned } from "../layout";
 import { useStore } from "../store";
 import type { DeviceState, Monitor } from "../types";
@@ -31,8 +30,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
     (plugin) =>
       plugin.enabled &&
       plugin.files.includes("plugin.js") &&
-      plugin.manifest.surfaces.includes("monitor") &&
-      (!plugin.manifest.surfaces.includes("float") || floatSupported()),
+      plugin.manifest.surfaces.includes("monitor"),
   );
 
   const content = (handle?: SortableHandle) => (

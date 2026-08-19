@@ -179,7 +179,7 @@ export class PluginHost {
 }
 
 const CONTAINERS = ["row", "col"];
-const LEAVES = ["text", "chip", "camera", "image", "button", "select", "input", "toggle"];
+const LEAVES = ["text", "chip", "camera", "image", "float", "button", "select", "input", "toggle"];
 const MAX_NODES = 400;
 
 export function normalise(raw: unknown, budget = { left: MAX_NODES }): PluginNode | null {

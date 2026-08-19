@@ -97,10 +97,6 @@
             "description": "A panel of its own on the dashboard."
           },
           {
-            "const": "float",
-            "description": "A window that floats above other apps, holding whatever render last returned."
-          },
-          {
             "const": "monitor",
             "description": "Drawn on every monitor tile, once per monitor."
           },

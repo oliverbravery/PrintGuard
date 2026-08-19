@@ -29,6 +29,12 @@ declare global {
     | { type: "camera"; camera_id?: string }
     /** An image you shipped, named as it appears in the manifest's `assets`. */
     | { type: "image"; asset: string; label?: string }
+    /**
+     * A button that floats a camera in the browser's own picture-in-picture
+     * window. Needs `camera:view`, and PrintGuard floats it from the press
+     * itself, since a browser only allows that from something the user did.
+     */
+    | { type: "float"; camera_id: string; label?: string; value?: string }
     /** A field the user types into, committed on blur or Enter. `secret` masks it. */
     | { type: "input"; value?: string; label?: string; action: string; kind?: "text" | "number"; placeholder?: string; secret?: boolean }
     /** A switch, handed `true` or `false` as the arg. */
@@ -163,12 +169,6 @@ declare global {
     http(request: { method?: string; url: string; headers?: Record<string, string>; json?: unknown }): void;
     /** Raises a message on the dashboard. Needs `notify`, and does not use the user's alert channels. */
     notify(text: string): void;
-    /**
-     * Floats the camera your view last drew, in the browser's own
-     * picture-in-picture window. Needs the `float` surface and a view that is
-     * a single `camera` node.
-     */
-    float(on: boolean): void;
     /**
      * Sounds tones through the speakers of whoever is looking, one after the
      * next unless a tone says `together`. Needs `sound`, and stays quiet until

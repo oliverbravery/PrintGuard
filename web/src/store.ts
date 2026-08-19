@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { floatCamera, unfloat } from "./float";
 import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { log } from "./log";
@@ -107,9 +106,7 @@ interface PgStore {
   pluginAssets: Record<string, Record<string, string>>;
   pluginFailures: Record<string, string>;
   catalogue: CatalogueEntry[] | null;
-  poppedPlugin: string | null;
   pluginAct(id: string, action: string, arg: unknown): void;
-  popPlugin(id: string | null): void;
   fetchCatalogue(): void;
   installPlugin(source: Record<string, unknown>, zip?: string, granted?: string[]): void;
   setCustomising(on: boolean): void;
@@ -237,8 +234,6 @@ export const useStore = create<PgStore>((set, get) => {
         if (!plugin.granted.includes("sound")) continue;
         if (effect.asset) file && playFile(file);
         else play(effect.tones ?? []);
-      } else if (effect.kind === "float") {
-        if (plugin.manifest.surfaces.includes("float")) get().popPlugin(effect.on ? id : null);
       } else if (effect.kind === "log") {
         log("info", `plugin ${id}:`, effect.text);
       }
@@ -529,7 +524,6 @@ export const useStore = create<PgStore>((set, get) => {
     pluginAssets: {},
     pluginFailures: {},
     catalogue: null,
-    poppedPlugin: null,
 
     pluginAct(id, action, arg) {
       const plugin = get().engine?.plugins.find((p) => p.id === id);
@@ -537,18 +531,6 @@ export const useStore = create<PgStore>((set, get) => {
       if (plugin && host) void host.act(action, arg, pluginState(plugin), pluginTargets(plugin));
     },
 
-    popPlugin(poppedPlugin) {
-      const tree = poppedPlugin ? get().pluginTrees[poppedPlugin] : null;
-      const camera = tree?.type === "camera" ? tree.camera_id : undefined;
-      set({ poppedPlugin });
-      if (!poppedPlugin || !camera) return unfloat();
-      const name = get().engine?.plugins.find((p) => p.id === poppedPlugin)?.manifest.name ?? poppedPlugin;
-      void floatCamera(camera, () => set({ poppedPlugin: null })).then((refused) => {
-        if (!refused) return;
-        set({ poppedPlugin: null });
-        get().toast("error", `${name} could not float that camera, ${refused}`);
-      });
-    },
 
     fetchCatalogue() {
       get().send({ cmd: "plugin.catalogue" });

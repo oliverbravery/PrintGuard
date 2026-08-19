@@ -126,7 +126,6 @@ my-plugin/
 | `panel` | A panel of its own on the dashboard |
 | `monitor` | Drawn on every monitor tile |
 | `settings` | Drawn in every monitor's settings, under its own heading |
-| `float` | The camera your view draws, floated above other apps in the browser's own picture-in-picture window, adjustments and all |
 
 On `monitor` and `settings`, `render` is called once more per monitor, with `ctx.target` naming
 which and `ctx.surface` naming where, so a plugin can put a button on the tile and its own
@@ -144,9 +143,7 @@ catalogue by the one you are on, so anything that would not work is out of the w
 | `browser` | Local mode |
 
 Naming `docker` covers the images built from it, so declare a variant only when a plainer
-image would not do. A browser feature is a different question, since the dashboard is a web
-page everywhere. Declare the `float` surface and PrintGuard says when the browser in front of
-it cannot float a video, which every current desktop browser can.
+image would not do.
 
 `assets` names the files it ships beside its code, which are hashed and pinned the same way,
 so a plugin brings its own sounds and images rather than asking PrintGuard for them.
@@ -175,7 +172,6 @@ Both files get `plugin` to register with, and every handler gets a `ctx`:
 | `ctx.command(cmd)` | Ask PrintGuard to run an engine command |
 | `ctx.http(request)` | Ask PrintGuard to make a request, to a host you declared |
 | `ctx.notify(text)` | Raise a message in the dashboard |
-| `ctx.float(on)` | Open or close your floating window, if you declared the `float` surface |
 | `ctx.sound(tones)` | Sound your own tones through the speakers, `{ hz, ms }` each, or name an audio asset |
 | `ctx.assets` | The text files you shipped, keyed by name |
 | `ctx.log(text)` | Write a line to PrintGuard's log |
@@ -215,10 +211,15 @@ plugin looks like the rest of the dashboard and inherits the user's theme.
 | `chip` | `value`, `tone`: `ok`, `warn`, `bad`, `accent` |
 | `camera` | `camera_id` |
 | `image` | `asset`, `label` |
+| `float` | `camera_id`, `label`, `value` |
 | `button` | `label`, `action`, `arg` |
 | `select` | `value`, `options`, `action`, `label` |
 | `input` | `value`, `action`, `label`, `kind`: `text` or `number`, `placeholder`, `secret` |
 | `toggle` | `on`, `action`, `label` |
+
+A `float` node is the one thing PrintGuard acts on from the press rather than from what you
+return, since a browser only floats a video for something the user did and a trip through the
+sandbox loses that. It draws nothing where the browser cannot float one.
 
 `render` is called whenever state changes, and again after every action, so keep it a plain
 function of `ctx`. Pressing a `button` or changing a `select` calls `action` with the node's
@@ -244,9 +245,8 @@ plugin.render((ctx) => ({
 }));
 ```
 
-[`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in twelve
-lines. It takes the `monitor` and `float` surfaces, so it draws a button on each monitor and
-its panel view is only ever the camera it floats.
+[`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in five lines.
+It takes the `monitor` surface and returns one `float` node per monitor.
 [`plugins/alert-sounds`](../plugins/alert-sounds) is the other one. It adds a switch and a
 sound picker to each monitor's settings, and watches each monitor's `alert` between renders,
 sounding the chosen tones the moment one appears. Its main view returns nothing, since a

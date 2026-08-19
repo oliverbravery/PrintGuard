@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { floatSupported } from "../float";
 import { runsHere } from "../plugins";
 import { useStore } from "../store";
 import type { CatalogueEntry, Permission, PluginRecord } from "../types";
@@ -23,12 +22,11 @@ function readZip(file: File): Promise<string> {
   });
 }
 
-function Runs({ platforms, surfaces }: { platforms: string[] | undefined; surfaces: string[] | undefined }) {
+function Runs({ platforms }: { platforms: string[] | undefined }) {
   const engine = useStore((s) => s.engine);
   const labels = engine?.plugin_platforms ?? {};
   const host = engine?.host ?? "";
   const here = runsHere(platforms, host);
-  const floats = surfaces?.includes("float") && !floatSupported();
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -38,7 +36,6 @@ function Runs({ platforms, surfaces }: { platforms: string[] | undefined; surfac
         </span>
       ))}
       {!here && <span className="chip chip-bad">Not on {labels[host] ?? host}</span>}
-      {here && floats && <span className="chip chip-warn">No floating video in this browser</span>}
     </div>
   );
 }
@@ -118,7 +115,7 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
           onChange={(on) => send({ cmd: "plugin.update", id: plugin.id, patch: { enabled: on } })}
         />
       </div>
-      <Runs platforms={plugin.manifest.platforms} surfaces={plugin.manifest.surfaces} />
+      <Runs platforms={plugin.manifest.platforms} />
       {plugin.failure && <span className="block text-[0.7rem] text-bad">Stopped: {plugin.failure}</span>}
       <span className="mono block truncate text-[0.65rem] text-text-2">{origin}</span>
       <div className="flex items-center gap-2">
@@ -172,7 +169,7 @@ function Available({ entry, installed, permissions }: { entry: CatalogueEntry; i
           {installed ? "Installed" : "Install"}
         </button>
       </div>
-      <Runs platforms={entry.platforms} surfaces={entry.surfaces} />
+      <Runs platforms={entry.platforms} />
       {asking && !installed && (
         <div className="space-y-2 border-t border-line-0 pt-2">
           <span className="block text-[0.7rem] text-text-1">Installing lets it:</span>

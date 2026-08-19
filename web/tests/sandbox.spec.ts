@@ -143,15 +143,10 @@ const PLUGIN = {
 };
 
 const MONITOR_PIP = `
-plugin.action((name, arg, ctx) => {
-  if (name !== "float") return;
-  ctx.store.picked = arg;
-  ctx.float(true);
-});
 plugin.render((ctx) => {
-  if (!ctx.target) return { type: "camera", camera_id: ctx.store.picked };
   const monitor = (ctx.state.monitors || []).find((candidate) => candidate.id === ctx.target);
-  return { type: "button", label: "Float " + monitor.name, action: "float", arg: monitor.camera_id };
+  if (!monitor) return null;
+  return { type: "float", label: "Float " + monitor.name, camera_id: monitor.camera_id };
 });
 `;
 
@@ -252,12 +247,10 @@ async function stubFloat(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
     const win = window as any;
     win.__floated = 0;
-    win.__floatedFrom = [];
     Object.defineProperty(Document.prototype, "pictureInPictureEnabled", { get: () => true, configurable: true });
     Object.defineProperty(HTMLMediaElement.prototype, "readyState", { get: () => 1, configurable: true });
     HTMLVideoElement.prototype.requestPictureInPicture = function () {
       win.__floated += 1;
-      win.__floatedFrom.push(this.srcObject ? "canvas" : "feed");
       return Promise.resolve({} as PictureInPictureWindow);
     };
   });
@@ -265,7 +258,7 @@ async function stubFloat(page: import("@playwright/test").Page) {
 
 test("a monitor surface draws on each monitor and nothing on the dashboard", async ({ page }) => {
   await stubFloat(page);
-  await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor", "float"]);
+  await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor"]);
 
   await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
   await page.getByRole("button", { name: "Float Bench" }).click();
@@ -363,28 +356,20 @@ test("a plugin takes input and shows the files it shipped", async ({ page }) => 
   await expect(panel.getByAltText("Logo")).toHaveJSProperty("naturalWidth", 1);
 });
 
-test("an adjusted camera floats what the dashboard drew, not the raw feed", async ({ page }) => {
+test("a camera the plugin may not view is never floated", async ({ page }) => {
   await stubFloat(page);
-  await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor", "float"]);
-  await page.evaluate(() => {
-    const win = window as any;
-    const engine = win.__pg.getState().engine;
-    win.__pgEvent({ event: "state", ...engine, cameras: engine.cameras.map((camera: any) => ({ ...camera, rotation: 180 })) });
-  });
-  await expect(page.locator("canvas")).toBeAttached();
+  await dashboardWithPlugin(page, MONITOR_PIP, ["state:read"], ["monitor"]);
 
-  await page.getByRole("button", { name: "Float Bench" }).click();
-
-  await expect.poll(() => page.evaluate(() => (window as any).__floatedFrom)).toEqual(["canvas"]);
+  await expect(page.getByRole("button", { name: "Float Bench" })).toHaveCount(0);
 });
 
-test("popping a panel out floats the camera it drew", async ({ page }) => {
+test("a float node in a panel floats without a round trip to the sandbox", async ({ page }) => {
   await stubFloat(page);
-  await dashboardWithPlugin(page, "plugin.render(() => ({ type: 'camera', camera_id: 'c1' }));");
+  await dashboardWithPlugin(page, "plugin.render(() => ({ type: 'float', label: 'Float it', camera_id: 'c1' }));");
 
   const panel = page.locator("section", { hasText: "Picture in picture" });
-  await panel.getByRole("button", { name: /Pop out/ }).click();
+  await panel.getByRole("button", { name: "Float it" }).click();
 
-  await expect(panel.getByText("Showing in a floating window")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "plugin.act").length)).toBe(0);
   expect(await page.evaluate(() => (window as any).__floated)).toBe(1);
 });

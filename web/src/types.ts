@@ -212,7 +212,7 @@ export interface PluginManifest {
   author: string;
   homepage: string;
   permissions: string[];
-  surfaces: ("panel" | "float" | "monitor" | "settings")[];
+  surfaces: ("panel" | "monitor" | "settings")[];
   platforms: string[];
   hosts: string[];
   events: string[];
@@ -280,7 +280,6 @@ export interface PluginEffect {
   text?: string;
   tones?: PluginTone[];
   asset?: string;
-  on?: boolean;
 }
 
 export interface EngineStats {

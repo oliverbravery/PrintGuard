@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { floatCamera, floatSupported } from "../float";
 import { useStore } from "../store";
 import type { PluginNode as Node } from "../types";
 import { Feed } from "./Feed";
@@ -29,7 +30,7 @@ function PluginInput({ node, pluginId }: { node: Node; pluginId: string }) {
 }
 
 export function PluginNodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: string; mayViewCameras: boolean }) {
-  const { engine, pluginAct, pluginAssets } = useStore();
+  const { engine, pluginAct, pluginAssets, toast } = useStore();
 
   if (node.type === "row" || node.type === "col") {
     return (
@@ -62,6 +63,19 @@ export function PluginNodeView({ node, pluginId, mayViewCameras }: { node: Node;
   if (node.type === "image") {
     const url = pluginAssets[pluginId]?.[node.asset ?? ""];
     return url ? <img src={url} alt={node.label ?? ""} className="max-h-40 max-w-full rounded border border-line-0" /> : null;
+  }
+
+  if (node.type === "float") {
+    if (!mayViewCameras || !floatSupported()) return null;
+    return (
+      <button
+        className="chip grid place-items-center min-h-6 min-w-6 cursor-pointer hover:opacity-80"
+        aria-label={node.label ?? "Float this camera"}
+        onClick={() => floatCamera(node.camera_id ?? "", (reason) => toast("error", `Could not float that camera, ${reason}`))}
+      >
+        {node.value ?? "⧉"}
+      </button>
+    );
   }
 
   if (node.type === "toggle") {
