@@ -542,8 +542,11 @@ export const useStore = create<PgStore>((set, get) => {
       const camera = tree?.type === "camera" ? tree.camera_id : undefined;
       set({ poppedPlugin });
       if (!poppedPlugin || !camera) return unfloat();
-      void floatCamera(camera, () => set({ poppedPlugin: null })).then((floating) => {
-        if (!floating) set({ poppedPlugin: null });
+      const name = get().engine?.plugins.find((p) => p.id === poppedPlugin)?.manifest.name ?? poppedPlugin;
+      void floatCamera(camera, () => set({ poppedPlugin: null })).then((refused) => {
+        if (!refused) return;
+        set({ poppedPlugin: null });
+        get().toast("error", `${name} could not float that camera, ${refused}`);
       });
     },
 

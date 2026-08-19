@@ -126,7 +126,7 @@ my-plugin/
 | `panel` | A panel of its own on the dashboard |
 | `monitor` | Drawn on every monitor tile |
 | `settings` | Drawn in every monitor's settings, under its own heading |
-| `float` | The camera your view draws, floated above other apps in the browser's own picture-in-picture window |
+| `float` | The camera your view draws, floated above other apps in the browser's own picture-in-picture window, adjustments and all |
 
 On `monitor` and `settings`, `render` is called once more per monitor, with `ctx.target` naming
 which and `ctx.surface` naming where, so a plugin can put a button on the tile and its own

@@ -68,6 +68,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | Installing from a repository fails | The path holds no `plugin.json`, the reference does not exist, or GitHub is rate-limiting an unauthenticated request | Check the path points at the plugin's own folder, and try again in a few minutes |
 | A plugin installs as third party rather than verified | The catalogue vouches for different bytes, or does not list it at all | Expected for anything unreviewed. If it should be verified, its catalogue entry needs re-pinning |
 | A plugin's requests fail | The host is not one its manifest declared, or **Reach the internet** is not granted | Both are deliberate. Only its declared hosts are reachable |
+| Nothing floats when a plugin's pop-out is pressed | The feed had not started, or the browser refused it | The toast names the reason. A feed that says "starting stream" has nothing to float yet, so wait for the picture |
 | Locked out of the hub by a plugin | A plugin holding **Authorise every request** is refusing them | Restart with `PRINTGUARD_PLUGINS=off` and remove it. [Deployment](deployment.md#plugins) |
 
 ## Acceleration

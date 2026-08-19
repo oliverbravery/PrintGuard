@@ -252,9 +252,12 @@ async function stubFloat(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
     const win = window as any;
     win.__floated = 0;
+    win.__floatedFrom = [];
     Object.defineProperty(Document.prototype, "pictureInPictureEnabled", { get: () => true, configurable: true });
+    Object.defineProperty(HTMLMediaElement.prototype, "readyState", { get: () => 1, configurable: true });
     HTMLVideoElement.prototype.requestPictureInPicture = function () {
       win.__floated += 1;
+      win.__floatedFrom.push(this.srcObject ? "canvas" : "feed");
       return Promise.resolve({} as PictureInPictureWindow);
     };
   });
@@ -358,6 +361,21 @@ test("a plugin takes input and shows the files it shipped", async ({ page }) => 
 
   await expect(panel.getByText("url:https://hooks.example.com/x loud:true read:hello")).toBeVisible();
   await expect(panel.getByAltText("Logo")).toHaveJSProperty("naturalWidth", 1);
+});
+
+test("an adjusted camera floats what the dashboard drew, not the raw feed", async ({ page }) => {
+  await stubFloat(page);
+  await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor", "float"]);
+  await page.evaluate(() => {
+    const win = window as any;
+    const engine = win.__pg.getState().engine;
+    win.__pgEvent({ event: "state", ...engine, cameras: engine.cameras.map((camera: any) => ({ ...camera, rotation: 180 })) });
+  });
+  await expect(page.locator("canvas")).toBeAttached();
+
+  await page.getByRole("button", { name: "Float Bench" }).click();
+
+  await expect.poll(() => page.evaluate(() => (window as any).__floatedFrom)).toEqual(["canvas"]);
 });
 
 test("popping a panel out floats the camera it drew", async ({ page }) => {

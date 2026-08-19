@@ -18,7 +18,7 @@ export function Feed({ camera, mode, active = true }: { camera: Camera | undefin
 
   useEffect(() => {
     const video = videoRef.current;
-    return video && camera ? registerFeed(camera.id, video) : undefined;
+    return video && camera ? registerFeed(camera.id, { video, canvas: () => canvasRef.current }) : undefined;
   }, [camera?.id]);
 
   useEffect(() => setPlaying(false), [camera?.id, active]);
