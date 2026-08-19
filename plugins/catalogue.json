@@ -39,10 +39,33 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/picture-in-picture",
-      "ref": "0704c607ac0cd3d2c77812ee00b0b31321492a80",
+      "ref": "e7457a8068ef417213786950da997d55ef4277bc",
       "digests": {
         "plugin.json": "bbd43f0e1b7d099c5b675154ae01dbda953ac3dad63705ca406c3d52f7186198",
         "plugin.js": "a636fd69599d79d0ee2c99841968cd670212184f52e87a8f2eddb35d1780356e"
+      }
+    },
+    {
+      "id": "progress-reports",
+      "name": "Progress reports",
+      "description": "Sends how far a print has got and how many defects it has seen, as often as you ask, on the monitors you switch it on for.",
+      "author": "oliverbravery",
+      "version": "1.0.0",
+      "permissions": [
+        "state:read",
+        "alert:send"
+      ],
+      "surfaces": [
+        "settings"
+      ],
+      "platforms": [],
+      "repo": "oliverbravery/PrintGuard",
+      "path": "plugins/progress-reports",
+      "ref": "d5219404b5197d8136c5606d2dca158bf1630c94",
+      "digests": {
+        "plugin.json": "c37185d400dd52ed4fdbb89a310e19a6afde6c90d2b63c83d039b13e2563269e",
+        "plugin.js": "6f718fe574c4dbb0e256fbbba016b1449276dd19ad2d7aaa6c69872ae5b8e153",
+        "worker.js": "a699466fcb3b328401e7891bebefd17036071865c637453f081e76d670687d48"
       }
     }
   ]
