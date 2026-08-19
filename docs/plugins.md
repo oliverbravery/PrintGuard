@@ -219,7 +219,9 @@ plugin looks like the rest of the dashboard and inherits the user's theme.
 
 A `float` node is the one thing PrintGuard acts on from the press rather than from what you
 return, since a browser only floats a video for something the user did and a trip through the
-sandbox loses that. It draws nothing where the browser cannot float one.
+sandbox loses that. It draws nothing where the browser cannot float one. The floating window
+carries the camera as it arrives, without the brightness, crop or rotation the dashboard
+draws, because picture-in-picture shows the video itself and nothing drawn over it.
 
 `render` is called whenever state changes, and again after every action, so keep it a plain
 function of `ctx`. Pressing a `button` or changing a `select` calls `action` with the node's
