@@ -52,26 +52,21 @@ Nothing is installed and no frame leaves your device. When you are ready to run 
 
 ## What you get
 
-- Catches a failure early. The model scores every frame and acts as soon as a defect holds, so
-  spaghetti and detachments don't run for hours or burn through a spool.
-- Pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, with the
-  sensitivity, thresholds and cooldown you set per monitor.
-- Sends a snapshot to your phone over ntfy, Telegram or Discord the moment a defect holds.
-- Stays quiet when nothing is wrong. A printer linked to a print service is only watched while
-  it actually prints, so inference rests when it is idle and wakes when a job starts.
-- Tells you when it cannot see. A dropped camera, a frozen feed or an unresponsive printer
-  warns you on the dashboard and on your phone, and if PrintGuard cannot tell whether a printer
-  is printing it keeps watching.
+- Catches a failure early, before spaghetti runs for hours or burns a spool.
+- Pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab.
+- Sends a snapshot to your phone over ntfy, Telegram or Discord.
+- Only watches while a linked printer is actually printing.
+- Warns you when a camera drops, a feed freezes or a printer stops answering.
 - Shares one model across as many cameras as your hardware can sustain.
+- Tunes per monitor: sensitivity, threshold, how long a defect must hold, and the cooldown.
 
 ## Quick start
 
 ### Desktop app for macOS and Windows
 
-The easiest way to run a hub on the computer next to your printer, with no Docker and no
-terminal. It lives in your menu bar or system tray, so closing the window leaves the hub
-running and the printer watched. Reach it from your phone on the same network at
-`http://<computer>:8000`.
+A hub on the computer next to your printer, with no Docker and no terminal. It lives in the
+menu bar or system tray, so closing the window leaves the printer watched. Reach it from your
+phone at `http://<computer>:8000`.
 
 <div align="center">
 
@@ -197,41 +192,36 @@ with Access and oauth2-proxy, and it ends with a hardening checklist.
 
 ## Home Assistant
 
-Point the hub at your MQTT broker under Settings, in the Home Assistant tab, and every monitor
-appears in Home Assistant through MQTT discovery. You get a defect sensor, the defect score,
-the latest failure snapshot and an **Enabled** switch, and a linked printer also gets live
-status with **Pause**, **Resume** and **Cancel**. Control is two-way, so your automations can
-drive PrintGuard. The broker is yours and the bridge runs on the hub, so no frames leave your
-hardware.
+Point the hub at your MQTT broker in Settings and every monitor appears in Home Assistant
+through MQTT discovery, with a defect sensor, the score, the latest snapshot and an **Enabled**
+switch. A linked printer adds live status with **Pause**, **Resume** and **Cancel**. Control is
+two-way, so your automations can drive PrintGuard.
 
 ## Automate it with MCP and the API
 
-A hub exposes its engine to agents and scripts over the same protocol the dashboard uses, so
-anything the UI can do can be automated. Point an MCP client at `https://<host>/mcp/`, or use
-the REST API at `/api/v1`. Both read printer and camera status, fetch the current frame as an
-image, and pause, resume or cancel.
+Anything the dashboard can do, an agent or a script can do. Point an MCP client at
+`https://<host>/mcp/`, or use the REST API at `/api/v1`. Both read printer and camera status,
+fetch the current frame as an image, and pause, resume or cancel.
 
-You issue scoped bearer tokens from Settings, so an agent only gets what you grant it. `read`
-is status only, `control` adds the printer actions and `manage` adds the rest. Uptime monitors
-can poll the unauthenticated `GET /api/health` for readiness and the installed version.
-**[docs/api.md](docs/api.md)** has the full reference.
+Tokens are scoped and issued from Settings. `read` is status only, `control` adds the printer
+actions and `manage` adds the rest. `GET /api/health` needs no token and reports readiness and
+version. **[docs/api.md](docs/api.md)** has the full reference.
 
 ## Plugins
 
-Plugins are written in JavaScript and run in a sandbox. You can install verified plugins from
-the store under Settings, or install them from a GitHub repo or a zip. They can be granted
-fine-grained permissions to reach an internal API, so developers can safely add features to
-PrintGuard. Four come as standard, picture in picture for floating a camera above your other
-windows, alert sounds for hearing a defect the moment it is caught, progress reports for a
-tally of how a print is going through your usual alert channels, and Spotify for the cover of
-whatever you are playing behind the dashboard.
+Plugins are written in JavaScript and run in a sandbox. Install verified ones from the store in
+Settings, or from a GitHub repo or a zip. They ask for fine-grained permissions when you enable
+them, and you can take those back at any time.
 
-A panel runs in a sandboxed frame with no network and no access to the page, and anything on
-the hub runs in QuickJS compiled to WebAssembly with no filesystem, no sockets, a memory cap
-and a CPU budget. A plugin never sees your credentials, tokens or camera frames, and you can
-take away what you granted at any time. Ones I have reviewed are pinned by hash and show as
-verified, and everything else installs as third party. Writing one takes no build step and no
-dependencies, which **[docs/plugins.md](docs/plugins.md)** goes through.
+Four come as standard:
+
+- **Picture in picture** floats a camera above your other windows
+- **Alert sounds** plays a horn the moment a defect is caught
+- **Progress reports** sends a tally of a print through your alert channels
+- **Spotify** puts the cover of what you are playing behind the dashboard
+
+Writing one takes no build step and no dependencies. **[docs/plugins.md](docs/plugins.md)** has
+the API and the sandbox details.
 
 ## How the detector works
 
