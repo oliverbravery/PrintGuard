@@ -35,7 +35,7 @@ plugin.render((ctx) => {
       on && {
         type: "input",
         kind: "number",
-        label: "Minutes between each report",
+        label: "Minutes between each notification",
         value: String(every),
         action: "every:" + ctx.target,
       },
