@@ -221,8 +221,9 @@ can poll the unauthenticated `GET /api/health` for readiness and the installed v
 Plugins are written in JavaScript and run in a sandbox. You can install verified plugins from
 the store under Settings, or install them from a GitHub repo or a zip. They can be granted
 fine-grained permissions to reach an internal API, so developers can safely add features to
-PrintGuard. Two come as standard, picture in picture for floating a camera above your other
-windows and alert sounds for hearing a defect the moment it is caught.
+PrintGuard. Three come as standard, picture in picture for floating a camera above your other
+windows, alert sounds for hearing a defect the moment it is caught and progress reports for a
+tally of how a print is going through your usual alert channels.
 
 A panel runs in a sandboxed frame with no network and no access to the page, and anything on
 the hub runs in QuickJS compiled to WebAssembly with no filesystem, no sockets, a memory cap

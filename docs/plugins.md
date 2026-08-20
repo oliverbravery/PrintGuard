@@ -91,7 +91,9 @@ saved as part of your PrintGuard state.
 ## Writing a plugin
 
 A plugin is a folder with a manifest and one or two JavaScript files. There's no build step
-and nothing to minify, so what you publish is what people read before they install it.
+and nothing to minify, so what you publish is what people read before they install it. The
+three that come as standard live in [`plugins/`](../plugins) and are commented throughout, so
+the quickest start is to copy the one closest to what you want.
 
 ```
 my-plugin/
@@ -248,7 +250,7 @@ plugin.render((ctx) => ({
 }));
 ```
 
-[`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in five lines.
+[`plugins/picture-in-picture`](../plugins/picture-in-picture) is a whole plugin, in five lines of code.
 It takes the `monitor` surface and returns one `float` node per monitor.
 [`plugins/alert-sounds`](../plugins/alert-sounds) is another. It adds a switch and a
 sound picker to each monitor's settings, and watches each monitor's `alert` between renders,

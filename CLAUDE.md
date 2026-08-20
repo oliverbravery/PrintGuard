@@ -87,11 +87,12 @@ essentials a change must respect:
 ## Conventions
 
 - **No comments; let names document intent.** The TypeScript/React UI carries **no** comments
-  or JSDoc - never narrate what the code does. The one exception is
-  [`plugins/plugin.d.ts`](plugins/plugin.d.ts), where TSDoc on every member is the reference a
-  plugin author reads on hover. In the Python engine/server, every module, class
-  and public method gets a docstring, but still no inline comments unless the *why* is genuinely
-  non-obvious.
+  or JSDoc - never narrate what the code does. Everything under [`plugins/`](plugins) is the
+  exception, since it is what a plugin author reads to learn the API:
+  [`plugin.d.ts`](plugins/plugin.d.ts) carries TSDoc on every member for the hover, and the
+  shipped plugins are commented throughout to work as examples. In the Python engine/server,
+  every module, class and public method gets a docstring, but still no inline comments unless
+  the *why* is genuinely non-obvious.
 - **Docstrings are Google style.** A summary line, then `Args:`, `Returns:` and `Raises:`
   whenever the function takes arguments, gives something back or fails. Never repeat a type
   there: the signature is annotated, so say what a value means, not what it is.
