@@ -1036,14 +1036,14 @@ class Engine:
 
     @staticmethod
     def _provider(plugin: Plugin) -> dict[str, Any]:
-        """A plugin's sign-in, with the client id whoever registered the app supplied.
+        """A plugin's sign-in, with the client id of the app the user registered.
 
         Raises:
-            PermissionError: If nobody has supplied one, since a sign-in without
+            PermissionError: If nobody has typed one in, since a sign-in without
                 a client id only fails later and less clearly.
         """
         provider = plugin.manifest["oauth"]
-        client_id = provider["client_id"] or plugin.secrets.get(plugins.CLIENT_ID_SECRET, "")
+        client_id = plugin.secrets.get(plugins.CLIENT_ID_SECRET, "")
         if not client_id:
             raise PermissionError(f"{plugin.id} needs the client id of a {provider['label']} app you registered")
         return {**provider, "client_id": client_id}

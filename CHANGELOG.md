@@ -84,7 +84,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   panel of its own shows the track, the artist and the transport. One button plays and pauses
   and tells you which it is. It hides, pins and reorders like a monitor. Spotify makes everyone
   register an app of their own, so PrintGuard asks for its client id and shows you the exact
-  redirect URI to give Spotify, with a link to where you create it. Playback control needs a
+  redirect URI to give Spotify, with a link to where you create it. No plugin ever carries a
+  client id, so the app is always yours rather than one shared by everyone who installed it. Playback control needs a
   Premium account, and a free one still gets the cover and the track with the buttons
   explained. It never sees your Spotify tokens; PrintGuard holds them and fills them in.
 

@@ -157,20 +157,6 @@ one.
 ```json
 "permissions": ["net", "oauth"],
 "oauth": {
-  "authorize_url": "https://auth.example.com/authorize",
-  "token_url": "https://auth.example.com/token",
-  "client_id": "your-public-client-id",
-  "scopes": ["read"]
-}
-```
-
-Leave `client_id` out where the provider makes every user register an app of their own, which
-most still do. PrintGuard then asks for theirs in the same form as any other credential and
-shows them the exact redirect URI to give the provider, so nothing has to be guessed or
-written down. Point `register_url` at wherever they create it.
-
-```json
-"oauth": {
   "label": "Spotify",
   "authorize_url": "https://accounts.spotify.com/authorize",
   "token_url": "https://accounts.spotify.com/api/token",
@@ -178,6 +164,12 @@ written down. Point `register_url` at wherever they create it.
   "scopes": ["user-read-playback-state"]
 }
 ```
+
+There is no client id in there and one written in is dropped at install. A plugin travels as a
+repository, a zip or a listing in the catalogue, so an id you shipped would be one app shared
+by everybody who installed it, which is the thing providers hand out quota and terms against.
+Whoever installs it registers their own and types it into PrintGuard, which shows them the
+exact redirect URI to give the provider and points `register_url` at wherever they create it.
 
 The redirect URI is the hub's own address with `/oauth/callback` on the end, and a loopback
 name is written as `127.0.0.1` because providers have stopped accepting the name.

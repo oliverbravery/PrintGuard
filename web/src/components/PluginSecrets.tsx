@@ -9,14 +9,13 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
   const names = Object.keys(plugin.manifest.secrets);
   const provider = plugin.manifest.oauth.label;
   const connected = plugin.secrets_set.includes("oauth");
-  const registering = Boolean(provider) && !plugin.manifest.oauth.client_id;
   const redirect = `${window.location.origin.replace("//localhost", "//127.0.0.1")}${callback}`;
 
   if (names.length === 0 && !provider) return null;
 
   return (
     <div className="space-y-2 border-t border-line-0 pt-2">
-      {registering && (
+      {provider && (
         <div className="space-y-1">
           <span className="block text-[0.7rem] text-text-2">
             {provider} makes everyone register their own app.{" "}
@@ -62,7 +61,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
           </span>
           <button
             className={connected ? "btn" : "btn btn-primary"}
-            disabled={!connected && registering && !plugin.secrets_set.includes("oauth_client_id")}
+            disabled={!connected && !plugin.secrets_set.includes("oauth_client_id")}
             onClick={() =>
               send({
                 cmd: "plugin.oauth",

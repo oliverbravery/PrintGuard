@@ -949,18 +949,18 @@ SECRET_MANIFEST = {
     "oauth": {
         "authorize_url": "https://auth.example.com/authorize",
         "token_url": "https://auth.example.com/token",
-        "client_id": "public-id",
         "scopes": ["read"],
     },
 }
 
 
 async def install_vault(engine: Engine) -> None:
-    """Installs the secret-holding demo plugin and accepts its permissions."""
+    """Installs the secret-holding demo plugin, accepted and given a client id."""
     await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(SECRET_MANIFEST)})
     await engine.handle(
         {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
     )
+    await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"oauth_client_id": "registered-app"}})
 
 
 async def test_a_secret_is_filled_in_on_the_way_out_and_read_back_by_nobody() -> None:
@@ -977,7 +977,7 @@ async def test_a_secret_is_filled_in_on_the_way_out_and_read_back_by_nobody() ->
     sent = platform.http_requests[-1]
     assert sent["headers"]["Authorization"] == "Bearer s3cr3t", "the secret never reached the request"
     assert sent["json"] == {"key": "s3cr3t"}
-    assert record["secrets_set"] == ["api_key"] and "secrets" not in record, "a secret rode along in the state snapshot"
+    assert record["secrets_set"] == ["api_key", "oauth_client_id"] and "secrets" not in record, "a secret rode along in the state snapshot"
     assert "s3cr3t" not in json.dumps([e for e in events if e.get("event") == "state"])
 
 
@@ -988,7 +988,7 @@ async def test_a_secret_the_manifest_never_declared_is_not_stored() -> None:
         await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "kept", "sneaky": "dropped"}})
         held = engine.plugins.get("vault").secrets
 
-    assert held == {"api_key": "kept"}
+    assert held == {"api_key": "kept", "oauth_client_id": "registered-app"}
 
 
 async def test_a_sign_in_ends_with_tokens_the_plugin_can_use_but_never_see() -> None:
@@ -1017,26 +1017,27 @@ async def test_a_sign_in_ends_with_tokens_the_plugin_can_use_but_never_see() -> 
     assert "oauth" in record["secrets_set"] and "at-1" not in json.dumps(record)
 
 
-async def test_a_plugin_that_ships_no_client_id_asks_for_one_and_uses_it() -> None:
-    """Most providers still make every user register an app of their own."""
+async def test_a_client_id_comes_from_whoever_installed_it_and_never_the_bundle() -> None:
+    """A plugin travels as a repo, a zip or a listing, so a client id in it would
+    be one app shared by everybody who installed it."""
     platform = FakePlatform(infer_s=0.02)
-    platform.files["https://auth.example.com/token"] = (200, {"access_token": "at-9", "expires_in": 3600})
-    manifest = {**SECRET_MANIFEST, "id": "byoc", "oauth": {k: v for k, v in SECRET_MANIFEST["oauth"].items() if k != "client_id"}}
+    shipped = {**SECRET_MANIFEST, "oauth": {**SECRET_MANIFEST["oauth"], "client_id": "the-authors-app"}}
     async with running_engine(platform, camera_fps=[]) as (engine, events):
-        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(shipped)})
         await engine.handle(
-            {"cmd": "plugin.update", "id": "byoc", "patch": {"granted": manifest["permissions"], "enabled": True}}
+            {"cmd": "plugin.update", "id": "vault", "patch": {"granted": shipped["permissions"], "enabled": True}}
         )
-        asked = engine.plugins.get("byoc").manifest["secrets"]
-        await engine.handle({"cmd": "plugin.oauth", "id": "byoc", "action": "start", "origin": "http://127.0.0.1:8000", "req_id": 7})
+        manifest = engine.plugins.get("vault").manifest
+        await engine.handle({"cmd": "plugin.oauth", "id": "vault", "action": "start", "origin": "http://127.0.0.1:8000", "req_id": 7})
         refused = [e for e in events if e.get("event") == "error" and e.get("req_id") == 7]
 
-        await engine.handle({"cmd": "plugin.secrets", "id": "byoc", "secrets": {"oauth_client_id": "mine-1234"}})
-        await engine.handle({"cmd": "plugin.oauth", "id": "byoc", "action": "start", "origin": "http://127.0.0.1:8000"})
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"oauth_client_id": "mine-1234"}})
+        await engine.handle({"cmd": "plugin.oauth", "id": "vault", "action": "start", "origin": "http://127.0.0.1:8000"})
         opened = next(e for e in events if e.get("event") == "plugin_oauth")["url"]
 
-    assert plugins.CLIENT_ID_SECRET in asked, "nobody was asked for a client id"
-    assert len(refused) == 1, "a sign-in started with no client id at all"
+    assert "client_id" not in manifest["oauth"], "a client id in the bundle survived the install"
+    assert plugins.CLIENT_ID_SECRET in manifest["secrets"], "nobody was asked for a client id"
+    assert len(refused) == 1, "a sign-in started before anyone supplied one"
     assert parse_qs(urlparse(opened).query)["client_id"] == ["mine-1234"]
 
 
@@ -1066,7 +1067,7 @@ async def test_an_expiring_access_token_is_renewed_before_the_request_goes_out()
     async with running_engine(platform, camera_fps=[]) as (engine, _):
         await install_vault(engine)
         plugin = engine.plugins.get("vault")
-        plugin.secrets = {"oauth": "stale", "oauth_refresh": "rt-1", "oauth_expires": "0"}
+        plugin.secrets = {**plugin.secrets, "oauth": "stale", "oauth_refresh": "rt-1", "oauth_expires": "0"}
         await engine.handle({
             "cmd": "plugin.http", "id": "vault", "url": "https://api.example.com/v1/me",
             "headers": {"Authorization": "Bearer {{secret.oauth}}"},

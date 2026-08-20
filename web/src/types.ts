@@ -221,7 +221,7 @@ export interface PluginManifest {
   secrets: Record<string, string>;
   provides: Record<string, string>;
   consumes: string[];
-  oauth: { authorize_url: string; token_url: string; client_id: string; register_url: string; scopes: string[]; label: string } | Record<string, never>;
+  oauth: { authorize_url: string; token_url: string; register_url: string; scopes: string[]; label: string } | Record<string, never>;
   events: string[];
   tick_s: number;
 }
