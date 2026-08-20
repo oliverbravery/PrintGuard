@@ -176,21 +176,18 @@ declare global {
     target?: string;
     /** Which surface is being drawn, `monitor` or `settings`, alongside `ctx.target`. */
     surface?: string;
-    /** The text files you shipped, keyed by name. Images and audio are not here, since only PrintGuard handles those. */
+    /** The text files you shipped, keyed by name. Images and audio stay with PrintGuard. */
     assets: Record<string, string>;
     /** Your own data. Assign to it and PrintGuard saves it, up to 16 KB. */
     store: Record<string, any>;
     /**
-     * Asks PrintGuard to run an engine command, such as
-     * `{ cmd: "printer.action", id, action: "pause" }`. Every command maps to a
-     * permission, and one you were not granted is refused and reported.
+     * Runs an engine command, such as `{ cmd: "printer.action", id, action: "pause" }`.
+     * Every command maps to a permission, and an ungranted one is refused.
      */
     command(cmd: { cmd: string; [field: string]: unknown }): void;
     /**
-     * Asks PrintGuard to make an HTTP request for you. Needs `net` and a URL
-     * your manifest's patterns cover. The answer comes back as an `http` event
-     * carrying the same `tag`, since a plugin runs and returns rather than
-     * waiting, so name the request and hook `http` to read it.
+     * Makes an HTTP request for you. Needs `net` and a URL your patterns cover.
+     * The answer arrives as an `http` event under the same `tag`.
      */
     http(request: { method?: string; url: string; headers?: Record<string, string>; json?: unknown; tag?: string }): void;
     /** Opens a WebSocket PrintGuard holds for you, answering on `tag`. Needs `net` and a `ws` or `wss` pattern covering the URL. */
@@ -202,24 +199,21 @@ declare global {
     /** Raises a message on the dashboard. Needs `notify`, and does not use the user's alert channels. */
     notify(text: string): void;
     /**
-     * Sounds tones through the speakers of whoever is looking, one after the
-     * next unless a tone says `together`. Needs `sound`, and stays quiet until
-     * they have pressed something in the page. Four seconds is the most it
-     * will play.
+     * Sounds tones through the speakers of whoever is looking, one after the next
+     * unless a tone says `together`. Needs `sound`, stays quiet until they have
+     * pressed something in the page, and plays four seconds at most.
      */
     sound(tones: PluginTone[] | PluginTone): void;
     /** Plays an audio file you shipped, named as it appears in the manifest's `assets`. Needs `sound`. */
     sound(asset: string): void;
     /**
-     * Puts a picture behind the whole dashboard and makes the panels
-     * see-through over it. Needs `background`, takes a `data:` URL so nothing
-     * is fetched on the user's behalf, and clears when passed nothing.
+     * Puts a picture behind the dashboard. Needs `background`, takes a `data:` URL,
+     * and clears when passed nothing.
      */
     background(image: string): void;
     /**
      * Asks another plugin for something, on a channel your manifest names in
-     * `consumes`. Needs `link:consume`, and the answer comes back on an
-     * `answer` event carrying the same `tag`.
+     * `consumes`. Needs `link:consume`, and answers on an `answer` event.
      */
     call(request: { to: string; channel: string; body?: unknown; tag?: string }): void;
     /** Publishes on one of your own channels, reaching every plugin that named it. Needs `link:provide`. */

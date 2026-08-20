@@ -1,11 +1,9 @@
-// The worker half. It has no UI and gets a fresh VM every time it wakes, so
-// anything it needs to remember goes in ctx.store, which is the same store the
-// panel in plugin.js reads and writes.
+// The worker half. No UI, and a fresh VM every time it wakes, so anything worth
+// keeping goes in ctx.store, the same one plugin.js reads.
 const DEFAULT_MINUTES = 30;
 
-// result fires on every inference on a watched monitor, before any threshold or
-// streak logic, so this counts raw frames the model called a failure. An event
-// only fires if the manifest names it in events.
+// result fires per inference, before any threshold or streak logic, so this counts
+// raw frames the model called a failure. Only events named in the manifest fire.
 plugin.on("result", (event, ctx) => {
   if (event.prediction !== "failure") return;
   const counts = ctx.store.counts || {};
@@ -15,8 +13,7 @@ plugin.on("result", (event, ctx) => {
   ctx.store.counts = counts;
 });
 
-// alert fires once a defect has held long enough for PrintGuard to act on it, so
-// there are far fewer of these than there are results.
+// alert fires once a defect has held long enough to act on, so far fewer of these.
 plugin.on("alert", (event, ctx) => {
   const counts = ctx.store.counts || {};
   const seen = counts[event.monitor_id] || { alerts: 0, frames: 0 };
@@ -25,9 +22,8 @@ plugin.on("alert", (event, ctx) => {
   ctx.store.counts = counts;
 });
 
-// tick is the worker's own timer, running as often as tick_s in the manifest asks.
-// Waking every minute and deciding here what is due beats one timer per monitor,
-// since every monitor can be on a different interval.
+// tick is the worker's own timer, as often as tick_s asks. Waking every minute and
+// working out what is due here beats one timer per monitor.
 plugin.on("tick", (event, ctx) => {
   const on = ctx.store.on || {};
   const every = ctx.store.every || {};

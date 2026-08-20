@@ -1,6 +1,5 @@
-// The panel half. It shares one ctx.store with worker.js, so the switch and the
-// interval set here are what the worker reads when its timer comes round, and the
-// tally the worker keeps is what gets shown back.
+// The panel half. It shares one ctx.store with worker.js, so the switch and interval
+// set here are what the worker reads, and its tally is what gets shown back.
 const DEFAULT_MINUTES = 30;
 
 plugin.action((name, arg, ctx) => {
@@ -20,8 +19,7 @@ plugin.action((name, arg, ctx) => {
 });
 
 plugin.render((ctx) => {
-  // The settings surface calls render once more without ctx.target, for a panel
-  // this plugin does not have, so there is nothing to draw that time.
+  // render is called once more without ctx.target, for a panel this one does not have.
   if (!ctx.target) return null;
   const on = (ctx.store.on || {})[ctx.target] === true;
   const every = (ctx.store.every || {})[ctx.target] || DEFAULT_MINUTES;

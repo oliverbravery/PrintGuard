@@ -20,7 +20,7 @@
       "ref": "c85577cbf42c6fa0ec808fff0bb2a7c6ac5ee4d9",
       "digests": {
         "plugin.json": "12d10c57398404917dc515b537804301efdeee983c57a8890132fa0966ce5b9e",
-        "plugin.js": "03f59008e04b5104a57c8561a78e3b09a6d17a0130dceacf34dba8992d74b1c2"
+        "plugin.js": "1b0a3241c6c0fd955bda75333bf1395d4ad375922d83332a06b1ef741aa734e4"
       }
     },
     {
@@ -42,7 +42,7 @@
       "ref": "c85577cbf42c6fa0ec808fff0bb2a7c6ac5ee4d9",
       "digests": {
         "plugin.json": "9b2ca61b161070caf943f8d6f83672f6299c925cabd771169d2b6c4502f04fa1",
-        "plugin.js": "594b6f4051cf0ac5e5fc768c3b5e8828529e4faf0d65ff62ee0ede441a3a8260"
+        "plugin.js": "9625952af0f6765e172104bea611cf27eb48fed6034cea4a154ca98ac6ccf233"
       }
     },
     {
@@ -64,8 +64,8 @@
       "ref": "c85577cbf42c6fa0ec808fff0bb2a7c6ac5ee4d9",
       "digests": {
         "plugin.json": "ff9ffe355ec31994d3002dc6f40402e88cc4b4540f99d45cdaf7b6b4168600bb",
-        "plugin.js": "1efb76525d9a2048a82f10e35c2a4329e4462ea5598de7b70eb056b9e063f7b6",
-        "worker.js": "01c5ec167ce8bd40eb135275b4fafea0ff15f547eb106125f366350bf4bbc3c4"
+        "plugin.js": "20b57c627bc6337c52ff0eef8cae642e2b2e38817fe1a9a402d089a9fa942a48",
+        "worker.js": "0e7bcff17d5c681dd90f3574ebbb6df47818535ae7d94a5f10dbefb1ea590af7"
       }
     },
     {

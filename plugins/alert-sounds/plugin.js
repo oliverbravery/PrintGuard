@@ -1,10 +1,8 @@
-// A file runs inside a function with nothing else in scope, so there is no import,
-// no fetch, no DOM and no storage. Top-level values like these last as long as the
-// sandbox does, which is until the next reload, so nothing worth keeping lives here.
+// A file runs inside a function with nothing else in scope. No import, no fetch, no
+// DOM, no storage. Top-level values last until the next reload, so keep nothing here.
 
-// ctx.sound takes tones rather than the name of a sound PrintGuard knows, so these
-// three are the plugin's own. Each tone runs after the one before it unless it says
-// together, which starts it alongside instead and is how a chord is built.
+// ctx.sound takes tones, so these three are the plugin's own. Each follows the one
+// before unless it says together, which is how a chord is built.
 const HORN = [
   { hz: 196, ms: 700, shape: "sawtooth", together: false },
   { hz: 233, ms: 700, shape: "sawtooth", together: true },
@@ -33,9 +31,8 @@ const SOUNDS = new Map([
 
 const names = [...SOUNDS.keys()];
 
-// One handler takes every press and choice, named by the node's action string and
-// given its arg. Packing the monitor id into that name is how a plugin drawn once
-// per monitor works out which one it is hearing from.
+// One handler takes every press and choice, named by the node's action string. The
+// monitor id is packed into that name, so a per-monitor plugin knows which sent it.
 plugin.action((name, arg, ctx) => {
   const [what, monitorId] = name.split(":");
   if (what === "on") {
@@ -58,8 +55,8 @@ plugin.render((ctx) => {
   const on = ctx.store.on || {};
   const sound = ctx.store.sound || {};
 
-  // The settings surface calls render once per monitor with ctx.target naming
-  // which, and once more without it for the plugin's own view.
+  // The settings surface calls render once per monitor, ctx.target naming which,
+  // and once more without it.
   if (ctx.target) {
     return {
       type: "col",
@@ -78,10 +75,9 @@ plugin.render((ctx) => {
     };
   }
 
-  // render runs on every state change whether or not there is a panel to draw, so
-  // this is where a plugin with no panel of its own can still watch for something.
-  // Each monitor's alert carries the moment it fired, and comparing that against
-  // the last one seen catches a new alert exactly once.
+  // render runs on every state change, panel or not, so a plugin with no panel of
+  // its own can still watch for something.
+  // An alert carries when it fired, so comparing with the last seen catches each once.
   const heard = ctx.store.heard || {};
   for (const monitor of ctx.state.monitors || []) {
     const at = monitor.alert ? monitor.alert.ts : 0;
