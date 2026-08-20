@@ -12,6 +12,7 @@ import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Lay
 
 const HISTORY_LIMIT = 240;
 const MAX_BACKGROUND_CHARS = 3 * 1024 * 1024;
+const MAX_NOTICE_CHARS = 200;
 const UPDATE_DEBOUNCE_MS = 250;
 const updateTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
@@ -243,7 +244,9 @@ export const useStore = create<PgStore>((set, get) => {
       } else if (effect.kind === "link" && effect.request) {
         sendSilent(outboundLink(id, String(effect.action), effect.request));
       } else if (effect.kind === "notify") {
-        if (plugin.granted.includes("notify")) get().toast("info", `${plugin.manifest.name}: ${effect.text}`);
+        if (plugin.granted.includes("notify")) {
+          get().toast("info", `${plugin.manifest.name}: ${String(effect.text ?? "").slice(0, MAX_NOTICE_CHARS)}`);
+        }
       } else if (effect.kind === "sound") {
         const file = effect.asset ? get().pluginAssets[id]?.[effect.asset] : undefined;
         if (!plugin.granted.includes("sound")) continue;
