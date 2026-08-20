@@ -63,6 +63,8 @@ const ctx = {
   call(request) { __effects.push({ kind: "link", action: "call", request }); },
   publish(request) { __effects.push({ kind: "link", action: "publish", request }); },
   notify(text) { __effects.push({ kind: "notify", text: String(text) }); },
+  sound(sound) { __effects.push(typeof sound === "string" ? { kind: "sound", asset: sound } : { kind: "sound", tones: Array.isArray(sound) ? sound : [sound] }); },
+  background(image) { __effects.push({ kind: "background", image: String(image) }); },
   log(text) { __effects.push({ kind: "log", text: String(text) }); },
 };
 (function (plugin) {
@@ -296,7 +298,12 @@ class WasmPluginRuntime:
             logger.warning("plugin %s could not save its data: %s", plugin.id, exc)
 
     async def _perform(self, plugin: Plugin, effects: list[Any]) -> None:
-        """Carries out a worker's effects, refusing any it was not granted."""
+        """Carries out a worker's effects, refusing any it was not granted.
+
+    Anything a dashboard has to perform, a notification, a sound or the
+    background, goes to the engine to be handed on, since nothing here has
+    speakers or a screen.
+    """
         if self._request is None:
             return
         for effect in effects[:MAX_EFFECTS]:
@@ -314,10 +321,8 @@ class WasmPluginRuntime:
                     await self._request(plugins.outbound_socket(plugin.id, str(effect.get("action")), effect.get("request")))
                 elif kind == "link":
                     await self._request(plugins.outbound_link(plugin.id, str(effect.get("action")), effect.get("request")))
-                elif kind == "notify":
-                    if not plugin.may("notify"):
-                        raise PermissionError("this plugin was not granted notifications")
-                    await self._request({"cmd": "plugin.notify", "id": plugin.id, "text": effect["text"]})
+                elif kind in plugins.UI_EFFECTS:
+                    await self._request({"cmd": "plugin.effect", "id": plugin.id, "effect": effect})
                 elif kind == "log":
                     logger.info("plugin %s: %s", plugin.id, str(effect["text"])[:400])
             except Exception as exc:

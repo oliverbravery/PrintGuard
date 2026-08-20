@@ -511,6 +511,9 @@ wrote.
 timer, and for requests to its routes. It gets a fresh VM each time, so anything it needs to
 remember goes in `ctx.store`.
 
+It has no screen and no speakers of its own, so `ctx.notify`, `ctx.sound` and `ctx.background`
+are carried out by whichever dashboards are open, and nothing happens while none are.
+
 These are the events a worker can name in `events`:
 
 | Event | Fires | Carries |

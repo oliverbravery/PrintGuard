@@ -33,7 +33,10 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   starts once you allow the lot. There is no partial yes, so a plugin either gets what it asks
   for or does not run, and disabling one keeps what you accepted so switching it back on asks
   nothing again. An update that asks for more than you accepted stands the plugin down until
-  you accept the wider list, so nothing new happens behind an Update press.
+  you accept the wider list, so nothing new happens behind an Update press, and more means a
+  permission, an address or another plugin it calls. What you gave a plugin carries across an
+  update from the repository it came from and nowhere else, so a bundle that shares only its
+  id installs holding none of your credentials.
 
 - Plugins can reach the network properly. A plugin lists the addresses it needs as match
   patterns, the same `https://*.example.com/*` grammar a browser extension uses, so it can ask

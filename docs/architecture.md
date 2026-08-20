@@ -93,7 +93,7 @@ Commands, UI to engine:
 | Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.test`, `printer.cameras.refresh` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
 | History | `history.get`, `snapshot.get` |
-| Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.http`, `plugin.notify` |
+| Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.http`, `plugin.effect` |
 | System | `settings.update`, `notify.test`, `token.create`, `token.remove`, `update.check`, `update.releases`, `report.send`, `report.bundle` |
 
 Every command may carry a `req_id`, echoed on the responding event so the UI can resolve
@@ -113,7 +113,7 @@ Events, engine to UI:
 | `releases` | The changelog history the update dialog browses |
 | `token_created` | A new API token's secret, delivered to the requesting transport and never written to the log |
 | `report_sent`, `report_bundle` | Bug report outcome, and the downloadable diagnostics zip |
-| `plugin_code`, `catalogue`, `plugin_notice` | A plugin's source for its sandbox, the reviewed-plugin catalogue, and a message a plugin raised |
+| `plugin_code`, `catalogue`, `plugin_effect` | A plugin's source for its sandbox, the reviewed-plugin catalogue, and an effect a dashboard performs for a plugin that has no screen of its own |
 | `http`, `socket` | An answer to a plugin's own request, and a frame on a socket it is holding, both addressed to the plugin that asked |
 | `error` | Anything that failed, including failed printer actions |
 

@@ -284,6 +284,20 @@ somebody else to ask, and read the answer.
 """
 
 
+UI_EFFECTS: dict[str, str] = {"notify": "notify", "sound": "sound", "background": "background"}
+"""Effects a dashboard carries out for a plugin, and the permission each needs.
+
+A worker on the hub has no speakers and nothing on screen, so it asks for these
+and every open dashboard performs them, the way a browser extension's service
+worker reaches a document to play a sound. The plugin writes the same call
+whichever side it runs on, and the grant is checked as the effect passes the
+engine as well as at the sandbox edge that sent it.
+"""
+
+MAX_EFFECT_BYTES = 3 * 1024 * 1024
+"""How large one may be, which a background picture is the reason for."""
+
+
 def sanitise_secrets(raw: Any, names: list[str]) -> dict[str, str]:
     """Keeps the secrets a manifest declared, refusing anything oversized.
 

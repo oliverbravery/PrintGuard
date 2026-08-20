@@ -122,7 +122,7 @@ class Engine:
             "plugin.publish": self._cmd_plugin_publish,
             "plugin.secrets": self._cmd_plugin_secrets,
             "plugin.oauth": self._cmd_plugin_oauth,
-            "plugin.notify": self._cmd_plugin_notify,
+            "plugin.effect": self._cmd_plugin_effect,
         }
 
     async def start(self) -> None:
@@ -1105,19 +1105,22 @@ class Engine:
         if renewed is not None:
             plugin.secrets = renewed
 
-    async def _cmd_plugin_notify(self, message: dict[str, Any]) -> None:
-        plugin = self.plugins.get(message["id"])
-        if not plugin or not plugin.may("notify"):
-            raise PermissionError("plugin may not raise notifications")
-        self.emit(
-            {
-                "event": "plugin_notice",
-                "id": plugin.id,
-                "name": plugin.manifest["name"],
-                "text": str(message.get("text", ""))[:200],
-                "req_id": message.get("req_id"),
-            }
-        )
+    async def _cmd_plugin_effect(self, message: dict[str, Any]) -> None:
+        """Hands a plugin's dashboard effect to the dashboards that can perform it.
+
+        Raises:
+            PermissionError: If the plugin was not granted what the effect needs,
+                or asks for something no dashboard performs.
+            ValueError: If the effect is larger than one has any business being.
+        """
+        plugin = self.plugins.get(str(message.get("id", "")))
+        effect = message.get("effect") if isinstance(message.get("effect"), dict) else {}
+        needed = plugins.UI_EFFECTS.get(str(effect.get("kind", "")))
+        if plugin is None or needed is None or not plugin.may(needed):
+            raise PermissionError(f"plugin {message.get('id')!r} may not ask a dashboard for {effect.get('kind')!r}")
+        if len(plugins.canonical(effect)) > plugins.MAX_EFFECT_BYTES:
+            raise ValueError(f"a plugin effect is {plugins.MAX_EFFECT_BYTES // 1024 // 1024} MB at most")
+        self.emit({"event": "plugin_effect", "id": plugin.id, "effect": effect, "req_id": message.get("req_id")})
 
     async def _refresh_catalogue(self, quiet: bool = False) -> None:
         try:

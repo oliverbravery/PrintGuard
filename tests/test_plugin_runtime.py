@@ -59,6 +59,23 @@ def test_worker_handles_an_event_and_keeps_its_own_data(runtime: WasmPluginRunti
     assert output["effects"] == [{"kind": "notify", "text": "at 0.9"}]
 
 
+def test_a_worker_asks_for_the_effects_it_has_no_way_of_performing(runtime: WasmPluginRuntime) -> None:
+    """The hub has no speakers and no screen, so a worker asks for both here.
+
+    The same worker.js runs in the browser sandbox in local mode, so anything
+    missing from this ``ctx`` would work in one mode and throw in the other.
+    """
+    output = call(
+        runtime,
+        "plugin.on('alert', (event, ctx) => { ctx.sound([{ hz: 880, ms: 100 }]); ctx.background('data:image/png;base64,x'); });",
+    )
+
+    assert output["effects"] == [
+        {"kind": "sound", "tones": [{"hz": 880, "ms": 100}]},
+        {"kind": "background", "image": "data:image/png;base64,x"},
+    ]
+
+
 def test_worker_that_never_finishes_is_cut_off(runtime: WasmPluginRuntime) -> None:
     with pytest.raises(RuntimeError):
         call(runtime, "plugin.on('alert', () => { while (true) {} });")
@@ -113,7 +130,7 @@ async def test_effects_a_plugin_was_not_granted_are_refused(runtime: WasmPluginR
         ],
     )
 
-    assert [c["cmd"] for c in performed] == ["plugin.notify"], "an ungranted printer action was carried out"
+    assert [c["cmd"] for c in performed] == ["plugin.effect"], "an ungranted printer action was carried out"
 
 
 def _record(sink: list[dict], command: dict) -> asyncio.Future:

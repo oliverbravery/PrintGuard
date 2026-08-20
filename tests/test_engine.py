@@ -1040,6 +1040,51 @@ async def test_a_disabled_plugin_loses_the_sockets_it_was_holding() -> None:
     assert platform.sockets[-1].closed, "a socket outlived the plugin holding it"
 
 
+SOUND_MANIFEST = {
+    "id": "chimes",
+    "name": "Chimes",
+    "version": "1.0.0",
+    "permissions": ["sound"],
+    "reasons": {"sound": "to sound an alert"},
+}
+
+
+async def install_chimes(engine: Engine, granted: list[str]) -> None:
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(SOUND_MANIFEST)})
+    await engine.handle({"cmd": "plugin.update", "id": "chimes", "patch": {"granted": granted, "enabled": bool(granted)}})
+
+
+async def test_an_effect_only_a_dashboard_can_perform_is_passed_on_to_them() -> None:
+    """A worker has no speakers, so it asks and whoever has a dashboard open does it."""
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_chimes(engine, granted=["sound"])
+        await engine.handle({"cmd": "plugin.effect", "id": "chimes", "effect": {"kind": "sound", "asset": "horn.mp3"}})
+        passed = [e for e in events if e.get("event") == "plugin_effect"]
+
+    assert passed == [
+        {"event": "plugin_effect", "id": "chimes", "effect": {"kind": "sound", "asset": "horn.mp3"}, "req_id": None}
+    ]
+
+
+async def test_an_effect_the_plugin_was_not_granted_reaches_no_dashboard() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_chimes(engine, granted=[])
+        await engine.handle(
+            {"cmd": "plugin.effect", "id": "chimes", "effect": {"kind": "sound", "asset": "horn.mp3"}, "req_id": 1}
+        )
+        await install_chimes(engine, granted=["sound"])
+        await engine.handle(
+            {"cmd": "plugin.effect", "id": "chimes", "effect": {"kind": "command", "cmd": {"cmd": "monitor.remove"}}, "req_id": 2}
+        )
+        refused = [e for e in events if e.get("event") == "error" and e.get("req_id") in (1, 2)]
+        passed = [e for e in events if e.get("event") == "plugin_effect"]
+
+    assert len(refused) == 2, "an ungranted sound, or a command dressed as one, went to the dashboards"
+    assert passed == [], "an effect nobody granted was handed on"
+
+
 SECRET_MANIFEST = {
     "id": "vault",
     "name": "Vault",

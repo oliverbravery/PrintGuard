@@ -430,8 +430,8 @@ export const useStore = create<PgStore>((set, get) => {
         clearPending(event.req_id);
         window.open(event.url, "_blank", "noopener");
         break;
-      case "plugin_notice":
-        get().toast("info", `${event.name}: ${event.text}`);
+      case "plugin_effect":
+        perform(event.id, [event.effect]);
         break;
 
       case "catalogue":
