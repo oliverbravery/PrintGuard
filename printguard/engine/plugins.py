@@ -1,15 +1,12 @@
 """Plugin sourcing, verification and the permission table.
 
-A plugin is plain JavaScript: ``plugin.js`` draws a panel in the UI and
-``worker.js`` runs in the background. Neither ever runs here - this module only
-fetches the source, validates the manifest, hashes what it got and checks that
-hash against the catalogue of reviewed plugins. Execution happens in a sandbox
-on each side: an opaque-origin iframe in the browser, QuickJS compiled to
-WebAssembly on the hub.
+Nothing runs here. This module fetches a plugin's source, validates the
+manifest, hashes what it got and checks that hash against the catalogue.
+Execution is a sandbox on each side, an opaque-origin iframe in the browser and
+QuickJS in WebAssembly on the hub.
 
-Permissions live here as data. The UI and the hub runtime both enforce them at
-their own sandbox edge, because by the time a command reaches the engine it is
-indistinguishable from one the dashboard sent.
+Permissions are data. Both sandboxes enforce them at their own edge, since by
+the time a command reaches the engine it looks like one the dashboard sent.
 """
 
 from __future__ import annotations
@@ -43,8 +40,8 @@ MAX_SECRET_BYTES = 4096
 SECRET_REFERENCE = re.compile(r"\{\{\s*secret\.([a-z0-9_-]{1,40})\s*\}\}")
 """How a plugin names a secret it may use but never read.
 
-The value is substituted as the request leaves PrintGuard, so the reference is
-all the plugin ever holds and all that is ever stored in anything it can read.
+The value is substituted as the request leaves, so the reference is all a
+plugin ever holds.
 """
 CATALOGUE_URL = "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/catalogue.json"
 GITHUB_COMMIT_URL = "https://api.github.com/repos/{repo}/commits/{ref}"
@@ -208,12 +205,11 @@ ASSET_TYPES: dict[str, str] = {
     "csv": "text/csv",
     "txt": "text/plain",
 }
-"""What a plugin may ship beside its code, and the type each is handed over as.
+"""What a plugin may ship beside its code, and the type each is served as.
 
-An allowlist rather than a blocklist, since the dangerous formats are the ones
-nobody thinks of. SVG is not here because it is markup wearing an image's
-extension, and the type is the one this table gives, never the one the file
-claims.
+An allowlist, since the dangerous formats are the ones nobody thinks of. SVG is
+markup wearing an image's extension, so it is not here. The type comes from this
+table, never from the file.
 """
 
 ASSET_MAGIC: dict[str, tuple[bytes, ...]] = {
@@ -239,9 +235,8 @@ PLATFORMS: dict[str, str] = {
 }
 """Where PrintGuard runs, as a plugin declares it and a deployment reports it.
 
-An id extends the one before its hyphen, so a plugin naming ``docker`` runs on
-every image and one naming ``docker-nvidia`` runs only on that one. A plugin
-naming none of them runs everywhere.
+An id extends the one before its hyphen, so ``docker`` covers every image and
+``docker-nvidia`` covers that one. Naming none of them runs everywhere.
 """
 
 EVENTS: dict[str, list[str]] = {
@@ -261,10 +256,9 @@ EVENTS: dict[str, list[str]] = {
 }
 """The events a plugin may hook, and the fields each one hands it.
 
-Engine events carry far more than a plugin's grants allow, a printer's
-credentials in a state snapshot or a new API token's secret, so a plugin is
-handed these fields and nothing else, and an event missing from here never
-reaches one at all.
+Engine events carry more than a plugin's grants allow, such as a printer's
+credentials or a new token's secret, so a plugin gets these fields only. An
+event missing from here never reaches one.
 """
 
 EVENT_PERMISSIONS: dict[str, str] = {
@@ -275,23 +269,20 @@ EVENT_PERMISSIONS: dict[str, str] = {
     "answer": "link:consume",
     "message": "link:consume",
 }
-"""Events carrying something a permission covers, and which one that is.
+"""Events carrying something a permission covers, and which one.
 
-An event is broadcast to every plugin that named it, so one carrying a camera
-still or a monitor's history has to be held to the same grant the command that
-asked for it needed. Without this a plugin could name the event, wait for
-somebody else to ask, and read the answer.
+Events broadcast to every plugin that named them, so one carrying a camera still
+or a monitor's history needs the grant its command needed. Without this a plugin
+could name the event, wait for somebody else to ask, and read the answer.
 """
 
 
 UI_EFFECTS: dict[str, str] = {"notify": "notify", "sound": "sound", "background": "background"}
 """Effects a dashboard carries out for a plugin, and the permission each needs.
 
-A worker on the hub has no speakers and nothing on screen, so it asks for these
-and every open dashboard performs them, the way a browser extension's service
-worker reaches a document to play a sound. The plugin writes the same call
-whichever side it runs on, and the grant is checked as the effect passes the
-engine as well as at the sandbox edge that sent it.
+A worker on the hub has no speakers and no screen, so it asks and every open
+dashboard performs it, the way an extension's service worker reaches a document.
+The grant is checked at the engine as well as at the sandbox edge.
 """
 
 MAX_EFFECT_BYTES = 3 * 1024 * 1024
@@ -350,11 +341,8 @@ def consented(manifest: dict[str, Any], granted: list[str]) -> bool:
 def same_source(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     """Whether a bundle comes from the place the installed one came from.
 
-    A repository is the nearest thing a plugin has to a signing key, so a
-    bundle from the same one is the same plugin and keeps what the user gave
-    it, while anything else is a stranger that happens to share an id and
-    starts with nothing. A zip carries no such identity, so it is never the
-    same place twice.
+    A repository is the nearest thing a plugin has to a signing key. A zip has
+    no identity, so it is never the same place twice.
 
     Args:
         previous: The source recorded against the installed plugin.
@@ -371,11 +359,9 @@ def same_source(previous: dict[str, Any], current: dict[str, Any]) -> bool:
 def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     """Whether an update reaches further than the manifest that was accepted.
 
-    The permissions, the addresses and the plugins it calls are what the user
-    was asked about, so a change to any of them is a fresh question and the
-    grants stand down until it is answered. Anything not written exactly as it
-    was counts as wider, since a pattern that reads narrower can still cover
-    more than the one it replaces.
+    Permissions, addresses and the plugins it calls are what the user agreed to,
+    so a change to any of them is a fresh question. Anything not written exactly
+    as before counts as wider, since a narrower-looking pattern can cover more.
 
     Args:
         previous: The manifest the grants were given against.
@@ -409,9 +395,9 @@ def permissions_meta() -> list[dict[str, Any]]:
 def project_state(state: dict[str, Any], granted: list[str]) -> dict[str, Any]:
     """Cuts a state snapshot down to the fields a plugin's grants allow.
 
-    Everything is dropped unless a permission names it, so a field added to
-    the snapshot later is invisible to plugins until it is listed here. The UI
-    applies the same table, which it reads from ``permissions_meta()``.
+    Everything is dropped unless a permission names it, so a field added to the
+    snapshot later is invisible until it is listed. The UI applies the same
+    table, read from ``permissions_meta()``.
     """
     view: dict[str, Any] = {"mode": state.get("mode"), "version": state.get("version")}
     for name in granted:
@@ -428,11 +414,9 @@ def project_event(event: dict[str, Any], granted: list[str]) -> dict[str, Any] |
         granted: Permissions the user gave the plugin.
 
     Returns:
-        The event carrying only the fields ``EVENTS`` lists for it, or None
-        for one no plugin may hook and for one this plugin has not been granted.
-        A state event comes back as the projection the grants allow, so a plugin
-        watching it reads what it gets on ``ctx.state`` rather than the whole
-        snapshot.
+        The event carrying only the fields ``EVENTS`` lists for it, or None if
+        no plugin may hook it or this one lacks the grant. A state event comes
+        back as the projection the grants allow.
     """
     name = str(event.get("event", ""))
     fields = EVENTS.get(name)
@@ -495,9 +479,8 @@ def text_assets(assets: dict[str, str]) -> dict[str, str]:
 def canonical(value: Any) -> bytes:
     """Encodes a manifest the one way both ends agree to hash it.
 
-    The platform's HTTP function returns parsed JSON in both modes and never
-    the bytes it came from, so a manifest is pinned by the hash of its
-    canonical form rather than of the file as written.
+    The platform's HTTP function returns parsed JSON in both modes, never the
+    bytes it came from, so a manifest is pinned by the hash of this form.
     """
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
@@ -608,8 +591,8 @@ def linked_events(raw: Any) -> set[str]:
 def outbound_link(plugin_id: str, kind: str, request: Any) -> dict[str, Any]:
     """Builds a plugin.call, plugin.publish or plugin.answer out of what a plugin asked for.
 
-    The plugin's id is set last, as it is for a request, so a sandbox cannot
-    spread over the command and speak as somebody else.
+    The id is set last, so a sandbox cannot spread over the command and speak as
+    somebody else.
     """
     fields = request if isinstance(request, dict) else {}
     return {
@@ -675,11 +658,10 @@ def sanitise_config(raw: Any) -> dict[str, Any]:
 def outbound_request(plugin_id: str, request: Any) -> dict[str, Any]:
     """Builds a plugin.http command out of what a plugin asked for.
 
-    Only these fields are carried over, and the plugin's id is set last: the
-    request comes from inside a sandbox, so left to spread over the command it
-    could name a *different* installed plugin and borrow its network grant.
-    ``binary`` asks for the answer base64 encoded, which is how a picture gets
-    back to a plugin that has no way of its own to fetch one.
+    Only these fields carry over, and the id is set last. The request comes from
+    a sandbox, so spreading it over the command could name another installed
+    plugin and borrow its network grant. ``binary`` asks for a base64 answer,
+    which is how a picture reaches a plugin.
     """
     fields = request if isinstance(request, dict) else {}
     return {

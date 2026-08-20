@@ -198,16 +198,14 @@ includes both. See
 
 ## Plugins
 
-Plugins are third-party code, so the engine never runs any of it.
-[`engine/plugins.py`](../printguard/engine/plugins.py) only sources it. It fetches from
-GitHub at a resolved commit or unpacks a zip, validates the manifest, hashes the manifest and
-every source file, and compares that against the reviewed catalogue. The registry holds the result beside
-the cameras, printers and tokens, and persists through the same `save_state`.
+Plugins are third-party code, and the engine runs none of it.
+[`engine/plugins.py`](../printguard/engine/plugins.py) only sources it: a fetch from GitHub at
+a resolved commit or a zip, manifest validation, a hash of every file, and a comparison against
+the catalogue. The registry holds the result beside the cameras, printers and tokens.
 
-Execution is a sandbox on each side, and the permission table in `PERMISSIONS` is the one
-policy both enforce. It reaches the UI in the state snapshot as `plugin_permissions`, the
-same way `integrations_meta()` already drives the config forms, so the UI applies a policy
-it does not define.
+Execution is a sandbox on each side. `PERMISSIONS` is the one policy both enforce, and it
+reaches the UI in the state snapshot as `plugin_permissions`, the way `integrations_meta()`
+already drives the config forms.
 
 ```mermaid
 flowchart LR
@@ -217,18 +215,18 @@ flowchart LR
     ui -- "checked effects" --> engine
 ```
 
-A sandbox asks for effects and PrintGuard is what carries them out, checking each one against
-what the user granted first. That check has to happen at the sandbox edge, because by the
-time a command reaches the engine it is indistinguishable from one the dashboard sent.
+A sandbox asks for effects and PrintGuard carries them out, checking each against the grants
+first. That check belongs at the sandbox edge: by the time a command reaches the engine it is
+indistinguishable from one the dashboard sent.
 
-A plugin's source never rides in the state snapshot, which broadcasts every second. It
-travels on request through `plugin.code`, like `snapshot.get` and `history.get`. Since that
-response is broadcast to every connected client, a tab must ignore one whose `req_id` is not
-its own, or a second tab's response starts a duplicate sandbox.
+A plugin's source never rides in the state snapshot, which broadcasts every second. It travels
+on request through `plugin.code`, like `snapshot.get` and `history.get`. That response reaches
+every connected client, so a tab ignores one whose `req_id` is not its own, or a second tab
+starts a duplicate sandbox.
 
-The hub also mounts `/plugins/<id>/` onto a plugin's route handler, and, for a plugin holding
-`gate`, consults it before serving anything else. `PRINTGUARD_PLUGINS=off` starts the hub with every
-plugin switched off. See [plugins](plugins.md).
+The hub mounts `/plugins/<id>/` onto a plugin's route handler and consults a `gate` plugin
+before serving anything else. `PRINTGUARD_PLUGINS=off` starts with every plugin off. See
+[plugins](plugins.md).
 
 ## Scheduling inference
 
