@@ -44,7 +44,7 @@
     "permissions": {
       "type": "array",
       "uniqueItems": true,
-      "description": "What it asks for at install. Anything not granted is refused at the sandbox edge.",
+      "description": "What it asks for. The user accepts all of it or none of it before the plugin can be enabled.",
       "items": {
         "anyOf": [
           {
@@ -88,6 +88,29 @@
             "description": "See and approve or refuse every request to the hub, including the dashboard and the API. A plugin holding this can lock you out."
           }
         ]
+      }
+    },
+    "reasons": {
+      "type": "object",
+      "description": "Why it wants each permission, in your own words, shown when the user is asked to accept them. One line per permission, and every one it asks for needs one.",
+      "propertyNames": {
+        "enum": [
+          "state:read",
+          "camera:view",
+          "monitor:control",
+          "printer:control",
+          "notify",
+          "sound",
+          "alert:send",
+          "net",
+          "routes",
+          "gate"
+        ]
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
       }
     },
     "surfaces": {

@@ -7,6 +7,10 @@
   "author": "oliverbravery",
   "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/progress-reports",
   "permissions": ["state:read", "alert:send"],
+  "reasons": {
+    "state:read": "To read how far each print has got and how many defects it has seen.",
+    "alert:send": "To send the tally to the same channels your defect alerts use."
+  },
   "surfaces": ["settings"],
   "events": ["result", "alert"],
   "tick_s": 60

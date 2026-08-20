@@ -172,6 +172,19 @@ reaches one at all.
 """
 
 
+def consented(manifest: dict[str, Any], granted: list[str]) -> bool:
+    """Whether every permission a manifest asks for has been accepted.
+
+    Args:
+        manifest: The validated manifest.
+        granted: What the user accepted, which an update can leave short.
+
+    Returns:
+        True when nothing the plugin asks for is still unaccepted.
+    """
+    return set(manifest["permissions"]) <= set(granted)
+
+
 def runs_here(platforms: list[str], host: str) -> bool:
     """Whether a plugin's declared platforms cover the deployment running it.
 
@@ -313,6 +326,12 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     version = str(raw.get("version", "")).strip()
     if not VERSION_PATTERN.match(version):
         raise ValueError("plugin version is missing or unusable")
+    permissions = [p for p in PERMISSIONS if p in raw.get("permissions", [])]
+    given = raw.get("reasons") if isinstance(raw.get("reasons"), dict) else {}
+    reasons = {p: str(given.get(p, "")).strip()[:200] for p in permissions}
+    unexplained = [p for p, why in reasons.items() if not why]
+    if unexplained:
+        raise ValueError(f"reasons must say why the plugin wants {', '.join(unexplained)}")
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
     platforms = sorted({str(p).strip() for p in raw.get("platforms", [])} & set(PLATFORMS))
     assets = sorted({str(a).strip().lower() for a in raw.get("assets", [])} - {MANIFEST_FILE, *SOURCE_FILES})
@@ -331,7 +350,8 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "description": str(raw.get("description", "")).strip()[:400],
         "author": str(raw.get("author", "")).strip()[:80],
         "homepage": str(raw.get("homepage", "")).strip()[:200],
-        "permissions": [p for p in PERMISSIONS if p in raw.get("permissions", [])],
+        "permissions": permissions,
+        "reasons": reasons,
         "surfaces": surfaces,
         "platforms": platforms,
         "assets": assets,

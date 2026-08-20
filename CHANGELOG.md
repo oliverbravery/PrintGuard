@@ -28,6 +28,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   types your editor reads, and [CONTRIBUTING.md](CONTRIBUTING.md) covers getting one
   listed in the catalogue.
 
+- Plugins install switched off and ask before they run. Pressing Enable shows every permission
+  a plugin wants, what it allows and the author's own reason for wanting it, and the plugin
+  starts once you allow the lot. There is no partial yes, so a plugin either gets what it asks
+  for or does not run, and disabling one keeps what you accepted so switching it back on asks
+  nothing again. An update that asks for more than you accepted stands the plugin down until
+  you accept the wider list, so nothing new happens behind an Update press.
+
 ### Fixed
 
 - A camera that keeps dropping out no longer notifies you every time it reconnects. The

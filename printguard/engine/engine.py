@@ -759,9 +759,12 @@ class Engine:
     async def _cmd_plugin_install(self, message: dict[str, Any]) -> None:
         """Fetches, verifies and registers a plugin, or reinstalls one in place.
 
-        Reinstalling is how a plugin is upgraded: the id is what identifies it,
-        so a newer revision of the same plugin replaces the old bytes and keeps
-        the permissions and stored data the user has already given it.
+        A plugin arrives disabled and holding nothing, since the permissions it
+        asks for are accepted at the point of enabling it. Reinstalling is how a
+        plugin is upgraded: the id is what identifies it, so a newer revision
+        replaces the old bytes and keeps the permissions and stored data it
+        already has. One that asks for more than it did stands down until the
+        wider list has been accepted too.
         """
         source = dict(message.get("source") or {})
         if source.get("kind") == "github":
@@ -783,6 +786,7 @@ class Engine:
         await self._refresh_catalogue(quiet=True)
         entry = plugins.verified_by(self.catalogue, manifest["id"], digests)
         existing = self.plugins.get(manifest["id"])
+        granted = [p for p in (existing.granted if existing else []) if p in manifest["permissions"]]
         self.plugins.add(
             Plugin(
                 id=manifest["id"],
@@ -791,10 +795,10 @@ class Engine:
                 assets=assets,
                 digests=digests,
                 source=source,
-                granted=[p for p in (existing.granted if existing else message.get("granted") or []) if p in manifest["permissions"]],
+                granted=granted,
                 config=existing.config if existing else {},
                 verified=entry is not None,
-                enabled=existing.enabled if existing else True,
+                enabled=bool(existing and existing.enabled and plugins.consented(manifest, granted)),
                 installed=time.time(),
             )
         )
@@ -809,6 +813,11 @@ class Engine:
         await self._reload_plugins()
 
     async def _cmd_plugin_update(self, message: dict[str, Any]) -> None:
+        """Applies a patch, refusing to run a plugin whose permissions stand unaccepted.
+
+        Raises:
+            PermissionError: If enabling one that asks for more than it holds.
+        """
         plugin = self.plugins.get(message["id"])
         if not plugin:
             raise KeyError(f"no plugin {message['id']}")
@@ -816,6 +825,8 @@ class Engine:
         if "granted" in patch:
             plugin.granted = [p for p in patch["granted"] if p in plugin.manifest["permissions"]]
         if "enabled" in patch:
+            if patch["enabled"] and not plugins.consented(plugin.manifest, plugin.granted):
+                raise PermissionError(f"{plugin.id} asks for permissions that have not been accepted")
             plugin.enabled = bool(patch["enabled"])
             plugin.failure = None
         if "config" in patch:

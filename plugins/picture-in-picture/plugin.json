@@ -7,5 +7,9 @@
   "author": "oliverbravery",
   "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/picture-in-picture",
   "permissions": ["state:read", "camera:view"],
+  "reasons": {
+    "state:read": "To find which camera each monitor is watching.",
+    "camera:view": "To float that camera above your other windows."
+  },
   "surfaces": ["monitor"]
 }

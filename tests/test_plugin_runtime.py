@@ -137,8 +137,17 @@ WORKER_MANIFEST = {
     "name": "Guard",
     "version": "1.0.0",
     "permissions": ["monitor:control", "routes", "gate"],
+    "reasons": {"monitor:control": "to retune", "routes": "to serve", "gate": "to authorise"},
     "events": ["alert"],
 }
+
+
+async def install_and_accept(engine: Engine, manifest: dict, worker: str) -> None:
+    """Installs a worker-only plugin and accepts its permissions as the user would."""
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": bundle(manifest, worker)})
+    await engine.handle(
+        {"cmd": "plugin.update", "id": manifest["id"], "patch": {"granted": manifest["permissions"], "enabled": True}}
+    )
 
 
 def bundle(manifest: dict, worker: str) -> str:
@@ -163,9 +172,7 @@ async def engine_with_worker(runtime: WasmPluginRuntime):
     engine = Engine(HostedPlatform(runtime))
     await engine.start()
     try:
-        await engine.handle(
-            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": bundle(WORKER_MANIFEST, WORKER), "granted": WORKER_MANIFEST["permissions"]}
-        )
+        await install_and_accept(engine, WORKER_MANIFEST, WORKER)
         yield engine
     finally:
         await engine.stop()
@@ -239,6 +246,7 @@ SNOOP_MANIFEST = {
     "name": "Snoop",
     "version": "1.0.0",
     "permissions": ["state:read"],
+    "reasons": {"state:read": "to snoop"},
     "events": ["state", "token_created"],
 }
 
@@ -253,10 +261,7 @@ async def test_a_worker_watching_events_sees_no_credentials(runtime: WasmPluginR
     await engine.start()
     try:
         await engine.handle({"cmd": "printer.add", "printer": {"name": "P", **OCTOPRINT}})
-        await engine.handle(
-            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": bundle(SNOOP_MANIFEST, SNOOP_WORKER),
-             "granted": ["state:read"]}
-        )
+        await install_and_accept(engine, SNOOP_MANIFEST, SNOOP_WORKER)
         await engine.handle({"cmd": "token.create", "name": "t", "scope": "manage"})
         await asyncio.sleep(0.5)
 
@@ -274,6 +279,7 @@ REPORTS_MANIFEST = {
     "name": "Progress reports",
     "version": "1.0.0",
     "permissions": ["state:read", "alert:send"],
+    "reasons": {"state:read": "to count", "alert:send": "to report"},
     "events": ["result", "alert"],
     "tick_s": 5.0,
 }
@@ -288,8 +294,7 @@ async def test_a_worker_reports_progress_and_defects_through_the_alert_channels(
         await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
         await engine.handle({"cmd": "monitor.add", "monitor": {"name": "Bench", "camera_id": "c1"}})
         monitor_id = next(iter(engine.monitors))
-        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"},
-                             "zip": bundle(REPORTS_MANIFEST, REPORTS), "granted": REPORTS_MANIFEST["permissions"]})
+        await install_and_accept(engine, REPORTS_MANIFEST, REPORTS)
         await engine.handle({"cmd": "plugin.update", "id": "progress-reports",
                              "patch": {"config": {"on": {monitor_id: True}, "every": {monitor_id: 1},
                                                   "sent": {monitor_id: 0}, "jobs": {monitor_id: None}}}})
@@ -323,6 +328,7 @@ RISK_MANIFEST = {
     "name": "Risk watch",
     "version": "1.0.0",
     "permissions": ["state:read", "printer:control"],
+    "reasons": {"state:read": "to watch", "printer:control": "to pause"},
     "events": ["result"],
 }
 
@@ -335,10 +341,7 @@ async def test_a_worker_can_act_on_a_single_inference_over_its_own_threshold(run
     try:
         await engine.handle({"cmd": "printer.add", "printer": {"name": "P", **OCTOPRINT}})
         printer_id = next(iter(engine.printers.items))
-        await engine.handle(
-            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": bundle(RISK_MANIFEST, RISK_WORKER),
-             "granted": RISK_MANIFEST["permissions"]}
-        )
+        await install_and_accept(engine, RISK_MANIFEST, RISK_WORKER)
         await engine.handle({"cmd": "plugin.update", "id": "risk", "patch": {"config": {"limit": 0.8, "printer": printer_id}}})
 
         for score in (0.10, 0.55, 0.91, 0.95):

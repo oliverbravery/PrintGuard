@@ -724,6 +724,7 @@ MANIFEST = {
     "name": "Demo",
     "version": "1.0.0",
     "permissions": ["state:read", "monitor:control", "net"],
+    "reasons": {"state:read": "to read", "monitor:control": "to retune", "net": "to post"},
     "hosts": ["hooks.example.com"],
 }
 PLUGIN_JS = "plugin.render = (state) => ({ type: 'text', value: state.monitors.length + ' monitors' });"
@@ -740,9 +741,11 @@ def plugin_zip(manifest: dict | None = None, code: str = PLUGIN_JS, files: dict[
     return base64.b64encode(buffer.getvalue()).decode()
 
 
-async def install_demo(engine: Engine, **extra) -> dict:
-    """Installs the demo plugin from a file and returns its record."""
+async def install_demo(engine: Engine, granted: list[str] | None = None, **extra) -> dict:
+    """Installs the demo plugin from a file, accepting its permissions as the user would."""
     await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(), **extra})
+    accepted = MANIFEST["permissions"] if granted is None else granted
+    await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": accepted, "enabled": True}})
     return engine.plugins.get("demo").public()
 
 
@@ -802,7 +805,7 @@ async def test_catalogue_verifies_only_the_exact_bytes_it_pinned() -> None:
 async def test_plugin_network_is_refused_beyond_the_hosts_it_declared() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[]) as (engine, events):
-        await install_demo(engine, granted=["net"])
+        await install_demo(engine)
         await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "req_id": 1})
         await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://elsewhere.example/a", "req_id": 2})
         await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": []}})
@@ -812,6 +815,47 @@ async def test_plugin_network_is_refused_beyond_the_hosts_it_declared() -> None:
     refused = [e for e in events if e.get("event") == "error" and e.get("req_id") in (2, 3)]
     assert len(refused) == 2, "an undeclared host or a revoked permission still got out"
     assert not any("elsewhere.example" in url for _, url in platform.http_calls)
+
+
+async def test_a_plugin_stays_off_until_every_permission_it_asks_for_is_accepted() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip()})
+        fresh = (engine.plugins.get("demo").enabled, engine.plugins.get("demo").granted)
+        await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": ["net"], "enabled": True}})
+        partial = engine.plugins.get("demo").enabled
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "demo", "patch": {"granted": MANIFEST["permissions"], "enabled": True}}
+        )
+        accepted = (engine.plugins.get("demo").enabled, engine.plugins.get("demo").granted)
+
+    assert fresh == (False, []), "a plugin ran before anyone accepted anything"
+    assert not partial, "accepting some of the permissions was enough to enable it"
+    assert accepted == (True, MANIFEST["permissions"])
+
+
+async def test_a_plugin_asking_for_more_stands_down_until_the_wider_list_is_accepted() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    wider = {
+        **MANIFEST,
+        "permissions": [*MANIFEST["permissions"], "printer:control"],
+        "reasons": {**MANIFEST["reasons"], "printer:control": "to pause"},
+    }
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_demo(engine)
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(wider)})
+        widened = engine.plugins.get("demo")
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip()})
+        narrowed = engine.plugins.get("demo")
+
+    assert not widened.enabled, "an update that asked for more kept running"
+    assert not widened.may("printer:control")
+    assert not narrowed.enabled, "reinstalling re-enabled a plugin the user had not re-accepted"
+
+
+async def test_a_manifest_without_a_reason_for_a_permission_is_refused() -> None:
+    with pytest.raises(ValueError, match="reasons"):
+        plugins.sanitise_manifest({**MANIFEST, "reasons": {"state:read": "to read"}})
 
 
 async def test_plugin_state_view_carries_no_credentials() -> None:

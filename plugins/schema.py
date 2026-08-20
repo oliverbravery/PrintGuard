@@ -77,8 +77,14 @@ def schema() -> dict:
             "permissions": {
                 "type": "array",
                 "uniqueItems": True,
-                "description": "What it asks for at install. Anything not granted is refused at the sandbox edge.",
+                "description": "What it asks for. The user accepts all of it or none of it before the plugin can be enabled.",
                 "items": {"anyOf": choices(permissions)},
+            },
+            "reasons": {
+                "type": "object",
+                "description": "Why it wants each permission, in your own words, shown when the user is asked to accept them. One line per permission, and every one it asks for needs one.",
+                "propertyNames": {"enum": list(permissions)},
+                "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 200},
             },
             "surfaces": {
                 "type": "array",

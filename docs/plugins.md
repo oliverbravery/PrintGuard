@@ -28,7 +28,7 @@ can install one three ways.
 
 | From | How |
 |---|---|
-| The catalogue | Pick one and confirm what it asks for. These are the ones I have reviewed |
+| The catalogue | Pick one. These are the ones I have reviewed |
 | A GitHub repository | Paste `owner/repo`, or `owner/repo/path@branch` for one inside a larger repo |
 | A file | Import a `.zip` of the plugin's folder |
 
@@ -39,8 +39,14 @@ has reviewed it, so read it first. Both run under the same restrictions either w
 A repository install pins the commit it resolved to, so a plugin never changes underneath
 you. **Update** re-resolves the branch and re-checks the hashes.
 
-Permissions are granted at install and can be changed or revoked per plugin at any time,
-which takes effect immediately.
+A plugin arrives switched off and holding nothing. Pressing **Enable** shows what it asks
+for, what each permission lets it do and the plugin author's own reason for wanting it, and
+it starts once you allow the lot. There is no partial yes: a plugin either gets what it asks
+for or does not run. Disabling one stops it and keeps what you accepted, so switching it back
+on asks nothing again.
+
+An update that asks for more than you accepted stands the plugin down until you accept the
+wider list, so nothing new happens behind an **Update** press.
 
 ## What a plugin can and cannot do
 
@@ -85,6 +91,11 @@ remove the plugin.
 | `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers | ✅ |
 | `gate` | See and refuse every other request to the hub | ✅ |
 
+Every permission a manifest asks for needs a line in `reasons` saying why, in the plugin
+author's own words, and one without a reason will not install. That line sits under
+PrintGuard's own description of the permission when you are asked to accept it, so you get
+both what it allows and what this plugin claims to want it for.
+
 Storing its own data needs no permission. The store is the plugin's own, capped at 16 KB, and
 saved as part of your PrintGuard state.
 
@@ -113,6 +124,10 @@ my-plugin/
   "author": "you",
   "homepage": "https://github.com/you/bed-clearance",
   "permissions": ["state:read", "notify"],
+  "reasons": {
+    "state:read": "To see which monitors are printing.",
+    "notify": "To tell you when the bed needs clearing."
+  },
   "surfaces": ["panel"],
   "platforms": ["docker", "windows"],
   "assets": ["alarm.mp3"],
@@ -121,6 +136,9 @@ my-plugin/
   "tick_s": 300
 }
 ```
+
+`reasons` is one line per permission, required for every one you ask for, shown to whoever is
+deciding whether to enable it. Say what your plugin does with it, not what the permission is.
 
 `surfaces` says where the panel appears.
 

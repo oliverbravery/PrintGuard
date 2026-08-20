@@ -108,7 +108,7 @@ interface PgStore {
   catalogue: CatalogueEntry[] | null;
   pluginAct(id: string, action: string, arg: unknown): void;
   fetchCatalogue(): void;
-  installPlugin(source: Record<string, unknown>, zip?: string, granted?: string[]): void;
+  installPlugin(source: Record<string, unknown>, zip?: string): void;
   setCustomising(on: boolean): void;
   mutateLayout(key: keyof Layout, fn: (section: LayoutSection) => LayoutSection): void;
   resetLayout(): void;
@@ -543,8 +543,8 @@ export const useStore = create<PgStore>((set, get) => {
       get().send({ cmd: "plugin.catalogue" });
     },
 
-    installPlugin(source, zip, granted) {
-      get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}), ...(granted ? { granted } : {}) });
+    installPlugin(source, zip) {
+      get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}) });
     },
 
     setCustomising(on) {

@@ -7,5 +7,9 @@
   "author": "oliverbravery",
   "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/alert-sounds",
   "permissions": ["state:read", "sound"],
+  "reasons": {
+    "state:read": "To notice the moment a monitor raises an alert.",
+    "sound": "To play the sound you picked when one is raised."
+  },
   "surfaces": ["settings"]
 }

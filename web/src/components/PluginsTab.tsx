@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { runsHere } from "../plugins";
 import { useStore } from "../store";
 import type { CatalogueEntry, Permission, PluginRecord } from "../types";
+import { ConsentDialog, PermissionList } from "./PluginConsent";
 import { Toggle } from "./Toggle";
 
 const REPO_HINT = "owner/repo, or owner/repo/path@branch";
@@ -40,62 +41,11 @@ function Runs({ platforms }: { platforms: string[] | undefined }) {
   );
 }
 
-function Permissions({
-  plugin,
-  permissions,
-  hubOnly,
-}: {
-  plugin: PluginRecord;
-  permissions: Permission[];
-  hubOnly: boolean;
-}) {
-  const send = useStore((s) => s.send);
-  const asked = permissions.filter((p) => plugin.manifest.permissions.includes(p.id));
-  if (asked.length === 0) return <span className="text-[0.7rem] text-text-2">Asks for nothing beyond drawing its panel.</span>;
-  return (
-    <div className="space-y-1.5">
-      {asked.map((permission) => {
-        const granted = plugin.granted.includes(permission.id);
-        const inert = permission.hub_only && !hubOnly;
-        return (
-          <label key={permission.id} className="flex items-start gap-2 text-[0.7rem]">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={granted}
-              disabled={inert}
-              onChange={(event) =>
-                send({
-                  cmd: "plugin.update",
-                  id: plugin.id,
-                  patch: {
-                    granted: event.target.checked
-                      ? [...plugin.granted, permission.id]
-                      : plugin.granted.filter((p) => p !== permission.id),
-                  },
-                })
-              }
-            />
-            <span>
-              <span className={permission.risky ? "text-warn" : "text-text-1"}>{permission.label}</span>
-              {permission.hosts && plugin.manifest.hosts.length > 0 && (
-                <span className="mono text-text-2"> ({plugin.manifest.hosts.join(", ")})</span>
-              )}
-              <span className="block text-text-2">
-                {inert ? "Only does anything on a hub." : permission.description}
-              </span>
-            </span>
-          </label>
-        );
-      })}
-    </div>
-  );
-}
-
 function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; permissions: Permission[]; hubOnly: boolean }) {
   const send = useStore((s) => s.send);
-  const unreviewed = plugin.granted.length === 0 && plugin.manifest.permissions.length > 0;
-  const [open, setOpen] = useState(unreviewed);
+  const [open, setOpen] = useState(false);
+  const [consenting, setConsenting] = useState(false);
+  const accepted = plugin.manifest.permissions.every((p) => plugin.granted.includes(p));
   const origin =
     plugin.source.kind === "github"
       ? `${plugin.source.repo}${plugin.source.path ? `/${plugin.source.path}` : ""} @ ${String(plugin.source.ref).slice(0, 7)}`
@@ -112,7 +62,9 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
           label={`Enable ${plugin.manifest.name}`}
           hideLabel
           on={plugin.enabled}
-          onChange={(on) => send({ cmd: "plugin.update", id: plugin.id, patch: { enabled: on } })}
+          onChange={(on) =>
+            on && !accepted ? setConsenting(true) : send({ cmd: "plugin.update", id: plugin.id, patch: { enabled: on } })
+          }
         />
       </div>
       <Runs platforms={plugin.manifest.platforms} />
@@ -123,12 +75,7 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
           {open ? "Hide" : "Permissions"}
         </button>
         {plugin.source.kind === "github" && (
-          <button
-            className="btn"
-            onClick={() =>
-              send({ cmd: "plugin.install", source: { ...plugin.source, ref: "HEAD" }, granted: plugin.granted })
-            }
-          >
+          <button className="btn" onClick={() => send({ cmd: "plugin.install", source: { ...plugin.source, ref: "HEAD" } })}>
             Update
           </button>
         )}
@@ -136,21 +83,20 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
           Remove
         </button>
       </div>
-      {open && <Permissions plugin={plugin} permissions={permissions} hubOnly={hubOnly} />}
+      {!accepted && <span className="block text-[0.7rem] text-warn">Asks for permissions you have not accepted yet.</span>}
+      {open && <PermissionList plugin={plugin} permissions={permissions} hubOnly={hubOnly} />}
+      {consenting && (
+        <ConsentDialog plugin={plugin} permissions={permissions} hubOnly={hubOnly} onClose={() => setConsenting(false)} />
+      )}
     </div>
   );
 }
 
-function Available({ entry, installed, permissions }: { entry: CatalogueEntry; installed: boolean; permissions: Permission[] }) {
+function Available({ entry, installed }: { entry: CatalogueEntry; installed: boolean }) {
   const installPlugin = useStore((s) => s.installPlugin);
   const isPending = useStore((s) => s.isPending);
   const host = useStore((s) => s.engine?.host ?? "");
-  const [asking, setAsking] = useState(false);
-  const wants = permissions.filter((p) => (entry.permissions ?? []).includes(p.id));
   const here = runsHere(entry.platforms, host);
-
-  const install = () =>
-    installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref }, undefined, entry.permissions);
 
   return (
     <div className="rounded border border-line-0 bg-ink-1 p-3 space-y-2.5">
@@ -164,33 +110,12 @@ function Available({ entry, installed, permissions }: { entry: CatalogueEntry; i
         <button
           className="btn btn-primary"
           disabled={installed || !here || isPending("plugin.install")}
-          onClick={() => (wants.length === 0 ? install() : setAsking(!asking))}
+          onClick={() => installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref })}
         >
           {installed ? "Installed" : "Install"}
         </button>
       </div>
       <Runs platforms={entry.platforms} />
-      {asking && !installed && (
-        <div className="space-y-2 border-t border-line-0 pt-2">
-          <span className="block text-[0.7rem] text-text-1">Installing lets it:</span>
-          <ul className="space-y-1">
-            {wants.map((permission) => (
-              <li key={permission.id} className="text-[0.7rem]">
-                <span className={permission.risky ? "text-warn" : "text-text-1"}>{permission.label}</span>
-                <span className="block text-text-2">{permission.description}</span>
-              </li>
-            ))}
-          </ul>
-          <div className="flex gap-2">
-            <button className="btn btn-primary" onClick={install}>
-              Install and allow
-            </button>
-            <button className="btn" onClick={() => setAsking(false)}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -226,9 +151,9 @@ export function PluginsTab() {
       <div>
         <span className="label block">Plugins</span>
         <span className="mt-1 block text-[0.7rem] leading-relaxed text-text-2">
-          Plugins are third-party code. They run in a sandbox with no network and no access to your credentials, cameras or
-          tokens, and only do what you grant them. Verified ones match a reviewed entry in PrintGuard's catalogue by hash;
-          anything else is unreviewed, so read it before you install it.
+          Plugins are third-party code. They install switched off, and enabling one asks you to accept everything it wants
+          first. Verified ones match a reviewed entry in PrintGuard's catalogue by hash; anything else is unreviewed, so read
+          it before you enable it.
         </span>
       </div>
 
@@ -272,12 +197,7 @@ export function PluginsTab() {
       ) : (
         <div className="space-y-2">
           {listed.map((entry) => (
-            <Available
-              key={entry.id}
-              entry={entry}
-              installed={plugins.some((p) => p.id === entry.id)}
-              permissions={permissions}
-            />
+            <Available key={entry.id} entry={entry} installed={plugins.some((p) => p.id === entry.id)} />
           ))}
         </div>
       )}
