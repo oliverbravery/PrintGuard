@@ -87,7 +87,7 @@
       "path": "plugins/spotify",
       "ref": "a3e07df1d6d394717e9055d997d6e5221f50d604",
       "digests": {
-        "plugin.json": "b3ffcdebbeb24719f081ba6e988cd23c6d4b8cfc9d04f08bab45d0cd307f2d68",
+        "plugin.json": "65d3aa1f23b841aa7247216c92374d7bf5fc621c74e75e2ab1f9f55a8bb6cb02",
         "panel.html": "af92963fc3ab89c26103504b6036581e223fae428550ff9be26ef6ba69f55bb7"
       }
     }
