@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { phraseFinding } from "../lint";
+import type { Finding } from "../lint";
 import { useStore } from "../store";
 import type { Permission, PluginRecord } from "../types";
 import { phrase, reachesLocal } from "../urls";
@@ -46,6 +46,12 @@ export function PermissionList({ plugin, permissions, hubOnly }: { plugin: Plugi
       ))}
     </ul>
   );
+}
+
+function phraseFinding(finding: Finding): string {
+  if (finding.kind === "unused") return `Asks for ${finding.what} but never uses it.`;
+  if (finding.kind === "undeclared") return `Uses ${finding.what} without asking for it, so PrintGuard will refuse it.`;
+  return `Uses ${finding.what}, so nobody can tell from the code what it reaches.`;
 }
 
 function Findings({ plugin }: { plugin: PluginRecord }) {
