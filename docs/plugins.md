@@ -32,6 +32,20 @@ can install one three ways.
 | A GitHub repository | Paste `owner/repo`, or `owner/repo/path@branch` for one inside a larger repo |
 | A file | Import a `.zip` of the plugin's folder |
 
+PrintGuard reads a plugin's code before you enable it and says where the code and the manifest
+disagree, above the permissions it is asking for. Three things come out of it.
+
+| It says | Meaning |
+|---|---|
+| Asks for something it never uses | The manifest is wider than the code needs |
+| Uses something it never asked for | PrintGuard refuses it at the sandbox edge anyway, so this is early notice |
+| Builds a command or an address as it runs | Nobody can tell from the code what it reaches, so it says so |
+
+It reads what is there rather than passing a verdict. A plugin that builds a URL is not a bad
+plugin, and the check that actually stops anything is the one at the sandbox edge every time a
+plugin asks for something. What it does settle is the catalogue: a listed plugin is one whose
+code and manifest agree, because `pin.py` will not pin one that does not.
+
 A plugin shows as verified when the manifest and every source file hash to exactly what the
 catalogue pins at a specific commit. Anything else shows as third party, which means nobody
 has reviewed it, so read it first. Both run under the same restrictions either way.
@@ -459,8 +473,9 @@ reviewed and listed in the catalogue, open a pull request adding it under `plugi
 uv run python plugins/pin.py
 ```
 
-That rewrites `plugins/catalogue.json` with the commit the plugin last changed in and the
-hash of every file. Commit the plugin first, since a pin has to describe bytes already in
+That reads your code against your manifest and refuses to list a plugin where the two
+disagree, then rewrites `plugins/catalogue.json` with the commit the plugin last changed in and
+the hash of every file. Commit the plugin first, since a pin has to describe bytes already in
 history. Run it again after every change, or the plugin stops verifying.
 
 You can run your own catalogue by pointing `catalogue_url` in settings at a JSON file of the

@@ -31,7 +31,7 @@ bash packaging/build.sh                      # build a .dmg (macOS) / .zip (Wind
 Run the tests before and after your change:
 
 ```bash
-uv run pytest                        # engine simulation, adapter contracts, plugin sandbox
+uv run pytest                        # engine simulation, adapter contracts, plugin sandbox and lint
 cd web && npm run typecheck          # strict TypeScript over the UI
 cd web && npm run test:sandbox       # the browser plugin sandbox, in chromium and webkit
 ```
@@ -39,9 +39,11 @@ cd web && npm run test:sandbox       # the browser plugin sandbox, in chromium a
 `tests/test_engine.py` simulates cameras and printers against a fake platform, covering
 fairness, gating, the watchdog, alerts and the protocol. `tests/test_adapters.py` pins the
 exact request shapes of every integration and notifier. `tests/test_plugin_runtime.py` runs
-real JavaScript in the shipped QuickJS build to hold the hub sandbox to what it promises. If
-you touch the scheduler, monitor or printer state handling, extend the first; a new adapter
-gets its payloads tested in the second.
+real JavaScript in the shipped QuickJS build to hold the hub sandbox to what it promises.
+`tests/test_plugin_lint.py` reads every shipped plugin against its own manifest, the same check
+`pin.py` refuses to list a plugin without, and it needs `npm install` in `web/` since the
+checker runs on node. If you touch the scheduler, monitor or printer state handling, extend the
+first; a new adapter gets its payloads tested in the second.
 
 The browser half of the plugin sandbox is only meaningful in a real engine, so
 `web/tests/sandbox.spec.ts` drives it through Playwright in both chromium and webkit. Run it

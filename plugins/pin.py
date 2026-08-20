@@ -5,6 +5,10 @@ manifest and every source file, which is what makes a plugin show as verified.
 Commit the plugin first: a pin has to describe bytes that are already in
 history.
 
+Every plugin is read against its own manifest before it is pinned, so a listed
+plugin is one whose code and its claims agree. Anything the check cannot decide
+from the code is reported rather than pinned over.
+
     uv run python plugins/pin.py
 """
 
@@ -20,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from printguard.engine import plugins  # noqa: E402
 
 HERE = Path(__file__).parent
+WEB = HERE.parent / "web"
 REPO = "oliverbravery/PrintGuard"
 CATALOGUE = HERE / "catalogue.json"
 
@@ -34,6 +39,29 @@ def last_commit(path: Path) -> str:
     return sha
 
 
+def findings(manifest: dict, sources: dict[str, str]) -> list[dict]:
+    """Reads a plugin's code and reports where it disagrees with its manifest.
+
+    Args:
+        manifest: The validated manifest.
+        sources: The plugin's source files as text.
+
+    Returns:
+        One entry per finding, each naming what it is and what it is about.
+
+    Raises:
+        SystemExit: If the checker could not run at all, since pinning a plugin
+            nobody has read is the thing this exists to stop.
+    """
+    bundle = json.dumps({"manifest": manifest, "sources": sources, "permissions": plugins.permissions_meta()})
+    result = subprocess.run(
+        ["npm", "run", "--silent", "lint:plugin", "--", "/dev/stdin"], input=bundle, cwd=WEB, capture_output=True, text=True
+    )
+    if result.returncode:
+        raise SystemExit(f"could not check {manifest['id']}, run npm install in web/ first\n{result.stderr.strip()}")
+    return json.loads(result.stdout)
+
+
 def entry(directory: Path) -> dict:
     """Builds one catalogue entry for a plugin directory."""
     manifest = plugins.sanitise_manifest(json.loads((directory / plugins.MANIFEST_FILE).read_text()))
@@ -41,6 +69,14 @@ def entry(directory: Path) -> dict:
         name: (directory / name).read_text() for name in plugins.SOURCE_FILES if (directory / name).exists()
     }
     assets = plugins.sanitise_assets({name: (directory / name).read_bytes() for name in manifest["assets"]})
+    disagreements = [f for f in findings(manifest, sources) if f["kind"] != "dynamic"]
+    if disagreements:
+        raise SystemExit(
+            f"{manifest['id']} does not do what it says:\n"
+            + "\n".join(f"  {f['kind']}: {f['what']}" for f in disagreements)
+        )
+    for unknowable in [f for f in findings(manifest, sources) if f["kind"] == "dynamic"]:
+        print(f"{manifest['id']}: {unknowable['what']}")
     return {
         "id": manifest["id"],
         "name": manifest["name"],

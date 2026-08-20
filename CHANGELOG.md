@@ -53,6 +53,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   A plugin needing a sign-in rather than a key gets one: PrintGuard runs it, keeps the tokens
   and refreshes them.
 
+- Enabling a plugin now shows what its code actually does, above what it is asking for. A
+  plugin asking for something it never uses, reaching an address it never declared, or using a
+  credential it never named is said plainly before you allow anything. Where a plugin builds a
+  command or an address as it runs, nobody can tell what it reaches, and it says that rather
+  than passing it off as fine. Plugins in the catalogue are held to it, so a listed one is a
+  plugin whose code and claims agree.
+
 ### Fixed
 
 - A camera that keeps dropping out no longer notifies you every time it reconnects. The

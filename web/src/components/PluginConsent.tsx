@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { phraseFinding } from "../lint";
 import { useStore } from "../store";
 import type { Permission, PluginRecord } from "../types";
 import { phrase, reachesLocal } from "../urls";
@@ -30,6 +32,29 @@ export function PermissionList({ plugin, permissions, hubOnly }: { plugin: Plugi
   );
 }
 
+function Findings({ plugin }: { plugin: PluginRecord }) {
+  const findings = useStore((s) => s.pluginFindings[plugin.id]);
+  const checkPlugin = useStore((s) => s.checkPlugin);
+
+  useEffect(() => {
+    checkPlugin(plugin.id);
+  }, [plugin.id]);
+
+  if (findings === undefined) return <span className="block text-[0.7rem] text-text-2">Reading its code…</span>;
+  if (findings.length === 0) {
+    return <span className="block text-[0.7rem] text-ok">Its code only does what it asks for above.</span>;
+  }
+  return (
+    <ul className="space-y-1">
+      {findings.map((finding) => (
+        <li key={`${finding.kind}:${finding.what}`} className={`text-[0.7rem] ${finding.kind === "dynamic" ? "text-text-2" : "text-warn"}`}>
+          {phraseFinding(finding)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ConsentDialog({ plugin, permissions, hubOnly, onClose }: { plugin: PluginRecord; permissions: Permission[]; hubOnly: boolean; onClose: () => void }) {
   const send = useStore((s) => s.send);
   const accept = () => {
@@ -45,6 +70,7 @@ export function ConsentDialog({ plugin, permissions, hubOnly, onClose }: { plugi
             ? "These bytes match a reviewed entry in PrintGuard's catalogue. It still only does what you allow here."
             : "This plugin is unreviewed third-party code. Read it before you allow any of this."}
         </span>
+        <Findings plugin={plugin} />
         <PermissionList plugin={plugin} permissions={permissions} hubOnly={hubOnly} />
         {Object.keys(plugin.manifest.secrets).length > 0 && (
           <span className="block text-[0.7rem] text-text-2">

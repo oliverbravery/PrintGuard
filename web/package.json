@@ -7,13 +7,16 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit",
     "screenshots": "playwright test --project=screenshots",
-    "test:sandbox": "playwright test --project=sandbox --project=sandbox-webkit"
+    "test:sandbox": "playwright test --project=sandbox --project=sandbox-webkit",
+    "lint:plugin": "node scripts/lint-plugin.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@tailwindcss/vite": "^4.3.0",
+    "acorn": "^8.18.0",
+    "acorn-walk": "^8.3.5",
     "hls.js": "^1.6.16",
     "marked": "^18.0.5",
     "react": "^19.2.0",
@@ -23,6 +26,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "@types/node": "^26.2.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { log } from "./log";
+import type { Finding } from "./lint";
 import { commandAllowed, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
 import { play, playFile } from "./sound";
 import { resumePublishers } from "./stream";
@@ -102,11 +103,13 @@ interface PgStore {
   optimistic: Record<string, OptimisticEntry>;
   savedAt: number | null;
   pluginTrees: Record<string, PluginNode | null>;
+  pluginFindings: Record<string, Finding[]>;
   pluginViews: Record<string, Record<string, PluginNode | null>>;
   pluginAssets: Record<string, Record<string, string>>;
   pluginFailures: Record<string, string>;
   catalogue: CatalogueEntry[] | null;
   pluginAct(id: string, action: string, arg: unknown): void;
+  checkPlugin(id: string): void;
   fetchCatalogue(): void;
   installPlugin(source: Record<string, unknown>, zip?: string): void;
   setCustomising(on: boolean): void;
@@ -307,10 +310,19 @@ export const useStore = create<PgStore>((set, get) => {
     }
   };
 
-  const startPlugin = (id: string, sources: Record<string, string>, assets: Record<string, string>) => {
+  const readPlugin = async (id: string, sources: Record<string, string>) => {
     const engine = get().engine;
     const plugin = engine?.plugins.find((p) => p.id === id);
     if (!engine || !plugin) return;
+    const { lint } = await import("./lint");
+    const findings = lint(plugin.manifest, sources, engine.plugin_permissions);
+    set((s) => ({ pluginFindings: { ...s.pluginFindings, [id]: findings } }));
+  };
+
+  const startPlugin = (id: string, sources: Record<string, string>, assets: Record<string, string>) => {
+    const engine = get().engine;
+    const plugin = engine?.plugins.find((p) => p.id === id);
+    if (!engine || !plugin || !plugin.enabled) return;
     const types = engine.plugin_assets ?? {};
     const files: Record<string, string> = {};
     const text: Record<string, string> = {};
@@ -377,6 +389,7 @@ export const useStore = create<PgStore>((set, get) => {
       case "plugin_code": {
         if (codeRequests.get(event.req_id) !== event.id) break;
         codeRequests.delete(event.req_id);
+        void readPlugin(event.id, event.sources);
         startPlugin(event.id, event.sources, event.assets ?? {});
         break;
       }
@@ -535,6 +548,7 @@ export const useStore = create<PgStore>((set, get) => {
     savedAt: null,
     pluginTrees: {},
     pluginViews: {},
+    pluginFindings: {},
     pluginAssets: {},
     pluginFailures: {},
     catalogue: null,
@@ -552,6 +566,11 @@ export const useStore = create<PgStore>((set, get) => {
 
     installPlugin(source, zip) {
       get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}) });
+    },
+
+    checkPlugin(id) {
+      if (get().pluginFindings[id] || [...codeRequests.values()].includes(id)) return;
+      codeRequests.set(get().send({ cmd: "plugin.code", id }), id);
     },
 
     setCustomising(on) {
