@@ -115,6 +115,7 @@ remove the plugin.
 | `oauth` | Sign you in to a service and use the result | |
 | `link:provide` | Answer other plugins on the channels it offers | |
 | `link:consume` | Ask the plugins and channels it names, and hear them | |
+| `background` | Put a picture behind the dashboard and make the panels see-through | |
 | `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers | ✅ |
 | `gate` | See and refuse every other request to the hub | ✅ |
 
@@ -289,6 +290,7 @@ Both files get `plugin` to register with, and every handler gets a `ctx`:
 | `ctx.socketClose(tag)` | Close a socket you opened |
 | `ctx.call(request)` | Ask another plugin for something. Answers on the `call` event's reply |
 | `ctx.publish(request)` | Publish on one of your own channels |
+| `ctx.background(image)` | Put a picture behind the dashboard, or nothing to clear it |
 | `ctx.notify(text)` | Raise a message in the dashboard |
 | `ctx.sound(tones)` | Sound your own tones through the speakers, `{ hz, ms }` each, or name an audio asset |
 | `ctx.assets` | The text files you shipped, keyed by name |
@@ -422,6 +424,11 @@ is transparent and the panel is as tall as it draws itself, up to 900px.
 `pg.asset(name)` gives a URL for a file you shipped, good inside your panel and nowhere else,
 which is how a picture or a video gets on screen.
 
+A panel may show pictures but may not fetch one, so a picture from elsewhere comes back
+through `pg.http` with `binary: true` and arrives base64 encoded on the `http` event, ready to
+be a `data:` URL. `pg.background(image)` puts one behind the whole dashboard and makes the
+panels see-through over it, which needs `background` and is cleared by passing nothing.
+
 A panel joins the dashboard's layout, so it drags, pins and hides alongside the monitors.
 
 ## Talking to other plugins
@@ -467,7 +474,9 @@ at most.
 
 ## The worker half
 
-[`plugins/progress-reports`](../plugins/progress-reports) is the one with both halves. Its
+[`plugins/spotify`](../plugins/spotify) is one file. It signs you in, asks Spotify what is
+playing, draws the cover, the title and the transport, and puts the cover behind the whole
+dashboard. [`plugins/progress-reports`](../plugins/progress-reports) is the one with both halves. Its
 panel puts a switch and an interval in each monitor's settings, its worker counts alerts and
 flagged frames from the events, and on its own timer it sends the tally through your alert
 channels with `notify.send`. Both halves share one store, so either can read what the other

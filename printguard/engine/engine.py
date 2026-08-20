@@ -943,6 +943,7 @@ class Engine:
             filled["url"],
             headers=filled["headers"],
             json=filled["json"],
+            binary=message.get("binary") is True,
             timeout=PLUGIN_TIMEOUT_S,
         )
         self.emit(

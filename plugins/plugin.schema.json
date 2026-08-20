@@ -120,6 +120,10 @@
             "description": "Sign you in to the service it names and hold the result. PrintGuard keeps the tokens; the plugin only ever gets to use them."
           },
           {
+            "const": "background",
+            "description": "Put a picture behind the dashboard and make the panels see-through over it. It changes how PrintGuard looks and nothing else."
+          },
+          {
             "const": "link:provide",
             "description": "Offer the channels it lists to other plugins you have installed, so they can ask it for something or hear what it publishes."
           },
@@ -161,6 +165,7 @@
           "net",
           "net:local",
           "oauth",
+          "background",
           "link:provide",
           "link:consume",
           "routes",

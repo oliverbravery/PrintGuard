@@ -62,13 +62,17 @@ function Toasts() {
 }
 
 export function Dashboard() {
-  const { engine, dialog, detailId, statsMonitorId, customising, mutateLayout } = useStore();
+  const { engine, dialog, detailId, statsMonitorId, customising, mutateLayout, background } = useStore();
   const monitors = engine?.monitors ?? [];
   const { visible } = applyLayout(monitors, section(engine?.settings.layout, "monitors"));
   const detail = monitors.find((m) => m.id === detailId);
   const stats = monitors.find((m) => m.id === statsMonitorId);
   return (
-    <div className="min-h-screen">
+    <div
+      className="min-h-screen"
+      data-painted={background ? "" : undefined}
+      style={background ? { backgroundImage: `url("${background.image}")` } : undefined}
+    >
       <a href="#main" className="skip-link">
         Skip to monitors
       </a>

@@ -112,6 +112,46 @@ body {
   border-radius: 6px;
 }
 
+[data-painted] {
+  background-position: center;
+  background-size: cover;
+  background-attachment: fixed;
+}
+
+[data-painted]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--color-ink-0) 50%, transparent);
+  backdrop-filter: blur(30px) saturate(120%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+[data-painted] > * {
+  position: relative;
+  z-index: 1;
+}
+
+[data-painted] .panel,
+[data-painted] .tile {
+  background: color-mix(in srgb, var(--color-ink-1) 45%, transparent);
+  backdrop-filter: blur(14px) saturate(130%);
+}
+
+[data-painted] .feed {
+  background: transparent;
+}
+
+[data-painted] .feed-veil {
+  background: color-mix(in srgb, var(--color-ink-0) 30%, transparent);
+}
+
+[data-painted] header,
+[data-painted] nav {
+  background: color-mix(in srgb, var(--color-ink-0) 55%, transparent) !important;
+}
+
 .hairline {
   border-top: 1px solid var(--color-line-0);
 }

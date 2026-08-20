@@ -1223,6 +1223,28 @@ async def test_a_disabled_provider_answers_nobody() -> None:
     assert any(e.get("event") == "error" and e.get("req_id") == 5 for e in events)
 
 
+async def test_a_plugin_can_ask_for_a_picture_back_as_bytes() -> None:
+    """A sandbox may show a picture it was handed but may not fetch one itself."""
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/art.jpg", "binary": True})
+
+    assert platform.http_requests[-1]["binary"] is True
+    assert any(e.get("event") == "http" for e in events)
+
+
+async def test_a_sign_in_sends_the_user_back_to_the_loopback_address() -> None:
+    """Providers refuse a redirect to the name, so the literal is what is sent."""
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_vault(engine)
+        await engine.handle({"cmd": "plugin.oauth", "id": "vault", "action": "start", "origin": "http://localhost:8000"})
+        opened = next(e for e in events if e.get("event") == "plugin_oauth")["url"]
+
+    assert parse_qs(urlparse(opened).query)["redirect_uri"] == ["http://127.0.0.1:8000/oauth/callback"]
+
+
 async def test_plugin_state_view_carries_no_credentials() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[10.0]) as (engine, _):

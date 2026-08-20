@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.schema.json",
+  "id": "spotify",
+  "name": "Spotify",
+  "version": "1.0.0",
+  "description": "Puts the cover of whatever you are playing behind the dashboard, with the track and the transport controls in a panel of their own.",
+  "author": "oliverbravery",
+  "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/spotify",
+  "permissions": ["net", "oauth", "background"],
+  "reasons": {
+    "net": "To ask Spotify what is playing and to fetch the cover.",
+    "oauth": "To sign you in to Spotify, which is the only way it can see your player.",
+    "background": "To put the cover of the current track behind the dashboard."
+  },
+  "oauth": {
+    "label": "Spotify",
+    "authorize_url": "https://accounts.spotify.com/authorize",
+    "token_url": "https://accounts.spotify.com/api/token",
+    "client_id": "put-your-own-spotify-client-id-here",
+    "scopes": ["user-read-playback-state", "user-modify-playback-state"]
+  },
+  "urls": ["https://api.spotify.com/v1/me/player*", "https://i.scdn.co/image/*"],
+  "surfaces": ["panel"],
+  "events": ["http"]
+}

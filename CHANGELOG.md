@@ -79,6 +79,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   everything listening. Neither ever sees the other's code, its stored data or anything it was
   not handed, and a plugin you switch off answers nobody.
 
+- A Spotify plugin comes as standard. Sign in from the Plugins tab and the cover of whatever
+  you are playing goes behind the dashboard, with the panels turning to glass over it, and a
+  panel of its own shows the track, the artist and the transport. One button plays and pauses
+  and tells you which it is. It hides, pins and reorders like a monitor. Playback control needs
+  a Premium account, and a free one still gets the cover and the track with the buttons
+  explained. It never sees your Spotify tokens; PrintGuard holds them and fills them in.
+
 ### Fixed
 
 - A plugin's own pages can no longer pull a live camera stream. Pages a plugin serves run in a

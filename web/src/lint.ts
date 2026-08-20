@@ -15,7 +15,7 @@ interface Call {
   dynamic: string | null;
 }
 
-const CTX_PERMISSIONS: Record<string, string> = { notify: "notify", sound: "sound" };
+const CTX_PERMISSIONS: Record<string, string> = { notify: "notify", sound: "sound", background: "background" };
 const PLUGIN_PERMISSIONS: Record<string, string> = { route: "routes", gate: "gate", serve: "link:provide" };
 const NETWORK_CALLS = ["http", "socket"];
 const LINK_CALLS: Record<string, string> = { call: "link:consume", publish: "link:provide" };

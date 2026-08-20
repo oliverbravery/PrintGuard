@@ -11,6 +11,7 @@ import { applyTheme } from "./theme";
 import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
+const MAX_BACKGROUND_CHARS = 3 * 1024 * 1024;
 const UPDATE_DEBOUNCE_MS = 250;
 const updateTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
@@ -105,6 +106,7 @@ interface PgStore {
   savedAt: number | null;
   pluginTrees: Record<string, PluginNode | null>;
   pluginFindings: Record<string, Finding[]>;
+  background: { id: string; image: string } | null;
   pluginPanels: Record<string, { html: string; assets: Record<string, Blob> }>;
   pluginViews: Record<string, Record<string, PluginNode | null>>;
   pluginAssets: Record<string, Record<string, string>>;
@@ -247,6 +249,10 @@ export const useStore = create<PgStore>((set, get) => {
         if (!plugin.granted.includes("sound")) continue;
         if (effect.asset) file && playFile(file);
         else play(effect.tones ?? []);
+      } else if (effect.kind === "background") {
+        if (!plugin.granted.includes("background")) continue;
+        const image = String(effect.image ?? "").slice(0, MAX_BACKGROUND_CHARS);
+        set({ background: image ? { id, image } : null });
       } else if (effect.kind === "log") {
         log("info", `plugin ${id}:`, effect.text);
       }
@@ -284,6 +290,7 @@ export const useStore = create<PgStore>((set, get) => {
       engine.plugins.filter((p) => p.enabled).flatMap((p) => runnableFiles(p, engine).map((file) => `${p.id}:${file}`)),
     );
     dropHosts((key) => !wanted.has(key));
+    if (get().background && !engine.plugins.some((p) => p.id === get().background?.id && p.enabled)) set({ background: null });
     for (const [id, panel] of panels) {
       if (engine.plugins.some((p) => p.id === id && p.enabled)) continue;
       panel.close();
@@ -579,6 +586,7 @@ export const useStore = create<PgStore>((set, get) => {
     pluginTrees: {},
     pluginViews: {},
     pluginFindings: {},
+    background: null,
     pluginPanels: {},
     pluginAssets: {},
     pluginFailures: {},

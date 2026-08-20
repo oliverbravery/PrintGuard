@@ -56,6 +56,7 @@ export function outboundRequest(id: string, request: Record<string, unknown> | u
     headers: fields.headers,
     json: fields.json,
     tag: String(fields.tag ?? ""),
+    binary: fields.binary === true,
     id,
   };
 }

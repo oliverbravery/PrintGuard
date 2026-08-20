@@ -163,6 +163,10 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
         "description": "Sign you in to the service it names and hold the result. PrintGuard keeps the tokens; the plugin only ever gets to use them.",
         "risky": True,
     },
+    "background": {
+        "label": "Paint the dashboard's background",
+        "description": "Put a picture behind the dashboard and make the panels see-through over it. It changes how PrintGuard looks and nothing else.",
+    },
     "link:provide": {
         "label": "Answer other plugins",
         "description": "Offer the channels it lists to other plugins you have installed, so they can ask it for something or hear what it publishes.",
@@ -619,6 +623,8 @@ def outbound_request(plugin_id: str, request: Any) -> dict[str, Any]:
     Only these fields are carried over, and the plugin's id is set last: the
     request comes from inside a sandbox, so left to spread over the command it
     could name a *different* installed plugin and borrow its network grant.
+    ``binary`` asks for the answer base64 encoded, which is how a picture gets
+    back to a plugin that has no way of its own to fetch one.
     """
     fields = request if isinstance(request, dict) else {}
     return {
@@ -628,6 +634,7 @@ def outbound_request(plugin_id: str, request: Any) -> dict[str, Any]:
         "headers": fields.get("headers"),
         "json": fields.get("json"),
         "tag": str(fields.get("tag", "")),
+        "binary": fields.get("binary") is True,
         "id": plugin_id,
     }
 

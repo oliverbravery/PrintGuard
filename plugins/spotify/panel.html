@@ -1,0 +1,168 @@
+<!--
+  The whole plugin. A panel draws itself, so this is markup, styles and script
+  rather than a tree of nodes, and `pg` is the same context a node-tree plugin
+  gets on `ctx`.
+
+  There is no network in here. Every request goes out through pg.http, which
+  PrintGuard makes on the plugin's behalf against the addresses the manifest
+  declared, and the answer arrives on an http event carrying the tag it was
+  named with. {{secret.oauth}} is the access token PrintGuard holds from the
+  sign-in, filled in as the request leaves, so this file never sees one.
+-->
+<style>
+  body {
+    color: var(--color-text-0);
+    display: flex;
+    font-family: var(--font-body);
+    gap: 14px;
+  }
+  #cover {
+    border-radius: 4px;
+    height: 84px;
+    object-fit: cover;
+    width: 84px;
+  }
+  #cover:not([src]) {
+    background: color-mix(in srgb, var(--color-text-2) 20%, transparent);
+  }
+  .now {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    min-width: 0;
+  }
+  #title {
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+  #artist,
+  #note {
+    color: var(--color-text-2);
+    font-size: 0.72rem;
+  }
+  #title,
+  #artist {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .controls {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  button {
+    background: color-mix(in srgb, var(--color-text-0) 8%, transparent);
+    border: 1px solid var(--color-line-0);
+    border-radius: 4px;
+    color: var(--color-text-1);
+    cursor: pointer;
+    font-family: var(--font-display);
+    font-size: 0.7rem;
+    padding: 5px 11px;
+  }
+  button:hover:not(:disabled) {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+  }
+  button:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+</style>
+
+<img id="cover" alt="" />
+<div class="now">
+  <span id="title">Not connected</span>
+  <span id="artist">Connect Spotify in the Plugins tab in Settings.</span>
+  <div class="controls">
+    <button id="prev" title="Previous">◀◀</button>
+    <button id="toggle" title="Play">▶</button>
+    <button id="next" title="Next">▶▶</button>
+  </div>
+  <span id="note"></span>
+</div>
+
+<script>
+  const PLAYER = "https://api.spotify.com/v1/me/player";
+  const POLL_MS = 5000;
+  const PREMIUM_NOTE = "Spotify only lets Premium accounts drive the player, so these do nothing on a free one.";
+
+  const el = (id) => document.getElementById(id);
+  const state = { playing: false, cover: "", premium: true };
+
+  // Whether the transport buttons do anything. Spotify answers 403 on a free
+  // account whatever scopes were granted, so the panel says so once it knows
+  // rather than leaving three buttons that quietly fail.
+  const setControls = () => {
+    el("toggle").textContent = state.playing ? "❚❚" : "▶";
+    el("toggle").title = state.playing ? "Pause" : "Play";
+    el("note").textContent = state.premium ? "" : PREMIUM_NOTE;
+    for (const id of ["prev", "toggle", "next"]) el(id).disabled = !state.premium;
+  };
+
+  const poll = () => pg.http({ url: PLAYER, headers: { Authorization: "Bearer {{secret.oauth}}" }, tag: "player" });
+
+  // The player is polled rather than pushed, so a press flips the button now and
+  // the next poll is what settles it. Waiting for the poll would leave it
+  // looking dead for as long as five seconds.
+  const send = (request) => {
+    pg.http({ ...request, headers: { Authorization: "Bearer {{secret.oauth}}" }, tag: "control" });
+    setTimeout(poll, 400);
+  };
+
+  el("toggle").onclick = () => {
+    state.playing = !state.playing;
+    setControls();
+    if (state.playing) send({ method: "PUT", url: "https://api.spotify.com/v1/me/player/play" });
+    else send({ method: "PUT", url: "https://api.spotify.com/v1/me/player/pause" });
+  };
+  el("prev").onclick = () => send({ method: "POST", url: "https://api.spotify.com/v1/me/player/previous" });
+  el("next").onclick = () => send({ method: "POST", url: "https://api.spotify.com/v1/me/player/next" });
+
+  const shown = (item, playing) => {
+    state.playing = playing;
+    el("title").textContent = item.name;
+    el("artist").textContent = (item.artists || []).map((artist) => artist.name).join(", ");
+    // The panel may show pictures it was handed but may not fetch one, so the
+    // cover comes back through pg.http as bytes and becomes a data URL here.
+    const art = (item.album.images || [])[0];
+    if (art && art.url !== state.cover) {
+      state.cover = art.url;
+      pg.http({ url: art.url, binary: true, tag: "cover" });
+    }
+    setControls();
+  };
+
+  const idle = (message) => {
+    state.cover = "";
+    el("cover").removeAttribute("src");
+    el("title").textContent = "Nothing playing";
+    el("artist").textContent = message;
+    setControls();
+    pg.background("");
+  };
+
+  pg.on("http", (event) => {
+    if (event.tag === "control") {
+      state.premium = event.status !== 403;
+      setControls();
+    } else if (event.tag === "cover") {
+      const image = `data:image/jpeg;base64,${event.body}`;
+      el("cover").src = image;
+      pg.background(image);
+    } else if (event.tag === "player") {
+      if (event.status === 204 || !event.body || !event.body.item) idle("Start something on any of your devices.");
+      else if (event.status === 401) idle("Reconnect Spotify in the Plugins tab in Settings.");
+      else shown(event.body.item, event.body.is_playing === true);
+    }
+  });
+
+  pg.on("ready", () => {
+    setControls();
+    poll();
+    setInterval(poll, POLL_MS);
+  });
+</script>

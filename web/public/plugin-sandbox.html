@@ -82,6 +82,9 @@
                 typeof sound === "string" ? { kind: "sound", asset: sound } : { kind: "sound", tones: Array.isArray(sound) ? sound : [sound] },
               );
             },
+            background(image) {
+              effects.push({ kind: "background", image: String(image) });
+            },
             log(text) {
               effects.push({ kind: "log", text: String(text) });
             },

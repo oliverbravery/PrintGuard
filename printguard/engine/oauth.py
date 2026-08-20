@@ -63,7 +63,9 @@ class OAuthFlows:
             plugin_id: Whose sign-in it is.
             provider: The manifest's ``oauth`` block.
             origin: Where the hub is being reached, which is where the provider
-                sends the user back to.
+                sends the user back to. A loopback name becomes the address it
+                stands for, since RFC 8252 asks for the literal and providers
+                have started refusing anything else over plain HTTP.
 
         Returns:
             The authorize URL to open.
@@ -71,7 +73,7 @@ class OAuthFlows:
         self._pending = {key: waiting for key, waiting in self._pending.items() if time.monotonic() - waiting.started < PENDING_TTL_S}
         verifier = _urlsafe(secrets.token_bytes(48))
         state = _urlsafe(secrets.token_bytes(24))
-        redirect_uri = f"{origin.rstrip('/')}{CALLBACK_PATH}"
+        redirect_uri = f"{origin.rstrip('/').replace('//localhost', '//127.0.0.1')}{CALLBACK_PATH}"
         self._pending[state] = Pending(plugin_id, verifier, redirect_uri)
         query = {
             "response_type": "code",

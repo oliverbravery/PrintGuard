@@ -282,6 +282,7 @@ export interface PluginTone {
 }
 
 export interface PluginEffect {
+  image?: string;
   action?: string;
   kind: string;
   cmd?: Record<string, unknown>;
