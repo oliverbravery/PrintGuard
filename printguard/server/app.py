@@ -8,6 +8,7 @@ source archive that Pyodide unpacks in the browser.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import os
@@ -16,20 +17,21 @@ import secrets
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
+from string import Template
 from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from starlette.types import Scope
 
 import printguard
 
-from ..engine import logs
+from ..engine import logs, oauth
 from ..engine.engine import Engine
 from ..pysrc import build_pysrc
 from .api import ApiAuth, build_api_app
@@ -82,6 +84,15 @@ PLUGIN_REQUEST_HEADERS = ("cookie", "authorization", "accept", "content-type", "
 PLUGIN_RESPONSE_HEADERS = ("set-cookie", "location", "cache-control")
 PLUGIN_BODY_LIMIT = 64 * 1024
 PLUGIN_PAGE_CSP = "sandbox allow-forms allow-scripts; frame-ancestors 'none'"
+SIGN_IN_PAGE = Template("""<!doctype html>
+<meta charset="utf-8">
+<title>PrintGuard</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.6 -apple-system, "Segoe UI", system-ui, sans-serif; margin: 0; display: grid; place-items: center; height: 100vh; }
+</style>
+<p>$message</p>
+""")
 """A plugin's own pages are served into a sandboxed, opaque origin. They may
 render and script themselves, but they are not the dashboard's origin, so they
 cannot read its storage, and the engine socket's origin check turns them away."""
@@ -214,6 +225,19 @@ def create_app() -> FastAPI:
             media_type=str(answer.get("type", "text/plain")),
             headers={**headers, "Content-Security-Policy": PLUGIN_PAGE_CSP, "X-Content-Type-Options": "nosniff"},
         )
+
+    @app.get(oauth.CALLBACK_PATH)
+    async def oauth_callback(request: Request, code: str = "", state: str = "", error: str = "") -> Response:
+        """Takes the user back from a provider a plugin sent them to."""
+        if error or not code:
+            return HTMLResponse(SIGN_IN_PAGE.substitute(message=html.escape(error or "no code came back")), status_code=400)
+        try:
+            name = await request.app.state.engine.finish_sign_in(state, code)
+        except (PermissionError, RuntimeError) as exc:
+            return HTMLResponse(SIGN_IN_PAGE.substitute(message=html.escape(str(exc))), status_code=403)
+        if name is None:
+            return HTMLResponse(SIGN_IN_PAGE.substitute(message="nothing was waiting for that sign-in"), status_code=404)
+        return HTMLResponse(SIGN_IN_PAGE.substitute(message=f"{html.escape(name)} is connected. You can close this tab."))
 
     @app.get("/api/health")
     def health(response: Response) -> dict[str, bool | str]:

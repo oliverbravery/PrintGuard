@@ -60,6 +60,26 @@
             "description": "Enable, disable and retune any monitor, including its defect threshold."
           },
           {
+            "const": "monitor:manage",
+            "description": "Set up new monitors and delete existing ones, losing their history with them."
+          },
+          {
+            "const": "camera:manage",
+            "description": "Register new cameras, retune brightness, crop and rotation, and delete existing ones."
+          },
+          {
+            "const": "printer:manage",
+            "description": "Connect new printers and delete existing ones. It supplies the credentials and can never read back one already stored."
+          },
+          {
+            "const": "settings",
+            "description": "Alert channels, theme, Home Assistant and the rest of Settings. It can never read back a credential already stored."
+          },
+          {
+            "const": "tokens",
+            "description": "Mint and revoke tokens for the API. It never sees the secret of one it minted, nor of any that already exists."
+          },
+          {
             "const": "printer:control",
             "description": "Pause, resume and cancel prints on any connected printer."
           },
@@ -84,6 +104,10 @@
             "description": "Send requests to addresses on this machine and the network around it, such as a printer or a hub of your own."
           },
           {
+            "const": "oauth",
+            "description": "Sign you in to the service it names and hold the result. PrintGuard keeps the tokens; the plugin only ever gets to use them."
+          },
+          {
             "const": "routes",
             "description": "Answer requests under /plugins/<id>/ on the hub, reading the headers each one carries, including your session cookie."
           },
@@ -102,12 +126,18 @@
           "state:read",
           "camera:view",
           "monitor:control",
+          "monitor:manage",
+          "camera:manage",
+          "printer:manage",
+          "settings",
+          "tokens",
           "printer:control",
           "notify",
           "sound",
           "alert:send",
           "net",
           "net:local",
+          "oauth",
           "routes",
           "gate"
         ]
@@ -116,6 +146,58 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 200
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "description": "Credentials you need but never see. PrintGuard draws a form for these, and you reference one as {{secret.name}} in a ctx.http request. Each line says what the user should paste in.",
+      "propertyNames": {
+        "pattern": "^[a-z0-9_-]{1,40}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "maxProperties": 8
+    },
+    "oauth": {
+      "type": "object",
+      "description": "Sign the user in to a service and hold the tokens for you. Needs the oauth permission, and the access token arrives as {{secret.oauth}}.",
+      "required": [
+        "authorize_url",
+        "token_url",
+        "client_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "authorize_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Where the user is sent to sign in."
+        },
+        "token_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Where the code is exchanged for tokens."
+        },
+        "client_id": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Your app's public client id. There is no client secret: the flow is PKCE."
+        },
+        "scopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "What the service is called, shown when the user is asked. Defaults to the authorize host."
+        }
       }
     },
     "surfaces": {

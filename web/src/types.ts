@@ -216,6 +216,8 @@ export interface PluginManifest {
   surfaces: ("panel" | "monitor" | "settings")[];
   platforms: string[];
   urls: string[];
+  secrets: Record<string, string>;
+  oauth: { authorize_url: string; token_url: string; client_id: string; scopes: string[]; label: string } | Record<string, never>;
   events: string[];
   tick_s: number;
 }
@@ -228,6 +230,7 @@ export interface PluginRecord {
   source: { kind: string; repo?: string; path?: string; ref?: string; filename?: string };
   granted: string[];
   config: Record<string, unknown>;
+  secrets_set: string[];
   verified: boolean;
   enabled: boolean;
   installed: number;

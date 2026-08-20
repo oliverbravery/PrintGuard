@@ -16,7 +16,7 @@ import uuid
 from collections import deque
 from typing import Any, Callable
 
-from . import plugins, reports, updates, urls, vision
+from . import oauth, plugins, reports, updates, urls, vision
 from .cameras import sanitise_camera
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
@@ -76,6 +76,7 @@ class Engine:
         self.scheduler = Scheduler(platform, self.cameras, self._on_result, self._on_pipeline_error)
         self.watchdog = Watchdog(self)
         self.sockets = SocketBroker(platform.open_socket, self.emit)
+        self.oauth = oauth.OAuthFlows(platform.http)
         self._plugin_calls: dict[str, list[float]] = {}
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
         self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
@@ -113,6 +114,8 @@ class Engine:
             "plugin.catalogue": self._cmd_plugin_catalogue,
             "plugin.http": self._cmd_plugin_http,
             "plugin.socket": self._cmd_plugin_socket,
+            "plugin.secrets": self._cmd_plugin_secrets,
+            "plugin.oauth": self._cmd_plugin_oauth,
             "plugin.notify": self._cmd_plugin_notify,
         }
 
@@ -905,11 +908,16 @@ class Engine:
         plugin = await self._network_allows(message["id"], str(message.get("url", "")))
         if not self._within_rate(plugin.id):
             raise PermissionError(f"plugin {plugin.id} is making requests faster than {PLUGIN_RATE_LIMIT} a minute")
+        await self._refresh_sign_in(plugin)
+        filled = plugins.fill_secrets(
+            {"url": str(message.get("url", "")), "headers": message.get("headers") or None, "json": message.get("json")},
+            plugin.secrets,
+        )
         status, body = await self.platform.http(
             str(message.get("method", "GET")).upper(),
-            str(message.get("url", "")),
-            headers=message.get("headers") or None,
-            json=message.get("json"),
+            filled["url"],
+            headers=filled["headers"],
+            json=filled["json"],
             timeout=PLUGIN_TIMEOUT_S,
         )
         self.emit(
@@ -932,6 +940,59 @@ class Engine:
         await self.sockets.act(
             plugin_id, action, str(message.get("tag", "")), str(message.get("url", "")), str(message.get("text", ""))
         )
+
+    async def _cmd_plugin_secrets(self, message: dict[str, Any]) -> None:
+        """Stores the credentials the user typed into a plugin's own form.
+
+        Values only ever travel inwards: a plugin references them by name and
+        PrintGuard fills them in as a request leaves, so neither the plugin nor
+        the dashboard reads one back.
+        """
+        plugin = self.plugins.get(message["id"])
+        if not plugin:
+            raise KeyError(f"no plugin {message['id']}")
+        given = message.get("secrets") or {}
+        kept = plugins.sanitise_secrets(given, list(plugin.manifest["secrets"]))
+        plugin.secrets = {**{name: value for name, value in plugin.secrets.items() if name.startswith("oauth")}, **kept}
+        await self._reload_plugins()
+
+    async def _cmd_plugin_oauth(self, message: dict[str, Any]) -> None:
+        """Starts a plugin's sign-in, or forgets what an earlier one returned."""
+        plugin = self.plugins.get(message["id"])
+        if not plugin or not plugin.may("oauth"):
+            raise PermissionError("plugin may not connect an account")
+        if str(message.get("action")) == "forget":
+            plugin.secrets = {name: value for name, value in plugin.secrets.items() if not name.startswith("oauth")}
+            return
+        url = self.oauth.start(plugin.id, plugin.manifest["oauth"], str(message.get("origin", "")))
+        self.emit({"event": "plugin_oauth", "id": plugin.id, "url": url, "req_id": message.get("req_id")})
+
+    async def finish_sign_in(self, state: str, code: str) -> str | None:
+        """Completes a sign-in a provider has sent the user back from.
+
+        Args:
+            state: What came back on the callback.
+            code: The authorisation code.
+
+        Returns:
+            The name of the plugin now signed in, or None if nothing was waiting.
+        """
+        plugin_id = self.oauth.waiting_for(state)
+        plugin = self.plugins.get(plugin_id) if plugin_id else None
+        if plugin is None:
+            return None
+        plugin.secrets = {**plugin.secrets, **await self.oauth.finish(state, code, plugin.manifest["oauth"])}
+        logger.info("plugin %s signed in to %s", plugin.id, plugin.manifest["oauth"]["label"])
+        self._broadcast(self.state_event())
+        return plugin.manifest["name"]
+
+    async def _refresh_sign_in(self, plugin: Plugin) -> None:
+        """Renews a plugin's access token before a request goes out on it."""
+        if not plugin.manifest["oauth"]:
+            return
+        renewed = await self.oauth.refreshed(plugin.manifest["oauth"], plugin.secrets)
+        if renewed is not None:
+            plugin.secrets = renewed
 
     async def _cmd_plugin_notify(self, message: dict[str, Any]) -> None:
         plugin = self.plugins.get(message["id"])

@@ -86,6 +86,26 @@ def schema() -> dict:
                 "propertyNames": {"enum": list(permissions)},
                 "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 200},
             },
+            "secrets": {
+                "type": "object",
+                "description": "Credentials you need but never see. PrintGuard draws a form for these, and you reference one as {{secret.name}} in a ctx.http request. Each line says what the user should paste in.",
+                "propertyNames": {"pattern": r"^[a-z0-9_-]{1,40}$"},
+                "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 200},
+                "maxProperties": plugins.MAX_SECRETS,
+            },
+            "oauth": {
+                "type": "object",
+                "description": "Sign the user in to a service and hold the tokens for you. Needs the oauth permission, and the access token arrives as {{secret.oauth}}.",
+                "required": ["authorize_url", "token_url", "client_id"],
+                "additionalProperties": False,
+                "properties": {
+                    "authorize_url": {"type": "string", "format": "uri", "description": "Where the user is sent to sign in."},
+                    "token_url": {"type": "string", "format": "uri", "description": "Where the code is exchanged for tokens."},
+                    "client_id": {"type": "string", "maxLength": 200, "description": "Your app's public client id. There is no client secret: the flow is PKCE."},
+                    "scopes": {"type": "array", "uniqueItems": True, "items": {"type": "string"}},
+                    "label": {"type": "string", "maxLength": 80, "description": "What the service is called, shown when the user is asked. Defaults to the authorize host."},
+                },
+            },
             "surfaces": {
                 "type": "array",
                 "uniqueItems": True,

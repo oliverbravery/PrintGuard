@@ -380,6 +380,10 @@ export const useStore = create<PgStore>((set, get) => {
         startPlugin(event.id, event.sources, event.assets ?? {});
         break;
       }
+      case "plugin_oauth":
+        clearPending(event.req_id);
+        window.open(event.url, "_blank", "noopener");
+        break;
       case "plugin_notice":
         get().toast("info", `${event.name}: ${event.text}`);
         break;

@@ -21,6 +21,7 @@ import json
 import re
 import zipfile
 from typing import Any
+from urllib.parse import urlsplit
 
 from . import urls
 from .adapters import HttpFn
@@ -33,6 +34,14 @@ SURFACES = ("panel", "monitor", "settings")
 MAX_SOURCE_BYTES = 64 * 1024
 MAX_CONFIG_BYTES = 16 * 1024
 MIN_TICK_S = 5.0
+MAX_SECRETS = 8
+MAX_SECRET_BYTES = 4096
+SECRET_REFERENCE = re.compile(r"\{\{\s*secret\.([a-z0-9_-]{1,40})\s*\}\}")
+"""How a plugin names a secret it may use but never read.
+
+The value is substituted as the request leaves PrintGuard, so the reference is
+all the plugin ever holds and all that is ever stored in anything it can read.
+"""
 CATALOGUE_URL = "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/catalogue.json"
 GITHUB_COMMIT_URL = "https://api.github.com/repos/{repo}/commits/{ref}"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/{repo}/{sha}/{path}"
@@ -66,6 +75,38 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
         "commands": ["monitor.update"],
         "risky": True,
     },
+    "monitor:manage": {
+        "label": "Add and remove monitors",
+        "description": "Set up new monitors and delete existing ones, losing their history with them.",
+        "commands": ["monitor.add", "monitor.remove"],
+        "risky": True,
+    },
+    "camera:manage": {
+        "label": "Add and remove cameras",
+        "description": "Register new cameras, retune brightness, crop and rotation, and delete existing ones.",
+        "commands": ["camera.add", "camera.update", "camera.remove", "discover"],
+        "risky": True,
+    },
+    "printer:manage": {
+        "label": "Add and remove printers",
+        "description": "Connect new printers and delete existing ones. It supplies the credentials and can never read back one already stored.",
+        "commands": ["printer.add", "printer.update", "printer.remove", "printer.test", "printer.cameras.refresh"],
+        "fields": {"integrations": ["id", "label", "schema", "docs_url", "setup_url", "setup_hint", "experimental"]},
+        "risky": True,
+    },
+    "settings": {
+        "label": "Change your settings",
+        "description": "Alert channels, theme, Home Assistant and the rest of Settings. It can never read back a credential already stored.",
+        "commands": ["settings.update", "notify.test"],
+        "fields": {"notifiers": ["id", "label", "schema", "docs_url", "setup_url", "setup_hint", "browser_ok"]},
+        "risky": True,
+    },
+    "tokens": {
+        "label": "Manage API tokens",
+        "description": "Mint and revoke tokens for the API. It never sees the secret of one it minted, nor of any that already exists.",
+        "commands": ["token.create", "token.remove"],
+        "risky": True,
+    },
     "printer:control": {
         "label": "Control printers",
         "description": "Pause, resume and cancel prints on any connected printer.",
@@ -95,6 +136,11 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
         "label": "Reach your own network",
         "description": "Send requests to addresses on this machine and the network around it, such as a printer or a hub of your own.",
         "urls": True,
+        "risky": True,
+    },
+    "oauth": {
+        "label": "Connect an account",
+        "description": "Sign you in to the service it names and hold the result. PrintGuard keeps the tokens; the plugin only ever gets to use them.",
         "risky": True,
     },
     "routes": {
@@ -178,6 +224,42 @@ credentials in a state snapshot or a new API token's secret, so a plugin is
 handed these fields and nothing else, and an event missing from here never
 reaches one at all.
 """
+
+
+def sanitise_secrets(raw: Any, names: list[str]) -> dict[str, str]:
+    """Keeps the secrets a manifest declared, refusing anything oversized.
+
+    Args:
+        raw: Values as the user typed them into PrintGuard's own form.
+        names: What the manifest declared, which is all that may be stored.
+
+    Returns:
+        The named secrets, dropping any the manifest does not declare and any
+        left blank.
+
+    Raises:
+        ValueError: If a value is larger than a credential has any business being.
+    """
+    kept = {name: str(raw.get(name, "")) for name in names if str(raw.get(name, ""))}
+    if any(len(value.encode()) > MAX_SECRET_BYTES for value in kept.values()):
+        raise ValueError(f"a secret is {MAX_SECRET_BYTES // 1024} KB at most")
+    return kept
+
+
+def fill_secrets(value: Any, secrets: dict[str, str]) -> Any:
+    """Replaces every secret reference in a request with the value it names.
+
+    Walks the whole structure, so a reference works in the URL, a header or
+    anywhere in a JSON body. A reference to something unset resolves to nothing
+    rather than travelling as the reference itself.
+    """
+    if isinstance(value, str):
+        return SECRET_REFERENCE.sub(lambda found: secrets.get(found.group(1), ""), value)
+    if isinstance(value, dict):
+        return {key: fill_secrets(item, secrets) for key, item in value.items()}
+    if isinstance(value, list):
+        return [fill_secrets(item, secrets) for item in value]
+    return value
 
 
 def consented(manifest: dict[str, Any], granted: list[str]) -> bool:
@@ -340,6 +422,13 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     unexplained = [p for p, why in reasons.items() if not why]
     if unexplained:
         raise ValueError(f"reasons must say why the plugin wants {', '.join(unexplained)}")
+    declared = raw.get("secrets") if isinstance(raw.get("secrets"), dict) else {}
+    secrets = {str(name).strip().lower(): str(why).strip()[:200] for name, why in list(declared.items())[:MAX_SECRETS]}
+    if any(not SECRET_REFERENCE.match("{{secret.%s}}" % name) or not why for name, why in secrets.items()):
+        raise ValueError("each secret needs a short name and a line saying what it is")
+    oauth = sanitise_oauth(raw.get("oauth"))
+    if oauth and "oauth" not in permissions:
+        raise ValueError("oauth needs the oauth permission")
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
     platforms = sorted({str(p).strip() for p in raw.get("platforms", [])} & set(PLATFORMS))
     assets = sorted({str(a).strip().lower() for a in raw.get("assets", [])} - {MANIFEST_FILE, *SOURCE_FILES})
@@ -369,8 +458,40 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "platforms": platforms,
         "assets": assets,
         "urls": patterns,
+        "secrets": secrets,
+        "oauth": oauth,
         "events": events,
         "tick_s": min(tick_s, 86400.0) if tick_s >= MIN_TICK_S else 0.0,
+    }
+
+
+def sanitise_oauth(raw: Any) -> dict[str, Any]:
+    """Validates the sign-in a manifest declares, if it declares one.
+
+    Args:
+        raw: The manifest's ``oauth`` block.
+
+    Returns:
+        The provider's endpoints, public client id and scopes, or an empty dict
+        when the plugin signs in to nothing.
+
+    Raises:
+        ValueError: If the block is there but unusable. No client secret is
+            accepted, since a plugin is a public client and PKCE is what stands
+            in for one.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    endpoints = {key: str(raw.get(key, "")).strip() for key in ("authorize_url", "token_url")}
+    if any(not urls.parse(f"{value}{'' if '/' in value.split('://')[-1] else '/'}") for value in endpoints.values()):
+        raise ValueError("oauth needs an https authorize_url and token_url")
+    if not str(raw.get("client_id", "")).strip():
+        raise ValueError("oauth needs the client_id of a public app")
+    return {
+        **endpoints,
+        "client_id": str(raw["client_id"]).strip()[:200],
+        "scopes": [str(scope).strip() for scope in raw.get("scopes", []) if str(scope).strip()][:20],
+        "label": str(raw.get("label", "")).strip()[:80] or urlsplit(endpoints["authorize_url"]).hostname or "",
     }
 
 

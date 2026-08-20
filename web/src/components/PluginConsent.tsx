@@ -22,6 +22,7 @@ export function PermissionList({ plugin, permissions, hubOnly }: { plugin: Plugi
             </ul>
           )}
           <span className="block text-text-1">{plugin.manifest.reasons[permission.id]}</span>
+          {permission.id === "oauth" && <span className="block text-text-2">{plugin.manifest.oauth.label}</span>}
           {permission.hub_only && !hubOnly && <span className="block text-text-2">Only does anything on a hub.</span>}
         </li>
       ))}
@@ -45,6 +46,12 @@ export function ConsentDialog({ plugin, permissions, hubOnly, onClose }: { plugi
             : "This plugin is unreviewed third-party code. Read it before you allow any of this."}
         </span>
         <PermissionList plugin={plugin} permissions={permissions} hubOnly={hubOnly} />
+        {Object.keys(plugin.manifest.secrets).length > 0 && (
+          <span className="block text-[0.7rem] text-text-2">
+            It also asks you for {Object.keys(plugin.manifest.secrets).join(", ").replace(/[_-]/g, " ")} once it is on.
+            PrintGuard holds those and fills them in for it, so the plugin never reads one back.
+          </span>
+        )}
         <span className="block text-[0.7rem] text-text-2">Enabling allows all of it. Disable the plugin to stop it.</span>
         <div className="flex gap-2">
           <button className="btn btn-primary" onClick={accept}>

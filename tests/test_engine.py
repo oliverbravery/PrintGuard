@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import zipfile
+from urllib.parse import parse_qs, urlparse
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
@@ -931,6 +932,117 @@ async def test_a_disabled_plugin_loses_the_sockets_it_was_holding() -> None:
         await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"enabled": False}})
 
     assert platform.sockets[-1].closed, "a socket outlived the plugin holding it"
+
+
+SECRET_MANIFEST = {
+    "id": "vault",
+    "name": "Vault",
+    "version": "1.0.0",
+    "permissions": ["net", "oauth"],
+    "reasons": {"net": "to post", "oauth": "to sign in"},
+    "urls": ["https://api.example.com/*"],
+    "secrets": {"api_key": "The key from your account page"},
+    "oauth": {
+        "authorize_url": "https://auth.example.com/authorize",
+        "token_url": "https://auth.example.com/token",
+        "client_id": "public-id",
+        "scopes": ["read"],
+    },
+}
+
+
+async def install_vault(engine: Engine) -> None:
+    """Installs the secret-holding demo plugin and accepts its permissions."""
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(SECRET_MANIFEST)})
+    await engine.handle(
+        {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
+    )
+
+
+async def test_a_secret_is_filled_in_on_the_way_out_and_read_back_by_nobody() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_vault(engine)
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
+        await engine.handle({
+            "cmd": "plugin.http", "id": "vault", "method": "POST", "url": "https://api.example.com/v1/ping",
+            "headers": {"Authorization": "Bearer {{secret.api_key}}"}, "json": {"key": "{{secret.api_key}}"},
+        })
+        record = engine.plugins.get("vault").public()
+
+    sent = platform.http_requests[-1]
+    assert sent["headers"]["Authorization"] == "Bearer s3cr3t", "the secret never reached the request"
+    assert sent["json"] == {"key": "s3cr3t"}
+    assert record["secrets_set"] == ["api_key"] and "secrets" not in record, "a secret rode along in the state snapshot"
+    assert "s3cr3t" not in json.dumps([e for e in events if e.get("event") == "state"])
+
+
+async def test_a_secret_the_manifest_never_declared_is_not_stored() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "kept", "sneaky": "dropped"}})
+        held = engine.plugins.get("vault").secrets
+
+    assert held == {"api_key": "kept"}
+
+
+async def test_a_sign_in_ends_with_tokens_the_plugin_can_use_but_never_see() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.files["https://auth.example.com/token"] = (
+        200, {"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600},
+    )
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_vault(engine)
+        await engine.handle({"cmd": "plugin.oauth", "id": "vault", "action": "start", "origin": "http://127.0.0.1:8000"})
+        opened = next(e for e in events if e.get("event") == "plugin_oauth")["url"]
+        state = parse_qs(urlparse(opened).query)["state"][0]
+        name = await engine.finish_sign_in(state, "code-1")
+
+        await engine.handle({
+            "cmd": "plugin.http", "id": "vault", "url": "https://api.example.com/v1/me",
+            "headers": {"Authorization": "Bearer {{secret.oauth}}"},
+        })
+        record = engine.plugins.get("vault").public()
+
+    query = parse_qs(urlparse(opened).query)
+    assert query["code_challenge_method"] == ["S256"] and "code_challenge" in query, "the sign-in skipped PKCE"
+    assert query["redirect_uri"] == ["http://127.0.0.1:8000/oauth/callback"]
+    assert name == "Vault"
+    assert platform.http_requests[-1]["headers"]["Authorization"] == "Bearer at-1"
+    assert "oauth" in record["secrets_set"] and "at-1" not in json.dumps(record)
+
+
+async def test_a_callback_nobody_asked_for_is_refused() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        assert await engine.finish_sign_in("made-up", "code-1") is None
+
+
+async def test_an_expiring_access_token_is_renewed_before_the_request_goes_out() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.files["https://auth.example.com/token"] = (
+        200, {"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 3600},
+    )
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        plugin = engine.plugins.get("vault")
+        plugin.secrets = {"oauth": "stale", "oauth_refresh": "rt-1", "oauth_expires": "0"}
+        await engine.handle({
+            "cmd": "plugin.http", "id": "vault", "url": "https://api.example.com/v1/me",
+            "headers": {"Authorization": "Bearer {{secret.oauth}}"},
+        })
+
+    assert platform.http_requests[-1]["headers"]["Authorization"] == "Bearer at-2", "a stale token went out"
+    assert plugin.secrets["oauth_refresh"] == "rt-2", "a rotated refresh token was thrown away"
+
+
+async def test_a_plugin_reaches_the_whole_command_table_it_was_granted() -> None:
+    """Every command a permission names dispatches, so the table cannot rot."""
+    unreachable = [command for command in plugins.PERMISSION_COMMANDS if command not in Engine(FakePlatform())._handlers]
+
+    assert unreachable == []
 
 
 async def test_plugin_state_view_carries_no_credentials() -> None:

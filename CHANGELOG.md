@@ -44,6 +44,15 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   and can hold a WebSocket open for live data. Requests are capped and rate limited, and a
   plugin loses its connections the moment you disable it.
 
+- Plugins can do the rest of what PrintGuard does. Adding and removing monitors, cameras and
+  printers, changing your settings and minting API tokens are each their own permission, so a
+  plugin can set itself up rather than talking you through it, and each one is spelled out
+  before you allow it. A plugin supplies credentials and can never read one back, whether it
+  put it there or not. It declares the ones it needs, PrintGuard draws the form and fills them
+  in as the plugin's requests go out, so the value is in nothing the plugin or this page reads.
+  A plugin needing a sign-in rather than a key gets one: PrintGuard runs it, keeps the tokens
+  and refreshes them.
+
 ### Fixed
 
 - A camera that keeps dropping out no longer notifies you every time it reconnects. The

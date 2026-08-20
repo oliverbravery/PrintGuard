@@ -244,6 +244,9 @@ class Plugin:
         granted: Permissions the user has actually granted, a subset of those
             the manifest asks for.
         config: The plugin's own stored data, opaque to PrintGuard.
+        secrets: Credentials the user gave it, and the tokens an OAuth sign-in
+            returned. Named in the manifest, referenced by the plugin, and never
+            in anything the plugin or the dashboard reads back.
         verified: Whether these exact bytes matched a catalogue entry.
         enabled: Whether the plugin runs.
         installed: Unix timestamp of the install.
@@ -257,6 +260,7 @@ class Plugin:
     assets: dict[str, str] = field(default_factory=dict)
     granted: list[str] = field(default_factory=list)
     config: dict[str, Any] = field(default_factory=dict)
+    secrets: dict[str, str] = field(default_factory=dict)
     verified: bool = False
     enabled: bool = True
     installed: float = 0.0
@@ -276,6 +280,7 @@ class Plugin:
             "source": self.source,
             "granted": self.granted,
             "config": self.config,
+            "secrets_set": sorted(self.secrets),
             "verified": self.verified,
             "enabled": self.enabled,
             "installed": self.installed,
@@ -293,6 +298,7 @@ class Plugin:
             "source": self.source,
             "granted": self.granted,
             "config": self.config,
+            "secrets": self.secrets,
             "verified": self.verified,
             "enabled": self.enabled,
             "installed": self.installed,

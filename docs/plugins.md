@@ -89,6 +89,12 @@ remove the plugin.
 | `alert:send` | Send through your own ntfy, Telegram or Discord | |
 | `net` | Reach the addresses its manifest lists, and nowhere else | |
 | `net:local` | Reach addresses on this machine and the network around it | |
+| `monitor:manage` | Add monitors and delete them | |
+| `camera:manage` | Register cameras, retune them and delete them | |
+| `printer:manage` | Connect printers, supplying the credentials, and delete them | |
+| `settings` | Change alert channels, theme and the rest of Settings | |
+| `tokens` | Mint and revoke API tokens | |
+| `oauth` | Sign you in to a service and use the result | |
 | `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers | ✅ |
 | `gate` | See and refuse every other request to the hub | ✅ |
 
@@ -99,6 +105,46 @@ both what it allows and what this plugin claims to want it for.
 
 Storing its own data needs no permission. The store is the plugin's own, capped at 16 KB, and
 saved as part of your PrintGuard state.
+
+## Credentials
+
+A plugin can supply a credential and can never read one back, whether it put it there or not.
+Printer passwords, notifier keys and API tokens go in and never come out, so nothing a plugin
+holds and nothing the dashboard shows it carries a stored value.
+
+Its own credentials work the same way. Declare them in `secrets` and PrintGuard draws the form,
+holds the values and fills them in as your requests leave.
+
+```json
+"secrets": {
+  "api_key": "The key from your account page"
+}
+```
+
+```js
+ctx.http({ url: "https://api.example.com/v1/me", headers: { Authorization: "Bearer {{secret.api_key}}" }, tag: "me" });
+```
+
+The reference is all your code ever holds, in the URL, a header or anywhere in a JSON body. A
+plugin gets eight secrets at most.
+
+For a service with a sign-in rather than a key, declare `oauth` and PrintGuard runs the flow
+itself, with PKCE and no client secret, since a plugin is a public client. Register
+`http://127.0.0.1:8000/oauth/callback` with your provider, matching wherever the hub is
+reached. The access token arrives as `{{secret.oauth}}` and is refreshed before it expires, so
+your code never handles one.
+
+```json
+"permissions": ["net", "oauth"],
+"oauth": {
+  "authorize_url": "https://auth.example.com/authorize",
+  "token_url": "https://auth.example.com/token",
+  "client_id": "your-public-client-id",
+  "scopes": ["read"]
+}
+```
+
+Signing in is hub only, since local mode has no address for a provider to send anyone back to.
 
 ## Writing a plugin
 
@@ -133,6 +179,7 @@ my-plugin/
   "platforms": ["docker", "windows"],
   "assets": ["alarm.mp3"],
   "urls": ["https://api.example.com/v1/*"],
+  "secrets": { "api_key": "The key from your account page" },
   "events": ["alert"],
   "tick_s": 300
 }
@@ -202,8 +249,8 @@ to than reaching the internet. A wildcard host counts, since it covers both. Pri
 the address a name actually resolves to, not just the name, so a public name pointing at a
 private address is caught.
 
-`events` and `tick_s` are the worker's, naming which engine events wake it and how often to
-run it anyway.
+`secrets` and `oauth` are credentials, covered below. `events` and `tick_s` are the worker's,
+naming which engine events wake it and how often to run it anyway.
 
 Both files get `plugin` to register with, and every handler gets a `ctx`:
 

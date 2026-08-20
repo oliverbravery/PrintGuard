@@ -3,6 +3,7 @@ import { runsHere } from "../plugins";
 import { useStore } from "../store";
 import type { CatalogueEntry, Permission, PluginRecord } from "../types";
 import { ConsentDialog, PermissionList } from "./PluginConsent";
+import { PluginSecrets } from "./PluginSecrets";
 import { Toggle } from "./Toggle";
 
 const REPO_HINT = "owner/repo, or owner/repo/path@branch";
@@ -85,6 +86,7 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
       </div>
       {!accepted && <span className="block text-[0.7rem] text-warn">Asks for permissions you have not accepted yet.</span>}
       {open && <PermissionList plugin={plugin} permissions={permissions} hubOnly={hubOnly} />}
+      {plugin.enabled && <PluginSecrets plugin={plugin} />}
       {consenting && (
         <ConsentDialog plugin={plugin} permissions={permissions} hubOnly={hubOnly} onClose={() => setConsenting(false)} />
       )}
