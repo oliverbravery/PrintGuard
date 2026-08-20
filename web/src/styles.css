@@ -113,10 +113,9 @@ body {
 }
 
 [data-painted] {
-  --painted-veil: color-mix(in srgb, var(--color-ink-0) 94%, transparent);
-  --painted-surface: color-mix(in srgb, var(--color-ink-1) 84%, transparent);
-  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 97%, transparent);
-  --painted-muted: color-mix(in srgb, var(--color-text-2) 60%, var(--color-text-1));
+  --painted-surface: color-mix(in srgb, var(--color-ink-1) 78%, transparent);
+  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 88%, transparent);
+  --painted-muted: color-mix(in srgb, var(--color-text-2) 85%, var(--color-text-1));
   isolation: isolate;
 }
 
@@ -134,12 +133,13 @@ body {
 }
 
 [data-painted]::before {
-  background: var(--painted-image) center / cover no-repeat;
+  background: var(--color-ink-0);
 }
 
 [data-painted]::after {
-  background: var(--painted-veil);
-  backdrop-filter: blur(40px) saturate(180%);
+  background: var(--painted-image) center / cover no-repeat;
+  filter: blur(24px) saturate(160%);
+  mix-blend-mode: color;
 }
 
 [data-painted] .panel,
@@ -165,8 +165,11 @@ body {
 }
 
 @media (prefers-reduced-transparency: reduce) {
+  [data-painted]::after {
+    display: none;
+  }
+
   [data-painted] {
-    --painted-veil: var(--color-ink-0);
     --painted-surface: var(--color-ink-1);
     --painted-chrome: var(--color-ink-0);
   }
