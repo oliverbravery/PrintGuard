@@ -53,7 +53,12 @@ def findings(manifest: dict, sources: dict[str, str]) -> list[dict]:
         SystemExit: If the checker could not run at all, since pinning a plugin
             nobody has read is the thing this exists to stop.
     """
-    bundle = json.dumps({"manifest": manifest, "sources": sources, "permissions": plugins.permissions_meta()})
+    bundle = json.dumps({
+        "manifest": manifest,
+        "sources": sources,
+        "permissions": plugins.permissions_meta(),
+        "event_permissions": plugins.EVENT_PERMISSIONS,
+    })
     result = subprocess.run(
         ["npm", "run", "--silent", "lint:plugin", "--", "/dev/stdin"], input=bundle, cwd=WEB, capture_output=True, text=True
     )
@@ -69,13 +74,14 @@ def entry(directory: Path) -> dict:
         name: (directory / name).read_text() for name in plugins.SOURCE_FILES if (directory / name).exists()
     }
     assets = plugins.sanitise_assets({name: (directory / name).read_bytes() for name in manifest["assets"]})
-    disagreements = [f for f in findings(manifest, sources) if f["kind"] != "dynamic"]
+    found = findings(manifest, sources)
+    disagreements = [f for f in found if f["kind"] != "dynamic"]
     if disagreements:
         raise SystemExit(
             f"{manifest['id']} does not do what it says:\n"
             + "\n".join(f"  {f['kind']}: {f['what']}" for f in disagreements)
         )
-    for unknowable in [f for f in findings(manifest, sources) if f["kind"] == "dynamic"]:
+    for unknowable in [f for f in found if f["kind"] == "dynamic"]:
         print(f"{manifest['id']}: {unknowable['what']}")
     return {
         "id": manifest["id"],
