@@ -120,6 +120,14 @@
             "description": "Sign you in to the service it names and hold the result. PrintGuard keeps the tokens; the plugin only ever gets to use them."
           },
           {
+            "const": "link:provide",
+            "description": "Offer the channels it lists to other plugins you have installed, so they can ask it for something or hear what it publishes."
+          },
+          {
+            "const": "link:consume",
+            "description": "Ask the plugins and channels it names for something, and hear what they publish. It reaches nothing they do not offer."
+          },
+          {
             "const": "routes",
             "description": "Answer requests under /plugins/<id>/ on the hub, reading the headers each one carries, including your session cookie."
           },
@@ -153,6 +161,8 @@
           "net",
           "net:local",
           "oauth",
+          "link:provide",
+          "link:consume",
           "routes",
           "gate"
         ]
@@ -175,6 +185,29 @@
         "maxLength": 200
       },
       "maxProperties": 8
+    },
+    "provides": {
+      "type": "object",
+      "description": "Channels other plugins may ask you for, or hear you publish on. Needs the link:provide permission, and each line says what the channel answers.",
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "maxProperties": 8
+    },
+    "consumes": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 16,
+      "description": "The plugins and channels you call or listen to, each written plugin-id:channel. Needs the link:consume permission, and you reach nothing you do not name here.",
+      "items": {
+        "type": "string",
+        "pattern": "^([a-z0-9][a-z0-9-]{1,38}[a-z0-9]):([a-z0-9][a-z0-9-]{0,38}[a-z0-9])$"
+      }
     },
     "oauth": {
       "type": "object",
@@ -300,6 +333,18 @@
           {
             "const": "frame",
             "description": "Carries camera_id, jpeg."
+          },
+          {
+            "const": "call",
+            "description": "Carries from, channel, body, call_id."
+          },
+          {
+            "const": "answer",
+            "description": "Carries tag, from, channel, body."
+          },
+          {
+            "const": "message",
+            "description": "Carries from, channel, body."
           },
           {
             "const": "history",

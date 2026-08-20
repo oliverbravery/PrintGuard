@@ -112,6 +112,12 @@ declare global {
     socket: { event: "socket"; tag: string; state: "open" | "message" | "closed"; text: string };
     /** A still you asked for with `camera.snapshot`, base64 JPEG. Needs `camera:frames`. */
     frame: { event: "frame"; camera_id: string; jpeg: string };
+    /** Another plugin asking you something, on a channel your manifest offers. Answer by returning from `plugin.serve`. */
+    call: { event: "call"; from: string; channel: string; body: any; call_id: string };
+    /** The answer to one of your own `ctx.call`s, carrying the `tag` you named it with. */
+    answer: { event: "answer"; tag: string; from: string; channel: string; body: any };
+    /** Something a plugin you named in `consumes` published. */
+    message: { event: "message"; from: string; channel: string; body: any };
     /** A monitor's risk history, answering `history.get`. Needs `history:read`. */
     history: {
       event: "history";
@@ -204,6 +210,14 @@ declare global {
     sound(tones: PluginTone[] | PluginTone): void;
     /** Plays an audio file you shipped, named as it appears in the manifest's `assets`. Needs `sound`. */
     sound(asset: string): void;
+    /**
+     * Asks another plugin for something, on a channel your manifest names in
+     * `consumes`. Needs `link:consume`, and the answer comes back on an
+     * `answer` event carrying the same `tag`.
+     */
+    call(request: { to: string; channel: string; body?: unknown; tag?: string }): void;
+    /** Publishes on one of your own channels, reaching every plugin that named it. Needs `link:provide`. */
+    publish(request: { channel: string; body?: unknown }): void;
     /** Writes a line to PrintGuard's log. */
     log(text: string): void;
   }
@@ -227,6 +241,8 @@ declare global {
     route(handler: (request: PluginRequest, ctx: PluginContext) => PluginResponse): void;
     /** Approves or refuses every other request to the hub. Needs `gate`, and anything but `true` refuses. */
     gate(handler: (request: PluginRequest, ctx: PluginContext) => boolean): void;
+    /** Answers another plugin asking on one of the channels your manifest offers. Needs `link:provide`. */
+    serve(handler: (request: PluginEvents["call"], ctx: PluginContext) => unknown): void;
   }
 
   /** Registers your plugin. In scope in `plugin.js` and `worker.js`, with nothing else beside it. */

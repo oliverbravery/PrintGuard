@@ -113,6 +113,8 @@ remove the plugin.
 | `settings` | Change alert channels, theme and the rest of Settings | |
 | `tokens` | Mint and revoke API tokens | |
 | `oauth` | Sign you in to a service and use the result | |
+| `link:provide` | Answer other plugins on the channels it offers | |
+| `link:consume` | Ask the plugins and channels it names, and hear them | |
 | `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers | ✅ |
 | `gate` | See and refuse every other request to the hub | ✅ |
 
@@ -270,7 +272,8 @@ to than reaching the internet. A wildcard host counts, since it covers both. Pri
 the address a name actually resolves to, not just the name, so a public name pointing at a
 private address is caught.
 
-`secrets` and `oauth` are credentials, covered below. `events` and `tick_s` are the worker's,
+`provides` and `consumes` are how plugins reach each other, covered below. `secrets` and
+`oauth` are credentials, covered below. `events` and `tick_s` are the worker's,
 naming which engine events wake it and how often to run it anyway.
 
 Both files get `plugin` to register with, and every handler gets a `ctx`:
@@ -284,6 +287,8 @@ Both files get `plugin` to register with, and every handler gets a `ctx`:
 | `ctx.socket({ url, tag })` | Ask PrintGuard to hold a WebSocket open for you. Answers on the `socket` event |
 | `ctx.socketSend(tag, text)` | Write one frame to a socket you opened |
 | `ctx.socketClose(tag)` | Close a socket you opened |
+| `ctx.call(request)` | Ask another plugin for something. Answers on the `call` event's reply |
+| `ctx.publish(request)` | Publish on one of your own channels |
 | `ctx.notify(text)` | Raise a message in the dashboard |
 | `ctx.sound(tones)` | Sound your own tones through the speakers, `{ hz, ms }` each, or name an audio asset |
 | `ctx.assets` | The text files you shipped, keyed by name |
@@ -419,6 +424,47 @@ which is how a picture or a video gets on screen.
 
 A panel joins the dashboard's layout, so it drags, pins and hides alongside the monitors.
 
+## Talking to other plugins
+
+Plugins reach each other only where both sides said so and the user agreed. A plugin offering
+something declares the channels it answers on, and a plugin wanting them names the exact
+plugin and channel it will call. PrintGuard carries the message; neither one sees the other's
+code, its store or anything it was not handed.
+
+```json
+"permissions": ["link:provide"],
+"provides": { "now-playing": "The track playing right now" }
+```
+
+```js
+plugin.serve((request, ctx) => ({ track: ctx.store.track, artist: ctx.store.artist }));
+```
+
+The plugin on the other side names it in full, so `spotify:now-playing` is one channel of one
+plugin rather than a door left open.
+
+```json
+"permissions": ["link:consume"],
+"consumes": ["spotify:now-playing"]
+```
+
+```js
+plugin.on("tick", (event, ctx) => ctx.call({ to: "spotify", channel: "now-playing", tag: "np" }));
+
+plugin.on("answer", (event, ctx) => { ctx.store.track = event.body.track; });
+```
+
+A provider with something to say rather than something to answer publishes instead, and every
+plugin that named that channel hears it.
+
+```js
+plugin.publish({ channel: "now-playing", body: { track: "Blue" } });
+```
+
+Both sides show up when the user is asked, the offer as what it answers and the call as which
+plugin and channel it reaches. A plugin that is disabled answers nobody, and a body is 16 KB
+at most.
+
 ## The worker half
 
 [`plugins/progress-reports`](../plugins/progress-reports) is the one with both halves. Its
@@ -438,6 +484,9 @@ These are the events a worker can name in `events`:
 | `http` | An answer to one of your own `ctx.http` calls | `tag`, `status`, `body` |
 | `socket` | A socket you opened coming up, carrying a frame, or ending | `tag`, `state`, `text` |
 | `frame` | A still you asked for with `camera.snapshot` | `camera_id`, `jpeg` |
+| `call` | Another plugin asking on a channel you offer | `from`, `channel`, `body`, `call_id` |
+| `answer` | The answer to one of your own `ctx.call`s | `tag`, `from`, `channel`, `body` |
+| `message` | Something a plugin you named published | `from`, `channel`, `body` |
 | `history` | A monitor's risk history, answering `history.get` | `monitor_id`, `now`, `buckets`, `alerts`, `stats` |
 | `result` | Every inference on a watched monitor, capped at 5 per second per monitor | `monitor_id`, `camera_id`, `score`, `prediction`, `margin`, `ms`, `ts` |
 | `alert` | A defect held long enough to act on | `monitor_id`, `score`, `action`, `ts` |

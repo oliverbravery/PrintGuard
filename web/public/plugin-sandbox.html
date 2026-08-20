@@ -41,7 +41,7 @@
           /* as above */
         }
 
-        let hooks = { view: null, action: null, events: new Map() };
+        let hooks = { view: null, action: null, serve: null, events: new Map() };
         let effects = [];
         let store = {};
         let assets = {};
@@ -68,6 +68,12 @@
             socketClose(tag) {
               effects.push({ kind: "socket", action: "close", request: { tag } });
             },
+            call(request) {
+              effects.push({ kind: "link", action: "call", request });
+            },
+            publish(request) {
+              effects.push({ kind: "link", action: "publish", request });
+            },
             notify(text) {
               effects.push({ kind: "notify", text: String(text) });
             },
@@ -83,7 +89,7 @@
         }
 
         function load(code) {
-          hooks = { view: null, action: null, events: new Map() };
+          hooks = { view: null, action: null, serve: null, events: new Map() };
           new Function("plugin", code)({
             render(fn) {
               hooks.view = fn;
@@ -93,6 +99,9 @@
             },
             on(name, fn) {
               hooks.events.set(String(name), fn);
+            },
+            serve(fn) {
+              hooks.serve = fn;
             },
           });
         }
@@ -104,7 +113,13 @@
           let tree = null;
           const targets = {};
           if (message.t === "action" && hooks.action) hooks.action(message.name, message.arg, ctx);
-          else if (message.t === "event") hooks.events.get(String(message.event.event))?.(message.event, ctx);
+          else if (message.t === "event") {
+            if (message.event.event === "call" && hooks.serve) {
+              const body = hooks.serve(message.event, ctx);
+              effects.push({ kind: "link", action: "answer", request: { call_id: message.event.call_id, channel: message.event.channel, body } });
+            }
+            hooks.events.get(String(message.event.event))?.(message.event, ctx);
+          }
           if (hooks.view) {
             tree = hooks.view(ctx);
             for (const at of message.targets || []) {

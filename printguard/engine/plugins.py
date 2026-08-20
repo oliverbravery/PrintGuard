@@ -35,6 +35,10 @@ MAX_SOURCE_BYTES = 256 * 1024
 MAX_CONFIG_BYTES = 16 * 1024
 MIN_TICK_S = 5.0
 MAX_SECRETS = 8
+MAX_CHANNELS = 8
+MAX_CONSUMES = 16
+CHANNEL_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
+LINK_PATTERN = re.compile(r"^([a-z0-9][a-z0-9-]{1,38}[a-z0-9]):([a-z0-9][a-z0-9-]{0,38}[a-z0-9])$")
 MAX_SECRET_BYTES = 4096
 SECRET_REFERENCE = re.compile(r"\{\{\s*secret\.([a-z0-9_-]{1,40})\s*\}\}")
 """How a plugin names a secret it may use but never read.
@@ -159,6 +163,15 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
         "description": "Sign you in to the service it names and hold the result. PrintGuard keeps the tokens; the plugin only ever gets to use them.",
         "risky": True,
     },
+    "link:provide": {
+        "label": "Answer other plugins",
+        "description": "Offer the channels it lists to other plugins you have installed, so they can ask it for something or hear what it publishes.",
+    },
+    "link:consume": {
+        "label": "Talk to other plugins",
+        "description": "Ask the plugins and channels it names for something, and hear what they publish. It reaches nothing they do not offer.",
+        "channels": True,
+    },
     "routes": {
         "label": "Serve its own pages",
         "description": "Answer requests under /plugins/<id>/ on the hub, reading the headers each one carries, including your session cookie.",
@@ -230,6 +243,9 @@ naming none of them runs everywhere.
 EVENTS: dict[str, list[str]] = {
     "http": ["tag", "status", "body"],
     "frame": ["camera_id", "jpeg"],
+    "call": ["from", "channel", "body", "call_id"],
+    "answer": ["tag", "from", "channel", "body"],
+    "message": ["from", "channel", "body"],
     "history": ["monitor_id", "now", "buckets", "alerts", "stats"],
     "socket": ["tag", "state", "text"],
     "result": ["monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts"],
@@ -239,7 +255,14 @@ EVENTS: dict[str, list[str]] = {
     "error": ["message"],
     "state": [],
 }
-EVENT_PERMISSIONS: dict[str, str] = {"state": "state:read", "frame": "camera:frames", "history": "history:read"}
+EVENT_PERMISSIONS: dict[str, str] = {
+    "state": "state:read",
+    "frame": "camera:frames",
+    "history": "history:read",
+    "call": "link:provide",
+    "answer": "link:consume",
+    "message": "link:consume",
+}
 """Events carrying something a permission covers, and which one that is.
 
 An event is broadcast to every plugin that named it, so one carrying a camera
@@ -459,6 +482,17 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     secrets = {str(name).strip().lower(): str(why).strip()[:200] for name, why in list(declared.items())[:MAX_SECRETS]}
     if any(not SECRET_REFERENCE.match("{{secret.%s}}" % name) or not why for name, why in secrets.items()):
         raise ValueError("each secret needs a short name and a line saying what it is")
+    offered = raw.get("provides") if isinstance(raw.get("provides"), dict) else {}
+    provides = {str(name).strip().lower(): str(why).strip()[:200] for name, why in list(offered.items())[:MAX_CHANNELS]}
+    if any(not CHANNEL_PATTERN.match(name) or not why for name, why in provides.items()):
+        raise ValueError("each channel in provides needs a short name and a line saying what it answers")
+    consumes = sorted({str(link).strip().lower() for link in raw.get("consumes", []) if str(link).strip()})[:MAX_CONSUMES]
+    if any(not LINK_PATTERN.match(link) for link in consumes):
+        raise ValueError("each entry in consumes names a plugin and a channel, as plugin-id:channel")
+    if provides and "link:provide" not in permissions:
+        raise ValueError("provides needs the link:provide permission")
+    if consumes and "link:consume" not in permissions:
+        raise ValueError("consumes needs the link:consume permission")
     oauth = sanitise_oauth(raw.get("oauth"))
     if oauth and "oauth" not in permissions:
         raise ValueError("oauth needs the oauth permission")
@@ -473,7 +507,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         raise ValueError("urls needs the net permission")
     if local and "net:local" not in permissions:
         raise ValueError(f"reaching {', '.join(local)} needs the net:local permission")
-    events = sorted({str(e).strip() for e in raw.get("events", [])} & set(EVENTS))
+    events = sorted(({str(e).strip() for e in raw.get("events", [])} & set(EVENTS)) | linked_events(raw))
     try:
         tick_s = max(0.0, float(raw.get("tick_s", 0)))
     except (TypeError, ValueError):
@@ -492,9 +526,40 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "assets": assets,
         "urls": patterns,
         "secrets": secrets,
+        "provides": provides,
+        "consumes": consumes,
         "oauth": oauth,
         "events": events,
         "tick_s": min(tick_s, 86400.0) if tick_s >= MIN_TICK_S else 0.0,
+    }
+
+
+def linked_events(raw: Any) -> set[str]:
+    """The events a plugin gets for talking to other plugins.
+
+    Declaring a channel is the whole declaration, so the events that carry the
+    traffic are added rather than asked for a second time in ``events``.
+    """
+    offered = bool(raw.get("provides")) if isinstance(raw, dict) else False
+    wanted = bool(raw.get("consumes")) if isinstance(raw, dict) else False
+    return ({"call"} if offered else set()) | ({"answer", "message"} if wanted else set())
+
+
+def outbound_link(plugin_id: str, kind: str, request: Any) -> dict[str, Any]:
+    """Builds a plugin.call, plugin.publish or plugin.answer out of what a plugin asked for.
+
+    The plugin's id is set last, as it is for a request, so a sandbox cannot
+    spread over the command and speak as somebody else.
+    """
+    fields = request if isinstance(request, dict) else {}
+    return {
+        "cmd": f"plugin.{kind}",
+        "to": str(fields.get("to", "")),
+        "channel": str(fields.get("channel", "")),
+        "tag": str(fields.get("tag", "")),
+        "call_id": str(fields.get("call_id", "")),
+        "body": fields.get("body"),
+        "id": plugin_id,
     }
 
 

@@ -127,6 +127,36 @@ def test_a_panel_that_draws_itself_is_read_like_any_other_source() -> None:
     assert "state:read" not in found(findings, "unused"), "hooking state is using state:read"
 
 
+LINKED = {
+    "worker.js": """
+plugin.serve((request, ctx) => ({ track: "Blue" }));
+plugin.on('tick', (event, ctx) => {
+  ctx.call({ to: 'spotify', channel: 'now-playing', tag: 'np' });
+  ctx.call({ to: 'weather', channel: 'forecast', tag: 'w' });
+  ctx.publish({ channel: 'now-playing', body: {} });
+});
+""",
+}
+
+LINKED_MANIFEST = {
+    "id": "hub-bridge",
+    "version": "1.0.0",
+    "permissions": ["link:provide", "link:consume"],
+    "reasons": {"link:provide": "a", "link:consume": "b"},
+    "provides": {"now-playing": "The track"},
+    "consumes": ["spotify:now-playing"],
+}
+
+
+def test_a_channel_it_talks_to_without_declaring_is_caught() -> None:
+    findings = pin.findings(plugins.sanitise_manifest(LINKED_MANIFEST), LINKED)
+
+    assert "weather:forecast" in found(findings, "undeclared")
+    assert "spotify:now-playing" not in found(findings, "undeclared"), "a declared channel was flagged"
+    assert "now-playing" not in found(findings, "undeclared"), "publishing on its own channel was flagged"
+    assert found(findings, "unused") == []
+
+
 def test_code_that_will_not_parse_is_reported_rather_than_passed() -> None:
     findings = pin.findings(plugins.sanitise_manifest(LIAR_MANIFEST), {"plugin.js": "this is not javascript {{{"})
 

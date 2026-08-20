@@ -323,6 +323,50 @@ plugin.on('result', (event, ctx) => {
 });
 """
 
+SERVER_WORKER = """
+plugin.serve((request, ctx) => {
+  ctx.store.asked = (ctx.store.asked || 0) + 1;
+  return { track: "Blue", asked_by: request.from, sent: request.body.q };
+});
+"""
+
+SERVER_MANIFEST = {
+    "id": "spotify",
+    "name": "Spotify",
+    "version": "1.0.0",
+    "permissions": ["link:provide"],
+    "reasons": {"link:provide": "to share the track"},
+    "provides": {"now-playing": "The track playing right now"},
+}
+
+
+async def test_a_worker_answers_another_plugin_over_a_channel(runtime: WasmPluginRuntime) -> None:
+    """The real sandbox, so the answer comes back out of QuickJS."""
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    events: list[dict] = []
+    engine.add_sink(events.append)
+    try:
+        await install_and_accept(engine, SERVER_MANIFEST, SERVER_WORKER)
+        consumer = {
+            "id": "np-widget", "name": "Now playing", "version": "1.0.0",
+            "permissions": ["link:consume"], "reasons": {"link:consume": "to draw it"},
+            "consumes": ["spotify:now-playing"],
+        }
+        await install_and_accept(engine, consumer, "plugin.on('answer', () => {});")
+        await engine.handle(
+            {"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "now-playing", "tag": "np", "body": {"q": 7}}
+        )
+        await asyncio.sleep(0.6)
+        answer = next(e for e in events if e.get("event") == "answer")
+    finally:
+        await engine.stop()
+
+    assert answer["id"] == "np-widget" and answer["tag"] == "np"
+    assert answer["body"] == {"track": "Blue", "asked_by": "np-widget", "sent": 7}
+    assert engine.plugins.get("spotify").config["asked"] == 1
+
+
 RISK_MANIFEST = {
     "id": "risk",
     "name": "Risk watch",

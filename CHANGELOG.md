@@ -73,6 +73,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   video now, and far larger pictures, at 4 MB a file and 12 MB in total. Plugin panels join the
   dashboard's layout, so they drag, pin and hide alongside your monitors.
 
+- Plugins can talk to each other, where both of them said so. One offers a channel and says
+  what it answers, another names that exact plugin and channel, and you see both before either
+  is enabled. They can ask each other for something and get an answer back, or publish to
+  everything listening. Neither ever sees the other's code, its stored data or anything it was
+  not handed, and a plugin you switch off answers nobody.
+
 ### Fixed
 
 - A plugin's own pages can no longer pull a live camera stream. Pages a plugin serves run in a

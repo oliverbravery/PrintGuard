@@ -4,7 +4,7 @@ import { bootLocal } from "./local";
 import { log } from "./log";
 import type { Finding } from "./lint";
 import { PluginPanelHost } from "./panel";
-import { commandAllowed, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
+import { commandAllowed, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
 import { play, playFile } from "./sound";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
@@ -238,6 +238,8 @@ export const useStore = create<PgStore>((set, get) => {
         sendSilent(outboundRequest(id, effect.request));
       } else if (effect.kind === "socket" && effect.request) {
         sendSilent(outboundSocket(id, String(effect.action), effect.request));
+      } else if (effect.kind === "link" && effect.request) {
+        sendSilent(outboundLink(id, String(effect.action), effect.request));
       } else if (effect.kind === "notify") {
         if (plugin.granted.includes("notify")) get().toast("info", `${plugin.manifest.name}: ${effect.text}`);
       } else if (effect.kind === "sound") {

@@ -93,6 +93,20 @@ def schema() -> dict:
                 "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 200},
                 "maxProperties": plugins.MAX_SECRETS,
             },
+            "provides": {
+                "type": "object",
+                "description": "Channels other plugins may ask you for, or hear you publish on. Needs the link:provide permission, and each line says what the channel answers.",
+                "propertyNames": {"pattern": plugins.CHANNEL_PATTERN.pattern},
+                "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 200},
+                "maxProperties": plugins.MAX_CHANNELS,
+            },
+            "consumes": {
+                "type": "array",
+                "uniqueItems": True,
+                "maxItems": plugins.MAX_CONSUMES,
+                "description": "The plugins and channels you call or listen to, each written plugin-id:channel. Needs the link:consume permission, and you reach nothing you do not name here.",
+                "items": {"type": "string", "pattern": plugins.LINK_PATTERN.pattern},
+            },
             "oauth": {
                 "type": "object",
                 "description": "Sign the user in to a service and hold the tokens for you. Needs the oauth permission, and the access token arrives as {{secret.oauth}}.",

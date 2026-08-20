@@ -1128,6 +1128,101 @@ async def test_a_file_claiming_to_be_video_but_is_not_never_installs() -> None:
     assert any("not really video/mp4" in str(e.get("message")) for e in events if e.get("event") == "error")
 
 
+PROVIDER = {
+    "id": "spotify", "name": "Spotify", "version": "1.0.0",
+    "permissions": ["link:provide"], "reasons": {"link:provide": "to share the track"},
+    "provides": {"now-playing": "The track playing right now"},
+}
+CONSUMER = {
+    "id": "np-widget", "name": "Now playing", "version": "1.0.0",
+    "permissions": ["link:consume"], "reasons": {"link:consume": "to draw the track"},
+    "consumes": ["spotify:now-playing"],
+}
+
+
+async def install_pair(engine: Engine) -> None:
+    """Installs a provider and a consumer, both accepted."""
+    for manifest in (PROVIDER, CONSUMER):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
+        await engine.handle(
+            {"cmd": "plugin.update", "id": manifest["id"], "patch": {"granted": manifest["permissions"], "enabled": True}}
+        )
+
+
+async def test_one_plugin_asks_another_and_the_answer_comes_back_to_it() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_pair(engine)
+        await engine.handle(
+            {"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "now-playing", "tag": "np", "body": {"q": 1}}
+        )
+        asked = next(e for e in events if e.get("event") == "call")
+        await engine.handle(
+            {"cmd": "plugin.answer", "id": "spotify", "call_id": asked["call_id"], "channel": "now-playing", "body": {"track": "Blue"}}
+        )
+        answer = next(e for e in events if e.get("event") == "answer")
+
+    assert asked["id"] == "spotify" and asked["from"] == "np-widget" and asked["body"] == {"q": 1}
+    assert answer["id"] == "np-widget" and answer["tag"] == "np" and answer["body"] == {"track": "Blue"}
+    assert plugins.project_event(asked, ["link:provide"]) is not None
+    assert plugins.project_event(answer, ["state:read"]) is None, "an answer reached a plugin without the grant"
+
+
+async def test_a_plugin_reaches_no_channel_it_did_not_declare() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_pair(engine)
+        await engine.handle({"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "library", "req_id": 1})
+        await engine.handle({"cmd": "plugin.call", "id": "spotify", "to": "np-widget", "channel": "now-playing", "req_id": 2})
+
+    refused = [e for e in events if e.get("event") == "error" and e.get("req_id") in (1, 2)]
+    assert len(refused) == 2, "an undeclared channel or a plugin with no link:consume got through"
+    assert not any(e.get("event") == "call" for e in events)
+
+
+async def test_an_answer_to_a_question_nobody_asked_is_refused() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_pair(engine)
+        await engine.handle({"cmd": "plugin.answer", "id": "spotify", "call_id": "made-up", "body": {}, "req_id": 3})
+        await engine.handle(
+            {"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "now-playing", "tag": "np"}
+        )
+        asked = next(e for e in events if e.get("event") == "call")
+        await engine.handle({"cmd": "plugin.answer", "id": "np-widget", "call_id": asked["call_id"], "body": {}, "req_id": 4})
+
+    refused = [e for e in events if e.get("event") == "error" and e.get("req_id") in (3, 4)]
+    assert len(refused) == 2, "a made-up call id or the wrong plugin answered"
+
+
+async def test_a_broadcast_only_reaches_the_plugins_that_asked_for_that_channel() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    bystander = {**CONSUMER, "id": "elsewhere", "name": "Elsewhere", "consumes": ["spotify:library"]}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_pair(engine)
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(bystander)})
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "elsewhere", "patch": {"granted": ["link:consume"], "enabled": True}}
+        )
+        await engine.handle({"cmd": "plugin.publish", "id": "spotify", "channel": "now-playing", "body": {"track": "Blue"}})
+
+    heard = [e for e in events if e.get("event") == "message"]
+    assert [e["id"] for e in heard] == ["np-widget"]
+    assert heard[0]["from"] == "spotify" and heard[0]["body"] == {"track": "Blue"}
+
+
+async def test_a_disabled_provider_answers_nobody() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_pair(engine)
+        await engine.handle({"cmd": "plugin.update", "id": "spotify", "patch": {"enabled": False}})
+        await engine.handle(
+            {"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "now-playing", "req_id": 5}
+        )
+
+    assert any(e.get("event") == "error" and e.get("req_id") == 5 for e in events)
+
+
 async def test_plugin_state_view_carries_no_credentials() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[10.0]) as (engine, _):

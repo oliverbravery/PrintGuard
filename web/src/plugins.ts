@@ -72,6 +72,19 @@ export function outboundSocket(id: string, action: string, request: Record<strin
   };
 }
 
+export function outboundLink(id: string, action: string, request: Record<string, unknown> | undefined): Record<string, unknown> {
+  const fields = request ?? {};
+  return {
+    cmd: `plugin.${action}`,
+    to: String(fields.to ?? ""),
+    channel: String(fields.channel ?? ""),
+    tag: String(fields.tag ?? ""),
+    call_id: String(fields.call_id ?? ""),
+    body: fields.body,
+    id,
+  };
+}
+
 export function runsHere(platforms: string[] | undefined, host: string): boolean {
   return !platforms?.length || platforms.some((name) => host === name || host.startsWith(`${name}-`));
 }

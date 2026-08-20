@@ -43,12 +43,13 @@ SHIM = """
 import * as __io from "qjs:std";
 const __input = JSON.parse(__io.in.readAsString());
 const __effects = [];
-const __hooks = { events: new Map(), route: null, gate: null };
+const __hooks = { events: new Map(), route: null, gate: null, serve: null };
 const __assets = __input.assets || {};
 const plugin = {
   on(name, fn) { __hooks.events.set(String(name), fn); },
   route(fn) { __hooks.route = fn; },
   gate(fn) { __hooks.gate = fn; },
+  serve(fn) { __hooks.serve = fn; },
 };
 const ctx = {
   store: __input.store,
@@ -59,6 +60,8 @@ const ctx = {
   socket(request) { __effects.push({ kind: "socket", action: "open", request }); },
   socketSend(tag, text) { __effects.push({ kind: "socket", action: "send", request: { tag, text: String(text) } }); },
   socketClose(tag) { __effects.push({ kind: "socket", action: "close", request: { tag } }); },
+  call(request) { __effects.push({ kind: "link", action: "call", request }); },
+  publish(request) { __effects.push({ kind: "link", action: "publish", request }); },
   notify(text) { __effects.push({ kind: "notify", text: String(text) }); },
   log(text) { __effects.push({ kind: "log", text: String(text) }); },
 };
@@ -69,8 +72,16 @@ DRIVER = """
 })(plugin);
 let __result = null;
 if (__input.kind === "event" || __input.kind === "tick") {
-  const handler = __hooks.events.get(String(__input.event.event));
-  if (handler) handler(__input.event, ctx);
+  const event = __input.event;
+  if (event.event === "call" && __hooks.serve) {
+    __effects.push({
+      kind: "link",
+      action: "answer",
+      request: { call_id: event.call_id, channel: event.channel, body: __hooks.serve(event, ctx) },
+    });
+  }
+  const handler = __hooks.events.get(String(event.event));
+  if (handler) handler(event, ctx);
 } else if (__input.kind === "request" && __hooks.route) {
   __result = __hooks.route(__input.request, ctx);
 } else if (__input.kind === "gate" && __hooks.gate) {
@@ -301,6 +312,8 @@ class WasmPluginRuntime:
                     await self._request(plugins.outbound_request(plugin.id, effect.get("request")))
                 elif kind == "socket":
                     await self._request(plugins.outbound_socket(plugin.id, str(effect.get("action")), effect.get("request")))
+                elif kind == "link":
+                    await self._request(plugins.outbound_link(plugin.id, str(effect.get("action")), effect.get("request")))
                 elif kind == "notify":
                     if not plugin.may("notify"):
                         raise PermissionError("this plugin was not granted notifications")

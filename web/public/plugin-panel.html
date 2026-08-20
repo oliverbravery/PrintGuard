@@ -65,6 +65,12 @@
           socketClose(tag) {
             push({ kind: "socket", action: "close", request: { tag } });
           },
+          call(request) {
+            push({ kind: "link", action: "call", request });
+          },
+          publish(request) {
+            push({ kind: "link", action: "publish", request });
+          },
           notify(text) {
             push({ kind: "notify", text: String(text) });
           },

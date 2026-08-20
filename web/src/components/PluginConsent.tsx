@@ -23,8 +23,24 @@ export function PermissionList({ plugin, permissions, hubOnly }: { plugin: Plugi
                 ))}
             </ul>
           )}
-          <span className="block text-text-1">{plugin.manifest.reasons[permission.id]}</span>
           {permission.id === "oauth" && <span className="block text-text-2">{plugin.manifest.oauth.label}</span>}
+          {permission.id === "link:provide" && (
+            <ul className="text-text-2">
+              {Object.entries(plugin.manifest.provides).map(([channel, what]) => (
+                <li key={channel}>
+                  {channel}, {what}
+                </li>
+              ))}
+            </ul>
+          )}
+          {permission.channels && (
+            <ul className="text-text-2">
+              {plugin.manifest.consumes.map((link) => (
+                <li key={link}>{link.replace(":", ", the ")} channel</li>
+              ))}
+            </ul>
+          )}
+          <span className="block text-text-1">{plugin.manifest.reasons[permission.id]}</span>
           {permission.hub_only && !hubOnly && <span className="block text-text-2">Only does anything on a hub.</span>}
         </li>
       ))}

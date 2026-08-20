@@ -44,6 +44,7 @@ PLUGIN_RATE_LIMIT = 60
 PLUGIN_RATE_WINDOW_S = 60.0
 PLUGIN_TIMEOUT_S = 10.0
 MAX_PLUGIN_BODY = 256 * 1024
+CALL_TTL_S = 30.0
 SETTINGS_DEFAULTS: dict[str, Any] = {
     "notifiers": {},
     "update_check": True,
@@ -78,6 +79,7 @@ class Engine:
         self.sockets = SocketBroker(platform.open_socket, self.emit)
         self.oauth = oauth.OAuthFlows(platform.http)
         self._plugin_calls: dict[str, list[float]] = {}
+        self._pending_calls: dict[str, tuple[str, str, str, float]] = {}
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
         self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
         self._tasks: list[asyncio.Task[None]] = []
@@ -115,6 +117,9 @@ class Engine:
             "plugin.catalogue": self._cmd_plugin_catalogue,
             "plugin.http": self._cmd_plugin_http,
             "plugin.socket": self._cmd_plugin_socket,
+            "plugin.call": self._cmd_plugin_call,
+            "plugin.answer": self._cmd_plugin_answer,
+            "plugin.publish": self._cmd_plugin_publish,
             "plugin.secrets": self._cmd_plugin_secrets,
             "plugin.oauth": self._cmd_plugin_oauth,
             "plugin.notify": self._cmd_plugin_notify,
@@ -960,6 +965,57 @@ class Engine:
         await self.sockets.act(
             plugin_id, action, str(message.get("tag", "")), str(message.get("url", "")), str(message.get("text", ""))
         )
+
+    def _offering(self, plugin_id: str, channel: str) -> Plugin:
+        """The plugin answering on a channel, if it offers that channel at all.
+
+        Raises:
+            PermissionError: If it is not installed, not running, or offers
+                nothing by that name.
+        """
+        plugin = self.plugins.get(plugin_id)
+        if plugin is None or not plugin.enabled or not plugin.may("link:provide"):
+            raise PermissionError(f"no plugin {plugin_id!r} is answering other plugins")
+        if channel not in plugin.manifest["provides"]:
+            raise PermissionError(f"{plugin_id} does not offer {channel!r}")
+        return plugin
+
+    async def _cmd_plugin_call(self, message: dict[str, Any]) -> None:
+        """Puts one plugin's question to another, and remembers who asked.
+
+        Both ends declared this: the caller named the plugin and channel in its
+        manifest and the user accepted it, and the answering plugin offers that
+        channel. Neither reaches the other on any other footing.
+        """
+        caller = self.plugins.get(message["id"])
+        to, channel = str(message.get("to", "")), str(message.get("channel", ""))
+        if not caller or not caller.may("link:consume") or f"{to}:{channel}" not in caller.manifest["consumes"]:
+            raise PermissionError(f"plugin {message['id']} did not declare {to}:{channel}")
+        self._offering(to, channel)
+        body = plugins.sanitise_config({"body": message.get("body")})["body"]
+        call_id = uuid.uuid4().hex
+        now = time.monotonic()
+        self._pending_calls = {k: v for k, v in self._pending_calls.items() if now - v[3] < CALL_TTL_S}
+        self._pending_calls[call_id] = (caller.id, to, str(message.get("tag", "")), now)
+        self.emit({"event": "call", "id": to, "from": caller.id, "channel": channel, "body": body, "call_id": call_id})
+
+    async def _cmd_plugin_answer(self, message: dict[str, Any]) -> None:
+        """Returns one plugin's answer to the plugin that asked for it."""
+        waiting = self._pending_calls.pop(str(message.get("call_id", "")), None)
+        if waiting is None or waiting[1] != message["id"]:
+            raise PermissionError("no question of that plugin is waiting for an answer")
+        caller, answering, tag, _ = waiting
+        body = plugins.sanitise_config({"body": message.get("body")})["body"]
+        self.emit({"event": "answer", "id": caller, "tag": tag, "from": answering, "channel": str(message.get("channel", "")), "body": body})
+
+    async def _cmd_plugin_publish(self, message: dict[str, Any]) -> None:
+        """Hands one plugin's message to everybody who asked to hear that channel."""
+        channel = str(message.get("channel", ""))
+        publisher = self._offering(str(message["id"]), channel)
+        body = plugins.sanitise_config({"body": message.get("body")})["body"]
+        for plugin in self.plugins.running():
+            if plugin.may("link:consume") and f"{publisher.id}:{channel}" in plugin.manifest["consumes"]:
+                self.emit({"event": "message", "id": plugin.id, "from": publisher.id, "channel": channel, "body": body})
 
     async def _cmd_plugin_secrets(self, message: dict[str, Any]) -> None:
         """Stores the credentials the user typed into a plugin's own form.

@@ -201,6 +201,7 @@ export interface Permission {
   risky?: boolean;
   hub_only?: boolean;
   urls?: boolean;
+  channels?: boolean;
   commands?: string[];
   fields?: Record<string, string[]>;
 }
@@ -218,6 +219,8 @@ export interface PluginManifest {
   platforms: string[];
   urls: string[];
   secrets: Record<string, string>;
+  provides: Record<string, string>;
+  consumes: string[];
   oauth: { authorize_url: string; token_url: string; client_id: string; scopes: string[]; label: string } | Record<string, never>;
   events: string[];
   tick_s: number;
