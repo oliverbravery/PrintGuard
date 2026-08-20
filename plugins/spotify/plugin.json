@@ -3,14 +3,14 @@
   "id": "spotify",
   "name": "Spotify",
   "version": "1.0.0",
-  "description": "Puts the cover of whatever you are playing behind the dashboard, with the track and the transport controls in a panel of their own.",
+  "description": "Puts the current cover behind the dashboard, with the track and the transport in a panel.",
   "author": "oliverbravery",
   "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/spotify",
   "permissions": ["net", "oauth", "background"],
   "reasons": {
     "net": "To ask Spotify what is playing and to fetch the cover.",
-    "oauth": "To sign you in to Spotify with an app of your own, which is the only way it can see your player.",
-    "background": "To put the cover of the current track behind the dashboard."
+    "oauth": "To read your player, which needs a sign-in.",
+    "background": "To put the current cover behind the dashboard."
   },
   "oauth": {
     "label": "Spotify",

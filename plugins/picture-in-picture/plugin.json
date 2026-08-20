@@ -3,7 +3,7 @@
   "id": "picture-in-picture",
   "name": "Picture in picture",
   "version": "1.0.0",
-  "description": "Puts a pop-out button on every monitor that floats its camera above your other windows.",
+  "description": "Puts a button on every monitor that floats its camera above your other windows.",
   "author": "oliverbravery",
   "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/picture-in-picture",
   "permissions": ["state:read", "camera:view"],
