@@ -113,9 +113,9 @@ body {
 }
 
 [data-painted] {
-  --painted-surface: color-mix(in srgb, var(--color-ink-1) 78%, transparent);
-  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 88%, transparent);
-  --painted-muted: color-mix(in srgb, var(--color-text-2) 85%, var(--color-text-1));
+  --painted-surface: color-mix(in srgb, var(--color-ink-1) 88%, transparent);
+  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 94%, transparent);
+  --painted-muted: color-mix(in srgb, var(--color-text-2) 50%, var(--color-text-1));
   isolation: isolate;
 }
 
@@ -123,23 +123,15 @@ body {
   --color-text-2: var(--painted-muted);
 }
 
-[data-painted]::before,
-[data-painted]::after {
+[data-painted]::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
-}
-
-[data-painted]::before {
-  background: var(--color-ink-0);
-}
-
-[data-painted]::after {
   background: var(--painted-image) center / cover no-repeat;
-  filter: blur(24px) saturate(160%);
-  mix-blend-mode: color;
+  filter: blur(6px);
+  transform: scale(1.05);
 }
 
 [data-painted] .panel,
@@ -150,6 +142,13 @@ body {
 [data-painted] header,
 [data-painted] nav {
   background: var(--painted-chrome) !important;
+}
+
+[data-painted] .plate {
+  background: var(--painted-chrome);
+  border-radius: 4px;
+  padding-inline: 0.5rem;
+  margin-inline-start: -0.5rem;
 }
 
 [data-painted] .feed {
@@ -165,7 +164,7 @@ body {
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  [data-painted]::after {
+  [data-painted]::before {
     display: none;
   }
 

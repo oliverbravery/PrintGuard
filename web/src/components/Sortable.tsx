@@ -16,6 +16,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { ReactElement, ReactNode } from "react";
+import { SectionHead } from "./SectionHead";
 
 export { horizontalListSortingStrategy, rectSortingStrategy } from "@dnd-kit/sortable";
 
@@ -85,10 +86,7 @@ export function HiddenTray({
   if (items.length === 0) return null;
   return (
     <div className="mt-6">
-      <div className="mb-2.5 flex items-center gap-3">
-        <h2 className="display text-xs font-semibold tracking-[0.24em] text-text-2">{label}</h2>
-        <div className="hairline flex-1" />
-      </div>
+      <SectionHead title={label} />
       <div className="flex flex-wrap gap-2">
         {items.map((item) => (
           <button key={item.id} className="btn !py-1.5 !px-3 !text-[0.68rem]" onClick={() => onShow(item.id)}>
