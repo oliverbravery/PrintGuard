@@ -1024,14 +1024,16 @@ class Engine:
 
         Values only ever travel inwards: a plugin references them by name and
         PrintGuard fills them in as a request leaves, so neither the plugin nor
-        the dashboard reads one back.
+        the dashboard reads one back. The form carries only what was typed into
+        it, so what it does not name is left as it stands rather than cleared,
+        which is what a field reading "stored, type to replace" promises.
         """
         plugin = self.plugins.get(message["id"])
         if not plugin:
             raise KeyError(f"no plugin {message['id']}")
         given = message.get("secrets") or {}
         kept = plugins.sanitise_secrets(given, list(plugin.manifest["secrets"]))
-        plugin.secrets = {**{name: value for name, value in plugin.secrets.items() if name.startswith("oauth")}, **kept}
+        plugin.secrets = {**plugin.secrets, **kept}
         await self._reload_plugins()
 
     @staticmethod
@@ -1043,7 +1045,7 @@ class Engine:
                 a client id only fails later and less clearly.
         """
         provider = plugin.manifest["oauth"]
-        client_id = plugin.secrets.get(plugins.CLIENT_ID_SECRET, "")
+        client_id = plugin.secrets.get(oauth.CLIENT_ID, "")
         if not client_id:
             raise PermissionError(f"{plugin.id} needs the client id of a {provider['label']} app you registered")
         return {**provider, "client_id": client_id}
@@ -1054,11 +1056,7 @@ class Engine:
         if not plugin or not plugin.may("oauth"):
             raise PermissionError("plugin may not connect an account")
         if str(message.get("action")) == "forget":
-            plugin.secrets = {
-                name: value
-                for name, value in plugin.secrets.items()
-                if not name.startswith("oauth") or name == plugins.CLIENT_ID_SECRET
-            }
+            plugin.secrets = oauth.without_session(plugin.secrets)
             return
         url = self.oauth.start(plugin.id, self._provider(plugin), str(message.get("origin", "")))
         self.emit({"event": "plugin_oauth", "id": plugin.id, "url": url, "req_id": message.get("req_id")})

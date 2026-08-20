@@ -28,7 +28,17 @@ logger = logging.getLogger(__name__)
 ACCESS = "oauth"
 REFRESH = "oauth_refresh"
 EXPIRES = "oauth_expires"
+SESSION = (ACCESS, REFRESH, EXPIRES)
 """The three secrets a sign-in writes. A plugin references the first."""
+
+CLIENT_ID = "oauth_client_id"
+"""Where the client id of the app the user registered is kept.
+
+A plugin never carries one. It travels as a repository, a zip or a catalogue
+entry, so a client id in it would be the same app for everybody who installs it,
+which is what providers hand out quota and terms against. Whoever installs it
+registers their own and types it in, and it is held like any other credential.
+"""
 
 CALLBACK_PATH = "/oauth/callback"
 PENDING_TTL_S = 600.0
@@ -37,6 +47,11 @@ REFRESH_MARGIN_S = 60.0
 
 def _urlsafe(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def without_session(secrets: dict[str, str]) -> dict[str, str]:
+    """The same secrets signed out, keeping the app the user registered."""
+    return {name: value for name, value in secrets.items() if name not in SESSION}
 
 
 @dataclass

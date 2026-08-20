@@ -23,7 +23,7 @@ import zipfile
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import urls
+from . import oauth, urls
 from .adapters import HttpFn
 
 MANIFEST_FILE = "plugin.json"
@@ -45,14 +45,6 @@ SECRET_REFERENCE = re.compile(r"\{\{\s*secret\.([a-z0-9_-]{1,40})\s*\}\}")
 
 The value is substituted as the request leaves PrintGuard, so the reference is
 all the plugin ever holds and all that is ever stored in anything it can read.
-"""
-CLIENT_ID_SECRET = "oauth_client_id"
-"""Where the client id of the app the user registered is kept.
-
-A plugin never carries one. It travels as a repository, a zip or a catalogue
-entry, so a client id in it would be the same app for everybody who installs it,
-which is what providers hand out quota and terms against. Whoever installs it
-registers their own and types it in, and it is held like any other credential.
 """
 CATALOGUE_URL = "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/catalogue.json"
 GITHUB_COMMIT_URL = "https://api.github.com/repos/{repo}/commits/{ref}"
@@ -505,11 +497,11 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         raise ValueError("provides needs the link:provide permission")
     if consumes and "link:consume" not in permissions:
         raise ValueError("consumes needs the link:consume permission")
-    oauth = sanitise_oauth(raw.get("oauth"))
-    if oauth and "oauth" not in permissions:
+    sign_in = sanitise_oauth(raw.get("oauth"))
+    if sign_in and "oauth" not in permissions:
         raise ValueError("oauth needs the oauth permission")
-    if oauth:
-        secrets[CLIENT_ID_SECRET] = f"The client id of the {oauth['label']} app you registered"
+    if sign_in:
+        secrets[oauth.CLIENT_ID] = f"The client id of the {sign_in['label']} app you registered"
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
     platforms = sorted({str(p).strip() for p in raw.get("platforms", [])} & set(PLATFORMS))
     assets = sorted({str(a).strip().lower() for a in raw.get("assets", [])} - {MANIFEST_FILE, *SOURCE_FILES})
@@ -542,7 +534,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "secrets": secrets,
         "provides": provides,
         "consumes": consumes,
-        "oauth": oauth,
+        "oauth": sign_in,
         "events": events,
         "tick_s": min(tick_s, 86400.0) if tick_s >= MIN_TICK_S else 0.0,
     }

@@ -19,7 +19,7 @@ import pytest
 from fakes import FakePlatform
 
 from printguard.engine import engine as engine_module
-from printguard.engine import logs, plugins, reports, vision, watchdog
+from printguard.engine import logs, oauth, plugins, reports, vision, watchdog
 from printguard.engine.engine import EVENT_LOG_LEVELS, Engine
 from printguard.engine.integrations import INTEGRATIONS
 
@@ -1036,7 +1036,7 @@ async def test_a_client_id_comes_from_whoever_installed_it_and_never_the_bundle(
         opened = next(e for e in events if e.get("event") == "plugin_oauth")["url"]
 
     assert "client_id" not in manifest["oauth"], "a client id in the bundle survived the install"
-    assert plugins.CLIENT_ID_SECRET in manifest["secrets"], "nobody was asked for a client id"
+    assert oauth.CLIENT_ID in manifest["secrets"], "nobody was asked for a client id"
     assert len(refused) == 1, "a sign-in started before anyone supplied one"
     assert parse_qs(urlparse(opened).query)["client_id"] == ["mine-1234"]
 
