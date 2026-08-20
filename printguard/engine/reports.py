@@ -89,7 +89,12 @@ def deployment(platform: Platform) -> str:
 
 
 def collect_secrets(engine: "Engine") -> set[str]:
-    """Every configured credential value, for scrubbing freeform report text."""
+    """Every configured credential value, for scrubbing freeform report text.
+
+    A plugin's own secrets are in here too. It never holds one, but PrintGuard
+    substitutes them into requests it makes, so a failure carrying the URL back
+    can put one in a log line.
+    """
     secrets: set[str] = set()
     for printer in engine.printers.values():
         adapter = INTEGRATIONS.get(printer.provider)
@@ -106,6 +111,8 @@ def collect_secrets(engine: "Engine") -> set[str]:
             secrets.add(str(camera.source["access_code"]))
         parts = urlsplit(str(camera.source.get("url") or ""))
         secrets |= {part for part in (parts.username, parts.password) if part}
+    for plugin in engine.plugins.values():
+        secrets |= {value for value in plugin.secrets.values() if value}
     return secrets
 
 

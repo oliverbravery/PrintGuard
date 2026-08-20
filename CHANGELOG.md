@@ -91,6 +91,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Fixed
 
+- `state.json` is written readable only by the account running the hub. It holds printer
+  passwords, notifier keys, API token hashes and whatever credentials plugins have been given,
+  and it was being written with whatever the system's default permissions were, so on a shared
+  host other accounts could read it.
+- A plugin's credentials are scrubbed from bug reports. A plugin never sees one, but PrintGuard
+  puts them into requests it makes on its behalf, so a failure carrying the URL back could have
+  put one in the log a report attaches.
 - A plugin's own pages can no longer pull a live camera stream. Pages a plugin serves run in a
   sandboxed origin, and the stream proxy answered them like any other request, so a plugin
   could have read a feed without ever asking for a camera permission. Those requests are

@@ -149,6 +149,15 @@ ctx.http({ url: "https://api.example.com/v1/me", headers: { Authorization: "Bear
 The reference is all your code ever holds, in the URL, a header or anywhere in a JSON body. A
 plugin gets eight secrets at most.
 
+What that does and does not buy you is worth being straight about. The value is never in the
+sandbox, never in the plugin's own stored data, never in the state this page reads and never
+in a bug report, and it is written to disk in a file only the account running the hub can read.
+What it cannot do is stop a plugin you granted the network from sending a secret somewhere it
+declared: PrintGuard fills the value in as the request leaves, so a plugin can aim one at a
+host of its own as easily as at the real service. The addresses it may reach are in front of
+you before you enable it, the code check reads them against what it actually calls, and a
+listed plugin has been reviewed. That is the control, not the substitution.
+
 For a service with a sign-in rather than a key, declare `oauth` and PrintGuard runs the flow
 itself, with PKCE and no client secret, since a plugin is a public client. The access token
 arrives as `{{secret.oauth}}` and is refreshed before it expires, so your code never handles

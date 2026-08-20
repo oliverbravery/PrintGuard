@@ -1280,6 +1280,19 @@ async def test_a_sign_in_sends_the_user_back_to_the_loopback_address() -> None:
     assert parse_qs(urlparse(opened).query)["redirect_uri"] == ["http://127.0.0.1:8000/oauth/callback"]
 
 
+async def test_a_plugins_secrets_are_scrubbed_from_a_bug_report() -> None:
+    """It never holds one, but PrintGuard puts them in requests it makes."""
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t-key"}})
+        found = reports.collect_secrets(engine)
+        scrubbed = reports.scrub("GET https://api.example.com/?k=s3cr3t-key failed", found)
+
+    assert {"s3cr3t-key", "registered-app"} <= found
+    assert "s3cr3t-key" not in scrubbed
+
+
 async def test_plugin_state_view_carries_no_credentials() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[10.0]) as (engine, _):

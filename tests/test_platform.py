@@ -124,3 +124,14 @@ def test_measured_concurrency_tracks_scaling() -> None:
 
     assert _measure_concurrency(scales)[0] > 1
     assert _measure_concurrency(serialises)[0] == 1
+
+
+def test_the_state_file_is_readable_only_by_whoever_runs_the_hub(tmp_path) -> None:
+    """It holds printer passwords, API token hashes and plugin credentials."""
+    from printguard.server.platform import ServerPlatform
+
+    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
+    ServerPlatform.save_state(holder, {"printers": [{"config": {"password": "hunter2"}}]})
+
+    assert oct((tmp_path / "state.json").stat().st_mode)[-3:] == "600"
+    assert not (tmp_path / "state.tmp").exists(), "the temporary file was left behind"

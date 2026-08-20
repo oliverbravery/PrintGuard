@@ -651,7 +651,14 @@ class ServerPlatform:
             return {}
 
     def save_state(self, state: dict[str, Any]) -> None:
-        """Atomically writes engine state to the data directory."""
+        """Atomically writes engine state to the data directory, owner-readable only.
+
+        It holds printer passwords, notifier keys, API token hashes and whatever
+        credentials plugins have been given, so the mode is set on the temporary
+        file before the rename rather than after: anything else leaves a window
+        where the finished file is readable by everybody on the host.
+        """
         tmp = self._state_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(state, indent=2))
+        tmp.chmod(0o600)
         tmp.replace(self._state_path)
