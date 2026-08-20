@@ -3,6 +3,7 @@ import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { log } from "./log";
 import type { Finding } from "./lint";
+import { PluginPanelHost } from "./panel";
 import { commandAllowed, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
 import { play, playFile } from "./sound";
 import { resumePublishers } from "./stream";
@@ -104,12 +105,14 @@ interface PgStore {
   savedAt: number | null;
   pluginTrees: Record<string, PluginNode | null>;
   pluginFindings: Record<string, Finding[]>;
+  pluginPanels: Record<string, { html: string; assets: Record<string, Blob> }>;
   pluginViews: Record<string, Record<string, PluginNode | null>>;
   pluginAssets: Record<string, Record<string, string>>;
   pluginFailures: Record<string, string>;
   catalogue: CatalogueEntry[] | null;
   pluginAct(id: string, action: string, arg: unknown): void;
   checkPlugin(id: string): void;
+  mountPanel(id: string, frame: HTMLIFrameElement | null): void;
   fetchCatalogue(): void;
   installPlugin(source: Record<string, unknown>, zip?: string): void;
   setCustomising(on: boolean): void;
@@ -207,6 +210,8 @@ export const useStore = create<PgStore>((set, get) => {
   const savedConfigs = new Map<string, string>();
   const writingConfigs = new Map<string, string>();
 
+  const panels = new Map<string, PluginPanelHost>();
+
   const runnableFiles = (plugin: PluginRecord, engine: EngineState): string[] =>
     plugin.files.filter((file) => file === "plugin.js" || (file === "worker.js" && !engine.plugin_host));
 
@@ -277,12 +282,21 @@ export const useStore = create<PgStore>((set, get) => {
       engine.plugins.filter((p) => p.enabled).flatMap((p) => runnableFiles(p, engine).map((file) => `${p.id}:${file}`)),
     );
     dropHosts((key) => !wanted.has(key));
+    for (const [id, panel] of panels) {
+      if (engine.plugins.some((p) => p.id === id && p.enabled)) continue;
+      panel.close();
+      panels.delete(id);
+      set((s) => ({ pluginPanels: Object.fromEntries(Object.entries(s.pluginPanels).filter(([key]) => key !== id)) }));
+    }
     const stale = Object.keys(get().pluginFailures).filter((id) => !engine.plugins.some((p) => p.id === id && p.enabled));
     if (stale.length) {
       set((s) => ({ pluginFailures: Object.fromEntries(Object.entries(s.pluginFailures).filter(([id]) => !stale.includes(id))) }));
     }
     const missing = new Set(
-      [...wanted].filter((key) => !hosts.has(key) && !get().pluginFailures[key.split(":")[0]]).map((key) => key.split(":")[0]),
+      [
+        ...[...wanted].filter((key) => !hosts.has(key)).map((key) => key.split(":")[0]),
+        ...engine.plugins.filter((p) => p.enabled && p.files.includes("panel.html") && !get().pluginPanels[p.id]).map((p) => p.id),
+      ].filter((id) => !get().pluginFailures[id]),
     );
     for (const id of missing) {
       if ([...codeRequests.values()].includes(id)) continue;
@@ -297,17 +311,22 @@ export const useStore = create<PgStore>((set, get) => {
       if (moved) savedConfigs.set(plugin.id, landed);
       void host.update(pluginState(plugin), pluginTargets(plugin), moved ? plugin.config : undefined);
     }
+    for (const [id, panel] of panels) {
+      const plugin = engine.plugins.find((p) => p.id === id);
+      if (plugin) panel.update(pluginState(plugin));
+    }
   };
 
   const forwardToPlugin = (id: string, event: Record<string, unknown>) => {
     const engine = get().engine;
     const plugin = engine?.plugins.find((p) => p.id === id);
     if (!engine || !plugin) return;
-    const seen = projectEvent(event, engine.plugin_events, plugin.granted, engine.plugin_permissions);
+    const seen = projectEvent(event, engine.plugin_events, plugin.granted, engine.plugin_permissions, engine.plugin_event_permissions);
     if (!seen) return;
     for (const [key, host] of hosts) {
       if (key.startsWith(`${id}:`)) void host.event(seen, pluginState(plugin));
     }
+    panels.get(id)?.event(seen);
   };
 
   const readPlugin = async (id: string, sources: Record<string, string>) => {
@@ -340,6 +359,15 @@ export const useStore = create<PgStore>((set, get) => {
       const { [id]: _dropped, ...rest } = s.pluginFailures;
       return { pluginFailures: rest };
     });
+    if (sources["panel.html"]) {
+      const blobs = Object.fromEntries(
+        Object.entries(assets).map(([name, data]) => [
+          name,
+          new Blob([Uint8Array.from(atob(data), (char) => char.charCodeAt(0))], { type: types[name.split(".").pop() ?? ""] ?? "" }),
+        ]),
+      );
+      set((s) => ({ pluginPanels: { ...s.pluginPanels, [id]: { html: sources["panel.html"], assets: blobs } } }));
+    }
     for (const file of runnableFiles(plugin, engine)) {
       const key = `${id}:${file}`;
       if (hosts.has(key) || !sources[file]) continue;
@@ -549,6 +577,7 @@ export const useStore = create<PgStore>((set, get) => {
     pluginTrees: {},
     pluginViews: {},
     pluginFindings: {},
+    pluginPanels: {},
     pluginAssets: {},
     pluginFailures: {},
     catalogue: null,
@@ -566,6 +595,16 @@ export const useStore = create<PgStore>((set, get) => {
 
     installPlugin(source, zip) {
       get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}) });
+    },
+
+    mountPanel(id, frame) {
+      panels.get(id)?.close();
+      panels.delete(id);
+      const engine = get().engine;
+      const plugin = engine?.plugins.find((p) => p.id === id);
+      const source = get().pluginPanels[id];
+      if (!frame || !engine || !plugin || !source) return;
+      panels.set(id, new PluginPanelHost(plugin, frame, source.html, source.assets, pluginState(plugin), handlers));
     },
 
     checkPlugin(id) {

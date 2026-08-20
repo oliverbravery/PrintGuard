@@ -275,7 +275,7 @@
       "description": "Files it ships beside its code, each named here and sitting next to plugin.js.",
       "items": {
         "type": "string",
-        "pattern": "^[a-z0-9][a-z0-9._-]{0,39}\\.(csv|gif|jpeg|jpg|json|mp3|ogg|png|txt|wav|webp)$"
+        "pattern": "^[a-z0-9][a-z0-9._-]{0,39}\\.(csv|gif|jpeg|jpg|json|mp3|mp4|ogg|png|txt|wav|webm|webp)$"
       }
     },
     "urls": {

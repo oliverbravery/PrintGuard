@@ -37,10 +37,12 @@ export function projectEvent(
   events: Record<string, string[]>,
   granted: string[],
   permissions: Permission[],
+  eventPermissions: Record<string, string> = {},
 ): Record<string, unknown> | null {
   const name = String(event.event ?? "");
   const fields = events[name];
-  if (!fields) return null;
+  const needed = eventPermissions[name];
+  if (!fields || (needed !== undefined && !granted.includes(needed))) return null;
   if (name === "state") return { event: name, ...projectState(event as unknown as EngineState, granted, permissions) };
   return { event: name, ...Object.fromEntries(fields.filter((field) => field in event).map((field) => [field, event[field]])) };
 }

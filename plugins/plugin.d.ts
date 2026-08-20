@@ -231,6 +231,26 @@ declare global {
 
   /** Registers your plugin. In scope in `plugin.js` and `worker.js`, with nothing else beside it. */
   const plugin: PluginApi;
+
+  /**
+   * What a `panel.html` reaches. It draws itself, so there are no nodes here,
+   * but everything else is the `ctx` the node tree gets and is checked against
+   * the same permissions.
+   */
+  interface PluginPanel extends Omit<PluginContext, "target" | "surface" | "assets"> {
+    /** The dashboard's theme, the same custom properties it sets on its own `:root`. */
+    theme: Record<string, string>;
+    /** Called once the panel is drawn, then on every state change and every event you named. */
+    on<K extends keyof PluginEvents | "ready" | "state">(
+      event: K,
+      handler: (event: K extends keyof PluginEvents ? PluginEvents[K] : PluginState) => void,
+    ): void;
+    /** A URL for a file you shipped, good inside this panel and nowhere else. Point an `img` or a `video` at it. */
+    asset(name: string): string;
+  }
+
+  /** Draws your own panel. In scope in `panel.html`, with no network and no reach into the page around it. */
+  const pg: PluginPanel;
 }
 
 export {};

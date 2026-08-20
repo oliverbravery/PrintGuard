@@ -7,7 +7,7 @@ export function section(layout: Layout | undefined, key: keyof Layout): LayoutSe
 }
 
 export function currentLayout(layout: Layout | undefined): Layout {
-  return { monitors: section(layout, "monitors"), cameras: section(layout, "cameras") };
+  return { monitors: section(layout, "monitors"), cameras: section(layout, "cameras"), plugins: section(layout, "plugins") };
 }
 
 export function applyLayout<T extends { id: string }>(

@@ -258,6 +258,7 @@ class Engine:
             "plugins": [p.public() for p in self.plugins.values()],
             "plugin_permissions": plugins.permissions_meta(),
             "plugin_events": plugins.EVENTS,
+            "plugin_event_permissions": plugins.EVENT_PERMISSIONS,
             "plugin_platforms": plugins.PLATFORMS,
             "plugin_assets": plugins.ASSET_TYPES,
             "plugin_host": self.platform.plugin_runtime is not None,

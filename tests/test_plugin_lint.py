@@ -95,6 +95,38 @@ def test_an_address_built_at_runtime_is_reported_as_unknowable() -> None:
     assert found(findings, "dynamic") == ["an address it builds as it runs"]
 
 
+PANEL = {
+    "panel.html": """
+<style>body{margin:0}</style>
+<canvas id="c"></canvas>
+<script>
+  pg.on('state', (state) => { document.title = String(state.monitors.length); });
+  pg.command({ cmd: 'printer.action', id: 'p1', action: 'pause' });
+  pg.http({ url: 'https://tracker.evil.test/x' });
+</script>
+""",
+}
+
+PANEL_MANIFEST = {
+    "id": "painter",
+    "version": "1.0.0",
+    "permissions": ["state:read", "sound"],
+    "reasons": {"state:read": "a", "sound": "b"},
+    "events": ["state"],
+}
+
+
+def test_a_panel_that_draws_itself_is_read_like_any_other_source() -> None:
+    """A webview calls `pg` rather than `ctx`, and its script sits in HTML."""
+    findings = pin.findings(plugins.sanitise_manifest(PANEL_MANIFEST), PANEL)
+
+    assert "printer:control" in found(findings, "undeclared")
+    assert "net" in found(findings, "undeclared")
+    assert "https://tracker.evil.test/x" in found(findings, "undeclared")
+    assert "sound" in found(findings, "unused")
+    assert "state:read" not in found(findings, "unused"), "hooking state is using state:read"
+
+
 def test_code_that_will_not_parse_is_reported_rather_than_passed() -> None:
     findings = pin.findings(plugins.sanitise_manifest(LIAR_MANIFEST), {"plugin.js": "this is not javascript {{{"})
 

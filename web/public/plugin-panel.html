@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <title>PrintGuard plugin panel</title>
+    <script>
+      (function () {
+        "use strict";
+
+        for (const name of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches"]) {
+          try {
+            delete window[name];
+          } catch {
+            /* frozen on some engines; the policy above is what actually closes these */
+          }
+        }
+
+        const listeners = new Map();
+        const assets = new Map();
+        let effects = [];
+        let store = {};
+        let painted = false;
+
+        const flush = () => {
+          if (effects.length) parent.postMessage({ t: "effects", effects: effects.splice(0) }, "*");
+        };
+
+        const push = (effect) => {
+          effects.push(effect);
+          queueMicrotask(flush);
+        };
+
+        const pg = {
+          state: {},
+          theme: {},
+          get store() {
+            return store;
+          },
+          set store(value) {
+            store = value;
+            parent.postMessage({ t: "store", store }, "*");
+          },
+          on(name, handler) {
+            listeners.set(String(name), handler);
+          },
+          asset(name) {
+            return assets.get(String(name)) ?? "";
+          },
+          command(cmd) {
+            push({ kind: "command", cmd });
+          },
+          http(request) {
+            push({ kind: "http", request });
+          },
+          socket(request) {
+            push({ kind: "socket", action: "open", request });
+          },
+          socketSend(tag, text) {
+            push({ kind: "socket", action: "send", request: { tag, text: String(text) } });
+          },
+          socketClose(tag) {
+            push({ kind: "socket", action: "close", request: { tag } });
+          },
+          notify(text) {
+            push({ kind: "notify", text: String(text) });
+          },
+          sound(sound) {
+            push(typeof sound === "string" ? { kind: "sound", asset: sound } : { kind: "sound", tones: Array.isArray(sound) ? sound : [sound] });
+          },
+          log(text) {
+            push({ kind: "log", text: String(text) });
+          },
+        };
+        window.pg = pg;
+
+        function paint(html) {
+          const parsed = new DOMParser().parseFromString(html, "text/html");
+          for (const style of parsed.head.querySelectorAll("style, link")) document.head.appendChild(style);
+          for (const node of [...parsed.body.childNodes]) {
+            if (node.nodeName !== "SCRIPT") {
+              document.body.appendChild(node);
+              continue;
+            }
+            const script = document.createElement("script");
+            script.textContent = node.textContent;
+            document.body.appendChild(script);
+          }
+        }
+
+        function applyTheme(tokens) {
+          pg.theme = tokens;
+          const style = document.createElement("style");
+          const vars = Object.entries(tokens).map(([k, v]) => `${k}:${v}`).join(";");
+          style.textContent = `:root{${vars};color-scheme:${tokens["color-scheme"] || "dark"}}html,body{background:transparent;margin:0}`;
+          document.head.insertBefore(style, document.head.firstChild);
+        }
+
+        function reportHeight() {
+          let last = 0;
+          new ResizeObserver(() => {
+            const height = Math.ceil(document.documentElement.scrollHeight);
+            if (height === last) return;
+            last = height;
+            parent.postMessage({ t: "size", height }, "*");
+          }).observe(document.documentElement);
+        }
+
+        addEventListener("message", (message) => {
+          if (message.source !== parent) return;
+          const data = message.data || {};
+          try {
+            if (data.t === "hello") {
+              parent.postMessage({ t: "booted" }, "*");
+            } else if (data.t === "init") {
+              store = data.store || {};
+              pg.state = data.state || {};
+              if (painted) return listeners.get("state")?.(pg.state);
+              painted = true;
+              for (const [name, blob] of Object.entries(data.assets || {})) assets.set(name, URL.createObjectURL(blob));
+              applyTheme(data.theme || {});
+              paint(String(data.html || ""));
+              reportHeight();
+              listeners.get("ready")?.(pg.state);
+            } else if (data.t === "state") {
+              pg.state = data.state || {};
+              if (data.store) store = data.store;
+              listeners.get("state")?.(pg.state);
+            } else if (data.t === "event") {
+              listeners.get(String(data.event.event))?.(data.event);
+            }
+          } catch (err) {
+            parent.postMessage({ t: "failed", message: String((err && err.message) || err) }, "*");
+          }
+        });
+
+        parent.postMessage({ t: "booted" }, "*");
+      })();
+    </script>
+  </head>
+  <body>
+    <!--
+      Draws one plugin's own panel inside an opaque origin. The plugin writes
+      whatever HTML, CSS and JavaScript it likes and PrintGuard renders none of
+      it, so the policy above is what holds it: it may paint and script itself,
+      it may show the pictures and video it shipped, and it can reach nothing.
+
+      There is no network of its own here, so `pg` is the only way out and every
+      call on it is checked against the granted permissions on the other side.
+      That is the same `ctx` a node-tree plugin gets, over a different pipe.
+
+      Assets arrive as blobs rather than as base64 or a URL: a blob made here
+      belongs to this origin, so the plugin can point an <img> or a <video> at
+      one, and nothing outside can follow it.
+
+      The panel is as tall as it draws itself, which it reports back rather than
+      being given, and its background is transparent so it sits on the panel the
+      dashboard drew around it.
+
+      The document paints once. PrintGuard re-attaches whenever the panel is
+      redrawn, and a second paint would run the plugin's scripts again on top of
+      the first, so a later init is taken as fresh state instead.
+    -->
+  </body>
+</html>

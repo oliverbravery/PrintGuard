@@ -732,12 +732,16 @@ MANIFEST = {
 PLUGIN_JS = "plugin.render = (state) => ({ type: 'text', value: state.monitors.length + ' monitors' });"
 
 
-def plugin_zip(manifest: dict | None = None, code: str = PLUGIN_JS, files: dict[str, bytes] | None = None) -> str:
+def plugin_zip(
+    manifest: dict | None = None, code: str = PLUGIN_JS, files: dict[str, bytes] | None = None, panel: str | None = None
+) -> str:
     """Packs a plugin bundle the way an imported file arrives."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("plugin.json", json.dumps(manifest if manifest is not None else MANIFEST))
         archive.writestr("plugin.js", code)
+        if panel is not None:
+            archive.writestr("panel.html", panel)
         for name, data in (files or {}).items():
             archive.writestr(name, data)
     return base64.b64encode(buffer.getvalue()).decode()
@@ -1081,6 +1085,47 @@ async def test_risk_history_reaches_a_plugin_without_a_store_of_its_own() -> Non
     assert seen is not None and seen["monitor_id"] == monitor_id
     assert set(seen) == {"event", "monitor_id", "now", "buckets", "alerts", "stats"}
     assert "snaps" not in seen, "the snapshot index rode along to a plugin"
+
+
+async def test_an_event_carrying_something_a_permission_covers_reaches_nobody_else() -> None:
+    """A plugin naming an event cannot wait for another to ask and read the answer."""
+    still = {"event": "frame", "camera_id": "c1", "jpeg": "abc"}
+    history = {"event": "history", "monitor_id": "m1", "now": 1.0, "buckets": [], "alerts": [], "stats": {}}
+
+    assert plugins.project_event(still, ["camera:frames"]) is not None
+    assert plugins.project_event(still, ["state:read"]) is None
+    assert plugins.project_event(history, ["history:read"]) is not None
+    assert plugins.project_event(history, []) is None
+    assert plugins.project_event({"event": "alert", "monitor_id": "m1"}, []) is not None
+
+
+async def test_a_plugin_draws_its_own_panel_and_ships_the_media_for_it() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "id": "painter", "assets": ["loop.mp4"], "surfaces": ["panel"]}
+    files = {"loop.mp4": b"\x00\x00\x00\x20ftypisom" + b"\x00" * 64}
+    panel = "<style>body{margin:0}</style><video autoplay muted loop></video><script>pg.log('up')</script>"
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle(
+            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest, files=files, panel=panel)}
+        )
+        plugin = engine.plugins.get("painter")
+
+    assert plugin.sources["panel.html"] == panel
+    assert plugin.digests["panel.html"] == hashlib.sha256(panel.encode()).hexdigest()
+    assert plugin.digests["loop.mp4"] == hashlib.sha256(files["loop.mp4"]).hexdigest()
+    assert "loop.mp4" not in plugins.text_assets(plugin.assets), "a video reached the sandbox as text"
+
+
+async def test_a_file_claiming_to_be_video_but_is_not_never_installs() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "assets": ["loop.mp4"]}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle(
+            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest, files={"loop.mp4": b"<script>"})}
+        )
+
+    assert engine.plugins.get("demo") is None
+    assert any("not really video/mp4" in str(e.get("message")) for e in events if e.get("event") == "error")
 
 
 async def test_plugin_state_view_carries_no_credentials() -> None:

@@ -66,6 +66,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   deleting one. Risk history comes from the same rollups the detailed monitor page draws, so a
   plugin watching a trend keeps no copy of its own.
 
+- A plugin can draw its own panel. Ship a `panel.html` and you write the markup, styles and
+  scripts yourself instead of returning nodes, so charts, layouts and animation are yours to
+  make. It gets the dashboard's colours and fonts to match, sizes itself to what it draws, and
+  still reaches nothing but the same internal API a node-tree plugin does. Plugins can ship
+  video now, and far larger pictures, at 4 MB a file and 12 MB in total. Plugin panels join the
+  dashboard's layout, so they drag, pin and hide alongside your monitors.
+
 ### Fixed
 
 - A plugin's own pages can no longer pull a live camera stream. Pages a plugin serves run in a

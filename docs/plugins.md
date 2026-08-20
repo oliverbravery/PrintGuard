@@ -71,6 +71,7 @@ permissions first.
 | Half | Runs in | On a hub | In local mode |
 |---|---|---|---|
 | `plugin.js` | An iframe with an opaque origin and `default-src 'none'` | ✅ | ✅ |
+| `panel.html` | The same, with your own markup, styles and scripts allowed | ✅ | ✅ |
 | `worker.js` | [QuickJS](https://github.com/quickjs-ng/quickjs) compiled to WebAssembly, under wasmtime | ✅ | The browser sandbox, headless |
 
 Only the hub can serve a plugin's own routes or let one gate requests, since local mode has no
@@ -173,7 +174,8 @@ the quickest start is to copy the one closest to what you want.
 ```
 my-plugin/
   plugin.json     the manifest
-  plugin.js       draws a panel                (optional)
+  plugin.js       draws a panel from nodes     (optional)
+  panel.html      draws its own panel instead  (optional)
   worker.js       runs in the background       (optional)
   alarm.mp3       anything it ships            (optional)
 ```
@@ -240,7 +242,9 @@ so a plugin brings its own sounds and images rather than asking PrintGuard for t
 | Audio | `mp3`, `ogg`, `wav`, played by `ctx.sound("alarm.mp3")` |
 | Text | `json`, `csv`, `txt`, read from `ctx.assets` as a string |
 
-An asset is 256 KB at most and a plugin ships 1 MB in total. The type comes from the
+| Video | `mp4`, `webm`, played by a `panel.html` |
+
+An asset is 4 MB at most and a plugin ships 12 MB in total. The type comes from the
 extension and the file has to start like the format it claims, so a script renamed to `.png`
 is refused at install. SVG is not on the list, since an SVG is markup and would run as the
 dashboard's own. Images and audio never enter the sandbox: it names one and PrintGuard draws
@@ -380,6 +384,40 @@ plugin.render((ctx) => {
 Each tone runs after the one before it unless it says `together`, which starts it alongside
 instead, and `shape` picks `sine`, `square`, `sawtooth` or `triangle`. Four seconds is the
 most PrintGuard will play in one go.
+
+## Drawing it yourself
+
+A node tree looks like the rest of the dashboard, which is what most plugins want. Ship a
+`panel.html` instead and you draw the panel, with your own markup, styles and scripts.
+
+```html
+<style>
+  .risk { font-family: var(--font-display); color: var(--color-accent); font-size: 32px; }
+</style>
+<p class="risk" id="worst">0</p>
+<video id="loop" autoplay muted loop></video>
+<script>
+  document.getElementById("loop").src = pg.asset("loop.mp4");
+  pg.on("state", (state) => {
+    const scores = (state.monitors || []).map((m) => (m.result ? m.result.score : 0));
+    document.getElementById("worst").textContent = Math.max(0, ...scores).toFixed(2);
+  });
+</script>
+```
+
+It runs in an opaque origin with `connect-src 'none'`, so `pg` is the only way out and every
+call on it is the `ctx` above under another name, checked against the same permissions.
+`pg.on("ready")` fires once the panel is drawn, `pg.on("state")` on every change, and any
+event your manifest names arrives the same way.
+
+The dashboard's colours and fonts come through as the custom properties it uses itself, so
+`var(--color-accent)` is the accent the user picked and `pg.theme` is the lot. The background
+is transparent and the panel is as tall as it draws itself, up to 900px.
+
+`pg.asset(name)` gives a URL for a file you shipped, good inside your panel and nowhere else,
+which is how a picture or a video gets on screen.
+
+A panel joins the dashboard's layout, so it drags, pins and hides alongside the monitors.
 
 ## The worker half
 

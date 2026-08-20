@@ -27,11 +27,11 @@ from . import urls
 from .adapters import HttpFn
 
 MANIFEST_FILE = "plugin.json"
-SOURCE_FILES = ("plugin.js", "worker.js")
-MAX_ASSET_BYTES = 256 * 1024
-MAX_ASSETS_BYTES = 1024 * 1024
+SOURCE_FILES = ("plugin.js", "worker.js", "panel.html")
+MAX_ASSET_BYTES = 4 * 1024 * 1024
+MAX_ASSETS_BYTES = 12 * 1024 * 1024
 SURFACES = ("panel", "monitor", "settings")
-MAX_SOURCE_BYTES = 64 * 1024
+MAX_SOURCE_BYTES = 256 * 1024
 MAX_CONFIG_BYTES = 16 * 1024
 MIN_TICK_S = 5.0
 MAX_SECRETS = 8
@@ -185,6 +185,8 @@ ASSET_TYPES: dict[str, str] = {
     "mp3": "audio/mpeg",
     "ogg": "audio/ogg",
     "wav": "audio/wav",
+    "mp4": "video/mp4",
+    "webm": "video/webm",
     "json": "application/json",
     "csv": "text/csv",
     "txt": "text/plain",
@@ -205,6 +207,8 @@ ASSET_MAGIC: dict[str, tuple[bytes, ...]] = {
     "audio/mpeg": (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"),
     "audio/ogg": (b"OggS",),
     "audio/wav": (b"RIFF",),
+    "video/mp4": (b"ftyp",),
+    "video/webm": (b"\x1a\x45\xdf\xa3",),
 }
 """How each binary type starts, so a file has to be what its name says it is."""
 
@@ -235,6 +239,15 @@ EVENTS: dict[str, list[str]] = {
     "error": ["message"],
     "state": [],
 }
+EVENT_PERMISSIONS: dict[str, str] = {"state": "state:read", "frame": "camera:frames", "history": "history:read"}
+"""Events carrying something a permission covers, and which one that is.
+
+An event is broadcast to every plugin that named it, so one carrying a camera
+still or a monitor's history has to be held to the same grant the command that
+asked for it needed. Without this a plugin could name the event, wait for
+somebody else to ask, and read the answer.
+"""
+
 """The events a plugin may hook, and the fields each one hands it.
 
 Engine events carry far more than a plugin's grants allow, a printer's
@@ -335,13 +348,15 @@ def project_event(event: dict[str, Any], granted: list[str]) -> dict[str, Any] |
 
     Returns:
         The event carrying only the fields ``EVENTS`` lists for it, or None
-        for one no plugin may hook. A state event comes back as the projection
-        the grants allow, so a plugin watching it reads what it gets on
-        ``ctx.state`` rather than the whole snapshot.
+        for one no plugin may hook and for one this plugin has not been granted.
+        A state event comes back as the projection the grants allow, so a plugin
+        watching it reads what it gets on ``ctx.state`` rather than the whole
+        snapshot.
     """
     name = str(event.get("event", ""))
     fields = EVENTS.get(name)
-    if fields is None:
+    needed = EVENT_PERMISSIONS.get(name)
+    if fields is None or (needed is not None and needed not in granted):
         return None
     if name == "state":
         return {"event": name, **project_state(event, granted)}
@@ -376,7 +391,7 @@ def sanitise_assets(raw: dict[str, bytes]) -> dict[str, str]:
         if len(data) > MAX_ASSET_BYTES or total > MAX_ASSETS_BYTES:
             raise ValueError(f"{name} takes the plugin past {MAX_ASSETS_BYTES // 1024} KB of files")
         starts = ASSET_MAGIC.get(media)
-        if starts and not data.startswith(starts):
+        if starts and not (data.startswith(starts) or (media == "video/mp4" and data[4:8] == b"ftyp")):
             raise ValueError(f"{name} is not really {media}")
         if not starts:
             try:

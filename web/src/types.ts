@@ -191,6 +191,7 @@ export interface LayoutSection {
 export interface Layout {
   monitors: LayoutSection;
   cameras: LayoutSection;
+  plugins: LayoutSection;
 }
 
 export interface Permission {
@@ -335,6 +336,7 @@ export interface EngineState {
   plugins: PluginRecord[];
   plugin_permissions: Permission[];
   plugin_events: Record<string, string[]>;
+  plugin_event_permissions: Record<string, string>;
   plugin_platforms: Record<string, string>;
   plugin_assets: Record<string, string>;
   plugin_host: boolean;

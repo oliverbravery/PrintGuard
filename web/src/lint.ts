@@ -18,6 +18,7 @@ const CTX_PERMISSIONS: Record<string, string> = { notify: "notify", sound: "soun
 const PLUGIN_PERMISSIONS: Record<string, string> = { route: "routes", gate: "gate" };
 const NETWORK_CALLS = ["http", "socket"];
 const STATE_COLLECTIONS = ["monitors", "cameras", "printers"];
+const EVENT_PERMISSIONS: Record<string, string> = { state: "state:read", frame: "camera:frames", history: "history:read" };
 const SECRET_REFERENCE = /\{\{\s*secret\.([a-z0-9_-]{1,40})\s*\}\}/g;
 
 function literalField(node: any, field: string): string | null {
@@ -32,7 +33,11 @@ function literalField(node: any, field: string): string | null {
   return null;
 }
 
-function callsIn(code: string, commands: Record<string, string>): { calls: Call[]; secrets: string[]; failed: string | null } {
+function scriptsIn(html: string): string {
+  return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((found) => found[1]).join("\n;\n");
+}
+
+function callsIn(code: string, commands: Record<string, string>, owners: string[]): { calls: Call[]; secrets: string[]; failed: string | null } {
   const calls: Call[] = [];
   const secrets: string[] = [];
   let tree: any;
@@ -53,7 +58,7 @@ function callsIn(code: string, commands: Record<string, string>): { calls: Call[
     },
     MemberExpression(node: any) {
       const inner = node.object;
-      if (inner?.type === "MemberExpression" && inner.object?.name === "ctx" && inner.property?.name === "state") {
+      if (inner?.type === "MemberExpression" && owners.includes(inner.object?.name) && inner.property?.name === "state") {
         if (STATE_COLLECTIONS.includes(node.property?.name)) calls.push({ permission: "state:read", url: null, dynamic: null });
       }
     },
@@ -65,7 +70,13 @@ function callsIn(code: string, commands: Record<string, string>): { calls: Call[
       if (owner === "plugin" && PLUGIN_PERMISSIONS[method]) {
         calls.push({ permission: PLUGIN_PERMISSIONS[method], url: null, dynamic: null });
       }
-      if (owner !== "ctx") return;
+      if (owner === "plugin" || owners.includes(owner)) {
+        if (method === "on" && node.arguments?.[0]?.type === "Literal") {
+          const implied = EVENT_PERMISSIONS[String(node.arguments[0].value)];
+          if (implied) calls.push({ permission: implied, url: null, dynamic: null });
+        }
+      }
+      if (!owners.includes(owner)) return;
       if (CTX_PERMISSIONS[method]) calls.push({ permission: CTX_PERMISSIONS[method], url: null, dynamic: null });
       if (method === "command") {
         const named = literalField(node, "cmd");
@@ -90,7 +101,8 @@ export function lint(manifest: PluginManifest, sources: Record<string, string>, 
   const secrets: string[] = [];
 
   for (const [name, code] of Object.entries(sources)) {
-    const read = callsIn(code, commands);
+    const panel = name.endsWith(".html");
+    const read = callsIn(panel ? scriptsIn(code) : code, commands, panel ? ["pg"] : ["ctx"]);
     if (read.failed) findings.push({ kind: "dynamic", what: `${name} could not be read, ${read.failed}` });
     calls.push(...read.calls);
     secrets.push(...read.secrets);
@@ -99,6 +111,9 @@ export function lint(manifest: PluginManifest, sources: Record<string, string>, 
   const wanted = new Set(calls.map((call) => call.permission).filter(Boolean) as string[]);
   const declared = new Set(manifest.permissions);
   const local = manifest.urls.some((url) => url.includes("://*") || url.includes("://localhost") || url.includes("://127."));
+  for (const event of manifest.events) {
+    if (EVENT_PERMISSIONS[event]) wanted.add(EVENT_PERMISSIONS[event]);
+  }
 
   for (const permission of wanted) {
     if (!declared.has(permission)) findings.push({ kind: "undeclared", what: permission });
