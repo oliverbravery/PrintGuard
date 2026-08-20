@@ -358,18 +358,31 @@ test("a plugin takes input and shows the files it shipped", async ({ page }) => 
   await expect(panel.getByAltText("Logo")).toHaveJSProperty("naturalWidth", 1);
 });
 
-test("a plugin panel rearranges like a monitor does", async ({ page }) => {
+test("a plugin panel rearranges with the monitors", async ({ page }) => {
   await dashboardWithPlugin(page, PIP);
   await page.evaluate(() => (window as any).__pg.setState({ customising: true }));
 
   const panel = page.locator("section", { hasText: "Picture in picture" });
-  const handle = panel.getByRole("button", { name: "Drag Picture in picture to reorder" });
-  await expect(handle).toHaveAttribute("aria-roledescription", "sortable");
-
   await panel.getByRole("button", { name: "Hide Picture in picture" }).click();
-
   await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Picture in picture · show" })).toBeVisible();
+  await page.getByRole("button", { name: "Picture in picture · show" }).click();
+
+  const grid = page.locator("main .grid").first();
+  const tiles = () => grid.locator("> *").evaluateAll((all) => all.map((tile) => tile.textContent?.slice(0, 8)));
+  const before = await tiles();
+  const handle = page.getByRole("button", { name: "Drag Picture in picture to reorder" });
+  const from = (await handle.boundingBox())!;
+  const target = (await grid.locator("> *").first().boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  for (let step = 1; step <= 12; step++) {
+    await page.mouse.move(from.x - ((from.x - target.x - 40) * step) / 12, from.y + from.height / 2, { steps: 2 });
+  }
+  await page.mouse.up();
+
+  await expect.poll(tiles).not.toEqual(before);
+  const saved = await page.evaluate(() => (window as any).__sent.filter((c: any) => c.patch?.layout).pop());
+  expect(saved.patch.layout.monitors.order).toContain("pip");
 });
 
 

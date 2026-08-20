@@ -191,7 +191,6 @@ export interface LayoutSection {
 export interface Layout {
   monitors: LayoutSection;
   cameras: LayoutSection;
-  plugins: LayoutSection;
 }
 
 export interface Permission {

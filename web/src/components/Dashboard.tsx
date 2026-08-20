@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { applyLayout, section, withOrder } from "../layout";
+import { applyLayout, section, tiles, withOrder } from "../layout";
 import { useStore } from "../store";
 import { CameraRail } from "./CameraRail";
 import { CamerasDialog } from "./CamerasDialog";
@@ -11,7 +11,7 @@ import { GuideDialog } from "./GuideDialog";
 import { Header, MobileActionBar } from "./Header";
 import { MonitorDialog } from "./MonitorDialog";
 import { MonitorTile } from "./MonitorTile";
-import { PluginSection } from "./PluginPanel";
+import { PluginPanel } from "./PluginPanel";
 import { PrintersDialog } from "./PrintersDialog";
 import { ReportDialog } from "./ReportDialog";
 import { SettingsDialog } from "./SettingsDialog";
@@ -64,7 +64,7 @@ function Toasts() {
 export function Dashboard() {
   const { engine, dialog, detailId, statsMonitorId, customising, mutateLayout, background } = useStore();
   const monitors = engine?.monitors ?? [];
-  const { visible } = applyLayout(monitors, section(engine?.settings.layout, "monitors"));
+  const { visible } = applyLayout(tiles(engine), section(engine?.settings.layout, "monitors"));
   const detail = monitors.find((m) => m.id === detailId);
   const stats = monitors.find((m) => m.id === statsMonitorId);
   return (
@@ -94,13 +94,16 @@ export function Dashboard() {
             onReorder={(ids) => mutateLayout("monitors", (s) => withOrder(s, ids))}
           >
             <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr))]">
-              {visible.map((monitor, index) => (
-                <MonitorTile key={monitor.id} monitor={monitor} index={index} />
-              ))}
+              {visible.map((tile, index) =>
+                tile.monitor ? (
+                  <MonitorTile key={tile.id} monitor={tile.monitor} index={index} />
+                ) : (
+                  <PluginPanel key={tile.id} plugin={tile.plugin!} />
+                ),
+              )}
             </div>
           </Sortable>
         )}
-        <PluginSection />
       </main>
       {dialog === "cameras" && <CamerasDialog />}
       {dialog === "printers" && <PrintersDialog />}

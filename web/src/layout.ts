@@ -1,4 +1,4 @@
-import type { Layout, LayoutSection } from "./types";
+import type { EngineState, Layout, LayoutSection, Monitor, PluginRecord } from "./types";
 
 const EMPTY: LayoutSection = { order: [], pinned: [], hidden: [] };
 
@@ -7,7 +7,24 @@ export function section(layout: Layout | undefined, key: keyof Layout): LayoutSe
 }
 
 export function currentLayout(layout: Layout | undefined): Layout {
-  return { monitors: section(layout, "monitors"), cameras: section(layout, "cameras"), plugins: section(layout, "plugins") };
+  return { monitors: section(layout, "monitors"), cameras: section(layout, "cameras") };
+}
+
+export interface Tile {
+  id: string;
+  name: string;
+  monitor?: Monitor;
+  plugin?: PluginRecord;
+}
+
+export function tiles(engine: EngineState | null | undefined): Tile[] {
+  const panels = (engine?.plugins ?? []).filter(
+    (p) => p.enabled && p.manifest.surfaces.includes("panel") && (p.files.includes("plugin.js") || p.files.includes("panel.html")),
+  );
+  return [
+    ...(engine?.monitors ?? []).map((monitor) => ({ id: monitor.id, name: monitor.name, monitor })),
+    ...panels.map((plugin) => ({ id: plugin.id, name: plugin.manifest.name, plugin })),
+  ];
 }
 
 export function applyLayout<T extends { id: string }>(

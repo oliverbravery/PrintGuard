@@ -1,11 +1,10 @@
-import { rectSortingStrategy } from "@dnd-kit/sortable";
 import { useEffect, useRef } from "react";
-import { applyLayout, section, togglePinned, toggleHidden, withOrder } from "../layout";
+import { section, togglePinned, toggleHidden } from "../layout";
 import { PANEL_SANDBOX_URL } from "../panel";
 import { useStore } from "../store";
 import type { PluginRecord } from "../types";
 import { PluginNodeView } from "./PluginNode";
-import { Sortable, SortableItem, type SortableHandle } from "./Sortable";
+import { SortableItem, type SortableHandle } from "./Sortable";
 
 function PluginWebview({ plugin }: { plugin: PluginRecord }) {
   const mountPanel = useStore((s) => s.mountPanel);
@@ -31,7 +30,7 @@ function PluginWebview({ plugin }: { plugin: PluginRecord }) {
 
 export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
   const { customising, mutateLayout, engine } = useStore();
-  const pinned = section(engine?.settings.layout, "plugins").pinned.includes(plugin.id);
+  const pinned = section(engine?.settings.layout, "monitors").pinned.includes(plugin.id);
   const tree = useStore((s) => s.pluginTrees[plugin.id]);
   const failure = useStore((s) => s.pluginFailures[plugin.id]) ?? plugin.failure;
   const webview = plugin.files.includes("panel.html");
@@ -64,14 +63,14 @@ export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
               className={`btn !py-1 !px-2 !text-[0.6rem] ${pinned ? "!border-accent !text-accent" : ""}`}
               aria-pressed={pinned}
               aria-label={`${pinned ? "Pinned" : "Pin"} ${plugin.manifest.name}`}
-              onClick={() => mutateLayout("plugins", (s) => togglePinned(s, plugin.id))}
+              onClick={() => mutateLayout("monitors", (s) => togglePinned(s, plugin.id))}
             >
               {pinned ? "Pinned" : "Pin"}
             </button>
             <button
               className="btn !py-1 !px-2 !text-[0.6rem]"
               aria-label={`Hide ${plugin.manifest.name}`}
-              onClick={() => mutateLayout("plugins", (s) => toggleHidden(s, plugin.id))}
+              onClick={() => mutateLayout("monitors", (s) => toggleHidden(s, plugin.id))}
             >
               Hide
             </button>
@@ -98,28 +97,5 @@ export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
         </section>
       )}
     </SortableItem>
-  );
-}
-
-export function PluginSection() {
-  const { engine, customising, mutateLayout } = useStore();
-  const drawn = (engine?.plugins ?? []).filter(
-    (p) => p.enabled && p.manifest.surfaces.includes("panel") && (p.files.includes("plugin.js") || p.files.includes("panel.html")),
-  );
-  const { visible } = applyLayout(drawn, section(engine?.settings.layout, "plugins"));
-  if (drawn.length === 0) return null;
-  return (
-    <Sortable
-      ids={visible.map((p) => p.id)}
-      strategy={rectSortingStrategy}
-      disabled={!customising}
-      onReorder={(ids) => mutateLayout("plugins", (s) => withOrder(s, ids))}
-    >
-      <div className="mt-4 grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr))]">
-        {visible.map((plugin) => (
-          <PluginPanel key={plugin.id} plugin={plugin} />
-        ))}
-      </div>
-    </Sortable>
   );
 }
