@@ -11,120 +11,48 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
-- A plugin store, in the Plugins tab in Settings. Plugins are written in JavaScript and
-  run in a sandbox, and one can draw a panel on your dashboard, run a job on the hub, or do
-  both. You can install verified plugins from the catalogue, or install them from a GitHub
-  repo or a zip. They can be granted fine-grained permissions to reach an internal API, so
-  developers can safely add features to PrintGuard without waiting on a release, and you can
-  take a permission back at any time. A plugin never sees your printer credentials, notifier
-  settings, API tokens or camera frames. A plugin says which platforms it runs on, and the
-  store filters the catalogue by the one you are on. Three come as standard. Picture in
-  picture puts a pop-out button on every monitor and floats that camera above your other
-  windows. Alert sounds plays a horn, a bell or an alarm the moment a defect is caught, on the
-  monitors you switch it on for. Progress reports sends how far a print has got and how many
-  defects it has seen to your usual alert channels, as often as you ask. To start the hub with
-  every plugin switched off, add `PRINTGUARD_PLUGINS=off` to its environment.
-  [docs/plugins.md](docs/plugins.md) has the whole API, a worked example and the schema and
-  types your editor reads, and [CONTRIBUTING.md](CONTRIBUTING.md) covers getting one
-  listed in the catalogue.
-
-- Plugins install switched off and ask before they run. Pressing Enable shows every permission
-  a plugin wants, what it allows and the author's own reason for wanting it, and the plugin
-  starts once you allow the lot. There is no partial yes, so a plugin either gets what it asks
-  for or does not run, and disabling one keeps what you accepted so switching it back on asks
-  nothing again. An update that asks for more than you accepted stands the plugin down until
-  you accept the wider list, so nothing new happens behind an Update press, and more means a
-  permission, an address or another plugin it calls. What you gave a plugin carries across an
-  update from the repository it came from and nowhere else, so a bundle that shares only its
-  id installs holding none of your credentials.
-
-- Plugins can reach the network properly. A plugin lists the addresses it needs as match
-  patterns, the same `https://*.example.com/*` grammar a browser extension uses, so it can ask
-  for one endpoint rather than a whole site, and the consent dialog reads each one back in
-  words before you allow it. Reaching the machine PrintGuard runs on or the network around it
-  is a separate thing to agree to than reaching the internet, and a public name pointing at a
-  private address is caught. A plugin can now read what it fetched, which it could not before,
-  and can hold a WebSocket open for live data. Requests are capped and rate limited, and a
-  plugin loses its connections the moment you disable it.
-
-- Plugins can do the rest of what PrintGuard does. Adding and removing monitors, cameras and
-  printers, changing your settings and minting API tokens are each their own permission, so a
-  plugin can set itself up rather than talking you through it, and each one is spelled out
-  before you allow it. A plugin supplies credentials and can never read one back, whether it
-  put it there or not. It declares the ones it needs, PrintGuard draws the form and fills them
-  in as the plugin's requests go out, so the value is in nothing the plugin or this page reads.
-  A plugin needing a sign-in rather than a key gets one: PrintGuard runs it, keeps the tokens
-  and refreshes them.
-
-- Enabling a plugin now shows what its code actually does, above what it is asking for. A
-  plugin asking for something it never uses, reaching an address it never declared, or using a
-  credential it never named is said plainly before you allow anything. Where a plugin builds a
-  command or an address as it runs, nobody can tell what it reaches, and it says that rather
-  than passing it off as fine. Plugins in the catalogue are held to it, so a listed one is a
-  plugin whose code and claims agree.
-
-- Plugins can read your cameras and your risk history, each behind its own permission. Taking a
-  still hands the plugin the picture itself rather than a placeholder, so it is the loudest
-  thing in the list when you are asked, and retuning a camera is separate from adding or
-  deleting one. Risk history comes from the same rollups the detailed monitor page draws, so a
-  plugin watching a trend keeps no copy of its own.
-
-- A plugin can draw its own panel. Ship a `panel.html` and you write the markup, styles and
-  scripts yourself instead of returning nodes, so charts, layouts and animation are yours to
-  make. It gets the dashboard's colours and fonts to match, sizes itself to what it draws, and
-  still reaches nothing but the same internal API a node-tree plugin does. Plugins can ship
-  video now, and far larger pictures, at 4 MB a file and 12 MB in total. Plugin panels join the
-  dashboard's layout, so they drag, pin and hide alongside your monitors.
-
-- Plugins can talk to each other, where both of them said so. One offers a channel and says
-  what it answers, another names that exact plugin and channel, and you see both before either
-  is enabled. They can ask each other for something and get an answer back, or publish to
-  everything listening. Neither ever sees the other's code, its stored data or anything it was
-  not handed, and a plugin you switch off answers nobody.
-
-- A Spotify plugin comes as standard. Sign in from the Plugins tab and the cover of whatever
-  you are playing goes behind the dashboard, with the panels turning to glass over it, and a
-  panel of its own shows the track, the artist and the transport. One button plays and pauses
-  and tells you which it is. It hides, pins and reorders like a monitor. Spotify makes everyone
-  register an app of their own, so PrintGuard asks for its client id and shows you the exact
-  redirect URI to give Spotify, with a link to where you create it. No plugin ever carries a
-  client id, so the app is always yours rather than one shared by everyone who installed it. Playback control needs a
-  Premium account, and a free one still gets the cover and the track with the buttons
-  explained. It never sees your Spotify tokens; PrintGuard holds them and fills them in.
+- A plugin store, in the Plugins tab in Settings. Plugins are written in JavaScript and run in
+  a sandbox, drawing a panel on your dashboard or running a job on the hub. Install verified
+  ones from the catalogue, or from a GitHub repo or a zip.
+  [docs/plugins.md](docs/plugins.md) has the API, and [CONTRIBUTING.md](CONTRIBUTING.md) covers
+  getting one listed.
+- Four come as standard. Picture in picture floats a camera above your other windows, alert
+  sounds plays a horn when a defect is caught, progress reports sends a tally of a print through
+  your alert channels, and Spotify puts the current cover behind the dashboard.
+- Plugins install switched off. Enable lists every permission with the author's reason for it,
+  and it is all or nothing. An update that asks for more waits until you accept it.
+- What you gave a plugin carries across updates from the repository it came from. A bundle that
+  shares only its id starts with nothing.
+- Enabling one shows what its code does against what it asks for. The catalogue is held to the
+  same check, so a listed plugin is one whose code and claims agree.
+- Plugins can reach the network on match patterns like `https://*.example.com/*`, hold a
+  WebSocket open, and read what they fetch. Reaching your own network is a separate permission.
+- Plugins can add printers, cameras and monitors, change settings and mint API tokens, each
+  behind its own permission.
+- Plugins can hold credentials they can never read back, and PrintGuard runs OAuth sign-ins on
+  their behalf.
+- Plugins can take camera stills and read risk history, each behind its own permission.
+- A plugin can ship a `panel.html` and draw its own panel, with video and larger images. Panels
+  drag, pin and hide with your monitors.
+- Plugins can call each other on channels both sides declared.
+- `PRINTGUARD_PLUGINS=off` starts the hub with every plugin switched off.
 
 ### Fixed
 
 - `state.json` is written readable only by the account running the hub. It holds printer
-  passwords, notifier keys, API token hashes and whatever credentials plugins have been given,
-  and it was being written with whatever the system's default permissions were, so on a shared
-  host other accounts could read it.
-- A plugin's credentials are scrubbed from bug reports. A plugin never sees one, but PrintGuard
-  puts them into requests it makes on its behalf, so a failure carrying the URL back could have
-  put one in the log a report attaches.
-- A plugin's own pages can no longer pull a live camera stream. Pages a plugin serves run in a
-  sandboxed origin, and the stream proxy answered them like any other request, so a plugin
-  could have read a feed without ever asking for a camera permission. Those requests are
-  refused now.
-- A camera that keeps dropping out no longer notifies you every time it reconnects. The
-  watchdog announced a recovery the moment a feed came back, so a source that reconnected in
-  a loop pushed an "offline" alert and a "back" alert on every cycle, on ntfy and every other
-  channel alike. Raising the monitor's cooldown did not help, because that setting is the
-  quiet window after a defect alert and never covered these warnings. One unstable episode is
-  now one warning. A recovery is only announced once the feed has held for a minute, and each
-  recovery doubles what the next one has to hold for, up to fifteen minutes, so a source that
-  keeps flapping gets quieter rather than louder. Outages themselves are never delayed. Worth
-  pulling if you run a camera on marginal wifi. Thanks to @subpanel0576 for the report.
-- The `latest-intel` image could not use most Intel GPUs. It carried Debian's Intel GPU
-  driver, which is from late 2022 and predates Meteor Lake, Lunar Lake, Arrow Lake and
-  Battlemage, so OpenVINO was handed no GPU on that hardware and inference quietly stayed on
-  the CPU. The image now carries Intel's own current runtime, covering Arc, Battlemage and
-  every iGPU from Tiger Lake (11th gen) onwards. Intel publishes no current driver for Gen8
-  to Gen11 graphics, so a pre-Tiger-Lake iGPU stays on the OpenVINO CPU path. Thanks for the
-  report.
-- The compute readout now names the hardware, not the provider. `intel openvino` meant
-  either the GPU or the processor, and it now reads `intel gpu` or `intel cpu`, and the log lists
-  what the providers offered at start, so a GPU that was never handed over is visible rather
-  than guessed at.
+  passwords, notifier keys and API token hashes, and was taking the system default.
+- A plugin's credentials are scrubbed from bug reports.
+- A plugin's own pages can no longer pull a live camera stream.
+- A camera that keeps dropping out no longer alerts on every reconnect. A recovery is announced
+  once the feed has held for a minute, and each one doubles what the next has to hold for, up to
+  fifteen minutes. Outages are never delayed. Worth pulling if you run a camera on marginal
+  wifi. Thanks to @subpanel0576 for the report.
+- The `latest-intel` image now carries Intel's current GPU runtime, covering Arc, Battlemage
+  and every iGPU from Tiger Lake on. Debian's driver predates Meteor Lake, so OpenVINO was
+  handed no GPU and inference quietly stayed on the CPU. Gen8 to Gen11 iGPUs stay on the CPU
+  path, since Intel publishes no current driver for them.
+- The compute readout names the hardware, so `intel openvino` now reads `intel gpu` or
+  `intel cpu`, and the log lists what the providers offered at start.
 
 ## [2.3.12] - 2026-08-12
 
