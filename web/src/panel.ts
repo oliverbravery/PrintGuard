@@ -74,7 +74,7 @@ export class PluginPanelHost {
 
   update(state: Record<string, unknown>, store?: Record<string, unknown>): void {
     this.state = state;
-    this.post({ t: "state", state, store });
+    this.post({ t: "state", state, store, theme: themeTokens() });
   }
 
   event(event: Record<string, unknown>): void {

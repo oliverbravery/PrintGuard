@@ -100,12 +100,17 @@
           }
         }
 
+        let themed = null;
+
         function applyTheme(tokens) {
+          if (!tokens || !Object.keys(tokens).length) return;
           pg.theme = tokens;
-          const style = document.createElement("style");
+          if (!themed) {
+            themed = document.createElement("style");
+            document.head.insertBefore(themed, document.head.firstChild);
+          }
           const vars = Object.entries(tokens).map(([k, v]) => `${k}:${v}`).join(";");
-          style.textContent = `:root{${vars};color-scheme:${tokens["color-scheme"] || "dark"}}html,body{background:transparent;margin:0}`;
-          document.head.insertBefore(style, document.head.firstChild);
+          themed.textContent = `:root{${vars};color-scheme:${tokens["color-scheme"] || "dark"}}html,body{background:transparent;margin:0}`;
         }
 
         function reportHeight() {
@@ -127,16 +132,17 @@
             } else if (data.t === "init") {
               store = data.store || {};
               pg.state = data.state || {};
+              applyTheme(data.theme);
               if (painted) return listeners.get("state")?.(pg.state);
               painted = true;
               for (const [name, blob] of Object.entries(data.assets || {})) assets.set(name, URL.createObjectURL(blob));
-              applyTheme(data.theme || {});
               paint(String(data.html || ""));
               reportHeight();
               listeners.get("ready")?.(pg.state);
             } else if (data.t === "state") {
               pg.state = data.state || {};
               if (data.store) store = data.store;
+              applyTheme(data.theme);
               listeners.get("state")?.(pg.state);
             } else if (data.t === "event") {
               listeners.get(String(data.event.event))?.(data.event);
@@ -171,7 +177,9 @@
 
       The document paints once. PrintGuard re-attaches whenever the panel is
       redrawn, and a second paint would run the plugin's scripts again on top of
-      the first, so a later init is taken as fresh state instead.
+      the first, so a later init is taken as fresh state instead. The theme
+      arrives with every update, since the user can change it while a panel is
+      open.
     -->
   </body>
 </html>
