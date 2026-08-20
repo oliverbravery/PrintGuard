@@ -333,6 +333,46 @@ def consented(manifest: dict[str, Any], granted: list[str]) -> bool:
     return set(manifest["permissions"]) <= set(granted)
 
 
+def same_source(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Whether a bundle comes from the place the installed one came from.
+
+    A repository is the nearest thing a plugin has to a signing key, so a
+    bundle from the same one is the same plugin and keeps what the user gave
+    it, while anything else is a stranger that happens to share an id and
+    starts with nothing. A zip carries no such identity, so it is never the
+    same place twice.
+
+    Args:
+        previous: The source recorded against the installed plugin.
+        current: Where the bundle being installed came from.
+
+    Returns:
+        True when both name the same repository and path.
+    """
+    if previous.get("kind") != "github" or current.get("kind") != "github":
+        return False
+    return (previous["repo"], previous.get("path", "")) == (current["repo"], current.get("path", ""))
+
+
+def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Whether an update reaches further than the manifest that was accepted.
+
+    The permissions, the addresses and the plugins it calls are what the user
+    was asked about, so a change to any of them is a fresh question and the
+    grants stand down until it is answered. Anything not written exactly as it
+    was counts as wider, since a pattern that reads narrower can still cover
+    more than the one it replaces.
+
+    Args:
+        previous: The manifest the grants were given against.
+        current: The manifest being installed over it.
+
+    Returns:
+        True when the new manifest asks for anything the old one did not.
+    """
+    return any(not set(current[field]) <= set(previous[field]) for field in ("permissions", "urls", "consumes"))
+
+
 def runs_here(platforms: list[str], host: str) -> bool:
     """Whether a plugin's declared platforms cover the deployment running it.
 

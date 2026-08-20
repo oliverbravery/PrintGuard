@@ -826,6 +826,78 @@ async def test_plugin_installs_from_github_pinned_to_a_commit() -> None:
     assert list(record.sources) == ["plugin.js"]
 
 
+def github_files(sha: str, manifest: dict, repo: str = "someone/pack") -> dict:
+    """The GitHub endpoints an install of one plugin reads."""
+    return {
+        f"https://api.github.com/repos/{repo}/commits/main": (200, {"sha": sha}),
+        f"https://raw.githubusercontent.com/{repo}/{sha}/plugin.json": (200, manifest),
+        f"https://raw.githubusercontent.com/{repo}/{sha}/plugin.js": (200, PLUGIN_JS),
+        f"https://raw.githubusercontent.com/{repo}/{sha}/worker.js": (404, ""),
+        f"https://raw.githubusercontent.com/{repo}/{sha}/panel.html": (404, ""),
+    }
+
+
+async def install_from_github(engine: Engine, repo: str = "someone/pack") -> None:
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "github", "repo": repo, "ref": "main"}})
+
+
+async def test_an_update_from_the_same_repository_keeps_what_the_user_gave_it() -> None:
+    """The repository is the plugin's signature, so its own update carries on."""
+    platform = FakePlatform(infer_s=0.02)
+    platform.files = github_files("a" * 40, SECRET_MANIFEST)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_from_github(engine)
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
+        )
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
+        platform.files = github_files("b" * 40, {**SECRET_MANIFEST, "version": "1.1.0"})
+        await install_from_github(engine)
+        updated = engine.plugins.get("vault")
+
+    assert updated.manifest["version"] == "1.1.0", "the new revision did not replace the old one"
+    assert updated.secrets["api_key"] == "s3cr3t", "an update made the user type its credentials again"
+    assert updated.enabled and updated.granted == SECRET_MANIFEST["permissions"]
+
+
+async def test_an_update_that_reaches_further_stands_the_plugin_down() -> None:
+    """A wider manifest is a fresh question, the way a browser asks one again."""
+    platform = FakePlatform(infer_s=0.02)
+    platform.files = github_files("a" * 40, SECRET_MANIFEST)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_from_github(engine)
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
+        )
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
+        wider = {**SECRET_MANIFEST, "urls": [*SECRET_MANIFEST["urls"], "https://collector.example.com/*"]}
+        platform.files = github_files("b" * 40, wider)
+        await install_from_github(engine)
+        updated = engine.plugins.get("vault")
+
+    assert updated.granted == [], "an address nobody accepted was reached under the old consent"
+    assert not updated.enabled, "a plugin that widened its reach kept running"
+    assert updated.secrets["api_key"] == "s3cr3t", "the same plugin's own credentials were thrown away"
+
+
+async def test_a_bundle_from_somewhere_else_inherits_nothing_but_the_id() -> None:
+    """An id is not an identity, so a stranger holding one starts with nothing."""
+    platform = FakePlatform(infer_s=0.02)
+    platform.files = github_files("a" * 40, SECRET_MANIFEST)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_from_github(engine)
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
+        )
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
+        platform.files = github_files("c" * 40, SECRET_MANIFEST, repo="squatter/pack")
+        await install_from_github(engine, repo="squatter/pack")
+        squatted = engine.plugins.get("vault")
+
+    assert squatted.secrets == {}, "another author's bundle inherited the credentials"
+    assert squatted.granted == [] and not squatted.enabled, "it ran on consent given to somebody else"
+
+
 async def test_catalogue_verifies_only_the_exact_bytes_it_pinned() -> None:
     platform = FakePlatform(infer_s=0.02)
     digests = plugins.digests(plugins.sanitise_manifest(MANIFEST), {"plugin.js": PLUGIN_JS}, {})

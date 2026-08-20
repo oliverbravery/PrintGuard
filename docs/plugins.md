@@ -60,7 +60,14 @@ for or does not run. Disabling one stops it and keeps what you accepted, so swit
 on asks nothing again.
 
 An update that asks for more than you accepted stands the plugin down until you accept the
-wider list, so nothing new happens behind an **Update** press.
+wider list, so nothing new happens behind an **Update** press. More means anything the
+consent dialog read out to you: a permission, an address or another plugin it calls.
+
+Your grants, the plugin's own data and the credentials you gave it carry across an update
+only when the new bundle comes from the repository the old one came from, which is the
+closest thing a plugin has to a signature. A bundle from anywhere else, a zip included, shares
+nothing with the plugin it replaces but the id, so it installs holding none of them and asks
+you from scratch.
 
 ## What a plugin can and cannot do
 

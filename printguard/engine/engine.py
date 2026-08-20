@@ -806,9 +806,12 @@ class Engine:
         A plugin arrives disabled and holding nothing, since the permissions it
         asks for are accepted at the point of enabling it. Reinstalling is how a
         plugin is upgraded: the id is what identifies it, so a newer revision
-        replaces the old bytes and keeps the permissions and stored data it
-        already has. One that asks for more than it did stands down until the
-        wider list has been accepted too.
+        replaces the old bytes, and it keeps the grants, the stored data and the
+        credentials the user gave it as long as it comes from the same place. A
+        bundle from anywhere else shares nothing but the id, so it starts as a
+        stranger with none of them, and one from the same place that reaches
+        further than the manifest already accepted stands down until the wider
+        list has been accepted too.
         """
         source = dict(message.get("source") or {})
         if source.get("kind") == "github":
@@ -830,7 +833,14 @@ class Engine:
         await self._refresh_catalogue(quiet=True)
         entry = plugins.verified_by(self.catalogue, manifest["id"], digests)
         existing = self.plugins.get(manifest["id"])
-        granted = [p for p in (existing.granted if existing else []) if p in manifest["permissions"]]
+        inherits = existing is not None and plugins.same_source(existing.source, source)
+        accepted = inherits and not plugins.widens(existing.manifest, manifest)
+        granted = [p for p in (existing.granted if accepted else []) if p in manifest["permissions"]]
+        if existing is not None and not inherits:
+            logger.warning(
+                "plugin %s came from %s and now from %s, so its grants and credentials were dropped",
+                manifest["id"], existing.source, source,
+            )
         self.plugins.add(
             Plugin(
                 id=manifest["id"],
@@ -840,7 +850,8 @@ class Engine:
                 digests=digests,
                 source=source,
                 granted=granted,
-                config=existing.config if existing else {},
+                config=existing.config if inherits else {},
+                secrets=existing.secrets if inherits else {},
                 verified=entry is not None,
                 enabled=bool(existing and existing.enabled and plugins.consented(manifest, granted)),
                 installed=time.time(),
