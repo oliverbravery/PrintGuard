@@ -17,9 +17,9 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/alert-sounds",
-      "ref": "0589a812810738215424beffca72fb61d75e2926",
+      "ref": "bde58ffcf5a4d3446da396402a53e05af8bad741",
       "digests": {
-        "plugin.json": "b20cc1a8b6abcc5cd37f0d98fe617b4ca22e706bad597038561008bed2eb8c1c",
+        "plugin.json": "63cf389d5ffeee47621e2d2163718d1a57e0e2976ad9bfbbc5ea49ac47941f4c",
         "plugin.js": "03f59008e04b5104a57c8561a78e3b09a6d17a0130dceacf34dba8992d74b1c2"
       }
     },
@@ -39,9 +39,9 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/picture-in-picture",
-      "ref": "0589a812810738215424beffca72fb61d75e2926",
+      "ref": "bde58ffcf5a4d3446da396402a53e05af8bad741",
       "digests": {
-        "plugin.json": "6baf1c7916bd7f328109e918aeea4ba46354b24eed3256b6cf511c6b3af6e71d",
+        "plugin.json": "5299605d0ed592cfc01803ebaa2879bdfe6b8b4a2f5cb8f36f779a72d24f8dd0",
         "plugin.js": "594b6f4051cf0ac5e5fc768c3b5e8828529e4faf0d65ff62ee0ede441a3a8260"
       }
     },
@@ -61,9 +61,9 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/progress-reports",
-      "ref": "1b963515f67779f1d0c198a815c98b4ad44ba30f",
+      "ref": "bde58ffcf5a4d3446da396402a53e05af8bad741",
       "digests": {
-        "plugin.json": "c37185d400dd52ed4fdbb89a310e19a6afde6c90d2b63c83d039b13e2563269e",
+        "plugin.json": "a4c251a4cf19ccbd60aa75fae12af16981e8827fd025ff8320dc4210dd2e7256",
         "plugin.js": "1efb76525d9a2048a82f10e35c2a4329e4462ea5598de7b70eb056b9e063f7b6",
         "worker.js": "01c5ec167ce8bd40eb135275b4fafea0ff15f547eb106125f366350bf4bbc3c4"
       }
