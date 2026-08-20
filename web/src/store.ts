@@ -352,14 +352,16 @@ export const useStore = create<PgStore>((set, get) => {
     const plugin = engine?.plugins.find((p) => p.id === id);
     if (!engine || !plugin || !plugin.enabled) return;
     const types = engine.plugin_assets ?? {};
+    const blobs: Record<string, Blob> = {};
     const files: Record<string, string> = {};
     const text: Record<string, string> = {};
     for (const [name, data] of Object.entries(assets)) {
       const type = types[name.split(".").pop() ?? ""];
       if (!type) continue;
       const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
-      if (type.startsWith("image/") || type.startsWith("audio/")) files[name] = URL.createObjectURL(new Blob([bytes], { type }));
-      else text[name] = new TextDecoder().decode(bytes);
+      blobs[name] = new Blob([bytes], { type });
+      if (type.startsWith("text/") || type === "application/json") text[name] = new TextDecoder().decode(bytes);
+      else files[name] = URL.createObjectURL(blobs[name]);
     }
     for (const url of Object.values(get().pluginAssets[id] ?? {})) URL.revokeObjectURL(url);
     set((s) => ({ pluginAssets: { ...s.pluginAssets, [id]: files } }));
@@ -369,12 +371,6 @@ export const useStore = create<PgStore>((set, get) => {
       return { pluginFailures: rest };
     });
     if (sources["panel.html"]) {
-      const blobs = Object.fromEntries(
-        Object.entries(assets).map(([name, data]) => [
-          name,
-          new Blob([Uint8Array.from(atob(data), (char) => char.charCodeAt(0))], { type: types[name.split(".").pop() ?? ""] ?? "" }),
-        ]),
-      );
       set((s) => ({ pluginPanels: { ...s.pluginPanels, [id]: { html: sources["panel.html"], assets: blobs } } }));
     }
     for (const file of runnableFiles(plugin, engine)) {
