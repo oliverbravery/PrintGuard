@@ -5,7 +5,7 @@ import { PANEL_SANDBOX_URL } from "../panel";
 import { useStore } from "../store";
 import type { PluginRecord } from "../types";
 import { PluginNodeView } from "./PluginNode";
-import { Sortable } from "./Sortable";
+import { Sortable, SortableItem, type SortableHandle } from "./Sortable";
 
 function PluginWebview({ plugin }: { plugin: PluginRecord }) {
   const mountPanel = useStore((s) => s.mountPanel);
@@ -44,15 +44,26 @@ export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
     <span className="text-[0.7rem] text-text-2">{failure ?? "Starting"}</span>
   );
 
-  return (
-    <section className="panel p-4 space-y-3">
+  const content = (handle?: SortableHandle) => (
+    <>
       <div className="flex items-center gap-2">
+        {handle && (
+          <button
+            className="btn !py-1 !px-2 cursor-grab touch-none"
+            aria-label={`Drag ${plugin.manifest.name} to reorder`}
+            {...handle.attributes}
+            {...handle.listeners}
+          >
+            ⠿
+          </button>
+        )}
         <h3 className="display text-sm font-semibold tracking-[0.08em] truncate flex-1">{plugin.manifest.name}</h3>
-        {customising ? (
+        {handle ? (
           <>
             <button
-              className={`btn !py-1 !px-2 !text-[0.6rem] ${pinned ? "btn-primary" : ""}`}
+              className={`btn !py-1 !px-2 !text-[0.6rem] ${pinned ? "!border-accent !text-accent" : ""}`}
               aria-pressed={pinned}
+              aria-label={`${pinned ? "Pinned" : "Pin"} ${plugin.manifest.name}`}
               onClick={() => mutateLayout("plugins", (s) => togglePinned(s, plugin.id))}
             >
               {pinned ? "Pinned" : "Pin"}
@@ -70,7 +81,23 @@ export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
         )}
       </div>
       {body}
-    </section>
+    </>
+  );
+
+  if (!customising) return <section className="panel p-4 space-y-3">{content()}</section>;
+
+  return (
+    <SortableItem id={plugin.id}>
+      {(handle) => (
+        <section
+          ref={handle.setNodeRef}
+          style={handle.style}
+          className={`panel p-4 space-y-3 ${pinned ? "!border-accent" : ""} ${handle.isDragging ? "z-10 opacity-90 shadow-xl" : ""}`}
+        >
+          {content(handle)}
+        </section>
+      )}
+    </SortableItem>
   );
 }
 

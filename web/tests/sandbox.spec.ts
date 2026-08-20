@@ -358,6 +358,21 @@ test("a plugin takes input and shows the files it shipped", async ({ page }) => 
   await expect(panel.getByAltText("Logo")).toHaveJSProperty("naturalWidth", 1);
 });
 
+test("a plugin panel rearranges like a monitor does", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP);
+  await page.evaluate(() => (window as any).__pg.setState({ customising: true }));
+
+  const panel = page.locator("section", { hasText: "Picture in picture" });
+  const handle = panel.getByRole("button", { name: "Drag Picture in picture to reorder" });
+  await expect(handle).toHaveAttribute("aria-roledescription", "sortable");
+
+  await panel.getByRole("button", { name: "Hide Picture in picture" }).click();
+
+  await expect(page.locator("section", { hasText: "Picture in picture" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Picture in picture · show" })).toBeVisible();
+});
+
+
 test("a camera the plugin may not view is never floated", async ({ page }) => {
   await stubFloat(page);
   await dashboardWithPlugin(page, MONITOR_PIP, ["state:read"], ["monitor"]);
