@@ -61,10 +61,10 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/progress-reports",
-      "ref": "0589a812810738215424beffca72fb61d75e2926",
+      "ref": "1b963515f67779f1d0c198a815c98b4ad44ba30f",
       "digests": {
         "plugin.json": "c37185d400dd52ed4fdbb89a310e19a6afde6c90d2b63c83d039b13e2563269e",
-        "plugin.js": "c8f896ff2ffb83a611ff1427bcdea0e1de838cc9cc7ee5123b725b2ad0a6a5ed",
+        "plugin.js": "1efb76525d9a2048a82f10e35c2a4329e4462ea5598de7b70eb056b9e063f7b6",
         "worker.js": "01c5ec167ce8bd40eb135275b4fafea0ff15f547eb106125f366350bf4bbc3c4"
       }
     }
