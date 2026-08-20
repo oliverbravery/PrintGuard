@@ -129,7 +129,8 @@ const PLUGIN = {
   id: "pip",
   manifest: {
     id: "pip", name: "Picture in picture", version: "1.0.0", description: "", author: "", homepage: "",
-    permissions: ["state:read", "camera:view"], surfaces: ["panel", "float"], hosts: [], events: [], tick_s: 0,
+    permissions: ["state:read", "camera:view"], reasons: {}, surfaces: ["panel"], platforms: [], assets: [],
+    urls: [], secrets: {}, provides: {}, consumes: [], oauth: {}, events: [], tick_s: 0,
   },
   files: ["plugin.js"],
   digests: {},

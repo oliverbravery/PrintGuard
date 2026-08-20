@@ -104,8 +104,8 @@ const INSTALLED = {
   manifest: {
     id: "picture-in-picture", name: "Picture in picture", version: "1.2.0", author: "oliverbravery", homepage: "",
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
-    permissions: ["state:read", "camera:view"], surfaces: ["monitor", "float"],
-    platforms: [], hosts: [], events: [], tick_s: 0,
+    permissions: ["state:read", "camera:view"], reasons: {}, surfaces: ["monitor"], platforms: [], assets: [],
+    urls: [], secrets: {}, provides: {}, consumes: [], oauth: {}, events: [], tick_s: 0,
   },
   files: ["plugin.js"], digests: {},
   source: { kind: "github", repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40) },
