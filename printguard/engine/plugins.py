@@ -41,6 +41,11 @@ CHANNEL_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
 LINK_PATTERN = re.compile(r"^([a-z0-9][a-z0-9-]{1,38}[a-z0-9]):([a-z0-9][a-z0-9-]{0,38}[a-z0-9])$")
 MAX_SECRET_BYTES = 4096
 SECRET_REFERENCE = re.compile(r"\{\{\s*secret\.([a-z0-9_-]{1,40})\s*\}\}")
+"""How a plugin names a secret it may use but never read.
+
+The value is substituted as the request leaves PrintGuard, so the reference is
+all the plugin ever holds and all that is ever stored in anything it can read.
+"""
 CLIENT_ID_SECRET = "oauth_client_id"
 """Where the client id of the app the user registered is kept.
 
@@ -48,11 +53,6 @@ A plugin never carries one. It travels as a repository, a zip or a catalogue
 entry, so a client id in it would be the same app for everybody who installs it,
 which is what providers hand out quota and terms against. Whoever installs it
 registers their own and types it in, and it is held like any other credential.
-"""
-"""How a plugin names a secret it may use but never read.
-
-The value is substituted as the request leaves PrintGuard, so the reference is
-all the plugin ever holds and all that is ever stored in anything it can read.
 """
 CATALOGUE_URL = "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/catalogue.json"
 GITHUB_COMMIT_URL = "https://api.github.com/repos/{repo}/commits/{ref}"
@@ -267,6 +267,14 @@ EVENTS: dict[str, list[str]] = {
     "error": ["message"],
     "state": [],
 }
+"""The events a plugin may hook, and the fields each one hands it.
+
+Engine events carry far more than a plugin's grants allow, a printer's
+credentials in a state snapshot or a new API token's secret, so a plugin is
+handed these fields and nothing else, and an event missing from here never
+reaches one at all.
+"""
+
 EVENT_PERMISSIONS: dict[str, str] = {
     "state": "state:read",
     "frame": "camera:frames",
@@ -281,14 +289,6 @@ An event is broadcast to every plugin that named it, so one carrying a camera
 still or a monitor's history has to be held to the same grant the command that
 asked for it needed. Without this a plugin could name the event, wait for
 somebody else to ask, and read the answer.
-"""
-
-"""The events a plugin may hook, and the fields each one hands it.
-
-Engine events carry far more than a plugin's grants allow, a printer's
-credentials in a state snapshot or a new API token's secret, so a plugin is
-handed these fields and nothing else, and an event missing from here never
-reaches one at all.
 """
 
 
