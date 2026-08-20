@@ -7,7 +7,7 @@ import { Dialog } from "./Dialog";
 
 export function PermissionList({ plugin, permissions, hubOnly }: { plugin: PluginRecord; permissions: Permission[]; hubOnly: boolean }) {
   const asked = permissions.filter((p) => plugin.manifest.permissions.includes(p.id));
-  if (asked.length === 0) return <span className="text-[0.7rem] text-text-2">Asks for nothing beyond drawing its panel.</span>;
+  if (asked.length === 0) return <span className="text-[0.7rem] text-text-2">Asks for nothing.</span>;
   return (
     <ul className="space-y-2">
       {asked.map((permission) => (
@@ -41,7 +41,7 @@ export function PermissionList({ plugin, permissions, hubOnly }: { plugin: Plugi
             </ul>
           )}
           <span className="block text-text-1">{plugin.manifest.reasons[permission.id]}</span>
-          {permission.hub_only && !hubOnly && <span className="block text-text-2">Only does anything on a hub.</span>}
+          {permission.hub_only && !hubOnly && <span className="block text-text-2">Hub only.</span>}
         </li>
       ))}
     </ul>
@@ -50,8 +50,8 @@ export function PermissionList({ plugin, permissions, hubOnly }: { plugin: Plugi
 
 function phraseFinding(finding: Finding): string {
   if (finding.kind === "unused") return `Asks for ${finding.what} but never uses it.`;
-  if (finding.kind === "undeclared") return `Uses ${finding.what} without asking for it, so PrintGuard will refuse it.`;
-  return `Uses ${finding.what}, so nobody can tell from the code what it reaches.`;
+  if (finding.kind === "undeclared") return `Uses ${finding.what} without asking. PrintGuard will refuse it.`;
+  return `Uses ${finding.what}, so its reach cannot be read from the code.`;
 }
 
 function Findings({ plugin }: { plugin: PluginRecord }) {
@@ -64,7 +64,7 @@ function Findings({ plugin }: { plugin: PluginRecord }) {
 
   if (findings === undefined) return <span className="block text-[0.7rem] text-text-2">Reading its code…</span>;
   if (findings.length === 0) {
-    return <span className="block text-[0.7rem] text-ok">Its code only does what it asks for above.</span>;
+    return <span className="block text-[0.7rem] text-ok">Its code matches what it asks for.</span>;
   }
   return (
     <ul className="space-y-1">
@@ -89,18 +89,18 @@ export function ConsentDialog({ plugin, permissions, hubOnly, onClose }: { plugi
       <div className="space-y-3">
         <span className="block text-[0.7rem] leading-relaxed text-text-2">
           {plugin.verified
-            ? "These bytes match a reviewed entry in PrintGuard's catalogue. It still only does what you allow here."
-            : "This plugin is unreviewed third-party code. Read it before you allow any of this."}
+            ? "These bytes match PrintGuard's catalogue."
+            : "Unreviewed third-party code. Read it first."}
         </span>
         <Findings plugin={plugin} />
         <PermissionList plugin={plugin} permissions={permissions} hubOnly={hubOnly} />
         {Object.keys(plugin.manifest.secrets).length > 0 && (
           <span className="block text-[0.7rem] text-text-2">
-            It also asks you for {Object.keys(plugin.manifest.secrets).join(", ").replace(/[_-]/g, " ")} once it is on.
-            PrintGuard holds those and fills them in for it, so the plugin never reads one back.
+            It also needs {Object.keys(plugin.manifest.secrets).join(", ").replace(/[_-]/g, " ")}, which PrintGuard fills
+            in for it.
           </span>
         )}
-        <span className="block text-[0.7rem] text-text-2">Enabling allows all of it. Disable the plugin to stop it.</span>
+        <span className="block text-[0.7rem] text-text-2">All of it or none. Disable to stop it.</span>
         <div className="flex gap-2">
           <button className="btn btn-primary" onClick={accept}>
             Allow and enable

@@ -84,7 +84,7 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
           Remove
         </button>
       </div>
-      {!accepted && <span className="block text-[0.7rem] text-warn">Asks for permissions you have not accepted yet.</span>}
+      {!accepted && <span className="block text-[0.7rem] text-warn">Waiting on permissions you have not accepted.</span>}
       {open && <PermissionList plugin={plugin} permissions={permissions} hubOnly={hubOnly} />}
       {plugin.enabled && <PluginSecrets plugin={plugin} />}
       {consenting && (
@@ -153,9 +153,8 @@ export function PluginsTab() {
       <div>
         <span className="label block">Plugins</span>
         <span className="mt-1 block text-[0.7rem] leading-relaxed text-text-2">
-          Plugins are third-party code. They install switched off, and enabling one asks you to accept everything it wants
-          first. Verified ones match a reviewed entry in PrintGuard's catalogue by hash; anything else is unreviewed, so read
-          it before you enable it.
+          Third-party code, installed switched off. Verified ones match the catalogue by hash. Read the rest before you
+          enable them.
         </span>
       </div>
 
@@ -193,7 +192,7 @@ export function PluginsTab() {
       ) : listed.length === 0 ? (
         <span className="block text-[0.7rem] text-text-2">
           {catalogue.length === 0
-            ? "No plugins listed, or the catalogue could not be reached."
+            ? "Nothing listed, or the catalogue is unreachable."
             : `Nothing listed for ${labels[chosen] ?? chosen}.`}
         </span>
       ) : (
@@ -232,7 +231,7 @@ export function PluginsTab() {
             if (chosen) installPlugin({ kind: "file", filename: chosen.name }, await readZip(chosen));
           }}
         />
-        <span className="text-[0.7rem] text-text-2">A folder with plugin.json and plugin.js or worker.js, zipped.</span>
+        <span className="text-[0.7rem] text-text-2">A zipped folder with plugin.json and plugin.js or worker.js.</span>
       </div>
     </div>
   );

@@ -160,12 +160,10 @@ export const GUIDE: GuideSection[] = [
     title: "Plugins",
     body: (
       <>
-        Add a panel to the dashboard, or a job that runs on the hub, from the catalogue or from any
-        GitHub repository. Plugins are third-party code, so they run in a sandbox with no network
-        and no access to your credentials, cameras or tokens, and only do what you grant them.{" "}
+        Add a panel to the dashboard or a job on the hub, from the catalogue or any GitHub repo.
+        Plugins are third-party code, so they run in a sandbox with only what you grant them.{" "}
         <strong>Picture in picture</strong>, <strong>Alert sounds</strong> and <strong>Progress reports</strong>{" "}
-        come as standard, floating a camera above your other windows, sounding a horn the moment a defect
-        is caught and sending a tally of how a print is going through your alert channels.{" "}
+        come as standard.{" "}
         <a className={link} href={docs("plugins.md")} target="_blank" rel="noreferrer">
           Writing one ↗
         </a>

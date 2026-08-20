@@ -18,13 +18,13 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
       {provider && (
         <div className="space-y-1">
           <span className="block text-[0.7rem] text-text-2">
-            {provider} makes everyone register their own app.{" "}
+            {provider} needs an app of your own.{" "}
             {plugin.manifest.oauth.register_url && (
               <a className="text-accent hover:underline" href={plugin.manifest.oauth.register_url} target="_blank" rel="noreferrer">
                 Create one ↗
               </a>
             )}{" "}
-            and add this as its redirect URI, then paste its client id below.
+            with this redirect URI, then paste its client id below.
           </span>
           <code className="mono block select-all break-all rounded border border-line-0 bg-ink-2 px-2 py-1 text-[0.65rem] text-text-1">
             {redirect}
@@ -51,13 +51,13 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
       ))}
       {names.length > 0 && (
         <span className="block text-[0.7rem] text-text-2">
-          PrintGuard fills these in as the plugin's requests go out. Neither it nor this page reads one back.
+          PrintGuard fills these in. The plugin never reads them back.
         </span>
       )}
       {provider && (
         <div className="flex items-center gap-2">
           <span className="text-[0.7rem] text-text-2 flex-1">
-            {connected ? `Connected to ${provider}.` : `Sign in to ${provider} to let it work.`}
+            {connected ? `Connected to ${provider}.` : `Sign in to ${provider}.`}
           </span>
           <button
             className={connected ? "btn" : "btn btn-primary"}
