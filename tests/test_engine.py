@@ -1017,6 +1017,40 @@ async def test_a_sign_in_ends_with_tokens_the_plugin_can_use_but_never_see() -> 
     assert "oauth" in record["secrets_set"] and "at-1" not in json.dumps(record)
 
 
+async def test_a_plugin_that_ships_no_client_id_asks_for_one_and_uses_it() -> None:
+    """Most providers still make every user register an app of their own."""
+    platform = FakePlatform(infer_s=0.02)
+    platform.files["https://auth.example.com/token"] = (200, {"access_token": "at-9", "expires_in": 3600})
+    manifest = {**SECRET_MANIFEST, "id": "byoc", "oauth": {k: v for k, v in SECRET_MANIFEST["oauth"].items() if k != "client_id"}}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "byoc", "patch": {"granted": manifest["permissions"], "enabled": True}}
+        )
+        asked = engine.plugins.get("byoc").manifest["secrets"]
+        await engine.handle({"cmd": "plugin.oauth", "id": "byoc", "action": "start", "origin": "http://127.0.0.1:8000", "req_id": 7})
+        refused = [e for e in events if e.get("event") == "error" and e.get("req_id") == 7]
+
+        await engine.handle({"cmd": "plugin.secrets", "id": "byoc", "secrets": {"oauth_client_id": "mine-1234"}})
+        await engine.handle({"cmd": "plugin.oauth", "id": "byoc", "action": "start", "origin": "http://127.0.0.1:8000"})
+        opened = next(e for e in events if e.get("event") == "plugin_oauth")["url"]
+
+    assert plugins.CLIENT_ID_SECRET in asked, "nobody was asked for a client id"
+    assert len(refused) == 1, "a sign-in started with no client id at all"
+    assert parse_qs(urlparse(opened).query)["client_id"] == ["mine-1234"]
+
+
+async def test_disconnecting_keeps_the_client_id_the_user_registered() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        plugin = engine.plugins.get("vault")
+        plugin.secrets = {"oauth_client_id": "mine-1234", "oauth": "at-1", "oauth_refresh": "rt-1"}
+        await engine.handle({"cmd": "plugin.oauth", "id": "vault", "action": "forget"})
+
+    assert plugin.secrets == {"oauth_client_id": "mine-1234"}, "signing out threw away the registered app"
+
+
 async def test_a_callback_nobody_asked_for_is_refused() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[]) as (engine, _):

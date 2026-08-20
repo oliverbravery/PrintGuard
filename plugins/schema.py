@@ -110,12 +110,13 @@ def schema() -> dict:
             "oauth": {
                 "type": "object",
                 "description": "Sign the user in to a service and hold the tokens for you. Needs the oauth permission, and the access token arrives as {{secret.oauth}}.",
-                "required": ["authorize_url", "token_url", "client_id"],
+                "required": ["authorize_url", "token_url"],
                 "additionalProperties": False,
                 "properties": {
                     "authorize_url": {"type": "string", "format": "uri", "description": "Where the user is sent to sign in."},
                     "token_url": {"type": "string", "format": "uri", "description": "Where the code is exchanged for tokens."},
-                    "client_id": {"type": "string", "maxLength": 200, "description": "Your app's public client id. There is no client secret: the flow is PKCE."},
+                    "client_id": {"type": "string", "maxLength": 200, "description": "Your app's public client id, if you ship one. Leave it out where the provider makes every user register their own app and PrintGuard will ask them for theirs. There is no client secret: the flow is PKCE."},
+                    "register_url": {"type": "string", "format": "uri", "maxLength": 200, "description": "Where the user goes to register their own app, shown alongside the redirect URI to give it."},
                     "scopes": {"type": "array", "uniqueItems": True, "items": {"type": "string"}},
                     "label": {"type": "string", "maxLength": 80, "description": "What the service is called, shown when the user is asked. Defaults to the authorize host."},
                 },

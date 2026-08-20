@@ -41,6 +41,13 @@ CHANNEL_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
 LINK_PATTERN = re.compile(r"^([a-z0-9][a-z0-9-]{1,38}[a-z0-9]):([a-z0-9][a-z0-9-]{0,38}[a-z0-9])$")
 MAX_SECRET_BYTES = 4096
 SECRET_REFERENCE = re.compile(r"\{\{\s*secret\.([a-z0-9_-]{1,40})\s*\}\}")
+CLIENT_ID_SECRET = "oauth_client_id"
+"""Where a client id the user registered themselves is kept.
+
+A plugin that ships one needs nothing here. One that cannot, because the
+provider makes every user register an app of their own, leaves ``client_id``
+out and PrintGuard asks for it in the same form as any other credential.
+"""
 """How a plugin names a secret it may use but never read.
 
 The value is substituted as the request leaves PrintGuard, so the reference is
@@ -500,6 +507,8 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     oauth = sanitise_oauth(raw.get("oauth"))
     if oauth and "oauth" not in permissions:
         raise ValueError("oauth needs the oauth permission")
+    if oauth and not oauth["client_id"]:
+        secrets[CLIENT_ID_SECRET] = f"The client id of the {oauth['label']} app you registered"
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
     platforms = sorted({str(p).strip() for p in raw.get("platforms", [])} & set(PLATFORMS))
     assets = sorted({str(a).strip().lower() for a in raw.get("assets", [])} - {MANIFEST_FILE, *SOURCE_FILES})
@@ -580,18 +589,19 @@ def sanitise_oauth(raw: Any) -> dict[str, Any]:
     Raises:
         ValueError: If the block is there but unusable. No client secret is
             accepted, since a plugin is a public client and PKCE is what stands
-            in for one.
+            in for one. A ``client_id`` is optional: most providers still make
+            somebody register an app by hand, so a plugin that cannot ship one
+            leaves it out and PrintGuard asks the user for theirs.
     """
     if not isinstance(raw, dict) or not raw:
         return {}
     endpoints = {key: str(raw.get(key, "")).strip() for key in ("authorize_url", "token_url")}
     if any(not urls.parse(f"{value}{'' if '/' in value.split('://')[-1] else '/'}") for value in endpoints.values()):
         raise ValueError("oauth needs an https authorize_url and token_url")
-    if not str(raw.get("client_id", "")).strip():
-        raise ValueError("oauth needs the client_id of a public app")
     return {
         **endpoints,
-        "client_id": str(raw["client_id"]).strip()[:200],
+        "client_id": str(raw.get("client_id", "")).strip()[:200],
+        "register_url": str(raw.get("register_url", "")).strip()[:200],
         "scopes": [str(scope).strip() for scope in raw.get("scopes", []) if str(scope).strip()][:20],
         "label": str(raw.get("label", "")).strip()[:80] or urlsplit(endpoints["authorize_url"]).hostname or "",
     }

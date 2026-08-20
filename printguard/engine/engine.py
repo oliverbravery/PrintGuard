@@ -264,6 +264,7 @@ class Engine:
             "plugin_permissions": plugins.permissions_meta(),
             "plugin_events": plugins.EVENTS,
             "plugin_event_permissions": plugins.EVENT_PERMISSIONS,
+            "plugin_oauth_callback": oauth.CALLBACK_PATH,
             "plugin_platforms": plugins.PLATFORMS,
             "plugin_assets": plugins.ASSET_TYPES,
             "plugin_host": self.platform.plugin_runtime is not None,
@@ -1033,15 +1034,33 @@ class Engine:
         plugin.secrets = {**{name: value for name, value in plugin.secrets.items() if name.startswith("oauth")}, **kept}
         await self._reload_plugins()
 
+    @staticmethod
+    def _provider(plugin: Plugin) -> dict[str, Any]:
+        """A plugin's sign-in, with the client id whoever registered the app supplied.
+
+        Raises:
+            PermissionError: If nobody has supplied one, since a sign-in without
+                a client id only fails later and less clearly.
+        """
+        provider = plugin.manifest["oauth"]
+        client_id = provider["client_id"] or plugin.secrets.get(plugins.CLIENT_ID_SECRET, "")
+        if not client_id:
+            raise PermissionError(f"{plugin.id} needs the client id of a {provider['label']} app you registered")
+        return {**provider, "client_id": client_id}
+
     async def _cmd_plugin_oauth(self, message: dict[str, Any]) -> None:
         """Starts a plugin's sign-in, or forgets what an earlier one returned."""
         plugin = self.plugins.get(message["id"])
         if not plugin or not plugin.may("oauth"):
             raise PermissionError("plugin may not connect an account")
         if str(message.get("action")) == "forget":
-            plugin.secrets = {name: value for name, value in plugin.secrets.items() if not name.startswith("oauth")}
+            plugin.secrets = {
+                name: value
+                for name, value in plugin.secrets.items()
+                if not name.startswith("oauth") or name == plugins.CLIENT_ID_SECRET
+            }
             return
-        url = self.oauth.start(plugin.id, plugin.manifest["oauth"], str(message.get("origin", "")))
+        url = self.oauth.start(plugin.id, self._provider(plugin), str(message.get("origin", "")))
         self.emit({"event": "plugin_oauth", "id": plugin.id, "url": url, "req_id": message.get("req_id")})
 
     async def finish_sign_in(self, state: str, code: str) -> str | None:
@@ -1058,7 +1077,7 @@ class Engine:
         plugin = self.plugins.get(plugin_id) if plugin_id else None
         if plugin is None:
             return None
-        plugin.secrets = {**plugin.secrets, **await self.oauth.finish(state, code, plugin.manifest["oauth"])}
+        plugin.secrets = {**plugin.secrets, **await self.oauth.finish(state, code, self._provider(plugin))}
         logger.info("plugin %s signed in to %s", plugin.id, plugin.manifest["oauth"]["label"])
         self._broadcast(self.state_event())
         return plugin.manifest["name"]
@@ -1067,7 +1086,7 @@ class Engine:
         """Renews a plugin's access token before a request goes out on it."""
         if not plugin.manifest["oauth"]:
             return
-        renewed = await self.oauth.refreshed(plugin.manifest["oauth"], plugin.secrets)
+        renewed = await self.oauth.refreshed(self._provider(plugin), plugin.secrets)
         if renewed is not None:
             plugin.secrets = renewed
 

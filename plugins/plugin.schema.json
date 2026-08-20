@@ -219,8 +219,7 @@
       "description": "Sign the user in to a service and hold the tokens for you. Needs the oauth permission, and the access token arrives as {{secret.oauth}}.",
       "required": [
         "authorize_url",
-        "token_url",
-        "client_id"
+        "token_url"
       ],
       "additionalProperties": false,
       "properties": {
@@ -237,7 +236,13 @@
         "client_id": {
           "type": "string",
           "maxLength": 200,
-          "description": "Your app's public client id. There is no client secret: the flow is PKCE."
+          "description": "Your app's public client id, if you ship one. Leave it out where the provider makes every user register their own app and PrintGuard will ask them for theirs. There is no client secret: the flow is PKCE."
+        },
+        "register_url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 200,
+          "description": "Where the user goes to register their own app, shown alongside the redirect URI to give it."
         },
         "scopes": {
           "type": "array",

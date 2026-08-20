@@ -4,33 +4,32 @@ import type { PluginRecord } from "../types";
 
 export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
   const send = useStore((s) => s.send);
+  const callback = useStore((s) => s.engine?.plugin_oauth_callback ?? "");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const names = Object.keys(plugin.manifest.secrets);
   const provider = plugin.manifest.oauth.label;
   const connected = plugin.secrets_set.includes("oauth");
+  const registering = Boolean(provider) && !plugin.manifest.oauth.client_id;
+  const redirect = `${window.location.origin.replace("//localhost", "//127.0.0.1")}${callback}`;
 
   if (names.length === 0 && !provider) return null;
 
   return (
     <div className="space-y-2 border-t border-line-0 pt-2">
-      {provider && (
-        <div className="flex items-center gap-2">
-          <span className="text-[0.7rem] text-text-2 flex-1">
-            {connected ? `Connected to ${provider}.` : `Sign in to ${provider} to let it work.`}
+      {registering && (
+        <div className="space-y-1">
+          <span className="block text-[0.7rem] text-text-2">
+            {provider} makes everyone register their own app.{" "}
+            {plugin.manifest.oauth.register_url && (
+              <a className="text-accent hover:underline" href={plugin.manifest.oauth.register_url} target="_blank" rel="noreferrer">
+                Create one ↗
+              </a>
+            )}{" "}
+            and add this as its redirect URI, then paste its client id below.
           </span>
-          <button
-            className={connected ? "btn" : "btn btn-primary"}
-            onClick={() =>
-              send({
-                cmd: "plugin.oauth",
-                id: plugin.id,
-                action: connected ? "forget" : "start",
-                origin: window.location.origin,
-              })
-            }
-          >
-            {connected ? "Disconnect" : "Connect"}
-          </button>
+          <code className="mono block select-all break-all rounded border border-line-0 bg-ink-2 px-2 py-1 text-[0.65rem] text-text-1">
+            {redirect}
+          </code>
         </div>
       )}
       {names.map((name) => (
@@ -55,6 +54,27 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
         <span className="block text-[0.7rem] text-text-2">
           PrintGuard fills these in as the plugin's requests go out. Neither it nor this page reads one back.
         </span>
+      )}
+      {provider && (
+        <div className="flex items-center gap-2">
+          <span className="text-[0.7rem] text-text-2 flex-1">
+            {connected ? `Connected to ${provider}.` : `Sign in to ${provider} to let it work.`}
+          </span>
+          <button
+            className={connected ? "btn" : "btn btn-primary"}
+            disabled={!connected && registering && !plugin.secrets_set.includes("oauth_client_id")}
+            onClick={() =>
+              send({
+                cmd: "plugin.oauth",
+                id: plugin.id,
+                action: connected ? "forget" : "start",
+                origin: window.location.origin,
+              })
+            }
+          >
+            {connected ? "Disconnect" : "Connect"}
+          </button>
+        </div>
       )}
     </div>
   );

@@ -150,10 +150,9 @@ The reference is all your code ever holds, in the URL, a header or anywhere in a
 plugin gets eight secrets at most.
 
 For a service with a sign-in rather than a key, declare `oauth` and PrintGuard runs the flow
-itself, with PKCE and no client secret, since a plugin is a public client. Register
-`http://127.0.0.1:8000/oauth/callback` with your provider, matching wherever the hub is
-reached. The access token arrives as `{{secret.oauth}}` and is refreshed before it expires, so
-your code never handles one.
+itself, with PKCE and no client secret, since a plugin is a public client. The access token
+arrives as `{{secret.oauth}}` and is refreshed before it expires, so your code never handles
+one.
 
 ```json
 "permissions": ["net", "oauth"],
@@ -164,6 +163,24 @@ your code never handles one.
   "scopes": ["read"]
 }
 ```
+
+Leave `client_id` out where the provider makes every user register an app of their own, which
+most still do. PrintGuard then asks for theirs in the same form as any other credential and
+shows them the exact redirect URI to give the provider, so nothing has to be guessed or
+written down. Point `register_url` at wherever they create it.
+
+```json
+"oauth": {
+  "label": "Spotify",
+  "authorize_url": "https://accounts.spotify.com/authorize",
+  "token_url": "https://accounts.spotify.com/api/token",
+  "register_url": "https://developer.spotify.com/dashboard",
+  "scopes": ["user-read-playback-state"]
+}
+```
+
+The redirect URI is the hub's own address with `/oauth/callback` on the end, and a loopback
+name is written as `127.0.0.1` because providers have stopped accepting the name.
 
 Signing in is hub only, since local mode has no address for a provider to send anyone back to.
 

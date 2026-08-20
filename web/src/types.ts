@@ -221,7 +221,7 @@ export interface PluginManifest {
   secrets: Record<string, string>;
   provides: Record<string, string>;
   consumes: string[];
-  oauth: { authorize_url: string; token_url: string; client_id: string; scopes: string[]; label: string } | Record<string, never>;
+  oauth: { authorize_url: string; token_url: string; client_id: string; register_url: string; scopes: string[]; label: string } | Record<string, never>;
   events: string[];
   tick_s: number;
 }
@@ -341,6 +341,7 @@ export interface EngineState {
   plugin_permissions: Permission[];
   plugin_events: Record<string, string[]>;
   plugin_event_permissions: Record<string, string>;
+  plugin_oauth_callback: string;
   plugin_platforms: Record<string, string>;
   plugin_assets: Record<string, string>;
   plugin_host: boolean;
