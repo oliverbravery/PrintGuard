@@ -767,6 +767,36 @@ async def test_plugin_installs_from_a_file_without_its_code_in_the_snapshot() ->
     assert PLUGIN_JS not in snapshot, "plugin source rode along in the state snapshot"
 
 
+async def test_a_manifest_stored_by_an_older_version_comes_back_in_todays_shape() -> None:
+    """A record written before a manifest field existed still restores complete.
+
+    Both sandboxes and the dashboard read the sanitised manifest, so a stored
+    one missing whatever has been added since would arrive short.
+    """
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_demo(engine)
+    stored = platform.state["plugins"][0]
+    stored["manifest"] = {k: v for k, v in stored["manifest"].items() if k not in ("consumes", "provides", "oauth")}
+
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        restored = engine.plugins.get("demo")
+
+    assert restored is not None, "a plugin was dropped over a manifest an older version wrote"
+    assert restored.manifest["consumes"] == [] and restored.manifest["oauth"] == {}
+    assert restored.granted == MANIFEST["permissions"], "restoring the record threw the grants away"
+
+
+async def test_a_stored_manifest_that_no_longer_validates_is_dropped() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_demo(engine)
+    platform.state["plugins"][0]["manifest"]["reasons"] = {}
+
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        assert engine.plugins.get("demo") is None, "a manifest this version cannot read was restored anyway"
+
+
 async def test_plugin_code_reaches_only_the_tab_that_asked() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[]) as (engine, events):

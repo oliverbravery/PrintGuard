@@ -126,7 +126,13 @@ class Engine:
         }
 
     async def start(self) -> None:
-        """Restores persisted state and launches the background loops."""
+        """Restores persisted state and launches the background loops.
+
+        A stored plugin manifest goes back through ``sanitise_manifest``, since
+        one written by an earlier version is missing whatever has been added to
+        the manifest since and both sandboxes read the sanitised shape. One that
+        no longer validates is dropped rather than half restored.
+        """
         persisted = self.platform.load_state() or {}
         self.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in persisted.get("settings", {}).items() if k in SETTINGS_DEFAULTS}}
         await self.platform.configure(self.settings)
@@ -143,9 +149,9 @@ class Engine:
             self.monitors[record["id"]] = sanitise_monitor(record["id"], record)
         for record in persisted.get("plugins", []):
             try:
-                self.plugins.add(Plugin(**record))
-            except TypeError:
-                logger.warning("dropping unreadable plugin record %r", record.get("id"))
+                self.plugins.add(Plugin(**{**record, "manifest": plugins.sanitise_manifest(record["manifest"])}))
+            except (KeyError, TypeError, ValueError) as exc:
+                logger.warning("dropping unreadable plugin record %r: %s", record.get("id"), exc)
         for record in persisted.get("cameras", []):
             settings = sanitise_camera(record["id"], record)
             camera = Camera(
