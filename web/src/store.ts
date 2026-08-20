@@ -343,7 +343,7 @@ export const useStore = create<PgStore>((set, get) => {
     const plugin = engine?.plugins.find((p) => p.id === id);
     if (!engine || !plugin) return;
     const { lint } = await import("./lint");
-    const findings = lint(plugin.manifest, sources, engine.plugin_permissions);
+    const findings = lint(plugin.manifest, sources, engine.plugin_permissions, engine.plugin_event_permissions);
     set((s) => ({ pluginFindings: { ...s.pluginFindings, [id]: findings } }));
   };
 

@@ -1,7 +1,7 @@
 import { parse } from "acorn";
 import { simple } from "acorn-walk";
 import type { Permission, PluginManifest } from "./types";
-import { matches } from "./urls.ts";
+import { matches, reachesLocal } from "./urls.ts";
 
 export interface Finding {
   kind: "unused" | "undeclared" | "dynamic";
@@ -15,12 +15,16 @@ interface Call {
   dynamic: string | null;
 }
 
+interface Tables {
+  commands: Record<string, string>;
+  collections: Record<string, string>;
+  events: Record<string, string>;
+}
+
 const CTX_PERMISSIONS: Record<string, string> = { notify: "notify", sound: "sound", background: "background" };
 const PLUGIN_PERMISSIONS: Record<string, string> = { route: "routes", gate: "gate", serve: "link:provide" };
 const NETWORK_CALLS = ["http", "socket"];
 const LINK_CALLS: Record<string, string> = { call: "link:consume", publish: "link:provide" };
-const STATE_COLLECTIONS = ["monitors", "cameras", "printers"];
-const EVENT_PERMISSIONS: Record<string, string> = { state: "state:read", frame: "camera:frames", history: "history:read" };
 const SECRET_REFERENCE = /\{\{\s*secret\.([a-z0-9_-]{1,40})\s*\}\}/g;
 
 function literalField(node: any, field: string): string | null {
@@ -39,7 +43,7 @@ function scriptsIn(html: string): string {
   return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((found) => found[1]).join("\n;\n");
 }
 
-function callsIn(code: string, commands: Record<string, string>, owners: string[]): { calls: Call[]; secrets: string[]; failed: string | null } {
+function callsIn(code: string, tables: Tables, owners: string[]): { calls: Call[]; secrets: string[]; failed: string | null } {
   const calls: Call[] = [];
   const secrets: string[] = [];
   let tree: any;
@@ -61,7 +65,8 @@ function callsIn(code: string, commands: Record<string, string>, owners: string[
     MemberExpression(node: any) {
       const inner = node.object;
       if (inner?.type === "MemberExpression" && owners.includes(inner.object?.name) && inner.property?.name === "state") {
-        if (STATE_COLLECTIONS.includes(node.property?.name)) calls.push({ permission: "state:read", url: null, link: null, dynamic: null });
+        const reads = tables.collections[node.property?.name];
+        if (reads) calls.push({ permission: reads, url: null, link: null, dynamic: null });
       }
     },
     CallExpression(node: any) {
@@ -74,7 +79,7 @@ function callsIn(code: string, commands: Record<string, string>, owners: string[
       }
       if (owner === "plugin" || owners.includes(owner)) {
         if (method === "on" && node.arguments?.[0]?.type === "Literal") {
-          const implied = EVENT_PERMISSIONS[String(node.arguments[0].value)];
+          const implied = tables.events[String(node.arguments[0].value)];
           if (implied) calls.push({ permission: implied, url: null, link: null, dynamic: null });
         }
       }
@@ -82,8 +87,9 @@ function callsIn(code: string, commands: Record<string, string>, owners: string[
       if (CTX_PERMISSIONS[method]) calls.push({ permission: CTX_PERMISSIONS[method], url: null, link: null, dynamic: null });
       if (method === "command") {
         const named = literalField(node, "cmd");
-        calls.push({ permission: named ? (commands[named] ?? null) : null, url: null, link: null, dynamic: named ? null : "a command it builds as it runs" });
-        if (named && !commands[named]) calls.push({ permission: null, url: null, link: null, dynamic: `an unknown command, ${named}` });
+        const runs = named ? (tables.commands[named] ?? null) : null;
+        calls.push({ permission: runs, url: null, link: null, dynamic: named ? null : "a command it builds as it runs" });
+        if (named && !runs) calls.push({ permission: null, url: null, link: null, dynamic: `an unknown command, ${named}` });
       }
       if (LINK_CALLS[method]) {
         const to = method === "call" ? literalField(node, "to") : null;
@@ -105,17 +111,28 @@ function callsIn(code: string, commands: Record<string, string>, owners: string[
   return { calls, secrets, failed: null };
 }
 
-export function lint(manifest: PluginManifest, sources: Record<string, string>, permissions: Permission[]): Finding[] {
-  const commands = Object.fromEntries(
-    permissions.flatMap((permission) => (permission.commands ?? []).map((command) => [command, permission.id])),
-  );
+export function lint(
+  manifest: PluginManifest,
+  sources: Record<string, string>,
+  permissions: Permission[],
+  eventPermissions: Record<string, string>,
+): Finding[] {
+  const tables: Tables = {
+    commands: Object.fromEntries(
+      permissions.flatMap((permission) => (permission.commands ?? []).map((command) => [command, permission.id])),
+    ),
+    collections: Object.fromEntries(
+      permissions.flatMap((permission) => Object.keys(permission.fields ?? {}).map((collection) => [collection, permission.id])),
+    ),
+    events: eventPermissions,
+  };
   const findings: Finding[] = [];
   const calls: Call[] = [];
   const secrets: string[] = [];
 
   for (const [name, code] of Object.entries(sources)) {
     const panel = name.endsWith(".html");
-    const read = callsIn(panel ? scriptsIn(code) : code, commands, panel ? ["pg"] : ["ctx"]);
+    const read = callsIn(panel ? scriptsIn(code) : code, tables, panel ? ["pg"] : ["ctx"]);
     if (read.failed) findings.push({ kind: "dynamic", what: `${name} could not be read, ${read.failed}` });
     calls.push(...read.calls);
     secrets.push(...read.secrets);
@@ -125,9 +142,9 @@ export function lint(manifest: PluginManifest, sources: Record<string, string>, 
   const declared = new Set(manifest.permissions);
   if (manifest.consumes.length) wanted.add("link:consume");
   if (Object.keys(manifest.provides).length) wanted.add("link:provide");
-  const local = manifest.urls.some((url) => url.includes("://*") || url.includes("://localhost") || url.includes("://127."));
+  const local = manifest.urls.some(reachesLocal);
   for (const event of manifest.events) {
-    if (EVENT_PERMISSIONS[event]) wanted.add(EVENT_PERMISSIONS[event]);
+    if (tables.events[event]) wanted.add(tables.events[event]);
   }
 
   for (const permission of wanted) {
@@ -154,10 +171,4 @@ export function lint(manifest: PluginManifest, sources: Record<string, string>, 
     findings.push({ kind: "dynamic", what });
   }
   return findings;
-}
-
-export function phraseFinding(finding: Finding): string {
-  if (finding.kind === "unused") return `Asks for ${finding.what} but never uses it.`;
-  if (finding.kind === "undeclared") return `Uses ${finding.what} without asking for it, so PrintGuard will refuse it.`;
-  return `Uses ${finding.what}, so nobody can tell from the code what it reaches.`;
 }
