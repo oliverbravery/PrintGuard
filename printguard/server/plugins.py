@@ -1,17 +1,15 @@
 """The hub's plugin sandbox, QuickJS compiled to WebAssembly under wasmtime.
 
-A plugin's ``worker.js`` runs here as a pure function. Each invocation gets a
-brand new JavaScript VM with the event, the state its permissions allow and its
-own stored data on stdin, and returns its new data plus a list of effects on
-stdout. PrintGuard performs the effects; the plugin performs none itself.
+A plugin's ``worker.js`` runs here as a pure function. Each call gets a fresh VM
+with the event, the state its permissions allow and its own stored data on
+stdin, and returns its new data plus a list of effects on stdout. PrintGuard
+performs the effects.
 
 The instance has no preopened directories and no sockets, so there is no
-filesystem and no network inside it whatever the code asks for, and it runs
-against a memory cap and a CPU fuel budget, so a plugin that hangs or allocates
-without bound traps in milliseconds and is disabled rather than taking the hub
-with it. WASI's one blocking call is stubbed out, so nothing inside can wait:
-without it, a sleeping plugin would sit in a host call where neither the fuel
-budget nor an epoch deadline can reach it.
+filesystem and no network whatever the code asks for. A memory cap and a CPU
+fuel budget trap a hung or greedy plugin in milliseconds, and it is disabled.
+WASI's one blocking call is stubbed out: without it, a sleeping plugin would sit
+in a host call where neither the fuel budget nor an epoch deadline can reach it.
 """
 
 from __future__ import annotations

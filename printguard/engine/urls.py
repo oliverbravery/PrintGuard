@@ -1,14 +1,13 @@
 """URL match patterns, the scope a plugin's network grant is written in.
 
-The grammar is the one Chrome and Firefox extensions use, ``scheme://host/path``
-with wildcards, extended past http and https to the streaming and socket schemes
-PrintGuard speaks. A bare hostname would have been simpler, but it cannot say
-"only this endpoint", so every grant would round up to the whole site.
+The grammar is the one browser extensions use, ``scheme://host/path`` with
+wildcards, extended to the streaming and socket schemes PrintGuard speaks. A
+bare hostname cannot say "only this endpoint", so every grant would round up to
+the whole site.
 
-Patterns naming a private or loopback address are separated out rather than
-refused: reaching a printer or a hub on the same network is most of what a
-self-hosted plugin wants, but it is a different thing to agree to than reaching
-the internet, so it is asked for on its own.
+A pattern naming a private or loopback address is asked for on its own. Reaching
+a printer on your network is most of what a self-hosted plugin wants, and a
+different thing to agree to than the internet.
 """
 
 from __future__ import annotations
@@ -107,9 +106,8 @@ def is_local_address(host: str) -> bool:
 def reaches_local(pattern: str) -> bool:
     """Whether a pattern can land on the machine's own network.
 
-    A wildcard host counts, since it covers every private address as readily as
-    a public one, which is what makes ``*://*/*`` the widest thing a plugin can
-    ask for.
+    A wildcard host counts, since it covers private addresses too, which makes
+    ``*://*/*`` the widest thing a plugin can ask for.
     """
     rule = parse(pattern)
     return rule is not None and (rule["host"] == "*" or is_local_address(rule["host"].removeprefix("*.")))
@@ -118,14 +116,13 @@ def reaches_local(pattern: str) -> bool:
 def resolves_local(url: str) -> bool:
     """Whether a URL's host resolves to an address on this network.
 
-    The literal is checked first so an address needs no lookup at all, then the
-    name is resolved and every answer is checked, since a public name is free to
-    point at a private address. A name that will not resolve is not local, since
-    it is not anywhere and the request is about to fail on its own.
+    A literal address needs no lookup. Otherwise the name is resolved and every
+    answer checked, since a public name can point somewhere private. A name that
+    will not resolve is not local.
 
-    Between this check and the connection the name could be re-resolved to
-    somewhere else, which no allowlist closes on its own, so this decides which
-    permission a request needs rather than standing as the only thing in its way.
+    The name could be re-resolved between this check and the connection, which no
+    allowlist closes, so this decides which permission a request needs. It is not
+    the only thing in its way.
     """
     host = (urlsplit(url.strip()).hostname or "").lower()
     if not host:

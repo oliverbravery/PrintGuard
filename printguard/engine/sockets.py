@@ -1,12 +1,11 @@
 """Long-lived WebSockets held open for plugins.
 
-A plugin is a pure function that runs and returns, so it cannot hold a
-connection itself. It names one with a tag, PrintGuard keeps it, and every
-frame that arrives comes back as a ``socket`` event carrying that tag. The
-plugin sends and closes by naming the same tag.
+A plugin runs and returns, so it cannot hold a connection itself. It names one
+with a tag, PrintGuard keeps it, and every frame comes back as a ``socket``
+event carrying that tag.
 
 Connections belong to the plugin that opened them and are dropped when it is
-disabled, reinstalled or removed, so nothing outlives a grant.
+disabled, reinstalled or removed.
 """
 
 from __future__ import annotations

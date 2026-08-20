@@ -129,9 +129,8 @@ class Engine:
         """Restores persisted state and launches the background loops.
 
         A stored plugin manifest goes back through ``sanitise_manifest``, since
-        one written by an earlier version is missing whatever has been added to
-        the manifest since and both sandboxes read the sanitised shape. One that
-        no longer validates is dropped rather than half restored.
+        one written by an earlier version is missing whatever has been added
+        since. One that no longer validates is dropped.
         """
         persisted = self.platform.load_state() or {}
         self.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in persisted.get("settings", {}).items() if k in SETTINGS_DEFAULTS}}
@@ -803,15 +802,11 @@ class Engine:
     async def _cmd_plugin_install(self, message: dict[str, Any]) -> None:
         """Fetches, verifies and registers a plugin, or reinstalls one in place.
 
-        A plugin arrives disabled and holding nothing, since the permissions it
-        asks for are accepted at the point of enabling it. Reinstalling is how a
-        plugin is upgraded: the id is what identifies it, so a newer revision
-        replaces the old bytes, and it keeps the grants, the stored data and the
-        credentials the user gave it as long as it comes from the same place. A
-        bundle from anywhere else shares nothing but the id, so it starts as a
-        stranger with none of them, and one from the same place that reaches
-        further than the manifest already accepted stands down until the wider
-        list has been accepted too.
+        A plugin arrives disabled and holding nothing. Reinstalling upgrades it:
+        a newer revision replaces the old bytes and keeps the grants, stored data
+        and credentials, as long as it comes from the same place. A bundle from
+        anywhere else starts with none of them, and one reaching further than the
+        accepted manifest stands down until the wider list is accepted.
         """
         source = dict(message.get("source") or {})
         if source.get("kind") == "github":
@@ -868,7 +863,7 @@ class Engine:
         await self._reload_plugins()
 
     async def _cmd_plugin_update(self, message: dict[str, Any]) -> None:
-        """Applies a patch, refusing to run a plugin whose permissions stand unaccepted.
+        """Applies a patch, refusing to run a plugin with unaccepted permissions.
 
         Raises:
             PermissionError: If enabling one that asks for more than it holds.
@@ -909,7 +904,7 @@ class Engine:
         self.emit({"event": "catalogue", "plugins": self.catalogue, "req_id": message.get("req_id")})
 
     async def _network_allows(self, plugin_id: str, url: str) -> Plugin:
-        """Checks a plugin may reach a URL, and returns it for the caller to use.
+        """Checks a plugin may reach a URL, and returns the plugin.
 
         Args:
             plugin_id: Whose request it is.
@@ -942,11 +937,9 @@ class Engine:
     async def _cmd_plugin_http(self, message: dict[str, Any]) -> None:
         """Makes an outbound request on a plugin's behalf, if it may.
 
-        A plugin has no network of its own in either sandbox, so this is the
-        only way out, and it only opens for the patterns the plugin's manifest
-        declares and the user granted. The answer goes back as an ``http`` event
-        tagged with whatever the plugin named the request, since a plugin runs
-        and returns rather than waiting on anything.
+        Neither sandbox has a network, so this is the only way out, and it opens
+        only for the patterns the manifest declares and the user granted. The
+        answer comes back as an ``http`` event under the plugin's own tag.
         """
         plugin = await self._network_allows(message["id"], str(message.get("url", "")))
         if not self._within_rate(plugin.id):
@@ -1002,9 +995,8 @@ class Engine:
     async def _cmd_plugin_call(self, message: dict[str, Any]) -> None:
         """Puts one plugin's question to another, and remembers who asked.
 
-        Both ends declared this: the caller named the plugin and channel in its
-        manifest and the user accepted it, and the answering plugin offers that
-        channel. Neither reaches the other on any other footing.
+        Both ends declared it. The caller named the plugin and channel, and the
+        answering plugin offers that channel.
         """
         caller = self.plugins.get(message["id"])
         to, channel = str(message.get("to", "")), str(message.get("channel", ""))
@@ -1039,11 +1031,9 @@ class Engine:
     async def _cmd_plugin_secrets(self, message: dict[str, Any]) -> None:
         """Stores the credentials the user typed into a plugin's own form.
 
-        Values only ever travel inwards: a plugin references them by name and
-        PrintGuard fills them in as a request leaves, so neither the plugin nor
-        the dashboard reads one back. The form carries only what was typed into
-        it, so what it does not name is left as it stands rather than cleared,
-        which is what a field reading "stored, type to replace" promises.
+        Values travel inwards only. A plugin references them by name and
+        PrintGuard fills them in as a request leaves. The form carries what was
+        typed, so anything it does not name is left as it stands.
         """
         plugin = self.plugins.get(message["id"])
         if not plugin:
@@ -1058,8 +1048,7 @@ class Engine:
         """A plugin's sign-in, with the client id of the app the user registered.
 
         Raises:
-            PermissionError: If nobody has typed one in, since a sign-in without
-                a client id only fails later and less clearly.
+            PermissionError: If nobody has typed one in.
         """
         provider = plugin.manifest["oauth"]
         client_id = plugin.secrets.get(oauth.CLIENT_ID, "")
@@ -1106,7 +1095,7 @@ class Engine:
             plugin.secrets = renewed
 
     async def _cmd_plugin_effect(self, message: dict[str, Any]) -> None:
-        """Hands a plugin's dashboard effect to the dashboards that can perform it.
+        """Hands a plugin's effect to the dashboards that can perform it.
 
         Raises:
             PermissionError: If the plugin was not granted what the effect needs,

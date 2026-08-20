@@ -1,13 +1,11 @@
-"""Signing a plugin in to a service, without the plugin ever holding the result.
+"""Signing a plugin in to a service, without it ever holding the result.
 
-PrintGuard runs the authorisation code flow with PKCE, which is what RFC 8252
-asks of an app that cannot keep a client secret, and a plugin is exactly that.
-The tokens land in the plugin's secrets, so it references them in a request and
-PrintGuard fills them in on the way out.
+PrintGuard runs the authorisation code flow with PKCE, which RFC 8252 asks of an
+app that cannot keep a client secret. The tokens land in the plugin's secrets,
+so it references them and PrintGuard fills them in on the way out.
 
-The access token is refreshed when it is close to expiring rather than after a
-request has already failed, and a provider that rotates its refresh tokens has
-the new one kept.
+The access token is refreshed shortly before it expires, and a rotated refresh
+token is kept.
 """
 
 from __future__ import annotations
