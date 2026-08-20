@@ -82,6 +82,33 @@ async def test_hls_view_wakes_camera_before_proxying() -> None:
     platform.view_camera.assert_awaited_once_with("camera-one")
 
 
+async def test_a_sandboxed_page_cannot_pull_a_camera_stream() -> None:
+    """A plugin's own pages are served into an opaque origin.
+
+    Nothing else in a browser sends ``Origin: null``, so refusing it is what
+    stops a plugin serving itself a page that reads the live feed without ever
+    asking for a camera permission.
+    """
+    platform = SimpleNamespace(view_camera=AsyncMock(), plugin_runtime=None)
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=platform)
+    app.state.hls = httpx.AsyncClient(
+        base_url="http://mediamtx",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=AsyncContent(), request=request)),
+    )
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            refused = await client.get("/hls/camera-one/index.m3u8", headers={"origin": "null"})
+            allowed = await client.get("/hls/camera-one/index.m3u8", headers={"origin": "http://test"})
+    finally:
+        await app.state.hls.aclose()
+
+    assert refused.status_code == 403
+    assert allowed.status_code == 200
+    platform.view_camera.assert_awaited_once_with("camera-one")
+
+
 async def test_failed_startup_stops_the_streaming_server(monkeypatch, tmp_path) -> None:
     """A hub that cannot finish starting takes the streaming server down with it.
 

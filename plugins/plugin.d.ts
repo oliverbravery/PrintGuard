@@ -110,6 +110,17 @@ declare global {
     http: { event: "http"; tag: string; status: number; body: unknown };
     /** A socket you opened coming up, carrying a frame, or ending. */
     socket: { event: "socket"; tag: string; state: "open" | "message" | "closed"; text: string };
+    /** A still you asked for with `camera.snapshot`, base64 JPEG. Needs `camera:frames`. */
+    frame: { event: "frame"; camera_id: string; jpeg: string };
+    /** A monitor's risk history, answering `history.get`. Needs `history:read`. */
+    history: {
+      event: "history";
+      monitor_id: string;
+      now: number;
+      buckets: { t: number; n: number; sum: number; min: number; max: number; defects: number }[];
+      alerts: { ts: number; score: number; action: string }[];
+      stats: { current: number; avg: number; min: number; max: number; inferences: number; defect_frames: number };
+    };
     /** Every inference on a watched monitor, capped at 5 a second per monitor, before any threshold or streak logic. */
     result: { event: "result"; monitor_id: string; camera_id: string; score: number; prediction: "failure" | "success"; margin: number; ms: number; ts: number };
     /** A defect held long enough to act on. `action` is what PrintGuard did to the printer. */

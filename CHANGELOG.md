@@ -60,8 +60,18 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   than passing it off as fine. Plugins in the catalogue are held to it, so a listed one is a
   plugin whose code and claims agree.
 
+- Plugins can read your cameras and your risk history, each behind its own permission. Taking a
+  still hands the plugin the picture itself rather than a placeholder, so it is the loudest
+  thing in the list when you are asked, and retuning a camera is separate from adding or
+  deleting one. Risk history comes from the same rollups the detailed monitor page draws, so a
+  plugin watching a trend keeps no copy of its own.
+
 ### Fixed
 
+- A plugin's own pages can no longer pull a live camera stream. Pages a plugin serves run in a
+  sandboxed origin, and the stream proxy answered them like any other request, so a plugin
+  could have read a feed without ever asking for a camera permission. Those requests are
+  refused now.
 - A camera that keeps dropping out no longer notifies you every time it reconnects. The
   watchdog announced a recovery the moment a feed came back, so a source that reconnected in
   a loop pushed an "offline" alert and a "back" alert on every cycle, on ntfy and every other

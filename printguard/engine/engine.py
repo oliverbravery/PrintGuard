@@ -98,6 +98,7 @@ class Engine:
             "monitor.remove": self._cmd_monitor_remove,
             "history.get": self._cmd_history_get,
             "snapshot.get": self._cmd_snapshot_get,
+            "camera.snapshot": self._cmd_camera_snapshot,
             "notify.test": self._cmd_notify_test,
             "notify.send": self._cmd_notify_send,
             "settings.update": self._cmd_settings_update,
@@ -686,6 +687,24 @@ class Engine:
         if jpeg is None:
             raise KeyError(f"no snapshot {message['id']!r}")
         self.emit({"event": "snapshot", "id": message["id"], "jpeg": base64.b64encode(jpeg).decode(), "req_id": message.get("req_id")})
+
+    async def _cmd_camera_snapshot(self, message: dict[str, Any]) -> None:
+        """Hands back a still of a camera as it looks now.
+
+        The frame carries the camera's own brightness, crop and rotation, so it
+        is the picture the dashboard shows rather than what the source sent.
+        """
+        jpeg = await self.snapshot(message["camera_id"])
+        if jpeg is None:
+            raise KeyError(f"camera {message['camera_id']!r} has no frame to hand over")
+        self.emit(
+            {
+                "event": "frame",
+                "camera_id": message["camera_id"],
+                "jpeg": base64.b64encode(jpeg).decode(),
+                "req_id": message.get("req_id"),
+            }
+        )
 
     async def _cmd_notify_test(self, message: dict[str, Any]) -> None:
         adapter = NOTIFIERS.get(message.get("provider") or "")

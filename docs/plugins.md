@@ -80,7 +80,7 @@ server for either to mean anything.
 |---|---|
 | Take your credentials somewhere | Neither sandbox has sockets. The browser half's policy is `connect-src 'none'`; the hub half has no WASI network and no filesystem. The only way out is a request through PrintGuard, to addresses the plugin declared |
 | Read your credentials at all | State is cut down to the fields a permission names. Printer configuration, notifier settings, MQTT credentials and API tokens are in no permission |
-| Read your camera frames | A `camera` node is a placeholder PrintGuard fills with its own player. The video never enters the sandbox, and a cross-origin frame cannot read it |
+| Read your camera frames | A `camera` node is a placeholder PrintGuard fills with its own player, and the video never enters the sandbox. Reading the picture itself is `camera:frames`, which is its own thing to agree to, and a plugin's own pages are refused the live stream |
 | Hang or exhaust the hub | The worker runs against a memory cap and a CPU budget, and traps in milliseconds. A plugin that fails is disabled and reported |
 | Do something it was not granted | Every command maps to a permission, checked at the sandbox edge before it goes anywhere |
 | Pretend to be PrintGuard | Plugins have no styling and no markup of their own, and PrintGuard draws every node itself. A plugin's own pages are served into a sandboxed origin that is not the dashboard's |
@@ -104,7 +104,10 @@ remove the plugin.
 | `net` | Reach the addresses its manifest lists, and nowhere else | |
 | `net:local` | Reach addresses on this machine and the network around it | |
 | `monitor:manage` | Add monitors and delete them | |
-| `camera:manage` | Register cameras, retune them and delete them | |
+| `camera:control` | Retune any camera's brightness, crop, rotation and frame rate | |
+| `camera:manage` | Register cameras and delete them | |
+| `camera:frames` | Take a still of any camera and read the picture itself | |
+| `history:read` | Read how a monitor's risk has moved and when it alerted | |
 | `printer:manage` | Connect printers, supplying the credentials, and delete them | |
 | `settings` | Change alert channels, theme and the rest of Settings | |
 | `tokens` | Mint and revoke API tokens | |
@@ -396,6 +399,8 @@ These are the events a worker can name in `events`:
 |---|---|---|
 | `http` | An answer to one of your own `ctx.http` calls | `tag`, `status`, `body` |
 | `socket` | A socket you opened coming up, carrying a frame, or ending | `tag`, `state`, `text` |
+| `frame` | A still you asked for with `camera.snapshot` | `camera_id`, `jpeg` |
+| `history` | A monitor's risk history, answering `history.get` | `monitor_id`, `now`, `buckets`, `alerts`, `stats` |
 | `result` | Every inference on a watched monitor, capped at 5 per second per monitor | `monitor_id`, `camera_id`, `score`, `prediction`, `margin`, `ms`, `ts` |
 | `alert` | A defect held long enough to act on | `monitor_id`, `score`, `action`, `ts` |
 | `warning` | A watchdog condition, and its recovery | `monitor_id`, `message`, `recovered` |
@@ -452,6 +457,23 @@ plugin.on("http", (event, ctx) => {
 A socket works the same way. `ctx.socket` opens one under a tag, `socket` events carry every
 frame that arrives on it, and PrintGuard drops it when the plugin is disabled or removed. Both
 need `http` or `socket` in the manifest's `events`, or the answer never reaches you.
+
+Camera stills and risk history come back the same way, asked for with a command and answered
+on an event.
+
+```js
+plugin.on("tick", (event, ctx) => {
+  for (const monitor of ctx.state.monitors || []) ctx.command({ cmd: "history.get", monitor_id: monitor.id });
+  ctx.command({ cmd: "camera.snapshot", camera_id: "cam-1" });
+});
+
+plugin.on("history", (event, ctx) => { ctx.store.peak = event.stats.max; });
+plugin.on("frame", (event, ctx) => { ctx.store.last = event.jpeg.length; });
+```
+
+`history.get` answers with the same rollups the detailed monitor page draws, so a plugin
+watching a trend needs no store of its own. `camera.snapshot` hands over a base64 JPEG, which
+is the picture rather than a placeholder, so it needs `camera:frames` and says as much.
 
 `route` answers everything under `/plugins/<id>/`, and may return `headers` with
 `Set-Cookie`, `Location` or `Cache-Control`. Its pages are served into a sandboxed origin,

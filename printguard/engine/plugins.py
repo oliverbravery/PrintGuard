@@ -81,11 +81,27 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
         "commands": ["monitor.add", "monitor.remove"],
         "risky": True,
     },
+    "camera:control": {
+        "label": "Retune cameras",
+        "description": "Change any camera's brightness, contrast, sharpness, crop, rotation and frame rate.",
+        "commands": ["camera.update"],
+    },
     "camera:manage": {
         "label": "Add and remove cameras",
-        "description": "Register new cameras, retune brightness, crop and rotation, and delete existing ones.",
-        "commands": ["camera.add", "camera.update", "camera.remove", "discover"],
+        "description": "Register new cameras and delete existing ones.",
+        "commands": ["camera.add", "camera.remove", "discover"],
         "risky": True,
+    },
+    "camera:frames": {
+        "label": "Read your camera images",
+        "description": "Take a still from any camera and hand it to the plugin. This is the picture itself, so a plugin holding this and a way out can send your images anywhere.",
+        "commands": ["camera.snapshot"],
+        "risky": True,
+    },
+    "history:read": {
+        "label": "Read risk history",
+        "description": "How each monitor's defect score has moved over time, and when it alerted.",
+        "commands": ["history.get"],
     },
     "printer:manage": {
         "label": "Add and remove printers",
@@ -209,6 +225,8 @@ naming none of them runs everywhere.
 
 EVENTS: dict[str, list[str]] = {
     "http": ["tag", "status", "body"],
+    "frame": ["camera_id", "jpeg"],
+    "history": ["monitor_id", "now", "buckets", "alerts", "stats"],
     "socket": ["tag", "state", "text"],
     "result": ["monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts"],
     "alert": ["monitor_id", "score", "action", "ts"],

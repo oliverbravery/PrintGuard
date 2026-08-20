@@ -297,7 +297,14 @@ def create_app() -> FastAPI:
         An unreachable MediaMTX answers 502 with a throttled warning - the
         dashboard polls playlists every second, so letting the error escape
         would flood the log with one ASGI traceback per poll.
+
+        A request from an opaque origin is refused. Plugin pages are served into
+        one, and nothing else in a browser sends ``Origin: null``, so without
+        this a plugin could serve itself a page that pulls the live feed with no
+        camera permission at all.
         """
+        if request.headers.get("origin") == "null":
+            raise HTTPException(403, "camera streams are not served to sandboxed pages")
         await app.state.engine.platform.view_camera(path.split("/", 1)[0])
         client: httpx.AsyncClient = app.state.hls
         try:

@@ -1045,6 +1045,44 @@ async def test_a_plugin_reaches_the_whole_command_table_it_was_granted() -> None
     assert unreachable == []
 
 
+async def test_a_plugin_can_take_a_still_of_a_camera_as_it_looks_now() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        camera_id = next(iter(engine.cameras.items))
+        await engine.handle({"cmd": "camera.snapshot", "camera_id": camera_id, "req_id": 9})
+
+    frame = next(e for e in events if e.get("event") == "frame")
+    assert frame["camera_id"] == camera_id and frame["req_id"] == 9
+    assert base64.b64decode(frame["jpeg"]), "the still came back empty"
+    assert "camera.snapshot" in plugins.PERMISSION_COMMANDS, "taking a still needs a permission"
+    assert plugins.PERMISSIONS[plugins.PERMISSION_COMMANDS["camera.snapshot"]]["risky"] is True
+
+
+async def test_a_camera_with_no_frame_yet_says_so_rather_than_handing_back_nothing() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "camera.snapshot", "camera_id": "nope", "req_id": 10})
+
+    assert any(e.get("event") == "error" and e.get("req_id") == 10 for e in events)
+    assert not any(e.get("event") == "frame" for e in events)
+
+
+async def test_risk_history_reaches_a_plugin_without_a_store_of_its_own() -> None:
+    """The rollups the detail page already draws, projected by the same table."""
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await asyncio.sleep(0.4)
+        await engine.handle({"cmd": "history.get", "monitor_id": monitor_id})
+
+    raw = next(e for e in events if e.get("event") == "history")
+    seen = plugins.project_event(raw, ["history:read"])
+
+    assert seen is not None and seen["monitor_id"] == monitor_id
+    assert set(seen) == {"event", "monitor_id", "now", "buckets", "alerts", "stats"}
+    assert "snaps" not in seen, "the snapshot index rode along to a plugin"
+
+
 async def test_plugin_state_view_carries_no_credentials() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[10.0]) as (engine, _):

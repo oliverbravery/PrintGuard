@@ -64,8 +64,20 @@
             "description": "Set up new monitors and delete existing ones, losing their history with them."
           },
           {
+            "const": "camera:control",
+            "description": "Change any camera's brightness, contrast, sharpness, crop, rotation and frame rate."
+          },
+          {
             "const": "camera:manage",
-            "description": "Register new cameras, retune brightness, crop and rotation, and delete existing ones."
+            "description": "Register new cameras and delete existing ones."
+          },
+          {
+            "const": "camera:frames",
+            "description": "Take a still from any camera and hand it to the plugin. This is the picture itself, so a plugin holding this and a way out can send your images anywhere."
+          },
+          {
+            "const": "history:read",
+            "description": "How each monitor's defect score has moved over time, and when it alerted."
           },
           {
             "const": "printer:manage",
@@ -127,7 +139,10 @@
           "camera:view",
           "monitor:control",
           "monitor:manage",
+          "camera:control",
           "camera:manage",
+          "camera:frames",
+          "history:read",
           "printer:manage",
           "settings",
           "tokens",
@@ -281,6 +296,14 @@
           {
             "const": "http",
             "description": "Carries tag, status, body."
+          },
+          {
+            "const": "frame",
+            "description": "Carries camera_id, jpeg."
+          },
+          {
+            "const": "history",
+            "description": "Carries monitor_id, now, buckets, alerts, stats."
           },
           {
             "const": "socket",
