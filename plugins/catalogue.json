@@ -67,6 +67,29 @@
         "plugin.js": "1efb76525d9a2048a82f10e35c2a4329e4462ea5598de7b70eb056b9e063f7b6",
         "worker.js": "01c5ec167ce8bd40eb135275b4fafea0ff15f547eb106125f366350bf4bbc3c4"
       }
+    },
+    {
+      "id": "spotify",
+      "name": "Spotify",
+      "description": "Puts the cover of whatever you are playing behind the dashboard, with the track and the transport controls in a panel of their own.",
+      "author": "oliverbravery",
+      "version": "1.0.0",
+      "permissions": [
+        "net",
+        "oauth",
+        "background"
+      ],
+      "surfaces": [
+        "panel"
+      ],
+      "platforms": [],
+      "repo": "oliverbravery/PrintGuard",
+      "path": "plugins/spotify",
+      "ref": "68a314986a3ff7be91fa998d097a94a7b497030a",
+      "digests": {
+        "plugin.json": "0475ea4fde249cb0fe134b62c2dc60a217c5c2a3e846d2fcaaf6b687fb07c559",
+        "panel.html": "af92963fc3ab89c26103504b6036581e223fae428550ff9be26ef6ba69f55bb7"
+      }
     }
   ]
 }
