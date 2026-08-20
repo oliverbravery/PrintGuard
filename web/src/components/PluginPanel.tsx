@@ -34,13 +34,12 @@ export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
   const pinned = section(engine?.settings.layout, "plugins").pinned.includes(plugin.id);
   const tree = useStore((s) => s.pluginTrees[plugin.id]);
   const failure = useStore((s) => s.pluginFailures[plugin.id]) ?? plugin.failure;
-  const mayViewCameras = plugin.granted.includes("camera:view");
   const webview = plugin.files.includes("panel.html");
 
   const body = webview ? (
     <PluginWebview plugin={plugin} />
   ) : tree ? (
-    <PluginNodeView node={tree} pluginId={plugin.id} mayViewCameras={mayViewCameras} />
+    <PluginNodeView plugin={plugin} node={tree} />
   ) : (
     <span className="text-[0.7rem] text-text-2">{failure ?? "Starting"}</span>
   );

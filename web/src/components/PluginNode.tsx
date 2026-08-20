@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { floatCamera, floatSupported } from "../float";
 import { useStore } from "../store";
-import type { PluginNode as Node } from "../types";
+import type { PluginNode as Node, PluginRecord } from "../types";
 import { Feed } from "./Feed";
 import { Toggle } from "./Toggle";
 
@@ -40,14 +40,26 @@ function PluginInput({ node, pluginId }: { node: Node; pluginId: string }) {
   );
 }
 
-export function PluginNodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: string; mayViewCameras: boolean }) {
+export function PluginNodeView({ plugin, node }: { plugin: PluginRecord; node: Node }) {
+  return <NodeView node={node} pluginId={plugin.id} mayViewCameras={plugin.granted.includes("camera:view")} />;
+}
+
+export function usePluginSurface(surface: "monitor" | "settings", monitorId: string): { plugin: PluginRecord; node: Node }[] {
+  const { engine, pluginViews } = useStore();
+  return (engine?.plugins ?? [])
+    .filter((plugin) => plugin.enabled && plugin.manifest.surfaces.includes(surface))
+    .map((plugin) => ({ plugin, node: pluginViews[plugin.id]?.[`${surface}:${monitorId}`] }))
+    .filter((drawn): drawn is { plugin: PluginRecord; node: Node } => drawn.node != null);
+}
+
+function NodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: string; mayViewCameras: boolean }) {
   const { engine, pluginAct, pluginAssets, toast } = useStore();
 
   if (node.type === "row" || node.type === "col") {
     return (
       <div className={node.type === "row" ? "flex flex-wrap items-center gap-2" : "flex flex-col gap-2"}>
         {(node.children ?? []).map((child, index) => (
-          <PluginNodeView key={index} node={child} pluginId={pluginId} mayViewCameras={mayViewCameras} />
+          <NodeView key={index} node={child} pluginId={pluginId} mayViewCameras={mayViewCameras} />
         ))}
       </div>
     );

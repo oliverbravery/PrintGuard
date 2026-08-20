@@ -4,7 +4,7 @@ import type { Monitor } from "../types";
 import { Modal } from "./Dialog";
 import { Feed } from "./Feed";
 import { DeviceChip } from "./MonitorTile";
-import { PluginNodeView } from "./PluginNode";
+import { PluginNodeView, usePluginSurface } from "./PluginNode";
 import { RiskGauge } from "./RiskGauge";
 import { SaveStatus } from "./SaveStatus";
 import { Sparkline } from "./Sparkline";
@@ -60,7 +60,8 @@ function Slider({
 }
 
 export function DetailPanel({ monitor }: { monitor: Monitor }) {
-  const { engine, history, send, openDetail, openStats, openDialog, isPending, updateMonitor, pluginViews } = useStore();
+  const { engine, history, send, openDetail, openStats, openDialog, isPending, updateMonitor } = useStore();
+  const settingsPanels = usePluginSurface("settings", monitor.id);
   const titleId = useId();
   const actionRef = useRef<string | null>(null);
   const removeRef = useRef(false);
@@ -219,16 +220,11 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
           </div>
         </Section>
 
-        {(engine?.plugins ?? [])
-          .filter((plugin) => plugin.enabled && plugin.manifest.surfaces.includes("settings"))
-          .map((plugin) => {
-            const node = pluginViews[plugin.id]?.[`settings:${monitor.id}`];
-            return node ? (
-              <Section key={plugin.id} title={plugin.manifest.name}>
-                <PluginNodeView node={node} pluginId={plugin.id} mayViewCameras={plugin.granted.includes("camera:view")} />
-              </Section>
-            ) : null;
-          })}
+        {settingsPanels.map(({ plugin, node }) => (
+          <Section key={plugin.id} title={plugin.manifest.name}>
+            <PluginNodeView plugin={plugin} node={node} />
+          </Section>
+        ))}
 
         <Section title="Printer">
           <div className="space-y-3">
