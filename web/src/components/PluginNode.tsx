@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { floatCamera, floatSupported } from "../float";
 import { useStore } from "../store";
 import type { PluginNode as Node } from "../types";
@@ -6,6 +6,16 @@ import { Feed } from "./Feed";
 import { Toggle } from "./Toggle";
 
 const TONES: Record<string, string> = { ok: "chip-ok", warn: "chip-warn", bad: "chip-bad", accent: "chip-accent" };
+
+function Labelled({ label, children }: { label?: string; children: ReactNode }) {
+  if (!label) return children;
+  return (
+    <label className="block">
+      <span className="label block mb-1">{label}</span>
+      {children}
+    </label>
+  );
+}
 
 function PluginInput({ node, pluginId }: { node: Node; pluginId: string }) {
   const pluginAct = useStore((s) => s.pluginAct);
@@ -16,16 +26,17 @@ function PluginInput({ node, pluginId }: { node: Node; pluginId: string }) {
   };
 
   return (
-    <input
-      className="field"
-      type={node.secret ? "password" : node.kind === "number" ? "number" : "text"}
-      aria-label={node.label}
-      placeholder={node.placeholder}
-      value={draft ?? node.value ?? ""}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => event.key === "Enter" && commit()}
-    />
+    <Labelled label={node.label}>
+      <input
+        className="field"
+        type={node.secret ? "password" : node.kind === "number" ? "number" : "text"}
+        placeholder={node.placeholder}
+        value={draft ?? node.value ?? ""}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => event.key === "Enter" && commit()}
+      />
+    </Labelled>
   );
 }
 
@@ -99,17 +110,18 @@ export function PluginNodeView({ node, pluginId, mayViewCameras }: { node: Node;
   }
 
   return (
-    <select
-      className="field"
-      value={String(node.value ?? "")}
-      aria-label={node.label}
-      onChange={(event) => node.action && pluginAct(pluginId, node.action, event.target.value)}
-    >
-      {(node.options ?? []).map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+    <Labelled label={node.label}>
+      <select
+        className="field"
+        value={String(node.value ?? "")}
+        onChange={(event) => node.action && pluginAct(pluginId, node.action, event.target.value)}
+      >
+        {(node.options ?? []).map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </Labelled>
   );
 }

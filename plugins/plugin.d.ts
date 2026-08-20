@@ -35,13 +35,13 @@ declare global {
      * itself, since a browser only allows that from something the user did.
      */
     | { type: "float"; camera_id: string; label?: string; value?: string }
-    /** A field the user types into, committed on blur or Enter. `secret` masks it. */
+    /** A field the user types into, committed on blur or Enter. Its `label` is drawn above it, and `secret` masks it. */
     | { type: "input"; value?: string; label?: string; action: string; kind?: "text" | "number"; placeholder?: string; secret?: boolean }
     /** A switch, handed `true` or `false` as the arg. */
     | { type: "toggle"; on?: boolean; label?: string; action: string }
     /** Calls your `action` handler with `action` as the name and `arg` as given. */
     | { type: "button"; label: string; action: string; arg?: unknown }
-    /** Calls your `action` handler with the chosen option's value as the arg. */
+    /** Calls your `action` handler with the chosen option's value as the arg. Its `label` is drawn above it. */
     | { type: "select"; value?: string; label?: string; action: string; options: { value: string; label: string }[] };
 
   /** A monitor, as `state:read` allows you to see it. */

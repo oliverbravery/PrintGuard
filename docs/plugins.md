@@ -226,6 +226,9 @@ sandbox loses that. It draws nothing where the browser cannot float one. The flo
 carries the camera as it arrives, without the brightness, crop or rotation the dashboard
 draws, because picture-in-picture shows the video itself and nothing drawn over it.
 
+An `input` and a `select` draw their `label` above the field, the way the dashboard's own
+settings do, so say what the value is for rather than leaving a bare box.
+
 `render` is called whenever state changes, and again after every action, so keep it a plain
 function of `ctx`. Pressing a `button` or changing a `select` calls `action` with the node's
 `action` name and `arg`. An `input` commits on blur or Enter rather than on every keystroke,
