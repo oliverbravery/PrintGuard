@@ -6,7 +6,7 @@
       "name": "Alert sounds",
       "description": "Sounds a horn, a bell or an alarm the moment a defect is caught, on the monitors you switch it on for.",
       "author": "oliverbravery",
-      "version": "1.1.0",
+      "version": "1.0.0",
       "permissions": [
         "state:read",
         "sound"
@@ -17,10 +17,10 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/alert-sounds",
-      "ref": "923a7992621378e088a02eecfd204535271259a1",
+      "ref": "0589a812810738215424beffca72fb61d75e2926",
       "digests": {
-        "plugin.json": "cb436952d6e5797cdb642812e666854de1dea491a931066fab25158f1aaa0cfc",
-        "plugin.js": "a833d0f176b2a630bfe379b1f376f3ed5ef4e3afa09a833d9a492e292191f690"
+        "plugin.json": "b20cc1a8b6abcc5cd37f0d98fe617b4ca22e706bad597038561008bed2eb8c1c",
+        "plugin.js": "03f59008e04b5104a57c8561a78e3b09a6d17a0130dceacf34dba8992d74b1c2"
       }
     },
     {
@@ -28,7 +28,7 @@
       "name": "Picture in picture",
       "description": "Puts a pop-out button on every monitor that floats its camera above your other windows.",
       "author": "oliverbravery",
-      "version": "1.3.0",
+      "version": "1.0.0",
       "permissions": [
         "state:read",
         "camera:view"
@@ -39,10 +39,10 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/picture-in-picture",
-      "ref": "e7457a8068ef417213786950da997d55ef4277bc",
+      "ref": "0589a812810738215424beffca72fb61d75e2926",
       "digests": {
-        "plugin.json": "bbd43f0e1b7d099c5b675154ae01dbda953ac3dad63705ca406c3d52f7186198",
-        "plugin.js": "a636fd69599d79d0ee2c99841968cd670212184f52e87a8f2eddb35d1780356e"
+        "plugin.json": "6baf1c7916bd7f328109e918aeea4ba46354b24eed3256b6cf511c6b3af6e71d",
+        "plugin.js": "594b6f4051cf0ac5e5fc768c3b5e8828529e4faf0d65ff62ee0ede441a3a8260"
       }
     },
     {
@@ -61,11 +61,11 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/progress-reports",
-      "ref": "d5219404b5197d8136c5606d2dca158bf1630c94",
+      "ref": "0589a812810738215424beffca72fb61d75e2926",
       "digests": {
         "plugin.json": "c37185d400dd52ed4fdbb89a310e19a6afde6c90d2b63c83d039b13e2563269e",
-        "plugin.js": "6f718fe574c4dbb0e256fbbba016b1449276dd19ad2d7aaa6c69872ae5b8e153",
-        "worker.js": "a699466fcb3b328401e7891bebefd17036071865c637453f081e76d670687d48"
+        "plugin.js": "c8f896ff2ffb83a611ff1427bcdea0e1de838cc9cc7ee5123b725b2ad0a6a5ed",
+        "worker.js": "01c5ec167ce8bd40eb135275b4fafea0ff15f547eb106125f366350bf4bbc3c4"
       }
     }
   ]
