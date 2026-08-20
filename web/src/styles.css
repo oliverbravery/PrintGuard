@@ -113,30 +113,43 @@ body {
 }
 
 [data-painted] {
-  background-position: center;
-  background-size: cover;
-  background-attachment: fixed;
-}
-
-[data-painted]::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background: color-mix(in srgb, var(--color-ink-0) 50%, transparent);
-  backdrop-filter: blur(30px) saturate(120%);
-  pointer-events: none;
-  z-index: 0;
+  --painted-veil: color-mix(in srgb, var(--color-ink-0) 94%, transparent);
+  --painted-surface: color-mix(in srgb, var(--color-ink-1) 84%, transparent);
+  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 97%, transparent);
+  --painted-muted: color-mix(in srgb, var(--color-text-2) 60%, var(--color-text-1));
+  isolation: isolate;
 }
 
 [data-painted] > * {
-  position: relative;
-  z-index: 1;
+  --color-text-2: var(--painted-muted);
+}
+
+[data-painted]::before,
+[data-painted]::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+[data-painted]::before {
+  background: var(--painted-image) center / cover no-repeat;
+}
+
+[data-painted]::after {
+  background: var(--painted-veil);
+  backdrop-filter: blur(40px) saturate(180%);
 }
 
 [data-painted] .panel,
 [data-painted] .tile {
-  background: color-mix(in srgb, var(--color-ink-1) 45%, transparent);
-  backdrop-filter: blur(14px) saturate(130%);
+  background: var(--painted-surface);
+}
+
+[data-painted] header,
+[data-painted] nav {
+  background: var(--painted-chrome) !important;
 }
 
 [data-painted] .feed {
@@ -147,9 +160,16 @@ body {
   background: color-mix(in srgb, var(--color-ink-0) 30%, transparent);
 }
 
-[data-painted] header,
-[data-painted] nav {
-  background: color-mix(in srgb, var(--color-ink-0) 55%, transparent) !important;
+[data-painted] dialog .panel {
+  background: linear-gradient(180deg, var(--color-ink-2), var(--color-ink-1));
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-painted] {
+    --painted-veil: var(--color-ink-0);
+    --painted-surface: var(--color-ink-1);
+    --painted-chrome: var(--color-ink-0);
+  }
 }
 
 .hairline {

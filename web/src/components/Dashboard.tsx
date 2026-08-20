@@ -71,7 +71,7 @@ export function Dashboard() {
     <div
       className="min-h-screen"
       data-painted={background ? "" : undefined}
-      style={background ? { backgroundImage: `url("${background.image}")` } : undefined}
+      style={background ? ({ "--painted-image": `url("${background.image}")` } as React.CSSProperties) : undefined}
     >
       <a href="#main" className="skip-link">
         Skip to monitors
