@@ -211,6 +211,12 @@ declare global {
     /** Plays an audio file you shipped, named as it appears in the manifest's `assets`. Needs `sound`. */
     sound(asset: string): void;
     /**
+     * Puts a picture behind the whole dashboard and makes the panels
+     * see-through over it. Needs `background`, takes a `data:` URL so nothing
+     * is fetched on the user's behalf, and clears when passed nothing.
+     */
+    background(image: string): void;
+    /**
      * Asks another plugin for something, on a channel your manifest names in
      * `consumes`. Needs `link:consume`, and the answer comes back on an
      * `answer` event carrying the same `tag`.

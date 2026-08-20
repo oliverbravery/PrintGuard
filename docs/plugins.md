@@ -315,7 +315,7 @@ Both files get `plugin` to register with, and every handler gets a `ctx`:
 | `ctx.socketClose(tag)` | Close a socket you opened |
 | `ctx.call(request)` | Ask another plugin for something. Answers on the `call` event's reply |
 | `ctx.publish(request)` | Publish on one of your own channels |
-| `ctx.background(image)` | Put a picture behind the dashboard, or nothing to clear it |
+| `ctx.background(image)` | Put a picture behind the dashboard as a `data:` URL, or nothing to clear it |
 | `ctx.notify(text)` | Raise a message in the dashboard |
 | `ctx.sound(tones)` | Sound your own tones through the speakers, `{ hz, ms }` each, or name an audio asset |
 | `ctx.assets` | The text files you shipped, keyed by name |

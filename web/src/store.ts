@@ -255,7 +255,7 @@ export const useStore = create<PgStore>((set, get) => {
       } else if (effect.kind === "background") {
         if (!plugin.granted.includes("background")) continue;
         const image = String(effect.image ?? "").slice(0, MAX_BACKGROUND_CHARS);
-        set({ background: image ? { id, image } : null });
+        set({ background: image.startsWith("data:image/") ? { id, image } : null });
       } else if (effect.kind === "log") {
         log("info", `plugin ${id}:`, effect.text);
       }
