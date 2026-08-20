@@ -193,8 +193,8 @@ def create_app() -> FastAPI:
     async def socket_allowed(websocket: WebSocket) -> bool:
         """Runs a gating plugin over a WebSocket handshake.
 
-        HTTP middleware never sees these, so the sockets ask for themselves,
-        the same way they already check the request's origin.
+        HTTP middleware never sees these, so the sockets ask for themselves, the
+        way they already check the request's origin.
         """
         runtime = app.state.engine.platform.plugin_runtime
         if runtime is None:
@@ -299,9 +299,8 @@ def create_app() -> FastAPI:
         would flood the log with one ASGI traceback per poll.
 
         A request from an opaque origin is refused. Plugin pages are served into
-        one, and nothing else in a browser sends ``Origin: null``, so without
-        this a plugin could serve itself a page that pulls the live feed with no
-        camera permission at all.
+        one, and nothing else in a browser sends ``Origin: null``. Without this a
+        plugin could serve itself a page that pulls the live feed.
         """
         if request.headers.get("origin") == "null":
             raise HTTPException(403, "camera streams are not served to sandboxed pages")

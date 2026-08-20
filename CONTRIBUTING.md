@@ -78,6 +78,9 @@ Writing style for docs and release notes:
 - Prefer a table or a diagram over a long paragraph. Mermaid renders on GitHub, so use it for
   flows, sequences and state.
 - Link to the page that explains a thing rather than restating it. Duplicated docs rot.
+- Cut the trailing clause. "Reach the addresses it lists" beats "Reach the addresses it lists,
+  and nowhere else". Where half a sentence is there to reassure, delete that half.
+- A changelog entry is one line, written for someone deciding whether to pull the image.
 
 ## Regenerating the docs screenshots
 

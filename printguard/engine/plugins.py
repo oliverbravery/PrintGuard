@@ -695,8 +695,8 @@ def outbound_socket(plugin_id: str, action: str, request: Any) -> dict[str, Any]
 def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes]]:
     """Reads a manifest, sources and declared assets out of a zipped bundle.
 
-    Files may sit at the root or under a single directory, which is what a
-    repository archive downloaded from GitHub looks like.
+    Files may sit at the root or under a single directory, the shape a GitHub
+    archive comes in.
 
     Args:
         data: The zip as uploaded.

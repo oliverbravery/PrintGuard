@@ -89,9 +89,9 @@ if (__input.kind === "event" || __input.kind === "tick") {
 }
 __io.out.puts(JSON.stringify({ store: ctx.store, effects: __effects, result: __result }));
 """
-"""The worker runs inside a function, so its own ``import`` is a syntax error
-and QuickJS's std and os modules stay out of its reach. Without that it could
-write to stdout, which is how the sandbox answers."""
+"""The worker runs inside a function, so its own ``import`` is a syntax error and
+QuickJS's std and os modules stay out of reach. Without that it could write to
+stdout, which is the sandbox's own answer channel."""
 
 
 class Sandbox:

@@ -187,8 +187,8 @@ how to pin a runtime.
 > and can pause or cancel your printers. Never port-forward it.
 
 Put an identity layer in front instead. **[docs/deployment.md](docs/deployment.md)** walks
-through Tailscale, which is what I would use for a private hub, alongside Cloudflare Tunnel
-with Access and oauth2-proxy, and it ends with a hardening checklist.
+through Tailscale, which is what I use for a private hub, alongside Cloudflare Tunnel with
+Access and oauth2-proxy, and ends with a hardening checklist.
 
 ## Home Assistant
 

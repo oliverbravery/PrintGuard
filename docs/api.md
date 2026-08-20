@@ -7,7 +7,7 @@
 </div>
 
 A hub exposes its engine to scripts and agents through two transports over one protocol. Both
-send the same commands the dashboard sends, so nothing here can drift from the UI.
+send the same commands the dashboard sends, so neither can drift from the UI.
 
 - [Surfaces](#surfaces)
 - [Health and version](#health-and-version)

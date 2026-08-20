@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 SCHEMES = ("http", "https", "ws", "wss", "rtsp", "rtsps")
 WILDCARD_SCHEMES = ("http", "https")
-"""What a ``*`` scheme covers, which is what a browser means by it too."""
+"""What a ``*`` scheme covers, the same as a browser means by it."""
 
 DEFAULT_PORTS = {"http": 80, "https": 443, "ws": 80, "wss": 443, "rtsp": 554, "rtsps": 322}
 
@@ -73,8 +73,8 @@ def matches(pattern: str, url: str) -> bool:
 
     Returns:
         True when scheme, host, port and path all match. The query string is
-        matched as part of the path, which is what a browser does, so a pattern
-        ending in ``*`` covers a URL's parameters too.
+        matched as part of the path, as a browser does, so a pattern ending in
+        ``*`` covers a URL's parameters.
     """
     rule = parse(pattern)
     if rule is None:
