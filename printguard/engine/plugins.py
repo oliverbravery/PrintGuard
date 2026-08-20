@@ -21,8 +21,8 @@ import json
 import re
 import zipfile
 from typing import Any
-from urllib.parse import urlsplit
 
+from . import urls
 from .adapters import HttpFn
 
 MANIFEST_FILE = "plugin.json"
@@ -88,8 +88,14 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
     },
     "net": {
         "label": "Reach the internet",
-        "description": "Send requests to the hosts the plugin lists, and nowhere else.",
-        "hosts": True,
+        "description": "Send requests to the addresses the plugin lists, and nowhere else.",
+        "urls": True,
+    },
+    "net:local": {
+        "label": "Reach your own network",
+        "description": "Send requests to addresses on this machine and the network around it, such as a printer or a hub of your own.",
+        "urls": True,
+        "risky": True,
     },
     "routes": {
         "label": "Serve its own pages",
@@ -156,6 +162,8 @@ naming none of them runs everywhere.
 """
 
 EVENTS: dict[str, list[str]] = {
+    "http": ["tag", "status", "body"],
+    "socket": ["tag", "state", "text"],
     "result": ["monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts"],
     "alert": ["monitor_id", "score", "action", "ts"],
     "warning": ["monitor_id", "message", "recovered"],
@@ -337,7 +345,12 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     assets = sorted({str(a).strip().lower() for a in raw.get("assets", [])} - {MANIFEST_FILE, *SOURCE_FILES})
     if any(asset_type(name) is None for name in assets):
         raise ValueError(f"a plugin may only ship {', '.join(sorted(set(ASSET_TYPES)))}")
-    hosts = sorted({str(h).strip().lower() for h in raw.get("hosts", []) if str(h).strip()})
+    patterns = urls.sanitise(raw.get("urls"))
+    local = [pattern for pattern in patterns if urls.reaches_local(pattern)]
+    if patterns and "net" not in permissions:
+        raise ValueError("urls needs the net permission")
+    if local and "net:local" not in permissions:
+        raise ValueError(f"reaching {', '.join(local)} needs the net:local permission")
     events = sorted({str(e).strip() for e in raw.get("events", [])} & set(EVENTS))
     try:
         tick_s = max(0.0, float(raw.get("tick_s", 0)))
@@ -355,7 +368,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "surfaces": surfaces,
         "platforms": platforms,
         "assets": assets,
-        "hosts": hosts,
+        "urls": patterns,
         "events": events,
         "tick_s": min(tick_s, 86400.0) if tick_s >= MIN_TICK_S else 0.0,
     }
@@ -384,9 +397,9 @@ def sanitise_config(raw: Any) -> dict[str, Any]:
 def outbound_request(plugin_id: str, request: Any) -> dict[str, Any]:
     """Builds a plugin.http command out of what a plugin asked for.
 
-    Only these four fields are carried over, and the plugin's id is set last:
-    the request comes from inside a sandbox, so left to spread over the command
-    it could name a *different* installed plugin and borrow its network grant.
+    Only these fields are carried over, and the plugin's id is set last: the
+    request comes from inside a sandbox, so left to spread over the command it
+    could name a *different* installed plugin and borrow its network grant.
     """
     fields = request if isinstance(request, dict) else {}
     return {
@@ -395,16 +408,25 @@ def outbound_request(plugin_id: str, request: Any) -> dict[str, Any]:
         "url": str(fields.get("url", "")),
         "headers": fields.get("headers"),
         "json": fields.get("json"),
+        "tag": str(fields.get("tag", "")),
         "id": plugin_id,
     }
 
 
-def host_allowed(url: str, hosts: list[str]) -> bool:
-    """Whether a URL targets one of the hosts a plugin declared."""
-    parsed = urlsplit(url)
-    if parsed.scheme not in ("http", "https"):
-        return False
-    return parsed.hostname is not None and parsed.hostname.lower() in hosts
+def outbound_socket(plugin_id: str, action: str, request: Any) -> dict[str, Any]:
+    """Builds a plugin.socket command out of what a plugin asked for.
+
+    Carries the same risk as an outbound request and is pinned the same way.
+    """
+    fields = request if isinstance(request, dict) else {}
+    return {
+        "cmd": "plugin.socket",
+        "action": action,
+        "url": str(fields.get("url", "")),
+        "text": str(fields.get("text", "")),
+        "tag": str(fields.get("tag", "")),
+        "id": plugin_id,
+    }
 
 
 def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes]]:

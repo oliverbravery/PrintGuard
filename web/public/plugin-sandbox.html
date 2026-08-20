@@ -59,6 +59,15 @@
             http(request) {
               effects.push({ kind: "http", request });
             },
+            socket(request) {
+              effects.push({ kind: "socket", action: "open", request });
+            },
+            socketSend(tag, text) {
+              effects.push({ kind: "socket", action: "send", request: { tag, text: String(text) } });
+            },
+            socketClose(tag) {
+              effects.push({ kind: "socket", action: "close", request: { tag } });
+            },
             notify(text) {
               effects.push({ kind: "notify", text: String(text) });
             },

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { currentLayout } from "./layout";
 import { bootLocal } from "./local";
 import { log } from "./log";
-import { commandAllowed, outboundRequest, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
+import { commandAllowed, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
 import { play, playFile } from "./sound";
 import { resumePublishers } from "./stream";
 import { applyTheme } from "./theme";
@@ -228,6 +228,8 @@ export const useStore = create<PgStore>((set, get) => {
         else get().toast("error", `${plugin.manifest.name} tried to run ${name} without permission`);
       } else if (effect.kind === "http" && effect.request) {
         sendSilent(outboundRequest(id, effect.request));
+      } else if (effect.kind === "socket" && effect.request) {
+        sendSilent(outboundSocket(id, String(effect.action), effect.request));
       } else if (effect.kind === "notify") {
         if (plugin.granted.includes("notify")) get().toast("info", `${plugin.manifest.name}: ${effect.text}`);
       } else if (effect.kind === "sound") {
@@ -294,13 +296,15 @@ export const useStore = create<PgStore>((set, get) => {
     }
   };
 
-  const forwardToWorker = (id: string, event: Record<string, unknown>) => {
+  const forwardToPlugin = (id: string, event: Record<string, unknown>) => {
     const engine = get().engine;
     const plugin = engine?.plugins.find((p) => p.id === id);
-    const host = hosts.get(`${id}:worker.js`);
-    if (!engine || !plugin || !host) return;
+    if (!engine || !plugin) return;
     const seen = projectEvent(event, engine.plugin_events, plugin.granted, engine.plugin_permissions);
-    if (seen) void host.event(seen, pluginState(plugin));
+    if (!seen) return;
+    for (const [key, host] of hosts) {
+      if (key.startsWith(`${id}:`)) void host.event(seen, pluginState(plugin));
+    }
   };
 
   const startPlugin = (id: string, sources: Record<string, string>, assets: Record<string, string>) => {
@@ -335,7 +339,8 @@ export const useStore = create<PgStore>((set, get) => {
 
   const onEvent = (event: any) => {
     for (const plugin of get().engine?.plugins ?? []) {
-      if (plugin.enabled && plugin.manifest.events.includes(event.event)) forwardToWorker(plugin.id, event);
+      if (event.id !== undefined && event.id !== plugin.id) continue;
+      if (plugin.enabled && plugin.manifest.events.includes(event.event)) forwardToPlugin(plugin.id, event);
     }
     switch (event.event) {
       case "state": {
@@ -378,9 +383,7 @@ export const useStore = create<PgStore>((set, get) => {
       case "plugin_notice":
         get().toast("info", `${event.name}: ${event.text}`);
         break;
-      case "plugin_http":
-        forwardToWorker(event.id, event);
-        break;
+
       case "catalogue":
         clearPending(event.req_id);
         set({ catalogue: event.plugins });

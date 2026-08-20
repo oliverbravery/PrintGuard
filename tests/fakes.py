@@ -35,6 +35,23 @@ class FakeSource:
         self.online = False
 
 
+class FakeSocket:
+    """A socket the engine holds, recording what was written to it."""
+
+    def __init__(self, url: str, arrived: Any) -> None:
+        self.url = url
+        self.arrived = arrived
+        self.sent: list[str] = []
+        self.closed = False
+
+    async def send(self, text: str) -> None:
+        self.sent.append(text)
+
+    async def close(self) -> None:
+        self.closed = True
+        self.arrived("closed", "")
+
+
 class FakePlatform:
     """In-memory platform with deterministic latency and HTTP."""
 
@@ -61,6 +78,7 @@ class FakePlatform:
         self.http_requests: list[dict[str, Any]] = []
         self.releases: list[dict[str, Any]] = []
         self.files: dict[str, tuple[int, Any]] = {}
+        self.sockets: list[FakeSocket] = []
         self.released_cameras: list[str] = []
         self.state: dict[str, Any] = {}
         self.inference_runtime = "auto"
@@ -85,6 +103,12 @@ class FakePlatform:
 
     async def release_camera(self, camera_id: str, source: dict[str, Any]) -> None:
         self.released_cameras.append(camera_id)
+
+    async def open_socket(self, url: str, arrived: Any) -> "FakeSocket":
+        socket = FakeSocket(url, arrived)
+        self.sockets.append(socket)
+        arrived("open", "")
+        return socket
 
     async def http(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
         self.http_calls.append((method, url))

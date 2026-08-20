@@ -232,7 +232,7 @@ async def test_a_worker_cannot_borrow_another_plugins_network_grant(runtime: Was
     )
 
     assert performed == [
-        {"cmd": "plugin.http", "method": "GET", "url": "https://hooks.example.com/x", "headers": None, "json": None, "id": "demo"}
+        {"cmd": "plugin.http", "method": "GET", "url": "https://hooks.example.com/x", "headers": None, "json": None, "tag": "", "id": "demo"}
     ]
 
 

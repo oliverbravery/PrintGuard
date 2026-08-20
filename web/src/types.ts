@@ -199,7 +199,7 @@ export interface Permission {
   description: string;
   risky?: boolean;
   hub_only?: boolean;
-  hosts?: boolean;
+  urls?: boolean;
   commands?: string[];
   fields?: Record<string, string[]>;
 }
@@ -215,7 +215,7 @@ export interface PluginManifest {
   reasons: Record<string, string>;
   surfaces: ("panel" | "monitor" | "settings")[];
   platforms: string[];
-  hosts: string[];
+  urls: string[];
   events: string[];
   tick_s: number;
 }
@@ -275,6 +275,7 @@ export interface PluginTone {
 }
 
 export interface PluginEffect {
+  action?: string;
   kind: string;
   cmd?: Record<string, unknown>;
   request?: Record<string, unknown>;

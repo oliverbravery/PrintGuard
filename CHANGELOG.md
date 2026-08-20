@@ -35,6 +35,15 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   nothing again. An update that asks for more than you accepted stands the plugin down until
   you accept the wider list, so nothing new happens behind an Update press.
 
+- Plugins can reach the network properly. A plugin lists the addresses it needs as match
+  patterns, the same `https://*.example.com/*` grammar a browser extension uses, so it can ask
+  for one endpoint rather than a whole site, and the consent dialog reads each one back in
+  words before you allow it. Reaching the machine PrintGuard runs on or the network around it
+  is a separate thing to agree to than reaching the internet, and a public name pointing at a
+  private address is caught. A plugin can now read what it fetched, which it could not before,
+  and can hold a WebSocket open for live data. Requests are capped and rate limited, and a
+  plugin loses its connections the moment you disable it.
+
 ### Fixed
 
 - A camera that keeps dropping out no longer notifies you every time it reconnects. The

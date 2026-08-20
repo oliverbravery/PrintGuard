@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from printguard.engine import plugins  # noqa: E402
+from printguard.engine import plugins, urls  # noqa: E402
 
 HERE = Path(__file__).parent
 SCHEMA_FILE = HERE / "plugin.schema.json"
@@ -104,11 +104,11 @@ def schema() -> dict:
                 "description": "Files it ships beside its code, each named here and sitting next to plugin.js.",
                 "items": {"type": "string", "pattern": r"^[a-z0-9][a-z0-9._-]{0,39}\.(" + "|".join(sorted(plugins.ASSET_TYPES)) + ")$"},
             },
-            "hosts": {
+            "urls": {
                 "type": "array",
                 "uniqueItems": True,
-                "description": "The only hosts ctx.http may reach, each a bare hostname.",
-                "items": {"type": "string", "pattern": r"^[^/:\s]+$"},
+                "description": "The only addresses ctx.http and ctx.socket may reach, each a match pattern of scheme://host/path. Naming a private or loopback address needs the net:local permission as well as net.",
+                "items": {"type": "string", "pattern": urls.PATTERN.pattern},
             },
             "events": {
                 "type": "array",

@@ -53,8 +53,12 @@ const plugin = {
 const ctx = {
   store: __input.store,
   state: __input.state,
+  assets: __assets,
   command(cmd) { __effects.push({ kind: "command", cmd }); },
   http(request) { __effects.push({ kind: "http", request }); },
+  socket(request) { __effects.push({ kind: "socket", action: "open", request }); },
+  socketSend(tag, text) { __effects.push({ kind: "socket", action: "send", request: { tag, text: String(text) } }); },
+  socketClose(tag) { __effects.push({ kind: "socket", action: "close", request: { tag } }); },
   notify(text) { __effects.push({ kind: "notify", text: String(text) }); },
   log(text) { __effects.push({ kind: "log", text: String(text) }); },
 };
@@ -167,13 +171,17 @@ class WasmPluginRuntime:
         A worker still busy with the last one is skipped rather than queued
         behind it: result events run at several hertz per monitor, and a plugin
         slower than its own event rate would otherwise accumulate calls without
-        bound.
+        bound. An event carrying an id is an answer to one plugin's own request,
+        so it goes to that plugin rather than to everything listening.
         """
         if event.get("event") == "state":
             self._state = event
+        addressed = event.get("id")
         for sandbox in list(self._sandboxes.values()):
             plugin = sandbox.plugin
             if event.get("event") not in plugin.manifest["events"] or plugin.id in self._busy:
+                continue
+            if addressed is not None and addressed != plugin.id:
                 continue
             seen = plugins.project_event(event, plugin.granted)
             if seen:
@@ -291,6 +299,8 @@ class WasmPluginRuntime:
                     await self._request(command)
                 elif kind == "http":
                     await self._request(plugins.outbound_request(plugin.id, effect.get("request")))
+                elif kind == "socket":
+                    await self._request(plugins.outbound_socket(plugin.id, str(effect.get("action")), effect.get("request")))
                 elif kind == "notify":
                     if not plugin.may("notify"):
                         raise PermissionError("this plugin was not granted notifications")

@@ -64,7 +64,7 @@ server for either to mean anything.
 
 | Attack | What stops it |
 |---|---|
-| Take your credentials somewhere | Neither sandbox has sockets. The browser half's policy is `connect-src 'none'`; the hub half has no WASI network and no filesystem. The only way out is a request through PrintGuard, to hosts the plugin declared |
+| Take your credentials somewhere | Neither sandbox has sockets. The browser half's policy is `connect-src 'none'`; the hub half has no WASI network and no filesystem. The only way out is a request through PrintGuard, to addresses the plugin declared |
 | Read your credentials at all | State is cut down to the fields a permission names. Printer configuration, notifier settings, MQTT credentials and API tokens are in no permission |
 | Read your camera frames | A `camera` node is a placeholder PrintGuard fills with its own player. The video never enters the sandbox, and a cross-origin frame cannot read it |
 | Hang or exhaust the hub | The worker runs against a memory cap and a CPU budget, and traps in milliseconds. A plugin that fails is disabled and reported |
@@ -87,7 +87,8 @@ remove the plugin.
 | `printer:control` | Pause, resume and cancel prints | |
 | `notify` | Raise a message in the dashboard | |
 | `alert:send` | Send through your own ntfy, Telegram or Discord | |
-| `net` | Reach the hosts its manifest lists, and nowhere else | |
+| `net` | Reach the addresses its manifest lists, and nowhere else | |
+| `net:local` | Reach addresses on this machine and the network around it | |
 | `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers | ✅ |
 | `gate` | See and refuse every other request to the hub | ✅ |
 
@@ -131,7 +132,7 @@ my-plugin/
   "surfaces": ["panel"],
   "platforms": ["docker", "windows"],
   "assets": ["alarm.mp3"],
-  "hosts": ["api.example.com"],
+  "urls": ["https://api.example.com/v1/*"],
   "events": ["alert"],
   "tick_s": 300
 }
@@ -181,8 +182,28 @@ is refused at install. SVG is not on the list, since an SVG is markup and would 
 dashboard's own. Images and audio never enter the sandbox: it names one and PrintGuard draws
 or plays it.
 
-`hosts` lists the only hosts `ctx.http` may reach. `events` and `tick_s` are the worker's,
-naming which engine events wake it and how often to run it anyway.
+`urls` lists the only addresses `ctx.http` and `ctx.socket` may reach, each a match pattern of
+`scheme://host/path`, the same grammar a browser extension uses.
+
+| Pattern | Reaches |
+|---|---|
+| `https://api.example.com/v1/*` | Anything under `/v1/` on that one host |
+| `https://*.example.com/*` | `example.com` and every subdomain of it |
+| `*://example.com/*` | That host over http or https |
+| `wss://hub.local:8123/api/*` | That endpoint over a WebSocket, on that port |
+| `*://*/*` | Anywhere at all, which is the widest thing you can ask for |
+
+A `*` scheme covers http and https, and `ws`, `wss`, `rtsp` and `rtsps` are named in full. A
+missing port means any port.
+
+A pattern landing on the machine PrintGuard runs on or the network around it needs
+`net:local` as well as `net`, so reaching a printer of your own is a separate thing to agree
+to than reaching the internet. A wildcard host counts, since it covers both. PrintGuard checks
+the address a name actually resolves to, not just the name, so a public name pointing at a
+private address is caught.
+
+`events` and `tick_s` are the worker's, naming which engine events wake it and how often to
+run it anyway.
 
 Both files get `plugin` to register with, and every handler gets a `ctx`:
 
@@ -191,7 +212,10 @@ Both files get `plugin` to register with, and every handler gets a `ctx`:
 | `ctx.state` | The state your permissions allow, refreshed each call |
 | `ctx.store` | Your own data. Assign to it and PrintGuard saves it |
 | `ctx.command(cmd)` | Ask PrintGuard to run an engine command |
-| `ctx.http(request)` | Ask PrintGuard to make a request, to a host you declared |
+| `ctx.http(request)` | Ask PrintGuard to make a request, to an address you declared. Answers on the `http` event |
+| `ctx.socket({ url, tag })` | Ask PrintGuard to hold a WebSocket open for you. Answers on the `socket` event |
+| `ctx.socketSend(tag, text)` | Write one frame to a socket you opened |
+| `ctx.socketClose(tag)` | Close a socket you opened |
 | `ctx.notify(text)` | Raise a message in the dashboard |
 | `ctx.sound(tones)` | Sound your own tones through the speakers, `{ hz, ms }` each, or name an audio asset |
 | `ctx.assets` | The text files you shipped, keyed by name |
@@ -309,6 +333,8 @@ These are the events a worker can name in `events`:
 
 | Event | Fires | Carries |
 |---|---|---|
+| `http` | An answer to one of your own `ctx.http` calls | `tag`, `status`, `body` |
+| `socket` | A socket you opened coming up, carrying a frame, or ending | `tag`, `state`, `text` |
 | `result` | Every inference on a watched monitor, capped at 5 per second per monitor | `monitor_id`, `camera_id`, `score`, `prediction`, `margin`, `ms`, `ts` |
 | `alert` | A defect held long enough to act on | `monitor_id`, `score`, `action`, `ts` |
 | `warning` | A watchdog condition, and its recovery | `monitor_id`, `message`, `recovered` |
@@ -350,6 +376,21 @@ plugin.route((request, ctx) => ({
 
 plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.store.session));
 ```
+
+A plugin runs and returns rather than waiting, so `ctx.http` hands nothing back on the spot.
+Name the request with a `tag` and read the answer when it arrives.
+
+```js
+plugin.on("tick", (event, ctx) => ctx.http({ url: "https://api.example.com/v1/now", tag: "now" }));
+
+plugin.on("http", (event, ctx) => {
+  if (event.tag === "now") ctx.store.latest = event.body;
+});
+```
+
+A socket works the same way. `ctx.socket` opens one under a tag, `socket` events carry every
+frame that arrives on it, and PrintGuard drops it when the plugin is disabled or removed. Both
+need `http` or `socket` in the manifest's `events`, or the answer never reaches you.
 
 `route` answers everything under `/plugins/<id>/`, and may return `headers` with
 `Set-Cookie`, `Location` or `Cache-Control`. Its pages are served into a sandboxed origin,

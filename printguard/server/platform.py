@@ -22,6 +22,7 @@ from typing import Any, Callable
 import av
 import httpx
 import numpy as np
+import websockets
 from av.video.reformatter import VideoReformatter
 from ..engine import vision
 from ..engine.platform import Frame
@@ -42,6 +43,9 @@ DEVICE_OPEN_OPTIONS = ({"framerate": "30"}, {"framerate": "15"}, {})
 """Frame rates tried, most common first, when a device's own capture formats
 cannot be read ahead of time (Windows/Linux); macOS pins a real size and rate
 from AVFoundation in _device_open_options."""
+
+SOCKET_TIMEOUT_S = 10.0
+SOCKET_MAX_BYTES = 256 * 1024
 DEVICE_SIZE_CAP = 1280 * 720
 DEVICE_PIXEL_FORMATS = {"420v": "nv12", "420f": "nv12", "yuvs": "yuyv422", "2vuy": "uyvy422"}
 """AVFoundation format subtypes mapped to ffmpeg pixel formats. avfoundation
@@ -405,6 +409,39 @@ class AVSource:
         self._wake.set()
 
 
+class WebSocket:
+    """One connection the hub holds open for a plugin."""
+
+    def __init__(self, connection: websockets.ClientConnection) -> None:
+        self._connection = connection
+        self._reader: asyncio.Task[None] | None = None
+
+    def read(self, arrived: Callable[[str, str], None]) -> None:
+        """Starts reporting frames, and reports the close whatever ends it."""
+
+        async def pump() -> None:
+            arrived("open", "")
+            try:
+                async for frame in self._connection:
+                    arrived("message", frame if isinstance(frame, str) else frame.decode("utf-8", "replace"))
+            except Exception as exc:
+                logger.info("plugin socket ended: %s", exc)
+            finally:
+                arrived("closed", "")
+
+        self._reader = asyncio.ensure_future(pump())
+
+    async def send(self, text: str) -> None:
+        """Writes one text frame."""
+        await self._connection.send(text)
+
+    async def close(self) -> None:
+        """Closes the connection and stops its reader."""
+        if self._reader is not None:
+            self._reader.cancel()
+        await self._connection.close()
+
+
 class ServerPlatform:
     """Hub mode platform, with hardware inference and frames via MediaMTX."""
 
@@ -570,6 +607,13 @@ class ServerPlatform:
             return resp.status_code, resp.json()
         except ValueError:
             return resp.status_code, resp.text
+
+    async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> WebSocket:
+        """Connects a WebSocket and reads it on a task of its own."""
+        connection = await websockets.connect(url, open_timeout=SOCKET_TIMEOUT_S, max_size=SOCKET_MAX_BYTES)
+        socket = WebSocket(connection)
+        socket.read(arrived)
+        return socket
 
     async def encode_jpeg(self, rgb: np.ndarray) -> bytes | None:
         """Encodes a frame as JPEG using PyAV's mjpeg encoder."""

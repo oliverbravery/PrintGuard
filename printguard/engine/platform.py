@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
 
 import numpy as np
 
+from . import sockets
+
 if TYPE_CHECKING:
     from .registry import Plugin
 
@@ -143,6 +145,20 @@ class Platform(Protocol):
         timeout: float = 10.0,
     ) -> tuple[int, Any]:
         """Performs an HTTP request and returns (status, parsed body)."""
+        ...
+
+    async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> sockets.Socket:
+        """Opens a WebSocket and reports every frame through the callback.
+
+        Args:
+            url: A ``ws://`` or ``wss://`` URL, already checked against the
+                plugin's grant.
+            arrived: Called with ``open``, then ``message`` per frame, then
+                ``closed`` once, whatever ends it.
+
+        Returns:
+            The connection, for writing to and closing.
+        """
         ...
 
     async def encode_jpeg(self, rgb: np.ndarray) -> bytes | None:

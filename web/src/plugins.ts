@@ -53,6 +53,19 @@ export function outboundRequest(id: string, request: Record<string, unknown> | u
     url: String(fields.url ?? ""),
     headers: fields.headers,
     json: fields.json,
+    tag: String(fields.tag ?? ""),
+    id,
+  };
+}
+
+export function outboundSocket(id: string, action: string, request: Record<string, unknown> | undefined): Record<string, unknown> {
+  const fields = request ?? {};
+  return {
+    cmd: "plugin.socket",
+    action,
+    url: String(fields.url ?? ""),
+    text: String(fields.text ?? ""),
+    tag: String(fields.tag ?? ""),
     id,
   };
 }

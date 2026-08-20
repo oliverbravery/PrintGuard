@@ -113,7 +113,8 @@ Events, engine to UI:
 | `releases` | The changelog history the update dialog browses |
 | `token_created` | A new API token's secret, delivered to the requesting transport and never written to the log |
 | `report_sent`, `report_bundle` | Bug report outcome, and the downloadable diagnostics zip |
-| `plugin_code`, `catalogue`, `plugin_http`, `plugin_notice` | A plugin's source for its sandbox, the reviewed-plugin catalogue, an outbound response, and a message a plugin raised |
+| `plugin_code`, `catalogue`, `plugin_notice` | A plugin's source for its sandbox, the reviewed-plugin catalogue, and a message a plugin raised |
+| `http`, `socket` | An answer to a plugin's own request, and a frame on a socket it is holding, both addressed to the plugin that asked |
 | `error` | Anything that failed, including failed printer actions |
 
 Result updates are conflated when a transport is slower than 5 Hz. Ordered events and

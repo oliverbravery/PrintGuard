@@ -106,6 +106,10 @@ declare global {
 
   /** The events a worker can hook, and what each one carries. */
   interface PluginEvents {
+    /** The answer to one of your own `ctx.http` calls, carrying the `tag` you named it with. */
+    http: { event: "http"; tag: string; status: number; body: unknown };
+    /** A socket you opened coming up, carrying a frame, or ending. */
+    socket: { event: "socket"; tag: string; state: "open" | "message" | "closed"; text: string };
     /** Every inference on a watched monitor, capped at 5 a second per monitor, before any threshold or streak logic. */
     result: { event: "result"; monitor_id: string; camera_id: string; score: number; prediction: "failure" | "success"; margin: number; ms: number; ts: number };
     /** A defect held long enough to act on. `action` is what PrintGuard did to the printer. */
@@ -165,8 +169,19 @@ declare global {
      * permission, and one you were not granted is refused and reported.
      */
     command(cmd: { cmd: string; [field: string]: unknown }): void;
-    /** Asks PrintGuard to make an HTTP request for you. Needs `net`, and a URL on a host your manifest declares. */
-    http(request: { method?: string; url: string; headers?: Record<string, string>; json?: unknown }): void;
+    /**
+     * Asks PrintGuard to make an HTTP request for you. Needs `net` and a URL
+     * your manifest's patterns cover. The answer comes back as an `http` event
+     * carrying the same `tag`, since a plugin runs and returns rather than
+     * waiting, so name the request and hook `http` to read it.
+     */
+    http(request: { method?: string; url: string; headers?: Record<string, string>; json?: unknown; tag?: string }): void;
+    /** Opens a WebSocket PrintGuard holds for you, answering on `tag`. Needs `net` and a `ws` or `wss` pattern covering the URL. */
+    socket(request: { url: string; tag: string }): void;
+    /** Writes one text frame to a socket you opened. */
+    socketSend(tag: string, text: string): void;
+    /** Closes a socket you opened. */
+    socketClose(tag: string): void;
     /** Raises a message on the dashboard. Needs `notify`, and does not use the user's alert channels. */
     notify(text: string): void;
     /**

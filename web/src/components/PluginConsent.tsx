@@ -1,5 +1,6 @@
 import { useStore } from "../store";
 import type { Permission, PluginRecord } from "../types";
+import { phrase, reachesLocal } from "../urls";
 import { Dialog } from "./Dialog";
 
 export function PermissionList({ plugin, permissions, hubOnly }: { plugin: PluginRecord; permissions: Permission[]; hubOnly: boolean }) {
@@ -10,10 +11,16 @@ export function PermissionList({ plugin, permissions, hubOnly }: { plugin: Plugi
       {asked.map((permission) => (
         <li key={permission.id} className="text-[0.7rem]">
           <span className={permission.risky ? "text-warn" : "text-text-1"}>{permission.label}</span>
-          {permission.hosts && plugin.manifest.hosts.length > 0 && (
-            <span className="mono text-text-2"> ({plugin.manifest.hosts.join(", ")})</span>
-          )}
           <span className="block text-text-2">{permission.description}</span>
+          {permission.urls && (
+            <ul className="text-text-2">
+              {plugin.manifest.urls
+                .filter((url) => reachesLocal(url) === (permission.id === "net:local"))
+                .map((url) => (
+                  <li key={url}>{phrase(url)}</li>
+                ))}
+            </ul>
+          )}
           <span className="block text-text-1">{plugin.manifest.reasons[permission.id]}</span>
           {permission.hub_only && !hubOnly && <span className="block text-text-2">Only does anything on a hub.</span>}
         </li>

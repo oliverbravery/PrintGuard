@@ -77,7 +77,11 @@
           },
           {
             "const": "net",
-            "description": "Send requests to the hosts the plugin lists, and nowhere else."
+            "description": "Send requests to the addresses the plugin lists, and nowhere else."
+          },
+          {
+            "const": "net:local",
+            "description": "Send requests to addresses on this machine and the network around it, such as a printer or a hub of your own."
           },
           {
             "const": "routes",
@@ -103,6 +107,7 @@
           "sound",
           "alert:send",
           "net",
+          "net:local",
           "routes",
           "gate"
         ]
@@ -176,13 +181,13 @@
         "pattern": "^[a-z0-9][a-z0-9._-]{0,39}\\.(csv|gif|jpeg|jpg|json|mp3|ogg|png|txt|wav|webp)$"
       }
     },
-    "hosts": {
+    "urls": {
       "type": "array",
       "uniqueItems": true,
-      "description": "The only hosts ctx.http may reach, each a bare hostname.",
+      "description": "The only addresses ctx.http and ctx.socket may reach, each a match pattern of scheme://host/path. Naming a private or loopback address needs the net:local permission as well as net.",
       "items": {
         "type": "string",
-        "pattern": "^[^/:\\s]+$"
+        "pattern": "^(?P<scheme>\\*|http|https|ws|wss|rtsp|rtsps)://(?P<host>\\*|(?:\\*\\.)?[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\\[[0-9a-f:]+\\])(?::(?P<port>\\*|\\d{1,5}))?(?P<path>/[^\\s]*)$"
       }
     },
     "events": {
@@ -191,6 +196,14 @@
       "description": "The engine events that wake worker.js.",
       "items": {
         "anyOf": [
+          {
+            "const": "http",
+            "description": "Carries tag, status, body."
+          },
+          {
+            "const": "socket",
+            "description": "Carries tag, state, text."
+          },
           {
             "const": "result",
             "description": "Carries monitor_id, camera_id, score, prediction, margin, ms, ts."

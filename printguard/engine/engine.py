@@ -16,7 +16,7 @@ import uuid
 from collections import deque
 from typing import Any, Callable
 
-from . import plugins, reports, updates, vision
+from . import plugins, reports, updates, urls, vision
 from .cameras import sanitise_camera
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
@@ -26,6 +26,7 @@ from .platform import Frame, Platform
 from .printers import sanitise_printer
 from .registry import Camera, CameraRegistry, Plugin, PluginRegistry, Printer, PrinterRegistry, Token, TokenRegistry
 from .scheduler import Scheduler
+from .sockets import SocketBroker
 from .tokens import new_token
 from .watchdog import Watchdog
 
@@ -39,6 +40,10 @@ RECENT_EVENTS_MAX = 100
 RECENT_EVENT_TYPES = ("alert", "warning", "device", "error")
 EVENT_LOG_LEVELS = {"alert": logging.INFO, "warning": logging.WARNING, "error": logging.ERROR, "device": logging.DEBUG}
 UPDATE_CHECK_INTERVAL_S = 86400.0
+PLUGIN_RATE_LIMIT = 60
+PLUGIN_RATE_WINDOW_S = 60.0
+PLUGIN_TIMEOUT_S = 10.0
+MAX_PLUGIN_BODY = 256 * 1024
 SETTINGS_DEFAULTS: dict[str, Any] = {
     "notifiers": {},
     "update_check": True,
@@ -70,6 +75,8 @@ class Engine:
         self.releases: list[dict[str, Any]] = []
         self.scheduler = Scheduler(platform, self.cameras, self._on_result, self._on_pipeline_error)
         self.watchdog = Watchdog(self)
+        self.sockets = SocketBroker(platform.open_socket, self.emit)
+        self._plugin_calls: dict[str, list[float]] = {}
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
         self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
         self._tasks: list[asyncio.Task[None]] = []
@@ -105,6 +112,7 @@ class Engine:
             "plugin.code": self._cmd_plugin_code,
             "plugin.catalogue": self._cmd_plugin_catalogue,
             "plugin.http": self._cmd_plugin_http,
+            "plugin.socket": self._cmd_plugin_socket,
             "plugin.notify": self._cmd_plugin_notify,
         }
 
@@ -173,6 +181,7 @@ class Engine:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        await self.sockets.drop_all(set())
         await self.watchdog.close()
         if self.platform.plugin_runtime is not None:
             await self.platform.plugin_runtime.close()
@@ -853,26 +862,76 @@ class Engine:
         await self._refresh_catalogue()
         self.emit({"event": "catalogue", "plugins": self.catalogue, "req_id": message.get("req_id")})
 
+    async def _network_allows(self, plugin_id: str, url: str) -> Plugin:
+        """Checks a plugin may reach a URL, and returns it for the caller to use.
+
+        Args:
+            plugin_id: Whose request it is.
+            url: Where it wants to go.
+
+        Returns:
+            The plugin record.
+
+        Raises:
+            PermissionError: If the plugin holds no network grant, the URL falls
+                outside every pattern it declared, or it lands on this network
+                without the grant that covers that.
+        """
+        plugin = self.plugins.get(plugin_id)
+        if not plugin or not plugin.may("net"):
+            raise PermissionError("plugin may not reach the network")
+        if not urls.allowed(url, plugin.manifest["urls"]):
+            raise PermissionError(f"plugin {plugin.id} did not declare {url}")
+        if await asyncio.to_thread(urls.resolves_local, url) and not plugin.may("net:local"):
+            raise PermissionError(f"plugin {plugin.id} may not reach {url} on this network")
+        return plugin
+
+    def _within_rate(self, plugin_id: str) -> bool:
+        """Whether a plugin has requests left in the current window."""
+        now = time.monotonic()
+        recent = [at for at in self._plugin_calls.get(plugin_id, []) if now - at < PLUGIN_RATE_WINDOW_S]
+        self._plugin_calls[plugin_id] = [*recent, now]
+        return len(recent) < PLUGIN_RATE_LIMIT
+
     async def _cmd_plugin_http(self, message: dict[str, Any]) -> None:
         """Makes an outbound request on a plugin's behalf, if it may.
 
         A plugin has no network of its own in either sandbox, so this is the
-        only way out, and it only opens for the hosts the plugin's manifest
-        declares and the user granted.
+        only way out, and it only opens for the patterns the plugin's manifest
+        declares and the user granted. The answer goes back as an ``http`` event
+        tagged with whatever the plugin named the request, since a plugin runs
+        and returns rather than waiting on anything.
         """
-        plugin = self.plugins.get(message["id"])
-        if not plugin or not plugin.may("net"):
-            raise PermissionError("plugin may not reach the network")
-        url = str(message.get("url", ""))
-        if not plugins.host_allowed(url, plugin.manifest["hosts"]):
-            raise PermissionError(f"plugin {plugin.id} did not declare {url}")
+        plugin = await self._network_allows(message["id"], str(message.get("url", "")))
+        if not self._within_rate(plugin.id):
+            raise PermissionError(f"plugin {plugin.id} is making requests faster than {PLUGIN_RATE_LIMIT} a minute")
         status, body = await self.platform.http(
             str(message.get("method", "GET")).upper(),
-            url,
+            str(message.get("url", "")),
             headers=message.get("headers") or None,
             json=message.get("json"),
+            timeout=PLUGIN_TIMEOUT_S,
         )
-        self.emit({"event": "plugin_http", "id": plugin.id, "status": status, "body": body, "req_id": message.get("req_id")})
+        self.emit(
+            {
+                "event": "http",
+                "id": plugin.id,
+                "tag": str(message.get("tag", "")),
+                "status": status,
+                "body": body if isinstance(body, (dict, list)) else str(body)[:MAX_PLUGIN_BODY],
+                "req_id": message.get("req_id"),
+            }
+        )
+
+    async def _cmd_plugin_socket(self, message: dict[str, Any]) -> None:
+        """Opens, writes to or closes a WebSocket a plugin is holding."""
+        action = str(message.get("action", ""))
+        plugin_id = str(message["id"])
+        if action == "open":
+            await self._network_allows(plugin_id, str(message.get("url", "")))
+        await self.sockets.act(
+            plugin_id, action, str(message.get("tag", "")), str(message.get("url", "")), str(message.get("text", ""))
+        )
 
     async def _cmd_plugin_notify(self, message: dict[str, Any]) -> None:
         plugin = self.plugins.get(message["id"])
@@ -897,10 +956,17 @@ class Engine:
             logger.warning("plugin catalogue unavailable: %s", exc)
 
     async def _reload_plugins(self) -> None:
-        """Hands the running set to the hub's plugin runtime, where there is one."""
+        """Hands the running set to the hub's plugin runtime, where there is one.
+
+        Sockets belong to the plugin that opened them, so anything no longer
+        running loses its connections rather than keeping them open behind a
+        grant that has gone.
+        """
+        running = self.plugins.running()
+        await self.sockets.drop_all({plugin.id for plugin in running})
         runtime = self.platform.plugin_runtime
         if runtime is not None:
-            await runtime.reload(self.plugins.running())
+            await runtime.reload(running)
 
     def plugin_failed(self, plugin_id: str, reason: str) -> None:
         """Disables a plugin its runtime could not keep running, and says why."""

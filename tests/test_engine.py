@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 from fakes import FakePlatform
 
+from printguard.engine import engine as engine_module
 from printguard.engine import logs, plugins, reports, vision, watchdog
 from printguard.engine.engine import EVENT_LOG_LEVELS, Engine
 from printguard.engine.integrations import INTEGRATIONS
@@ -725,7 +726,7 @@ MANIFEST = {
     "version": "1.0.0",
     "permissions": ["state:read", "monitor:control", "net"],
     "reasons": {"state:read": "to read", "monitor:control": "to retune", "net": "to post"},
-    "hosts": ["hooks.example.com"],
+    "urls": ["https://hooks.example.com/*", "wss://hooks.example.com/*"],
 }
 PLUGIN_JS = "plugin.render = (state) => ({ type: 'text', value: state.monitors.length + ' monitors' });"
 
@@ -802,19 +803,38 @@ async def test_catalogue_verifies_only_the_exact_bytes_it_pinned() -> None:
     assert tampered["verified"] is False, "an edited plugin still passed as verified"
 
 
-async def test_plugin_network_is_refused_beyond_the_hosts_it_declared() -> None:
+async def test_plugin_network_is_refused_beyond_the_patterns_it_declared() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[]) as (engine, events):
         await install_demo(engine)
         await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "req_id": 1})
         await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://elsewhere.example/a", "req_id": 2})
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "http://hooks.example.com/a", "req_id": 4})
         await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": []}})
         await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "req_id": 3})
 
-    assert next(e for e in events if e.get("event") == "plugin_http")["req_id"] == 1
-    refused = [e for e in events if e.get("event") == "error" and e.get("req_id") in (2, 3)]
-    assert len(refused) == 2, "an undeclared host or a revoked permission still got out"
+    assert next(e for e in events if e.get("event") == "http")["req_id"] == 1
+    refused = [e for e in events if e.get("event") == "error" and e.get("req_id") in (2, 3, 4)]
+    assert len(refused) == 3, "an undeclared pattern, scheme or a revoked permission still got out"
     assert not any("elsewhere.example" in url for _, url in platform.http_calls)
+
+
+async def test_a_plugin_reaching_this_network_needs_the_grant_that_covers_it() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {
+        **MANIFEST,
+        "permissions": ["net"],
+        "reasons": {"net": "to poke the printer"},
+        "urls": ["http://192.168.1.50/*"],
+    }
+    with pytest.raises(ValueError, match="net:local"):
+        plugins.sanitise_manifest(manifest)
+
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "req_id": 5})
+
+    assert any(e.get("event") == "http" and e.get("req_id") == 5 for e in events)
 
 
 async def test_a_plugin_stays_off_until_every_permission_it_asks_for_is_accepted() -> None:
@@ -856,6 +876,61 @@ async def test_a_plugin_asking_for_more_stands_down_until_the_wider_list_is_acce
 async def test_a_manifest_without_a_reason_for_a_permission_is_refused() -> None:
     with pytest.raises(ValueError, match="reasons"):
         plugins.sanitise_manifest({**MANIFEST, "reasons": {"state:read": "to read"}})
+
+
+async def test_a_plugins_request_comes_back_tagged_as_it_named_it() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.files["https://hooks.example.com/feed"] = (200, {"temp": 4})
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        await engine.handle(
+            {"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/feed", "tag": "forecast"}
+        )
+
+    answer = next(e for e in events if e.get("event") == "http")
+    assert answer["tag"] == "forecast" and answer["status"] == 200 and answer["body"] == {"temp": 4}
+    assert answer["id"] == "demo", "an answer that did not say whose request it was"
+
+
+async def test_a_plugin_making_requests_too_fast_is_refused() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        for index in range(engine_module.PLUGIN_RATE_LIMIT + 5):
+            await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "req_id": index})
+
+    assert len([e for e in events if e.get("event") == "http"]) == engine_module.PLUGIN_RATE_LIMIT
+    assert any("faster than" in str(e.get("message")) for e in events if e.get("event") == "error")
+
+
+async def test_a_plugin_holds_a_socket_and_hears_what_arrives_on_it() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        await engine.handle(
+            {"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "feed", "url": "wss://hooks.example.com/live"}
+        )
+        socket = platform.sockets[-1]
+        socket.arrived("message", '{"hello": true}')
+        await engine.handle({"cmd": "plugin.socket", "id": "demo", "action": "send", "tag": "feed", "text": "ping"})
+        await engine.handle({"cmd": "plugin.socket", "id": "demo", "action": "close", "tag": "feed"})
+
+    frames = [e for e in events if e.get("event") == "socket"]
+    assert [f["state"] for f in frames] == ["open", "message", "closed"]
+    assert frames[1]["text"] == '{"hello": true}' and all(f["tag"] == "feed" for f in frames)
+    assert socket.sent == ["ping"] and socket.closed
+
+
+async def test_a_disabled_plugin_loses_the_sockets_it_was_holding() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_demo(engine)
+        await engine.handle(
+            {"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "feed", "url": "wss://hooks.example.com/live"}
+        )
+        await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"enabled": False}})
+
+    assert platform.sockets[-1].closed, "a socket outlived the plugin holding it"
 
 
 async def test_plugin_state_view_carries_no_credentials() -> None:

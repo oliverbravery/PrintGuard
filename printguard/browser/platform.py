@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 import json as jsonlib
 import time
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -54,6 +54,36 @@ class BrowserSource:
     def close(self) -> None:
         """Stops the media track."""
         self._bridge.closeCamera(self._camera_id)
+
+
+class BrowserSocket:
+    """One connection the page holds open for a plugin."""
+
+    def __init__(self, socket: Any) -> None:
+        self._socket = socket
+        self._proxies: list[Any] = []
+
+    def listen(self, arrived: Callable[[str, str], None], proxy: Callable[[Any], Any]) -> None:
+        """Reports the open, every frame and the close, whatever ends it.
+
+        Proxies are kept alive for as long as the connection is, since a
+        callback the page drops takes the connection's events with it.
+        """
+        for name, state, text in (("open", "open", False), ("message", "message", True), ("close", "closed", False)):
+            handler = proxy(lambda event, state=state, text=text: arrived(state, str(event.data) if text else ""))
+            self._proxies.append(handler)
+            self._socket.addEventListener(name, handler)
+
+    async def send(self, text: str) -> None:
+        """Writes one text frame."""
+        self._socket.send(text)
+
+    async def close(self) -> None:
+        """Closes the connection and releases its callbacks."""
+        self._socket.close()
+        for handler in self._proxies:
+            handler.destroy()
+        self._proxies.clear()
 
 
 class BrowserPlatform:
@@ -149,6 +179,16 @@ class BrowserPlatform:
             return resp.status, jsonlib.loads(text)
         except ValueError:
             return resp.status, text
+
+    async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> BrowserSocket:
+        """Opens the page's own WebSocket and reports its frames."""
+        import js
+        from pyodide.ffi import create_proxy
+
+        socket = js.WebSocket.new(url)
+        handle = BrowserSocket(socket)
+        handle.listen(arrived, create_proxy)
+        return handle
 
     async def encode_jpeg(self, rgb: np.ndarray) -> bytes | None:
         """Encodes a frame as JPEG through a canvas in the bridge."""
