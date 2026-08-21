@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { type SettingsTabId, useStore } from "../store";
-import { applyTheme, beginPreview, endPreview, PALETTES } from "../theme";
+import { applyTheme, beginPreview, endPreview, GLASS, GLASS_DEFAULT, PALETTES } from "../theme";
 import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
 import { Dialog } from "./Dialog";
 import { PluginsTab } from "./PluginsTab";
 import { SaveStatus } from "./SaveStatus";
 import { SchemaForm } from "./SchemaForm";
+import { GlassSliders } from "./GlassTuner";
 import { ThemeEditor } from "./ThemeEditor";
 import { Toggle } from "./Toggle";
 
@@ -53,40 +54,41 @@ export function SettingsDialog() {
 
   const theme = engine?.settings.theme ?? "system";
   const themes = engine?.settings.themes ?? [];
+  const glass = engine?.settings.glass ?? GLASS_DEFAULT;
   const [editing, setEditing] = useState<CustomTheme | null>(null);
 
   const upsertTheme = (list: CustomTheme[], t: CustomTheme) =>
     list.some((x) => x.id === t.id) ? list.map((x) => (x.id === t.id ? t : x)) : [...list, t];
   const selectTheme = (id: string) => {
-    applyTheme(id, themes, true);
-    send({ cmd: "settings.update", patch: { theme: id } });
+    applyTheme(id, themes, glass, true);
+    updateSettings({ theme: id });
   };
   const newTheme = (base: ThemeBase) =>
     setEditing({ id: "t" + Date.now().toString(36), name: "", base, colors: { ...PALETTES[base] } });
   const cancelEdit = () => {
     endPreview();
     setEditing(null);
-    applyTheme(theme, themes, true);
+    applyTheme(theme, themes, glass, true);
   };
   const saveTheme = () => {
     if (!editing) return;
     const next = upsertTheme(themes, { ...editing, name: editing.name.trim() || "Custom" });
     endPreview();
-    applyTheme(editing.id, next, true);
+    applyTheme(editing.id, next, glass, true);
     send({ cmd: "settings.update", patch: { themes: next, theme: editing.id } });
     setEditing(null);
   };
   const deleteTheme = (id: string) => {
     const next = themes.filter((t) => t.id !== id);
     const selection = theme === id ? "system" : theme;
-    applyTheme(selection, next, true);
+    applyTheme(selection, next, glass, true);
     send({ cmd: "settings.update", patch: { themes: next, theme: selection } });
   };
 
   useEffect(() => {
     if (!editing) return;
     beginPreview();
-    applyTheme(editing.id, upsertTheme(themes, editing), true);
+    applyTheme(editing.id, upsertTheme(themes, editing), glass, true);
   }, [editing]);
 
   const desktopApp = "pywebview" in window;
@@ -178,6 +180,8 @@ export function SettingsDialog() {
                   </button>
                 ))}
               </div>
+
+              {theme === GLASS && <GlassSliders />}
 
               <div className="flex items-center justify-between">
                 <span className="label block">Custom themes</span>

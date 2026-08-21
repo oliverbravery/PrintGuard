@@ -407,7 +407,7 @@ export const useStore = create<PgStore>((set, get) => {
         for (const monitor of server.monitors) {
           if (monitor.result) history = appendScore(history, monitor.id, monitor.result);
         }
-        applyTheme(server.settings?.theme ?? "system", server.settings?.themes ?? []);
+        applyTheme(engine.settings?.theme ?? "system", engine.settings?.themes ?? [], engine.settings?.glass);
         set({
           engine,
           history,

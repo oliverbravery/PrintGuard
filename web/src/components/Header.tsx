@@ -1,6 +1,7 @@
 import { useStore } from "../store";
-import { applyTheme, nextScheme } from "../theme";
+import { applyTheme, GLASS, GLASS_DEFAULT, nextScheme } from "../theme";
 import { BugIcon } from "./BugIcon";
+import { GLASS_TUNER, GlassTuner } from "./GlassTuner";
 
 export function Wordmark({ size = "text-xl" }: { size?: string }) {
   return (
@@ -88,21 +89,26 @@ function VersionChip() {
 function ThemeToggle() {
   const theme = useStore((s) => s.engine?.settings.theme ?? "system");
   const themes = useStore((s) => s.engine?.settings.themes ?? []);
-  const send = useStore((s) => s.send);
-  const glyph = theme === "light" ? "☀" : theme === "dark" ? "☾" : theme === "glass" ? "◈" : themes.some((t) => t.id === theme) ? "✦" : "◐";
+  const glass = useStore((s) => s.engine?.settings.glass ?? GLASS_DEFAULT);
+  const updateSettings = useStore((s) => s.updateSettings);
+  const glyph = theme === "light" ? "☀" : theme === "dark" ? "☾" : theme === GLASS ? "◈" : themes.some((t) => t.id === theme) ? "✦" : "◐";
   return (
-    <button
-      className="chip cursor-pointer hover:opacity-80"
-      title={`Theme: ${theme}, tap to switch`}
-      aria-label="Switch theme"
-      onClick={() => {
-        const next = nextScheme(theme);
-        applyTheme(next, themes);
-        send({ cmd: "settings.update", patch: { theme: next } });
-      }}
-    >
-      {glyph}
-    </button>
+    <>
+      <button
+        className="chip tuner-anchor cursor-pointer hover:opacity-80"
+        title={`Theme: ${theme}, tap to switch`}
+        aria-label="Switch theme"
+        onClick={() => {
+          const next = nextScheme(theme);
+          applyTheme(next, themes, glass);
+          updateSettings({ theme: next });
+          if (next === GLASS) document.getElementById(GLASS_TUNER)?.showPopover();
+        }}
+      >
+        {glyph}
+      </button>
+      <GlassTuner />
+    </>
   );
 }
 

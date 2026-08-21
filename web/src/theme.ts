@@ -1,4 +1,4 @@
-import type { CustomTheme, ThemeBase, ThemeTokenKey } from "./types";
+import type { CustomTheme, Glass, ThemeBase, ThemeTokenKey } from "./types";
 
 interface TokenMeta {
   key: ThemeTokenKey;
@@ -63,6 +63,9 @@ export const PALETTES: Record<ThemeBase, Palette> = {
 
 const STORAGE_KEY = "pg.theme";
 export const GLASS = "glass";
+export const GLASS_DEFAULT: Glass = { tint: 0.38, tone: 0.08 };
+const PREFERRED_MUTED = 0.85;
+const AA = 4.5;
 const MEDIA = "(prefers-color-scheme: dark)";
 
 interface Resolved {
@@ -70,11 +73,67 @@ interface Resolved {
   colors: Palette | null;
 }
 
-export function resolveTheme(themeId: string, themes: CustomTheme[]): Resolved {
+function grey(level: number): number {
+  return level <= 0.03928 ? level / 12.92 : ((level + 0.055) / 1.055) ** 2.4;
+}
+
+function mutedRatio(level: number, ink: number, alpha: number): number {
+  const muted = grey(ink * alpha + level * (1 - alpha));
+  const surface = grey(level);
+  return (Math.max(muted, surface) + 0.05) / (Math.min(muted, surface) + 0.05);
+}
+
+function boundary(ink: number, alpha: number): number {
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 24; step += 1) {
+    const mid = (low + high) / 2;
+    if ((mutedRatio(mid, ink, alpha) >= AA) === (ink < 0.5)) high = mid;
+    else low = mid;
+  }
+  return ink < 0.5 ? high : low;
+}
+
+function mutedAlpha(level: number, ink: number): number {
+  let low = PREFERRED_MUTED;
+  let high = 1;
+  if (mutedRatio(level, ink, low) >= AA) return low;
+  for (let step = 0; step < 24; step += 1) {
+    const mid = (low + high) / 2;
+    if (mutedRatio(level, ink, mid) >= AA) high = mid;
+    else low = mid;
+  }
+  return high;
+}
+
+const LIGHTEST_UNDER_WHITE_INK = boundary(1, PREFERRED_MUTED);
+const DARKEST_UNDER_BLACK_INK = boundary(0, 1);
+
+export function glassMaterial({ tint, tone }: Glass): { lit: boolean; vars: Record<string, string> } {
+  const floor = tint * tone;
+  const lit = floor >= DARKEST_UNDER_BLACK_INK;
+  const headroom = (LIGHTEST_UNDER_WHITE_INK - floor) / Math.max(1 - tint, 1e-3);
+  const through = lit ? 1 : Math.max(0, Math.min(1, headroom));
+  const ink = lit ? 0 : 1;
+  const alpha = mutedAlpha(lit ? floor : floor + (1 - tint) * through, ink);
+  const level = Math.round(tone * 255);
+  const channels = ink ? "255 255 255" : "0 0 0";
+  return {
+    lit,
+    vars: {
+      "--glass-surface": `rgb(${level} ${level} ${level} / ${tint})`,
+      "--glass-filter": `blur(30px) saturate(180%) brightness(${through.toFixed(3)})`,
+      "--glass-ink": `rgb(${channels})`,
+      "--glass-muted": `rgb(${channels} / ${alpha.toFixed(3)})`,
+    },
+  };
+}
+
+export function resolveTheme(themeId: string, themes: CustomTheme[], glass: Glass = GLASS_DEFAULT): Resolved {
   const custom = themes.find((t) => t.id === themeId);
   if (custom) return { base: custom.base, colors: { ...PALETTES[custom.base], ...custom.colors } };
   if (themeId === "light" || themeId === "dark") return { base: themeId, colors: null };
-  if (themeId === GLASS) return { base: "dark", colors: null };
+  if (themeId === GLASS) return { base: glassMaterial(glass).lit ? "light" : "dark", colors: null };
   return { base: window.matchMedia(MEDIA).matches ? "dark" : "light", colors: null };
 }
 
@@ -91,7 +150,7 @@ function readableOn(hex: string): string {
   return luminance(hex) > 0.42 ? "#0b0c0a" : "#f3f4ed";
 }
 
-let current: { themeId: string; themes: CustomTheme[] } = { themeId: "system", themes: [] };
+let current: { themeId: string; themes: CustomTheme[]; glass: Glass } = { themeId: "system", themes: [], glass: GLASS_DEFAULT };
 let previewing = false;
 
 export function beginPreview(): void {
@@ -101,31 +160,39 @@ export function endPreview(): void {
   previewing = false;
 }
 
-export function applyTheme(themeId: string, themes: CustomTheme[], force = false): void {
+export function applyTheme(themeId: string, themes: CustomTheme[], glass: Glass = GLASS_DEFAULT, force = false): void {
   if (previewing && !force) return;
-  current = { themeId, themes };
-  const { base, colors } = resolveTheme(themeId, themes);
+  current = { themeId, themes, glass };
+  const { base, colors } = resolveTheme(themeId, themes, glass);
+  const material = glassMaterial(glass).vars;
+  const glassy = themeId === GLASS;
   const root = document.documentElement;
   root.dataset.theme = base;
   root.style.colorScheme = base;
-  root.toggleAttribute("data-glass", themeId === GLASS);
+  root.toggleAttribute("data-glass", glassy);
   for (const t of TOKENS) {
     if (colors) root.style.setProperty(t.cssVar, colors[t.key]);
     else root.style.removeProperty(t.cssVar);
   }
   if (colors) root.style.setProperty("--color-on-accent", readableOn(colors.accent));
   else root.style.removeProperty("--color-on-accent");
+  for (const [name, value] of Object.entries(material)) {
+    if (glassy) root.style.setProperty(name, value);
+    else root.style.removeProperty(name);
+  }
   const bg = colors ? colors.ink0 : PALETTES[base].ink0;
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg);
   if (previewing) return;
   const vars = colors
     ? { ...Object.fromEntries(TOKENS.map((t) => [t.cssVar, colors[t.key]])), "--color-on-accent": readableOn(colors.accent) }
-    : null;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ id: themeId, base, vars, bg, glass: themeId === GLASS }));
+    : glassy
+      ? material
+      : null;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ id: themeId, base, vars, bg, glass: glassy }));
 }
 
 window.matchMedia(MEDIA).addEventListener("change", () => {
-  if (current.themeId === "system") applyTheme(current.themeId, current.themes);
+  if (current.themeId === "system") applyTheme(current.themeId, current.themes, current.glass);
 });
 
 const ORDER = ["system", "light", "dark", GLASS] as const;

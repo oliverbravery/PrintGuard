@@ -182,6 +182,11 @@ export interface CustomTheme {
   colors: Record<ThemeTokenKey, string>;
 }
 
+export interface Glass {
+  tint: number;
+  tone: number;
+}
+
 export interface LayoutSection {
   order: string[];
   pinned: string[];
@@ -328,6 +333,7 @@ export interface EngineState {
     mqtt?: MqttConfig;
     theme: string;
     themes: CustomTheme[];
+    glass: Glass;
     layout?: Layout;
     inference_runtime: "auto" | "litert" | "onnx";
     catalogue_url: string;

@@ -386,11 +386,11 @@ test("a plugin panel rearranges with the monitors", async ({ page }) => {
 });
 
 
-test("glass turns the text white while a cover is up", async ({ page }) => {
+test("glass takes the text colour its tone can carry", async ({ page }) => {
   await dashboardWithPlugin(page, PIP);
-  const textOn = () =>
+  const textShown = () =>
     page.evaluate(() => {
-      const tile = document.querySelector("[data-painted] .panel, main .panel") as HTMLElement;
+      const tile = document.querySelector("main .panel") as HTMLElement;
       const probe = document.createElement("div");
       probe.style.color = getComputedStyle(tile).getPropertyValue("--color-text-1");
       tile.appendChild(probe);
@@ -398,19 +398,17 @@ test("glass turns the text white while a cover is up", async ({ page }) => {
       probe.remove();
       return shown;
     });
+  const wear = (tint: number, tone: number) =>
+    page.evaluate(async (glass) => {
+      const { applyTheme } = await import("/src/theme.ts");
+      applyTheme("glass", [], glass);
+    }, { tint, tone });
 
-  await page.evaluate(async () => {
-    const { applyTheme } = await import("/src/theme.ts");
-    applyTheme("glass", []);
-  });
-  expect(await textOn()).not.toBe("rgb(255, 255, 255)");
+  await wear(0.38, 0.08);
+  expect(await textShown()).toBe("rgb(255, 255, 255)");
 
-  await page.evaluate(() =>
-    (window as any).__pg.setState({
-      background: { id: "pip", image: "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" },
-    }),
-  );
-  expect(await textOn()).toBe("rgb(255, 255, 255)");
+  await wear(0.7, 0.95);
+  expect(await textShown()).toBe("rgb(0, 0, 0)");
 });
 
 
