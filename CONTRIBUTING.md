@@ -94,7 +94,8 @@ npm run screenshots                  # renders docs/assets/*.png from web/screen
 ```
 
 Each image is one entry in `SCENES` in `web/screenshots/capture.spec.ts`; add a scene there
-to capture a new screen.
+to capture a new screen. A scene naming `plugins` runs those plugins from `plugins/` in the real
+sandbox, so a screenshot shows what the code actually draws.
 
 ## Adding a printer integration
 

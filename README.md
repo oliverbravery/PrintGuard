@@ -20,6 +20,18 @@ holds for long enough, PrintGuard pauses or cancels the print through your print
 pushes a snapshot to your phone. There's no cloud and no subscription, and your camera frames
 never leave hardware you own.
 
+The detector is my own, trained for this. Against Obico's Spaghetti Detective, the only other
+open model, over the same four unseen test sets:
+
+| On a Raspberry Pi 4B | PrintGuard | Spaghetti Detective |
+|---|---|---|
+| Accuracy | 93.6% | 53.8% |
+| F1 score | 0.937 | 0.411 |
+| Images a second | 15.1 | 0.35 |
+
+43x the throughput and more than double the F1. Method and results are in the
+[dissertation](https://github.com/oliverbravery/Edge-FDM-Fault-Detection/blob/main/dissertation.pdf).
+
 ![PrintGuard dashboard: three cameras at a glance, one print mid-failure and auto-paused](docs/assets/dashboard.png)
 
 ## Contents
@@ -219,6 +231,8 @@ Four come as standard:
 - **Alert sounds** plays a horn the moment a defect is caught
 - **Progress reports** sends a tally of a print through your alert channels
 - **Spotify** puts the cover of what you are playing behind the dashboard
+
+![Picture in picture and Spotify running on the dashboard](docs/assets/plugins-live.png)
 
 Writing one takes no build step and no dependencies. **[docs/plugins.md](docs/plugins.md)** has
 the API and the sandbox details.

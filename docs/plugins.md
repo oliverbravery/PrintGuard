@@ -10,6 +10,8 @@ Plugins are written in JavaScript and run in a sandbox. One can draw a panel on 
 run a job on the hub, or both. They get fine-grained permissions to an internal API, so you can
 add features without waiting on a release.
 
+![Picture in picture and Spotify running on the dashboard](assets/plugins-live.png)
+
 - [Installing a plugin](#installing-a-plugin)
 - [What a plugin can and cannot do](#what-a-plugin-can-and-cannot-do)
 - [Permissions](#permissions)
