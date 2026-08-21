@@ -117,18 +117,30 @@ body {
   --painted-glass: blur(30px) saturate(180%);
   --painted-ink: var(--glass-ink, #ffffff);
   --painted-muted: var(--glass-muted, rgb(255 255 255 / 0.85));
-  --painted-wash: var(--glass-wash, rgb(0 0 0 / 0.16));
+  --painted-contrast: var(--glass-contrast, rgb(0 0 0));
+  --painted-wash: color-mix(in srgb, var(--painted-contrast) 16%, transparent);
+  --painted-scrim: color-mix(in srgb, var(--painted-contrast) 72%, transparent);
   --painted-edge: color-mix(in srgb, var(--painted-ink) 26%, transparent);
   --painted-sheen: inset 0 1px 0 color-mix(in srgb, var(--painted-ink) 24%, transparent);
   --theme-text-0: var(--color-text-0);
   --theme-text-1: var(--color-text-1);
   --theme-text-2: var(--color-text-2);
+  --theme-ink-1: var(--color-ink-1);
+  --theme-ink-2: var(--color-ink-2);
+  --theme-ink-3: var(--color-ink-3);
 }
 
 :root[data-glass] body {
   --color-text-0: var(--painted-ink);
   --color-text-1: var(--painted-ink);
   --color-text-2: var(--painted-muted);
+  --color-ink-1: color-mix(in srgb, var(--painted-contrast) 12%, transparent);
+  --color-ink-2: color-mix(in srgb, var(--painted-contrast) 8%, transparent);
+  --color-ink-3: color-mix(in srgb, var(--painted-contrast) 20%, transparent);
+}
+
+:root[data-glass] dialog.modal::backdrop {
+  background: var(--painted-scrim);
 }
 
 :root[data-glass] .panel,
@@ -198,6 +210,9 @@ body {
     --color-text-0: var(--theme-text-0);
     --color-text-1: var(--theme-text-1);
     --color-text-2: var(--theme-text-2);
+    --color-ink-1: var(--theme-ink-1);
+    --color-ink-2: var(--theme-ink-2);
+    --color-ink-3: var(--theme-ink-3);
   }
 }
 
