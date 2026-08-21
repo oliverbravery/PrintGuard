@@ -168,10 +168,12 @@ export class PluginHost {
     try {
       await this.booted;
       const result = await this.send(payload);
-      const targets = Object.fromEntries(
-        Object.entries(result.targets ?? {}).map(([target, tree]) => [target, normalise(tree)]),
-      );
-      this.handlers.onView(this.id, normalise(result.tree), targets);
+      if (result.targets) {
+        const targets = Object.fromEntries(
+          Object.entries(result.targets).map(([target, tree]) => [target, normalise(tree)]),
+        );
+        this.handlers.onView(this.id, normalise(result.tree), targets);
+      }
       this.handlers.onStore(this.id, result.store ?? {});
       this.handlers.onEffects(this.id, (result.effects ?? []).slice(0, MAX_EFFECTS));
     } catch (err) {

@@ -168,6 +168,7 @@ async function dashboardWithPlugin(
   granted = PLUGIN.granted,
   surfaces = PLUGIN.manifest.surfaces,
   assets: Record<string, string> = {},
+  worker?: string,
 ) {
   await page.addInitScript(() => {
     class Offline extends EventTarget {
@@ -180,7 +181,7 @@ async function dashboardWithPlugin(
   await page.goto("/");
   await page.waitForFunction(() => Boolean((window as any).__pg.getState().link));
   await page.evaluate(
-    ({ plugin, permissions, code, granted, surfaces, monitor, assets }) => {
+    ({ plugin, permissions, code, granted, surfaces, monitor, assets, worker }) => {
       const win = window as any;
       const sent: any[] = [];
       win.__sent = sent;
@@ -200,18 +201,19 @@ async function dashboardWithPlugin(
           printers: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
           settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
           stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
-          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces }, granted }],
+          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces }, granted, files: worker ? ["plugin.js", "worker.js"] : ["plugin.js"] }],
           plugin_permissions: permissions,
           plugin_events: { state: [] },
           plugin_assets: { png: "image/png", txt: "text/plain", mp3: "audio/mpeg" },
-          plugin_host: true,
+          plugin_host: !worker,
         },
       });
       win.__pgEvent({ event: "state", ...win.__pg.getState().engine });
       const request = sent.find((c) => c.cmd === "plugin.code");
-      win.__pgEvent({ event: "plugin_code", id: "pip", sources: { "plugin.js": code }, assets, req_id: request?.req_id });
+      const sources = worker ? { "plugin.js": code, "worker.js": worker } : { "plugin.js": code };
+      win.__pgEvent({ event: "plugin_code", id: "pip", sources, assets, req_id: request?.req_id });
     },
-    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets },
+    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets, worker },
   );
   await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().pluginTrees).length)).toBeGreaterThan(0);
 }
@@ -409,6 +411,17 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
 
   await wear(0.7, 0.95);
   expect(await textShown()).toBe("rgb(0, 0, 0)");
+});
+
+
+test("a worker half never wipes the view its panel half drew", async ({ page }) => {
+  await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor"], {}, "plugin.on('result', () => {});");
+
+  await expect(page.getByRole("button", { name: "Float Bench" })).toBeVisible();
+  for (let round = 0; round < 3; round += 1) {
+    await page.evaluate(() => (window as any).__pgEvent({ event: "result", monitor_id: "m1", prediction: "failure" }));
+  }
+  await expect(page.getByRole("button", { name: "Float Bench" })).toBeVisible();
 });
 
 
