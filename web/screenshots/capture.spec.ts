@@ -164,8 +164,19 @@ interface Scene {
   customising?: boolean;
   settingsTab?: string;
   catalogue?: unknown[];
+  tuner?: boolean;
   mutate?: (engine: EngineState) => void;
 }
+
+const live = (e: EngineState) => {
+  e.plugin_events = { http: ["tag", "status", "body"] };
+  e.settings.theme = "glass";
+  e.monitors = e.monitors.slice(0, 2);
+  e.plugins = [
+    installed("spotify", "Spotify", ["net", "oauth", "background"], ["panel"], ["panel.html"]),
+    installed("picture-in-picture", "Picture in picture", ["state:read", "camera:view"], ["monitor"], ["plugin.js"]),
+  ] as never;
+};
 
 const SCENES: Scene[] = [
   { name: "dashboard", width: 1360, height: 620, theme: "dark" },
@@ -186,19 +197,8 @@ const SCENES: Scene[] = [
       e.plugins = [INSTALLED as never];
     },
   },
-  {
-    name: "plugins-live", width: 1360, height: 720, theme: "dark",
-    plugins: ["spotify", "picture-in-picture"],
-    mutate: (e) => {
-      e.plugin_events = { http: ["tag", "status", "body"] };
-      e.settings.theme = "glass";
-      e.monitors = e.monitors.slice(0, 2);
-      e.plugins = [
-        installed("spotify", "Spotify", ["net", "oauth", "background"], ["panel"], ["panel.html"]),
-        installed("picture-in-picture", "Picture in picture", ["state:read", "camera:view"], ["monitor"], ["plugin.js"]),
-      ] as never;
-    },
-  },
+  { name: "plugins-live", width: 1360, height: 720, theme: "dark", plugins: ["spotify", "picture-in-picture"], mutate: live },
+  { name: "glass", width: 1360, height: 720, theme: "dark", plugins: ["spotify", "picture-in-picture"], tuner: true, mutate: live },
 ];
 
 function pluginSources(id: string): Record<string, string> {
@@ -257,6 +257,7 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
       el.appendChild(img);
     }
   }, FRAMES);
+  if (scene.tuner) await page.evaluate(() => document.getElementById("glass-tuner")?.showPopover());
   await page.evaluate(async () => {
     await document.fonts.ready;
   });

@@ -139,8 +139,8 @@ native window on your own computer.
 ## Themes and layout
 
 Choose **System**, **Light**, **Dark**, **Glass**, or design your own in the built-in theme
-editor. Themes are saved on the hub and follow every browser that opens it. Glass makes the
-panels frosted, so a plugin putting a picture behind the dashboard shows through them.
+editor. Themes are saved on the hub and follow every browser that opens it. Glass frosts the
+panels, so a plugin putting a picture behind the dashboard shows through them.
 
 <table>
 <tr>
@@ -152,6 +152,12 @@ panels frosted, so a plugin putting a picture behind the dashboard shows through
 <td align="center"><b>Light</b></td>
 </tr>
 </table>
+
+Picking Glass drops out two sliders, for how clear the panels are and how light or dark. Text
+takes whichever colour holds 4.5:1 over what the glass is letting through, so any setting stays
+readable.
+
+![The Glass theme with its opacity and tone sliders open over a plugin's cover art](docs/assets/glass.png)
 
 Tap **Customise** to arrange the dashboard around how you work. Drag monitors into any order,
 pin the ones that matter to the front and hide the rest, with a tray to bring them back. The

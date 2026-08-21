@@ -20,7 +20,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   sounds plays a horn when a defect is caught, progress reports sends a tally of a print through
   your alert channels, and Spotify puts the current cover behind the dashboard.
 - A Glass theme, alongside System, Light and Dark. The panels frost over whatever is behind
-  them, which is what the Spotify plugin's cover shows through.
+  them, which is what the Spotify plugin's cover shows through. Picking it drops out two
+  sliders for how clear the panels are and how light or dark, and text takes whichever colour
+  holds 4.5:1 over what the glass lets through.
 
 - Plugins install switched off. Enable lists every permission with the author's reason for it,
   and it is all or nothing. An update that asks for more waits until you accept it.
