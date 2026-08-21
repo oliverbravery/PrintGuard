@@ -63,7 +63,7 @@ export const PALETTES: Record<ThemeBase, Palette> = {
 
 const STORAGE_KEY = "pg.theme";
 export const GLASS = "glass";
-export const GLASS_DEFAULT: Glass = { tint: 0.38, tone: 0.08 };
+export const GLASS_DEFAULT: Glass = { opacity: 0.38, tone: 0.08 };
 const PREFERRED_MUTED = 0.85;
 const AA = 4.5;
 const BACKDROP_CELLS = 8;
@@ -148,9 +148,10 @@ export function clearestTint(tone: number): number {
   return high;
 }
 
-export function glassMaterial({ tint, tone }: Glass): { lit: boolean; vars: Record<string, string> } {
+export function glassMaterial({ opacity, tone }: Glass): { lit: boolean; vars: Record<string, string> } {
   const lit = litGlass(tone);
-  const settled = Math.max(tint, clearestTint(tone));
+  const floor = clearestTint(tone);
+  const settled = floor + opacity * (1 - floor);
   const { lo, hi } = behindTheGlass(tone);
   const alpha = mutedAlpha(settled * tone + (1 - settled) * (lit ? lo : hi), lit ? 0 : 1);
   const level = Math.round(tone * 255);
@@ -161,7 +162,7 @@ export function glassMaterial({ tint, tone }: Glass): { lit: boolean; vars: Reco
       "--glass-surface": `rgb(${level} ${level} ${level} / ${settled.toFixed(3)})`,
       "--glass-ink": `rgb(${channels})`,
       "--glass-muted": `rgb(${channels} / ${alpha.toFixed(3)})`,
-      "--glass-wash": `rgb(${lit ? "255 255 255" : "0 0 0"} / 0.16)`,
+      "--glass-contrast": lit ? "rgb(255 255 255)" : "rgb(0 0 0)",
     },
   };
 }
@@ -223,8 +224,9 @@ export function endPreview(): void {
   previewing = false;
 }
 
-export function applyTheme(themeId: string, themes: CustomTheme[], glass: Glass = GLASS_DEFAULT, force = false): void {
+export function applyTheme(themeId: string, themes: CustomTheme[], given?: Partial<Glass>, force = false): void {
   if (previewing && !force) return;
+  const glass = { ...GLASS_DEFAULT, ...given };
   current = { themeId, themes, glass };
   const { base, colors } = resolveTheme(themeId, themes, glass);
   const material = glassMaterial(glass).vars;

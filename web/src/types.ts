@@ -183,7 +183,7 @@ export interface CustomTheme {
 }
 
 export interface Glass {
-  tint: number;
+  opacity: number;
   tone: number;
 }
 

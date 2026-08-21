@@ -54,7 +54,7 @@ export function SettingsDialog() {
 
   const theme = engine?.settings.theme ?? "system";
   const themes = engine?.settings.themes ?? [];
-  const glass = engine?.settings.glass ?? GLASS_DEFAULT;
+  const glass = { ...GLASS_DEFAULT, ...engine?.settings.glass };
   const [editing, setEditing] = useState<CustomTheme | null>(null);
 
   const upsertTheme = (list: CustomTheme[], t: CustomTheme) =>

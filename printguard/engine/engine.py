@@ -51,7 +51,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "mqtt": {},
     "theme": "system",
     "themes": [],
-    "glass": {"tint": 0.38, "tone": 0.08},
+    "glass": {"opacity": 0.38, "tone": 0.08},
     "layout": {},
     "inference_runtime": "auto",
     "catalogue_url": plugins.CATALOGUE_URL,

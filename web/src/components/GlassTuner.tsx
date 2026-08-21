@@ -1,16 +1,17 @@
 import { useStore } from "../store";
-import { applyTheme, clearestTint, GLASS_DEFAULT } from "../theme";
+import { applyTheme, GLASS_DEFAULT } from "../theme";
 import type { Glass } from "../types";
 
 export const GLASS_TUNER = "glass-tuner";
 
-const SLIDERS: { key: keyof Glass; label: string; low: string; high: string; floor?: (glass: Glass) => number }[] = [
-  { key: "tint", label: "Opacity", low: "Clear", high: "Solid", floor: (glass) => clearestTint(glass.tone) },
+const SLIDERS: { key: keyof Glass; label: string; low: string; high: string }[] = [
+  { key: "opacity", label: "Opacity", low: "Clear", high: "Solid" },
   { key: "tone", label: "Tone", low: "Black", high: "White" },
 ];
 
 export function GlassSliders() {
-  const glass = useStore((s) => s.engine?.settings.glass ?? GLASS_DEFAULT);
+  const stored = useStore((s) => s.engine?.settings.glass);
+  const glass = { ...GLASS_DEFAULT, ...stored };
   const theme = useStore((s) => s.engine?.settings.theme ?? "system");
   const themes = useStore((s) => s.engine?.settings.themes ?? []);
   const updateSettings = useStore((s) => s.updateSettings);
@@ -21,22 +22,19 @@ export function GlassSliders() {
   };
   return (
     <div className="space-y-3">
-      {SLIDERS.map((slider) => {
-        const floor = slider.floor?.(glass) ?? 0;
-        const shown = Math.max(glass[slider.key], floor);
-        return (
+      {SLIDERS.map((slider) => (
         <div key={slider.key}>
           <div className="flex items-baseline justify-between">
             <span className="label">{slider.label}</span>
-            <span className="mono text-[0.7rem] text-text-2">{Math.round(shown * 100)}%</span>
+            <span className="mono text-[0.7rem] text-text-2">{Math.round(glass[slider.key] * 100)}%</span>
           </div>
           <input
             type="range"
             className="slider"
-            min={floor}
+            min={0}
             max={1}
             step={0.01}
-            value={shown}
+            value={glass[slider.key]}
             aria-label={slider.label}
             onChange={(e) => slide(slider.key, Number(e.target.value))}
           />
@@ -45,8 +43,7 @@ export function GlassSliders() {
             <span>{slider.high}</span>
           </div>
         </div>
-        );
-      })}
+      ))}
     </div>
   );
 }

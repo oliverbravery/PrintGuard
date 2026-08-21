@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { applyTheme, GLASS, GLASS_DEFAULT, nextScheme } from "../theme";
+import { applyTheme, GLASS, nextScheme } from "../theme";
 import { BugIcon } from "./BugIcon";
 import { GLASS_TUNER, GlassTuner } from "./GlassTuner";
 
@@ -89,7 +89,7 @@ function VersionChip() {
 function ThemeToggle() {
   const theme = useStore((s) => s.engine?.settings.theme ?? "system");
   const themes = useStore((s) => s.engine?.settings.themes ?? []);
-  const glass = useStore((s) => s.engine?.settings.glass ?? GLASS_DEFAULT);
+  const stored = useStore((s) => s.engine?.settings.glass);
   const updateSettings = useStore((s) => s.updateSettings);
   const glyph = theme === "light" ? "☀" : theme === "dark" ? "☾" : theme === GLASS ? "◈" : themes.some((t) => t.id === theme) ? "✦" : "◐";
   return (
@@ -100,7 +100,7 @@ function ThemeToggle() {
         aria-label="Switch theme"
         onClick={() => {
           const next = nextScheme(theme);
-          applyTheme(next, themes, glass);
+          applyTheme(next, themes, stored);
           updateSettings({ theme: next });
           if (next === GLASS) document.getElementById(GLASS_TUNER)?.showPopover();
         }}
