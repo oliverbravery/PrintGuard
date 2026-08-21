@@ -37,6 +37,7 @@ MAX_CONSUMES = 16
 CHANNEL_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
 LINK_PATTERN = re.compile(r"^([a-z0-9][a-z0-9-]{1,38}[a-z0-9]):([a-z0-9][a-z0-9-]{0,38}[a-z0-9])$")
 MAX_SECRET_BYTES = 4096
+SECRET_NAME = re.compile(r"^[a-z0-9_-]{1,40}$")
 SECRET_REFERENCE = re.compile(r"\{\{\s*secret\.([a-z0-9_-]{1,40})\s*\}\}")
 """How a plugin names a secret it may use but never read.
 
@@ -493,6 +494,29 @@ def digests(manifest: dict[str, Any], sources: dict[str, str], assets: dict[str,
     return hashed
 
 
+def described(raw: Any, field: str, pattern: re.Pattern[str], cap: int, complaint: str) -> dict[str, str]:
+    """Reads one of the manifest's maps of a name against the line describing it.
+
+    Args:
+        raw: The parsed ``plugin.json``.
+        field: Which map to read.
+        pattern: What every name in the map has to match.
+        cap: How many entries are kept.
+        complaint: What to raise when an entry is unusable.
+
+    Returns:
+        Every name in the map against its description.
+
+    Raises:
+        ValueError: If a name or its description is unusable.
+    """
+    given = raw.get(field) if isinstance(raw.get(field), dict) else {}
+    lines = {str(name).strip().lower(): str(why).strip()[:200] for name, why in list(given.items())[:cap]}
+    if any(not pattern.match(name) or not why for name, why in lines.items()):
+        raise ValueError(complaint)
+    return lines
+
+
 def sanitise_manifest(raw: Any) -> dict[str, Any]:
     """Validates a plugin manifest, dropping anything unrecognised.
 
@@ -519,14 +543,8 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     unexplained = [p for p, why in reasons.items() if not why]
     if unexplained:
         raise ValueError(f"reasons must say why the plugin wants {', '.join(unexplained)}")
-    declared = raw.get("secrets") if isinstance(raw.get("secrets"), dict) else {}
-    secrets = {str(name).strip().lower(): str(why).strip()[:200] for name, why in list(declared.items())[:MAX_SECRETS]}
-    if any(not SECRET_REFERENCE.match("{{secret.%s}}" % name) or not why for name, why in secrets.items()):
-        raise ValueError("each secret needs a short name and a line saying what it is")
-    offered = raw.get("provides") if isinstance(raw.get("provides"), dict) else {}
-    provides = {str(name).strip().lower(): str(why).strip()[:200] for name, why in list(offered.items())[:MAX_CHANNELS]}
-    if any(not CHANNEL_PATTERN.match(name) or not why for name, why in provides.items()):
-        raise ValueError("each channel in provides needs a short name and a line saying what it answers")
+    wanted = described(raw, "secrets", SECRET_NAME, MAX_SECRETS, "each secret needs a short name and a line saying what it is")
+    provides = described(raw, "provides", CHANNEL_PATTERN, MAX_CHANNELS, "each channel in provides needs a short name and a line saying what it answers")
     consumes = sorted({str(link).strip().lower() for link in raw.get("consumes", []) if str(link).strip()})[:MAX_CONSUMES]
     if any(not LINK_PATTERN.match(link) for link in consumes):
         raise ValueError("each entry in consumes names a plugin and a channel, as plugin-id:channel")
@@ -538,7 +556,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     if sign_in and "oauth" not in permissions:
         raise ValueError("oauth needs the oauth permission")
     if sign_in:
-        secrets[oauth.CLIENT_ID] = f"The client id of the {sign_in['label']} app you registered"
+        wanted[oauth.CLIENT_ID] = f"The client id of the {sign_in['label']} app you registered"
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
     platforms = sorted({str(p).strip() for p in raw.get("platforms", [])} & set(PLATFORMS))
     assets = sorted({str(a).strip().lower() for a in raw.get("assets", [])} - {MANIFEST_FILE, *SOURCE_FILES})
@@ -568,7 +586,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "platforms": platforms,
         "assets": assets,
         "urls": patterns,
-        "secrets": secrets,
+        "secrets": wanted,
         "provides": provides,
         "consumes": consumes,
         "oauth": sign_in,
