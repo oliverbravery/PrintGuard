@@ -552,7 +552,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         raise ValueError("provides needs the link:provide permission")
     if consumes and "link:consume" not in permissions:
         raise ValueError("consumes needs the link:consume permission")
-    sign_in = sanitise_oauth(raw.get("oauth"))
+    sign_in = sanitise_sign_in(raw.get("oauth"))
     if sign_in and "oauth" not in permissions:
         raise ValueError("oauth needs the oauth permission")
     if sign_in:
@@ -624,7 +624,7 @@ def outbound_link(plugin_id: str, kind: str, request: Any) -> dict[str, Any]:
     }
 
 
-def sanitise_oauth(raw: Any) -> dict[str, Any]:
+def sanitise_sign_in(raw: Any) -> dict[str, Any]:
     """Validates the sign-in a manifest declares, if it declares one.
 
     Args:
