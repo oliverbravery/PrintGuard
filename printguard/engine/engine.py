@@ -1081,9 +1081,8 @@ class Engine:
         plugin = self.plugins.get(plugin_id) if plugin_id else None
         if plugin is None:
             return None
-        signed_in = f"plugin {plugin.id} signed in to {plugin.manifest['oauth']['label']}"
         plugin.secrets = {**plugin.secrets, **await self.oauth.finish(state, code, self._provider(plugin))}
-        logger.info("%s", signed_in)
+        logger.info("plugin %s signed in to %s", plugin.id, plugin.manifest["oauth"]["label"])
         self._broadcast(self.state_event())
         return plugin.manifest["name"]
 
