@@ -13,28 +13,33 @@
   /* PrintGuard injects its theme tokens on :root before this, and the tile the
      panel sits in already paints the background, so nothing here sets a colour
      of its own. */
+  /* The tile centres the panel, and the padding below it lifts the stack a
+     little above the middle. */
   body {
+    align-items: center;
     color: var(--color-text-0);
     display: flex;
+    flex-direction: column;
     font-family: var(--font-body);
-    gap: 14px;
+    gap: 12px;
+    padding-bottom: 26px;
+    text-align: center;
   }
   #cover {
-    border-radius: 4px;
-    height: 84px;
+    border-radius: 6px;
+    height: 132px;
     object-fit: cover;
-    width: 84px;
+    width: 132px;
   }
   #cover:not([src]) {
     background: color-mix(in srgb, var(--color-text-2) 20%, transparent);
   }
   .now {
+    align-items: center;
     display: flex;
-    flex: 1;
     flex-direction: column;
-    justify-content: center;
     gap: 3px;
-    min-width: 0;
+    max-width: 100%;
   }
   #title {
     font-size: 0.9rem;

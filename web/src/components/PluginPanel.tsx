@@ -79,11 +79,11 @@ export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
           <span className={`chip ${plugin.verified ? "chip-ok" : ""}`}>{plugin.verified ? "verified" : "third party"}</span>
         )}
       </div>
-      {body}
+      <div className="flex flex-1 flex-col justify-center">{body}</div>
     </>
   );
 
-  if (!customising) return <section className="panel p-4 space-y-3">{content()}</section>;
+  if (!customising) return <section className="panel flex flex-col gap-3 p-4">{content()}</section>;
 
   return (
     <SortableItem id={plugin.id}>
@@ -91,7 +91,7 @@ export function PluginPanel({ plugin }: { plugin: PluginRecord }) {
         <section
           ref={handle.setNodeRef}
           style={handle.style}
-          className={`panel p-4 space-y-3 ${pinned ? "!border-accent" : ""} ${handle.isDragging ? "z-10 opacity-90 shadow-xl" : ""}`}
+          className={`panel flex flex-col gap-3 p-4 ${pinned ? "!border-accent" : ""} ${handle.isDragging ? "z-10 opacity-90 shadow-xl" : ""}`}
         >
           {content(handle)}
         </section>
