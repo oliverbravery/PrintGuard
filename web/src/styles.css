@@ -113,11 +113,12 @@ body {
 }
 
 :root[data-glass] {
-  --painted-surface: color-mix(in srgb, var(--color-ink-1) 65%, transparent);
-  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 72%, transparent);
-  --painted-glass: blur(28px) saturate(190%);
+  --painted-surface: color-mix(in srgb, var(--color-ink-1) 88%, transparent);
+  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 94%, transparent);
+  --painted-glass: blur(30px) saturate(160%);
   --painted-ink: #ffffff;
-  --painted-edge: color-mix(in srgb, var(--painted-ink) 18%, transparent);
+  --painted-edge: color-mix(in srgb, var(--painted-ink) 22%, transparent);
+  --painted-sheen: inset 0 1px 0 color-mix(in srgb, var(--painted-ink) 20%, transparent);
   --theme-text-0: var(--color-text-0);
   --theme-text-1: var(--color-text-1);
   --theme-text-2: var(--color-text-2);
@@ -128,7 +129,7 @@ body {
   background: var(--painted-surface);
   backdrop-filter: var(--painted-glass);
   border-color: var(--painted-edge);
-  box-shadow: 0 12px 32px -16px rgb(0 0 0 / 0.55);
+  box-shadow: var(--painted-sheen), 0 16px 40px -20px rgb(0 0 0 / 0.65);
 }
 
 :root[data-glass] header,
@@ -154,6 +155,14 @@ body {
 
 [data-painted] {
   isolation: isolate;
+}
+
+/* A cover is what there is to see through, so the glass thins out over one and
+   dims what it lets past. */
+:root[data-glass] [data-painted] {
+  --painted-surface: color-mix(in srgb, var(--color-ink-1) 38%, transparent);
+  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 50%, transparent);
+  --painted-glass: blur(30px) saturate(200%) brightness(0.55);
 }
 
 [data-painted]::before {
