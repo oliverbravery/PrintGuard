@@ -166,7 +166,7 @@ export function SettingsDialog() {
           ) : (
             <div className="space-y-4">
               <span className="label block">Theme</span>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {SCHEMES.map((opt) => (
                   <button
                     key={opt.id}
