@@ -310,6 +310,25 @@ def sanitise_secrets(raw: Any, names: list[str]) -> dict[str, str]:
     return kept
 
 
+def missing_secrets(value: Any, secrets: dict[str, str]) -> set[str]:
+    """Names the secrets a request refers to that the plugin has nothing for.
+
+    Args:
+        value: The request, walked the same way ``fill_secrets`` walks it.
+        secrets: What the plugin holds.
+
+    Returns:
+        Every name referenced that is unset, empty when the request is ready to go.
+    """
+    if isinstance(value, str):
+        return {name for name in SECRET_REFERENCE.findall(value) if not secrets.get(name)}
+    if isinstance(value, dict):
+        return set().union(*(missing_secrets(item, secrets) for item in value.values())) if value else set()
+    if isinstance(value, list):
+        return set().union(*(missing_secrets(item, secrets) for item in value)) if value else set()
+    return set()
+
+
 def fill_secrets(value: Any, secrets: dict[str, str]) -> Any:
     """Replaces every secret reference in a request with the value it names.
 

@@ -946,10 +946,15 @@ class Engine:
         if not self._within_rate(plugin.id):
             raise PermissionError(f"plugin {plugin.id} is making requests faster than {PLUGIN_RATE_LIMIT} a minute")
         await self._refresh_sign_in(plugin)
-        filled = plugins.fill_secrets(
-            {"url": str(message.get("url", "")), "headers": message.get("headers") or None, "json": message.get("json")},
-            plugin.secrets,
-        )
+        request = {"url": str(message.get("url", "")), "headers": message.get("headers") or None, "json": message.get("json")}
+        blank = plugins.missing_secrets(request, plugin.secrets)
+        if blank:
+            raise ValueError(
+                f"{plugin.id} is not signed in yet"
+                if blank & set(oauth.SESSION)
+                else f"{plugin.id} needs {', '.join(sorted(blank))} filled in first"
+            )
+        filled = plugins.fill_secrets(request, plugin.secrets)
         status, body = await self.platform.http(
             str(message.get("method", "GET")).upper(),
             filled["url"],

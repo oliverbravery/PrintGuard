@@ -926,6 +926,23 @@ async def test_plugin_network_is_refused_beyond_the_patterns_it_declared() -> No
     assert not any("elsewhere.example" in url for _, url in platform.http_calls)
 
 
+async def test_a_request_naming_a_secret_it_has_not_got_never_leaves() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    wanting = {**MANIFEST, "secrets": {"api_key": "The key from your account page"}}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest=wanting)})
+        await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": MANIFEST["permissions"], "enabled": True}})
+        signed = {"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "headers": {"Authorization": "Bearer {{secret.api_key}}"}}
+        await engine.handle({**signed, "req_id": 1})
+        await engine.handle({"cmd": "plugin.secrets", "id": "demo", "secrets": {"api_key": "k3y"}})
+        await engine.handle({**signed, "req_id": 2})
+
+    refused = [e for e in events if e.get("event") == "error" and e.get("req_id") == 1]
+    assert len(refused) == 1, "a half-filled header went out instead of being refused"
+    assert "api_key" in refused[0]["message"], refused[0]["message"]
+    assert [e.get("req_id") for e in events if e.get("event") == "http"] == [2]
+
+
 async def test_a_plugin_reaching_this_network_needs_the_grant_that_covers_it() -> None:
     platform = FakePlatform(infer_s=0.02)
     manifest = {
