@@ -10,18 +10,18 @@
   sign-in, filled in as the request leaves, so this file never sees one.
 -->
 <style>
-  /* Spotify's own artwork sets the mood here, so the panel stays dark whatever
-     theme the dashboard is on. Overriding the tokens PrintGuard injects is all
-     it takes, since they arrive on :root ahead of this. */
+  /* The cover sets the mood, so the panel locks to the Glass theme whatever the
+     dashboard is on. The tokens PrintGuard injects arrive on :root ahead of
+     this, so overriding them here is all it takes. */
   :root {
     color-scheme: dark;
-    --color-text-0: #eceee6;
-    --color-text-1: #a8af9c;
-    --color-text-2: #7e866d;
-    --color-line-0: #262b20;
+    --color-text-0: #ffffff;
+    --color-text-1: rgb(255 255 255 / 0.85);
+    --color-text-2: rgb(255 255 255 / 0.85);
+    --color-line-0: rgb(255 255 255 / 0.18);
   }
   body {
-    background: #11130e;
+    background: color-mix(in srgb, #11130e 65%, transparent);
     border-radius: 6px;
     color: var(--color-text-0);
     display: flex;
