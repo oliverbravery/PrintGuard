@@ -270,7 +270,7 @@ body {
   justify-self: start;
   align-self: start;
   --tuner-tail: 0.8rem;
-  margin: 0.7rem 0 0;
+  margin: 0.7rem 0.75rem 0 0;
   padding: 0.85rem 1rem 1rem;
   width: 18rem;
   max-width: 100%;
