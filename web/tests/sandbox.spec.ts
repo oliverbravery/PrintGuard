@@ -270,6 +270,18 @@ test("a monitor surface draws on each monitor and nothing on the dashboard", asy
   await expect.poll(() => page.evaluate(() => (window as any).__floated)).toBe(1);
 });
 
+test("a camera drawn twice still floats after one of the two goes away", async ({ page }) => {
+  await stubFloat(page);
+  await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor"]);
+
+  await page.getByRole("button", { name: "Open Bench monitor details" }).click();
+  await page.getByRole("button", { name: "Close monitor details" }).click();
+  await page.getByRole("button", { name: "Float Bench" }).click();
+
+  await expect.poll(() => page.evaluate(() => (window as any).__floated)).toBe(1);
+});
+
+
 async function silentAudio(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
     const win = window as any;
