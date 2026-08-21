@@ -1,5 +1,6 @@
 import { parse } from "acorn";
 import { simple } from "acorn-walk";
+import { parseFragment } from "parse5";
 import type { Permission, PluginManifest } from "./types";
 import { matches, reachesLocal } from "./urls.ts";
 
@@ -40,7 +41,13 @@ function literalField(node: any, field: string): string | null {
 }
 
 function scriptsIn(html: string): string {
-  return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)].map((found) => found[1]).join("\n;\n");
+  const scripts: string[] = [];
+  const walk = (node: any) => {
+    if (node.nodeName === "script") scripts.push(node.childNodes?.[0]?.value ?? "");
+    for (const child of node.childNodes ?? []) walk(child);
+  };
+  walk(parseFragment(html));
+  return scripts.join("\n;\n");
 }
 
 function callsIn(code: string, tables: Tables, owners: string[]): { calls: Call[]; secrets: string[]; failed: string | null } {
