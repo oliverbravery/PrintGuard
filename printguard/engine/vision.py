@@ -20,7 +20,7 @@ MARGIN_HALF_SPAN = 4.0
 
 @dataclass(frozen=True)
 class Assets:
-    """Model companion data: normalisation constants and class prototypes."""
+    """Model companion data, the normalisation constants and class prototypes."""
 
     mean: tuple[float, ...]
     std: tuple[float, ...]
@@ -181,7 +181,7 @@ def transform(
     contrast: float = 1.0,
     sharpness: float = 0.0,
 ) -> np.ndarray:
-    """Applies a camera's full image pipeline: rotate, then crop, then adjust.
+    """Applies a camera's full image pipeline, rotating, then cropping, then adjusting.
 
     The crop is interpreted in the rotated frame's coordinates, so the result
     matches exactly what the live view shows and what the model infers on.
@@ -203,7 +203,7 @@ def transform(
 
 
 def defect_score(result: dict[str, Any], sensitivity: float = 1.0) -> float:
-    """Maps a classification result onto a 0–1 defect score.
+    """Maps a classification result onto a 0-1 defect score.
 
     A score of 0.5 sits on the decision boundary; higher means the frame
     looks more like a failing print. Sensitivity scales how aggressively

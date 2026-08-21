@@ -93,7 +93,7 @@ export function GettingStarted() {
           <h2 className="display text-xl font-bold">GET PRINTGUARD WATCHING</h2>
         </div>
         <p className="mb-5 text-sm text-text-1">
-          Register a camera and add a monitor to start watching — connect a printer and alerts for the
+          Register a camera and add a monitor to start watching. Connect a printer and alerts for the
           full safety net.
         </p>
         <div className="mb-4 flex items-center gap-3">

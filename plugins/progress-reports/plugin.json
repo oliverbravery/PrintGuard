@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.schema.json",
+  "id": "progress-reports",
+  "name": "Progress reports",
+  "version": "1.0.0",
+  "description": "Sends how far a print has got and how many defects it has seen, as often as you ask.",
+  "author": "oliverbravery",
+  "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/progress-reports",
+  "permissions": ["state:read", "alert:send"],
+  "reasons": {
+    "state:read": "To read how far a print has got and how many defects it has seen.",
+    "alert:send": "To send the tally through your alert channels."
+  },
+  "surfaces": ["settings"],
+  "events": ["result", "alert"],
+  "tick_s": 60
+}

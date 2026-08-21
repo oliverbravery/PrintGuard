@@ -82,14 +82,19 @@ def public_source(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def deployment(platform: Platform) -> str:
-    """Names how this instance is deployed: desktop app, docker hub or local."""
+    """Names how this instance is deployed, as desktop app, docker hub or local."""
     if platform.update_asset:
         return "desktop"
     return "local" if platform.mode == "local" else "docker"
 
 
 def collect_secrets(engine: "Engine") -> set[str]:
-    """Every configured credential value, for scrubbing freeform report text."""
+    """Every configured credential value, for scrubbing freeform report text.
+
+    A plugin's own secrets are in here too. It never holds one, but PrintGuard
+    substitutes them into requests it makes, so a failure carrying the URL back
+    can put one in a log line.
+    """
     secrets: set[str] = set()
     for printer in engine.printers.values():
         adapter = INTEGRATIONS.get(printer.provider)
@@ -106,6 +111,8 @@ def collect_secrets(engine: "Engine") -> set[str]:
             secrets.add(str(camera.source["access_code"]))
         parts = urlsplit(str(camera.source.get("url") or ""))
         secrets |= {part for part in (parts.username, parts.password) if part}
+    for plugin in engine.plugins.values():
+        secrets |= {value for value in plugin.secrets.values() if value}
     return secrets
 
 
@@ -186,7 +193,7 @@ def report_files(
     secrets: set[str],
     attachments: Sequence[dict[str, Any]] = (),
 ) -> list[tuple[str, str, bytes]]:
-    """Builds a report's files: diagnostics, both log tails and user attachments.
+    """Builds a report's files, the diagnostics, both log tails and user attachments.
 
     The diagnostics JSON and both log tails are scrubbed of every value in
     ``secrets``, since an error string inside any of them may embed a

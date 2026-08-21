@@ -112,6 +112,110 @@ body {
   border-radius: 6px;
 }
 
+:root[data-glass] {
+  --painted-surface: var(--glass-surface, rgb(20 20 20 / 0.38));
+  --painted-glass: blur(30px) saturate(180%);
+  --painted-ink: var(--glass-ink, #ffffff);
+  --painted-muted: var(--glass-muted, rgb(255 255 255 / 0.85));
+  --painted-contrast: var(--glass-contrast, rgb(0 0 0));
+  --painted-wash: color-mix(in srgb, var(--painted-contrast) 16%, transparent);
+  --painted-scrim: color-mix(in srgb, var(--painted-contrast) 72%, transparent);
+  --painted-edge: color-mix(in srgb, var(--painted-ink) 26%, transparent);
+  --painted-sheen: inset 0 1px 0 color-mix(in srgb, var(--painted-ink) 24%, transparent);
+  --theme-text-0: var(--color-text-0);
+  --theme-text-1: var(--color-text-1);
+  --theme-text-2: var(--color-text-2);
+  --theme-ink-1: var(--color-ink-1);
+  --theme-ink-2: var(--color-ink-2);
+  --theme-ink-3: var(--color-ink-3);
+}
+
+:root[data-glass] body {
+  --color-text-0: var(--painted-ink);
+  --color-text-1: var(--painted-ink);
+  --color-text-2: var(--painted-muted);
+  --color-ink-1: color-mix(in srgb, var(--painted-contrast) 12%, transparent);
+  --color-ink-2: color-mix(in srgb, var(--painted-contrast) 8%, transparent);
+  --color-ink-3: color-mix(in srgb, var(--painted-contrast) 20%, transparent);
+}
+
+:root[data-glass] dialog.modal::backdrop {
+  background: var(--painted-scrim);
+}
+
+:root[data-glass] .panel,
+:root[data-glass] .tile,
+:root[data-glass] header,
+:root[data-glass] .action-bar,
+:root[data-glass] .plate {
+  background: var(--painted-surface) !important;
+  backdrop-filter: var(--painted-glass);
+  border-color: var(--painted-edge);
+}
+
+:root[data-glass] .btn:not(.btn-primary),
+:root[data-glass] .chip,
+:root[data-glass] .field {
+  background: var(--painted-wash) !important;
+  border-color: var(--painted-edge);
+}
+
+:root[data-glass] .btn:not(.btn-primary):hover,
+:root[data-glass] .chip:hover {
+  border-color: color-mix(in srgb, var(--painted-ink) 55%, transparent);
+}
+
+:root[data-glass] .panel,
+:root[data-glass] .tile {
+  box-shadow: var(--painted-sheen), 0 16px 40px -20px rgb(0 0 0 / 0.65);
+}
+
+:root[data-glass] .plate {
+  border-radius: 4px;
+  padding-inline: 0.5rem;
+  margin-inline-start: -0.5rem;
+}
+
+:root[data-glass] .feed {
+  background: transparent;
+}
+
+[data-painted] {
+  isolation: isolate;
+}
+
+[data-painted]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--painted-image) center / cover no-repeat;
+  filter: blur(28px);
+  transform: scale(1.12);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-painted]::before {
+    display: none;
+  }
+
+  :root[data-glass] {
+    --painted-surface: var(--color-ink-1);
+    --painted-glass: none;
+    --painted-edge: var(--color-line-0);
+  }
+
+  :root[data-glass] body {
+    --color-text-0: var(--theme-text-0);
+    --color-text-1: var(--theme-text-1);
+    --color-text-2: var(--theme-text-2);
+    --color-ink-1: var(--theme-ink-1);
+    --color-ink-2: var(--theme-ink-2);
+    --color-ink-3: var(--theme-ink-3);
+  }
+}
+
 .hairline {
   border-top: 1px solid var(--color-line-0);
 }
@@ -179,6 +283,80 @@ body {
 .chip-warn { color: var(--color-warn); border-color: color-mix(in srgb, var(--color-warn) 45%, transparent); }
 .chip-bad { color: var(--color-bad); border-color: color-mix(in srgb, var(--color-bad) 45%, transparent); }
 .chip-accent { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 50%, transparent); }
+
+.tuner-anchor {
+  anchor-name: --theme-chip;
+}
+
+.tuner {
+  position: fixed;
+  inset: auto;
+  overflow: visible;
+  position-anchor: --theme-chip;
+  position-area: block-end span-inline-end;
+  position-try-fallbacks: flip-block;
+  justify-self: start;
+  align-self: start;
+  --tuner-tail: 0.8rem;
+  margin: 0.7rem 0.75rem 0 0;
+  padding: 0.85rem 1rem 1rem;
+  width: 18rem;
+  max-width: 100%;
+  border-radius: 8px;
+  color: var(--color-text-0);
+  transform-origin: top left;
+  opacity: 0;
+  transform: translateY(-0.4rem) scale(0.94);
+  transition:
+    opacity 0.14s ease,
+    transform 0.34s cubic-bezier(0.2, 1.55, 0.4, 1),
+    overlay 0.34s allow-discrete,
+    display 0.34s allow-discrete;
+}
+
+.tuner:popover-open {
+  opacity: 1;
+  transform: none;
+}
+
+@starting-style {
+  .tuner:popover-open {
+    opacity: 0;
+    transform: translateY(-0.4rem) scale(0.94);
+  }
+}
+
+.tuner::after {
+  content: "";
+  position: absolute;
+  left: 0.9rem;
+  top: calc(var(--tuner-tail) / -2);
+  width: var(--tuner-tail);
+  height: var(--tuner-tail);
+  transform: rotate(45deg);
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+  background: var(--painted-surface, var(--color-ink-2));
+  backdrop-filter: var(--painted-glass);
+  border-top: 1px solid var(--painted-edge, var(--color-line-0));
+  border-left: 1px solid var(--painted-edge, var(--color-line-0));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tuner {
+    transition: none;
+  }
+}
+
+.slider {
+  width: 100%;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.slider:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
 
 .chip-message {
   min-width: 0;

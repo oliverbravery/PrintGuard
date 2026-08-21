@@ -123,8 +123,8 @@ def _mjpeg_endpoint(webcam: dict[str, Any]) -> str:
     """Derives camera-streamer's MJPEG endpoint for a WebRTC-advertised webcam.
 
     camera-streamer serves the same feed as MJPEG alongside WebRTC, at the
-    sibling of its snapshot (``…/?action=snapshot`` → ``…/?action=stream``) or of
-    its WebRTC path (``…/webrtc`` → ``…/stream``). The snapshot is preferred as
+    sibling of its snapshot (``…/?action=snapshot`` becomes ``…/?action=stream``)
+    or of its WebRTC path (``…/webrtc`` becomes ``…/stream``). The snapshot is preferred as
     Moonraker reports it verbatim; an empty string means none could be derived.
     """
     snapshot = str(webcam.get("snapshot_url") or "")

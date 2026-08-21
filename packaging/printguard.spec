@@ -23,6 +23,7 @@ icon_png = staging / "icon.png"
 shutil.copyfile(ROOT / "web" / "public" / "apple-touch-icon.png", icon_png)
 
 binaries = collect_dynamic_libs("av") + collect_dynamic_libs("onnxruntime") + collect_dynamic_libs("ai_edge_litert")
+binaries += collect_dynamic_libs("wasmtime")
 if MEDIAMTX:
     binaries.append((MEDIAMTX, "."))
 
@@ -34,6 +35,7 @@ datas = [
     (str(ROOT / "printguard" / "__init__.py"), "printguard"),
     (str(ROOT / "printguard" / "engine"), "printguard/engine"),
     (str(ROOT / "printguard" / "browser"), "printguard/browser"),
+    (str(ROOT / "printguard" / "server" / "runtime"), "printguard/server/runtime"),
 ]
 datas += copy_metadata("printguard") + copy_metadata("fastmcp", recursive=True)
 

@@ -7,6 +7,58 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-08-20
+
+### Added
+
+- A plugin store, in the Plugins tab in Settings. Plugins are written in JavaScript and run in
+  a sandbox, drawing a panel on your dashboard or running a job on the hub. Install verified
+  ones from the catalogue, or from a GitHub repo or a zip.
+  [docs/plugins.md](docs/plugins.md) has the API, and [CONTRIBUTING.md](CONTRIBUTING.md) covers
+  getting one listed.
+- Four come as standard. Picture in picture floats a camera above your other windows, alert
+  sounds plays a horn when a defect is caught, progress reports sends a tally of a print through
+  your alert channels, and Spotify puts the current cover behind the dashboard.
+- A Glass theme, alongside System, Light and Dark. The panels frost over whatever is behind
+  them, which is what the Spotify plugin's cover shows through. Picking it drops out two
+  sliders for how clear the panels are and how light or dark, and text takes whichever colour
+  holds 4.5:1 over what the glass lets through.
+
+- Plugins install switched off. Enable lists every permission with the author's reason for it,
+  and it is all or nothing. An update that asks for more waits until you accept it.
+- What you gave a plugin carries across updates from the repository it came from. A bundle that
+  shares only its id starts with nothing.
+- Enabling one shows what its code does against what it asks for. The catalogue is held to the
+  same check, so a listed plugin is one whose code and claims agree.
+- Plugins can reach the network on match patterns like `https://*.example.com/*`, hold a
+  WebSocket open, and read what they fetch. Reaching your own network is a separate permission.
+- Plugins can add printers, cameras and monitors, change settings and mint API tokens, each
+  behind its own permission.
+- Plugins can hold credentials they can never read back, and PrintGuard runs OAuth sign-ins on
+  their behalf.
+- Plugins can take camera stills and read risk history, each behind its own permission.
+- A plugin can ship a `panel.html` and draw its own panel, with video and larger images. Panels
+  drag, pin and hide with your monitors.
+- Plugins can call each other on channels both sides declared.
+- `PRINTGUARD_PLUGINS=off` starts the hub with every plugin switched off.
+
+### Fixed
+
+- `state.json` is written readable only by the account running the hub. It holds printer
+  passwords, notifier keys and API token hashes, and was taking the system default.
+- A plugin's credentials are scrubbed from bug reports.
+- A plugin's own pages can no longer pull a live camera stream.
+- A camera that keeps dropping out no longer alerts on every reconnect. A recovery is announced
+  once the feed has held for a minute, and each one doubles what the next has to hold for, up to
+  fifteen minutes. Outages are never delayed. Worth pulling if you run a camera on marginal
+  wifi. Thanks to @subpanel0576 for the report.
+- The `latest-intel` image now carries Intel's current GPU runtime, covering Arc, Battlemage
+  and every iGPU from Tiger Lake on. Debian's driver predates Meteor Lake, so OpenVINO was
+  handed no GPU and inference quietly stayed on the CPU. Gen8 to Gen11 iGPUs stay on the CPU
+  path, since Intel publishes no current driver for them.
+- The compute readout names the hardware, so `intel openvino` now reads `intel gpu` or
+  `intel cpu`, and the log lists what the providers offered at start.
+
 ## [2.3.12] - 2026-08-12
 
 ### Fixed

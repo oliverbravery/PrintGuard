@@ -253,7 +253,7 @@ def route_command(topic: str, payload: str, monitors: list[dict[str, Any]]) -> d
 
 
 def _signature(config: dict[str, Any]) -> tuple:
-    """Connection-affecting settings; a change tears the session down to reconnect."""
+    """Connection-affecting settings, where a change tears the session down to reconnect."""
     return (
         bool(config.get("enabled")),
         str(config.get("host", "")).strip(),
@@ -290,7 +290,7 @@ class MqttBridge:
         self._task: asyncio.Task | None = None
 
     def start(self) -> None:
-        """Launches the connection loop; it idles until the bridge is configured."""
+        """Launches the connection loop, which idles until the bridge is configured."""
         self._task = asyncio.ensure_future(self._run())
 
     async def stop(self) -> None:

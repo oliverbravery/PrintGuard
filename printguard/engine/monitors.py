@@ -1,4 +1,4 @@
-"""Monitor configuration: defaults, validation, watch-state and serialisation.
+"""Monitor configuration, covering defaults, validation, watch-state and serialisation.
 
 A monitor binds a camera and, optionally, a registered printer, and carries the
 inference thresholds and defect-response policy for that pairing.

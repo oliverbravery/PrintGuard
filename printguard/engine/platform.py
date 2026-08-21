@@ -7,9 +7,14 @@ protocols; everything that consumes them is shared code.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
 
 import numpy as np
+
+from . import sockets
+
+if TYPE_CHECKING:
+    from .registry import Plugin
 
 
 @dataclass
@@ -48,10 +53,51 @@ class FrameSource(Protocol):
         ...
 
 
+class PluginRuntime(Protocol):
+    """Sandbox that runs the background half of installed plugins.
+
+    Only the hub has one. In local mode the browser runs the same source in
+    the same sandbox the UI half uses, so ``Platform.plugin_runtime`` is None
+    there and the engine simply has nothing to drive.
+    """
+
+    def attach(self, request: Callable[..., Awaitable[Any]], failed: Callable[[str, str], None]) -> None:
+        """Gives the runtime the engine's command channel and failure report."""
+        ...
+
+    def on_event(self, event: dict[str, Any]) -> None:
+        """Accepts an engine event for delivery to the running plugins."""
+        ...
+
+    async def reload(self, running: "list[Plugin]") -> None:
+        """Replaces the running set, starting and stopping sandboxes to match."""
+        ...
+
+    async def serve(self, plugin_id: str, request: dict[str, Any]) -> dict[str, Any] | None:
+        """Answers a request to a plugin's own routes, or None if it has none."""
+        ...
+
+    async def authorise(self, request: dict[str, Any]) -> bool | None:
+        """Asks any gating plugin to allow a request, returning None when none gates."""
+        ...
+
+    def gate_paths(self) -> tuple[str, ...]:
+        """Returns the route prefixes a gating plugin's own pages are served on."""
+        ...
+
+    async def close(self) -> None:
+        """Tears every sandbox down."""
+        ...
+
+
 class Platform(Protocol):
     """Runtime services the engine needs but cannot implement portably."""
 
     mode: str
+    host: str
+    """Which deployment this is, one of ``plugins.PLATFORMS``. A plugin declares
+    the ones it runs on, and the store offers what matches."""
+
     workers: int
     inference_device: str
     version: str
@@ -62,6 +108,10 @@ class Platform(Protocol):
     update_asset: str | None
     """Release asset filename this deployment updates with (the desktop app's
     installer), or None when the deployment updates outside the app."""
+
+    plugin_runtime: PluginRuntime | None
+    """Sandbox for the background half of plugins, or None where the runtime
+    lives outside the engine (the browser runs it in its own sandbox)."""
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Applies platform-owned settings before inference starts."""
@@ -91,9 +141,24 @@ class Platform(Protocol):
         headers: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
         data: bytes | None = None,
+        binary: bool = False,
         timeout: float = 10.0,
     ) -> tuple[int, Any]:
         """Performs an HTTP request and returns (status, parsed body)."""
+        ...
+
+    async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> sockets.Socket:
+        """Opens a WebSocket and reports every frame through the callback.
+
+        Args:
+            url: A ``ws://`` or ``wss://`` URL, already checked against the
+                plugin's grant.
+            arrived: Called with ``open``, then ``message`` per frame, then
+                ``closed`` once, whatever ends it.
+
+        Returns:
+            The connection, for writing to and closing.
+        """
         ...
 
     async def encode_jpeg(self, rgb: np.ndarray) -> bytes | None:

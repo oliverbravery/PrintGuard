@@ -1,1 +1,1 @@
-"""CPython-only platform: hub mode inference, capture and serving."""
+"""CPython-only platform for hub mode inference, capture and serving."""

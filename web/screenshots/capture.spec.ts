@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, type Browser } from "@playwright/test";
@@ -37,7 +37,8 @@ const history: Record<string, ScorePoint[]> = {
 
 function engine(): EngineState {
   return {
-    mode: "hub", version: VERSION, update: null,
+    mode: "hub",
+    host: "docker", version: VERSION, update: null,
     cameras: [
       camera("c1", "Workshop · Prusa", { kind: "rtsp", url: "rtsp://10.0.0.21:8554/prusa" }, true),
       camera("c2", "Garage · Ender", { kind: "rtsp", url: "rtsp://10.0.0.22:8554/ender" }),
@@ -52,20 +53,130 @@ function engine(): EngineState {
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
+    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "" },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: [], notifiers: [],
+    plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS, plugin_host: true,
+    plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },
   };
+}
+
+const PLATFORMS = {
+  docker: "Docker", "docker-nvidia": "NVIDIA image", "docker-intel": "Intel image",
+  macos: "macOS", windows: "Windows", browser: "Browser",
+};
+
+const PERMISSIONS = [
+  {
+    id: "state:read", label: "Read the dashboard",
+    description: "Monitor names, scores and alerts, camera and printer status.",
+    fields: {
+      monitors: ["id", "name", "camera_id", "printer_id", "enabled", "watching", "threshold", "result", "alert"],
+      cameras: ["id", "name", "online", "standby", "in_use", "max_fps", "achieved_fps"],
+      printers: ["id", "name", "provider", "online", "device_state"],
+    },
+  },
+  { id: "camera:view", label: "Show live camera feeds", description: "Show a live feed in its panel." },
+  { id: "notify", label: "Show notifications", description: "Show a message in the dashboard." },
+  { id: "sound", label: "Play a sound", description: "Play a sound on this device." },
+  { id: "alert:send", label: "Use your alert channels", description: "Send through your ntfy, Telegram or Discord." },
+  { id: "net", label: "Reach the internet", description: "Reach the addresses it lists.", urls: true },
+  { id: "oauth", label: "Connect an account", description: "Sign you in to a service. PrintGuard holds the tokens.", risky: true },
+  { id: "background", label: "Paint the dashboard's background", description: "Put a picture behind the dashboard." },
+];
+
+const CATALOGUE = [
+  {
+    id: "picture-in-picture", name: "Picture in picture", version: "1.2.0", author: "oliverbravery",
+    description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
+    repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40),
+    permissions: ["state:read", "camera:view"], platforms: [], surfaces: ["monitor", "float"], digests: {},
+  },
+  {
+    id: "alert-sounds", name: "Alert sounds", version: "1.1.0", author: "oliverbravery",
+    description: "Sounds a horn, a bell or an alarm the moment a defect is caught, on the monitors you switch it on for.",
+    repo: "oliverbravery/PrintGuard", path: "plugins/alert-sounds", ref: "c".repeat(40),
+    permissions: ["state:read", "sound"], platforms: [], surfaces: ["settings"], digests: {},
+  },
+  {
+    id: "progress-reports", name: "Progress reports", version: "1.0.0", author: "oliverbravery",
+    description: "Sends how far a print has got and how many defects it has seen, as often as you ask, on the monitors you switch it on for.",
+    repo: "oliverbravery/PrintGuard", path: "plugins/progress-reports", ref: "d".repeat(40),
+    permissions: ["state:read", "alert:send"], platforms: [], surfaces: ["settings"], digests: {},
+  },
+  {
+    id: "print-log", name: "Print log", version: "0.3.0", author: "community",
+    description: "Writes every alert to a webhook so you can keep a record outside PrintGuard.",
+    repo: "someone/printguard-print-log", ref: "b".repeat(40),
+    permissions: ["state:read", "notify"], platforms: [], surfaces: ["panel"], digests: {},
+  },
+];
+
+const NOW_PLAYING = {
+  item: {
+    name: "Test Pattern",
+    artists: [{ name: "Bench Radio" }],
+    album: { images: [{ url: "https://i.scdn.co/image/cover" }] },
+  },
+  is_playing: true,
+};
+
+function installed(id: string, name: string, permissions: string[], surfaces: string[], files: string[]) {
+  return {
+    id,
+    manifest: {
+      id, name, version: "1.0.0", description: "", author: "oliverbravery", homepage: "",
+      permissions, reasons: {}, surfaces, platforms: [], assets: [], urls: [],
+      secrets: {}, provides: {}, consumes: [], oauth: {}, events: files.includes("panel.html") ? ["http"] : [], tick_s: 0,
+    },
+    files,
+    digests: {},
+    source: { kind: "github", repo: "oliverbravery/PrintGuard", path: `plugins/${id}`, ref: "a".repeat(40) },
+    granted: permissions,
+    config: {},
+    secrets_set: ["oauth", "oauth_client_id"],
+    verified: true,
+    enabled: true,
+    installed: NOW / 1000,
+    failure: null,
+  };
+}
+
+const INSTALLED = {
+  id: "picture-in-picture",
+  manifest: {
+    id: "picture-in-picture", name: "Picture in picture", version: "1.2.0", author: "oliverbravery", homepage: "",
+    description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
+    permissions: ["state:read", "camera:view"], reasons: {}, surfaces: ["monitor"], platforms: [], assets: [],
+    urls: [], secrets: {}, provides: {}, consumes: [], oauth: {}, events: [], tick_s: 0,
+  },
+  files: ["plugin.js"], digests: {},
+  source: { kind: "github", repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40) },
+  granted: ["state:read", "camera:view"], config: {}, secrets_set: [], verified: true, enabled: true, installed: NOW / 1000, failure: null,
 }
 
 interface Scene {
   name: string;
+  plugins?: string[];
   width: number;
   height: number;
   theme: "dark" | "light";
   detailId?: string;
   customising?: boolean;
+  settingsTab?: string;
+  catalogue?: unknown[];
+  tuner?: boolean;
   mutate?: (engine: EngineState) => void;
 }
+
+const live = (e: EngineState) => {
+  e.plugin_events = { http: ["tag", "status", "body"] };
+  e.settings.theme = "glass";
+  e.monitors = e.monitors.slice(0, 2);
+  e.plugins = [
+    installed("spotify", "Spotify", ["net", "oauth", "background"], ["panel"], ["panel.html"]),
+    installed("picture-in-picture", "Picture in picture", ["state:read", "camera:view"], ["monitor"], ["plugin.js"]),
+  ] as never;
+};
 
 const SCENES: Scene[] = [
   { name: "dashboard", width: 1360, height: 620, theme: "dark" },
@@ -80,7 +191,24 @@ const SCENES: Scene[] = [
       };
     },
   },
+  {
+    name: "plugins", width: 1360, height: 860, theme: "dark", settingsTab: "plugins", catalogue: CATALOGUE,
+    mutate: (e) => {
+      e.plugins = [INSTALLED as never];
+    },
+  },
+  { name: "plugins-live", width: 1360, height: 720, theme: "dark", plugins: ["spotify", "picture-in-picture"], mutate: live },
+  { name: "glass", width: 1360, height: 720, theme: "dark", plugins: ["spotify", "picture-in-picture"], tuner: true, mutate: live },
 ];
+
+function pluginSources(id: string): Record<string, string> {
+  const dir = resolve(here, "../../plugins", id);
+  return Object.fromEntries(
+    ["plugin.js", "worker.js", "panel.html"]
+      .filter((file) => existsSync(resolve(dir, file)))
+      .map((file) => [file, readFileSync(resolve(dir, file), "utf8")]),
+  );
+}
 
 async function capture(browser: Browser, scene: Scene): Promise<void> {
   const built = engine();
@@ -98,6 +226,7 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
       close(): void {}
     }
     (window as unknown as { WebSocket: unknown }).WebSocket = UnconnectedSocket;
+    Object.defineProperty(Document.prototype, "pictureInPictureEnabled", { get: () => true, configurable: true });
   });
   await page.goto("/");
   await page.evaluate(
@@ -108,10 +237,17 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
     },
     {
       theme: scene.theme,
-      state: { mode: "hub", phase: "ready", engine: built, history, detailId: scene.detailId ?? null, customising: scene.customising ?? false },
+      state: {
+        mode: "hub", phase: "ready", engine: built, history,
+        detailId: scene.detailId ?? null, customising: scene.customising ?? false,
+        dialog: scene.settingsTab ? "settings" : null, settingsTab: scene.settingsTab ?? null,
+        catalogue: scene.catalogue ?? null,
+        ...(scene.plugins ? { link: null } : {}),
+      },
     },
   );
-  await page.waitForSelector(".aspect-video");
+  if (scene.plugins) await runPlugins(page, scene.plugins);
+  await page.waitForSelector(scene.settingsTab ? "dialog" : ".aspect-video");
   await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}" });
   await page.evaluate((frames) => {
     for (const el of document.querySelectorAll<HTMLElement>(".aspect-video")) {
@@ -121,6 +257,7 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
       el.appendChild(img);
     }
   }, FRAMES);
+  if (scene.tuner) await page.evaluate(() => document.getElementById("glass-tuner")?.showPopover());
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
@@ -128,6 +265,50 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
   await page.waitForTimeout(200);
   await page.screenshot({ path: asset(`${scene.name}.png`) });
   await context.close();
+}
+
+async function runPlugins(page: import("@playwright/test").Page, ids: string[]): Promise<void> {
+  const sources = Object.fromEntries(ids.map((id) => [id, pluginSources(id)]));
+  await page.evaluate((files) => {
+    const win = window as any;
+    const sent: any[] = [];
+    win.__pg.setState({ link: { send: (cmd: any) => sent.push(cmd), close() {} } });
+    win.__pgEvent({ event: "state", ...win.__pg.getState().engine });
+    for (const [id, code] of Object.entries(files)) {
+      const asked = sent.find((cmd) => cmd.cmd === "plugin.code" && cmd.id === id);
+      win.__pgEvent({ event: "plugin_code", id, sources: code, assets: {}, req_id: asked?.req_id });
+    }
+  }, sources);
+  await page.waitForTimeout(600);
+  const cover = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 300;
+    const paint = canvas.getContext("2d")!;
+    const wash = paint.createLinearGradient(0, 0, 300, 300);
+    wash.addColorStop(0, "#ff5a1f");
+    wash.addColorStop(0.55, "#7b1fa2");
+    wash.addColorStop(1, "#0b3b8f");
+    paint.fillStyle = wash;
+    paint.fillRect(0, 0, 300, 300);
+    paint.fillStyle = "rgba(255,255,255,0.16)";
+    for (let ring = 0; ring < 5; ring++) {
+      paint.beginPath();
+      paint.arc(150, 150, 30 + ring * 26, 0, Math.PI * 2);
+      paint.lineWidth = 10;
+      paint.strokeStyle = "rgba(255,255,255,0.16)";
+      paint.stroke();
+    }
+    return canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
+  });
+  await page.evaluate(
+    ({ playing, art }) => {
+      const win = window as any;
+      win.__pgEvent({ event: "http", id: "spotify", tag: "player", status: 200, body: playing });
+      win.__pgEvent({ event: "http", id: "spotify", tag: "cover", status: 200, body: art });
+    },
+    { playing: NOW_PLAYING, art: cover },
+  );
+  await page.waitForTimeout(900);
 }
 
 for (const scene of SCENES) {

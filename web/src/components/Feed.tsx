@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { registerFeed } from "../float";
 import { renderVideoFrame, useVideoStream } from "../image";
 import type { Camera } from "../types";
 
@@ -14,6 +15,11 @@ export function Feed({ camera, mode, active = true }: { camera: Camera | undefin
   const useCanvas = sharpness > 0 || crop !== null || brightness !== 1 || contrast !== 1 || rotation !== 0;
 
   useVideoStream(videoRef, camera, mode, active);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    return video && camera ? registerFeed(camera.id, video) : undefined;
+  }, [camera?.id]);
 
   useEffect(() => setPlaying(false), [camera?.id, active]);
 
@@ -37,7 +43,7 @@ export function Feed({ camera, mode, active = true }: { camera: Camera | undefin
   }, [camera?.id, useCanvas, brightness, contrast, sharpness, crop, rotation]);
 
   return (
-    <div className="relative aspect-video bg-ink-0 overflow-hidden">
+    <div className="feed relative aspect-video bg-ink-0 overflow-hidden">
       <video
         ref={videoRef}
         autoPlay
@@ -52,7 +58,7 @@ export function Feed({ camera, mode, active = true }: { camera: Camera | undefin
       />
       {useCanvas && <canvas ref={canvasRef} className="absolute inset-0 m-auto" />}
       {(!camera || !playing) && (
-        <div className="absolute inset-0 grid place-items-center bg-ink-0/85 z-[2]">
+        <div className="feed-veil absolute inset-0 grid place-items-center bg-ink-0/85 z-[2] pointer-events-none">
           <span className="mono text-[0.65rem] tracking-[0.2em] text-text-2 uppercase">
             {!camera ? "no camera bound" : camera.standby || camera.online ? "starting stream" : "no signal"}
           </span>

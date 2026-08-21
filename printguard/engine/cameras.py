@@ -1,4 +1,4 @@
-"""Camera configuration: defaults, validation and serialisation."""
+"""Camera configuration, covering defaults, validation and serialisation."""
 
 from __future__ import annotations
 

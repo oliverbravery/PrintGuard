@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { type SettingsTabId, useStore } from "../store";
-import { applyTheme, beginPreview, endPreview, PALETTES } from "../theme";
+import { applyTheme, beginPreview, endPreview, GLASS, GLASS_DEFAULT, PALETTES } from "../theme";
 import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
 import { Dialog } from "./Dialog";
+import { PluginsTab } from "./PluginsTab";
 import { SaveStatus } from "./SaveStatus";
 import { SchemaForm } from "./SchemaForm";
+import { GlassSliders } from "./GlassTuner";
 import { ThemeEditor } from "./ThemeEditor";
 import { Toggle } from "./Toggle";
 
@@ -12,6 +14,7 @@ const SCHEMES: { id: string; name: string; glyph: string }[] = [
   { id: "system", name: "System", glyph: "◐" },
   { id: "light", name: "Light", glyph: "☀" },
   { id: "dark", name: "Dark", glyph: "☾" },
+  { id: "glass", name: "Glass", glyph: "◈" },
 ];
 
 function Swatch({ colors }: { colors: CustomTheme["colors"] }) {
@@ -51,40 +54,41 @@ export function SettingsDialog() {
 
   const theme = engine?.settings.theme ?? "system";
   const themes = engine?.settings.themes ?? [];
+  const glass = { ...GLASS_DEFAULT, ...engine?.settings.glass };
   const [editing, setEditing] = useState<CustomTheme | null>(null);
 
   const upsertTheme = (list: CustomTheme[], t: CustomTheme) =>
     list.some((x) => x.id === t.id) ? list.map((x) => (x.id === t.id ? t : x)) : [...list, t];
   const selectTheme = (id: string) => {
-    applyTheme(id, themes, true);
-    send({ cmd: "settings.update", patch: { theme: id } });
+    applyTheme(id, themes, glass, true);
+    updateSettings({ theme: id });
   };
   const newTheme = (base: ThemeBase) =>
     setEditing({ id: "t" + Date.now().toString(36), name: "", base, colors: { ...PALETTES[base] } });
   const cancelEdit = () => {
     endPreview();
     setEditing(null);
-    applyTheme(theme, themes, true);
+    applyTheme(theme, themes, glass, true);
   };
   const saveTheme = () => {
     if (!editing) return;
     const next = upsertTheme(themes, { ...editing, name: editing.name.trim() || "Custom" });
     endPreview();
-    applyTheme(editing.id, next, true);
+    applyTheme(editing.id, next, glass, true);
     send({ cmd: "settings.update", patch: { themes: next, theme: editing.id } });
     setEditing(null);
   };
   const deleteTheme = (id: string) => {
     const next = themes.filter((t) => t.id !== id);
     const selection = theme === id ? "system" : theme;
-    applyTheme(selection, next, true);
+    applyTheme(selection, next, glass, true);
     send({ cmd: "settings.update", patch: { themes: next, theme: selection } });
   };
 
   useEffect(() => {
     if (!editing) return;
     beginPreview();
-    applyTheme(editing.id, upsertTheme(themes, editing), true);
+    applyTheme(editing.id, upsertTheme(themes, editing), glass, true);
   }, [editing]);
 
   const desktopApp = "pywebview" in window;
@@ -95,6 +99,7 @@ export function SettingsDialog() {
   const tabs: { id: SettingsTabId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
     { id: "alerts", label: "Alerts" },
+    { id: "plugins", label: "Plugins" },
     ...(engine?.mode === "hub"
       ? ([
           { id: "mqtt", label: "Home Assistant" },
@@ -161,7 +166,7 @@ export function SettingsDialog() {
           ) : (
             <div className="space-y-4">
               <span className="label block">Theme</span>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {SCHEMES.map((opt) => (
                   <button
                     key={opt.id}
@@ -175,6 +180,8 @@ export function SettingsDialog() {
                   </button>
                 ))}
               </div>
+
+              {theme === GLASS && <GlassSliders />}
 
               <div className="flex items-center justify-between">
                 <span className="label block">Custom themes</span>
@@ -271,6 +278,12 @@ export function SettingsDialog() {
           </div>
         )}
 
+        {tab === "plugins" && (
+          <div role="tabpanel" id="settings-panel-plugins" aria-labelledby="settings-tab-plugins" tabIndex={0}>
+            <PluginsTab />
+          </div>
+        )}
+
         {tab === "mqtt" && (
           <div role="tabpanel" id="settings-panel-mqtt" aria-labelledby="settings-tab-mqtt" tabIndex={0} className="space-y-3">
             <span className="label block">Home Assistant (MQTT)</span>
@@ -324,8 +337,8 @@ export function SettingsDialog() {
                 </div>
                 <Toggle label="Use TLS" on={!!mqtt.tls} onChange={(on) => setMqttField("tls", on)} />
                 <span className="text-[0.7rem] text-text-2 block">
-                  Each monitor becomes a Home Assistant device — defect, score, state and snapshot, with an enable switch and
-                  printer pause/resume/cancel — via MQTT discovery. Anyone with broker access can control PrintGuard.
+                  Each monitor becomes a Home Assistant device with defect, score, state and snapshot, an enable switch and
+                  printer pause, resume and cancel, all through MQTT discovery. Anyone with broker access can control PrintGuard.
                 </span>
               </div>
             )}
@@ -395,7 +408,7 @@ export function SettingsDialog() {
                   ×
                 </button>
                 <span className="text-[0.7rem] text-text-1 block">
-                  Copy <span className="text-accent">{createdToken.name}</span> now — it is shown once and cannot be retrieved later.
+                  Copy <span className="text-accent">{createdToken.name}</span> now, it is shown once and cannot be retrieved later.
                 </span>
                 <div className="flex items-center gap-2">
                   <code className="mono text-[0.68rem] text-text-0 break-all flex-1">{createdToken.secret}</code>

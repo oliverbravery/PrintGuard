@@ -1,4 +1,4 @@
-"""Per-monitor risk history: rolled-up time buckets and alert snapshots.
+"""Per-monitor risk history, rolled-up time buckets and alert snapshots.
 
 Each inference score is folded into a fixed-interval rollup bucket (count, sum,
 min, max and a defect tally); every fired alert is logged and keeps the JPEG of

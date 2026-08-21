@@ -2,6 +2,7 @@ import { cardButton } from "../a11y";
 import { applyLayout, section, toggleHidden, withOrder } from "../layout";
 import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
+import { SectionHead } from "./SectionHead";
 import { horizontalListSortingStrategy, Sortable, SortableItem, type SortableHandle } from "./Sortable";
 
 export function sourceLabel(source: CameraSource): string {
@@ -97,15 +98,13 @@ export function CameraRail() {
   const { visible } = applyLayout(cameras, section(engine?.settings.layout, "cameras"));
   return (
     <section className="mx-auto max-w-[1500px] px-4 sm:px-6 pt-5">
-      <div className="flex items-center gap-3 mb-2.5">
-        <h2 className="display text-xs font-semibold tracking-[0.24em] text-text-2">CAMERA REGISTRY</h2>
-        <div className="hairline flex-1" />
+      <SectionHead title="CAMERA REGISTRY">
         <button className="btn !py-1.5 !px-3 !text-[0.68rem]" onClick={() => openDialog("cameras")}>
           + Camera
         </button>
-      </div>
+      </SectionHead>
       {cameras.length === 0 ? (
-        <p className="mono text-[0.7rem] text-text-2 py-1.5">no cameras registered</p>
+        <p className="plate mono text-[0.7rem] text-text-2 py-1.5">no cameras registered</p>
       ) : (
         <Sortable
           ids={visible.map((c) => c.id)}

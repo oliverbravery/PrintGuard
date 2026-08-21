@@ -1,0 +1,403 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.schema.json",
+  "title": "PrintGuard plugin",
+  "description": "The manifest of a PrintGuard plugin. See https://github.com/oliverbravery/PrintGuard/blob/main/docs/plugins.md",
+  "type": "object",
+  "required": [
+    "id",
+    "version"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$",
+      "description": "Identifies the plugin everywhere, 3 to 40 lowercase letters, digits or hyphens."
+    },
+    "name": {
+      "type": "string",
+      "description": "Shown on the panel and in Settings. Defaults to the id."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[\\w.+-]{1,32}$",
+      "description": "Your own version, shown beside the name."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 400,
+      "description": "One line about what it does."
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "homepage": {
+      "type": "string",
+      "maxLength": 200,
+      "format": "uri"
+    },
+    "permissions": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "What it asks for. The user accepts all of it or none of it before the plugin can be enabled.",
+      "items": {
+        "anyOf": [
+          {
+            "const": "state:read",
+            "description": "Monitor names, scores and alerts, camera and printer status."
+          },
+          {
+            "const": "camera:view",
+            "description": "Show a live feed in its panel."
+          },
+          {
+            "const": "monitor:control",
+            "description": "Enable, disable and retune any monitor."
+          },
+          {
+            "const": "monitor:manage",
+            "description": "Add monitors, and delete them with their history."
+          },
+          {
+            "const": "camera:control",
+            "description": "Change any camera's picture and frame rate."
+          },
+          {
+            "const": "camera:manage",
+            "description": "Add and delete cameras."
+          },
+          {
+            "const": "camera:frames",
+            "description": "Take a still from any camera. With net, it can send your pictures anywhere."
+          },
+          {
+            "const": "history:read",
+            "description": "Every monitor's score history and past alerts."
+          },
+          {
+            "const": "printer:manage",
+            "description": "Add and delete printers. It can set credentials, not read them."
+          },
+          {
+            "const": "settings",
+            "description": "Change anything in Settings. It can set credentials, not read them."
+          },
+          {
+            "const": "tokens",
+            "description": "Mint and revoke API tokens. It never sees the secret."
+          },
+          {
+            "const": "printer:control",
+            "description": "Pause, resume and cancel any print."
+          },
+          {
+            "const": "notify",
+            "description": "Show a message in the dashboard."
+          },
+          {
+            "const": "sound",
+            "description": "Play a sound on this device."
+          },
+          {
+            "const": "alert:send",
+            "description": "Send through your ntfy, Telegram or Discord."
+          },
+          {
+            "const": "net",
+            "description": "Reach the addresses it lists."
+          },
+          {
+            "const": "net:local",
+            "description": "Reach this machine and the network around it."
+          },
+          {
+            "const": "oauth",
+            "description": "Sign you in to a service. PrintGuard holds the tokens."
+          },
+          {
+            "const": "background",
+            "description": "Put a picture behind the dashboard."
+          },
+          {
+            "const": "link:provide",
+            "description": "Answer other plugins on the channels it lists."
+          },
+          {
+            "const": "link:consume",
+            "description": "Call the plugins and channels it names."
+          },
+          {
+            "const": "routes",
+            "description": "Serve pages under /plugins/<id>/, reading your session cookie."
+          },
+          {
+            "const": "gate",
+            "description": "Approve or refuse every request to the hub. It can lock you out."
+          }
+        ]
+      }
+    },
+    "reasons": {
+      "type": "object",
+      "description": "Why it wants each permission, in your own words, shown when the user is asked to accept them. One line per permission, and every one it asks for needs one.",
+      "propertyNames": {
+        "enum": [
+          "state:read",
+          "camera:view",
+          "monitor:control",
+          "monitor:manage",
+          "camera:control",
+          "camera:manage",
+          "camera:frames",
+          "history:read",
+          "printer:manage",
+          "settings",
+          "tokens",
+          "printer:control",
+          "notify",
+          "sound",
+          "alert:send",
+          "net",
+          "net:local",
+          "oauth",
+          "background",
+          "link:provide",
+          "link:consume",
+          "routes",
+          "gate"
+        ]
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "description": "Credentials you need but never see. PrintGuard draws a form for these, and you reference one as {{secret.name}} in a ctx.http request. Each line says what the user should paste in.",
+      "propertyNames": {
+        "pattern": "^[a-z0-9_-]{1,40}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "maxProperties": 8
+    },
+    "provides": {
+      "type": "object",
+      "description": "Channels other plugins may ask you for, or hear you publish on. Needs the link:provide permission, and each line says what the channel answers.",
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "maxProperties": 8
+    },
+    "consumes": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 16,
+      "description": "The plugins and channels you call or listen to, each written plugin-id:channel. Needs the link:consume permission, and you reach nothing you do not name here.",
+      "items": {
+        "type": "string",
+        "pattern": "^([a-z0-9][a-z0-9-]{1,38}[a-z0-9]):([a-z0-9][a-z0-9-]{0,38}[a-z0-9])$"
+      }
+    },
+    "oauth": {
+      "type": "object",
+      "description": "Sign the user in to a service and hold the tokens for you. Needs the oauth permission, and the access token arrives as {{secret.oauth}}. No client id here: whoever installs the plugin registers their own app and PrintGuard asks them for it.",
+      "required": [
+        "authorize_url",
+        "token_url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "authorize_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Where the user is sent to sign in."
+        },
+        "token_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Where the code is exchanged for tokens."
+        },
+        "register_url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 200,
+          "description": "Where the user goes to register their own app, shown alongside the redirect URI to give it."
+        },
+        "scopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "What the service is called, shown when the user is asked. Defaults to the authorize host."
+        }
+      }
+    },
+    "surfaces": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Where plugin.js draws. Defaults to a dashboard panel.",
+      "items": {
+        "anyOf": [
+          {
+            "const": "panel",
+            "description": "A panel of its own on the dashboard."
+          },
+          {
+            "const": "monitor",
+            "description": "Drawn on every monitor tile, once per monitor."
+          },
+          {
+            "const": "settings",
+            "description": "Drawn in every monitor's settings, once per monitor."
+          }
+        ]
+      }
+    },
+    "platforms": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Where it runs. Leave it out for everywhere, and name a bare platform to cover its variants.",
+      "items": {
+        "anyOf": [
+          {
+            "const": "docker",
+            "description": "Docker"
+          },
+          {
+            "const": "docker-nvidia",
+            "description": "NVIDIA image"
+          },
+          {
+            "const": "docker-intel",
+            "description": "Intel image"
+          },
+          {
+            "const": "macos",
+            "description": "macOS"
+          },
+          {
+            "const": "windows",
+            "description": "Windows"
+          },
+          {
+            "const": "browser",
+            "description": "Browser"
+          }
+        ]
+      }
+    },
+    "assets": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Files it ships beside its code, each named here and sitting next to plugin.js.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9._-]{0,39}\\.(csv|gif|jpeg|jpg|json|mp3|mp4|ogg|png|txt|wav|webm|webp)$"
+      }
+    },
+    "urls": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "The only addresses ctx.http and ctx.socket may reach, each a match pattern of scheme://host/path. Naming a private or loopback address needs the net:local permission as well as net.",
+      "items": {
+        "type": "string",
+        "pattern": "^(?P<scheme>\\*|http|https|ws|wss|rtsp|rtsps)://(?P<host>\\*|(?:\\*\\.)?[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\\[[0-9a-f:]+\\])(?::(?P<port>\\*|\\d{1,5}))?(?P<path>/[^\\s]*)$"
+      }
+    },
+    "events": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "The engine events that wake worker.js.",
+      "items": {
+        "anyOf": [
+          {
+            "const": "http",
+            "description": "Carries tag, status, body."
+          },
+          {
+            "const": "frame",
+            "description": "Carries camera_id, jpeg."
+          },
+          {
+            "const": "call",
+            "description": "Carries from, channel, body, call_id."
+          },
+          {
+            "const": "answer",
+            "description": "Carries tag, from, channel, body."
+          },
+          {
+            "const": "message",
+            "description": "Carries from, channel, body."
+          },
+          {
+            "const": "history",
+            "description": "Carries monitor_id, now, buckets, alerts, stats."
+          },
+          {
+            "const": "socket",
+            "description": "Carries tag, state, text."
+          },
+          {
+            "const": "result",
+            "description": "Carries monitor_id, camera_id, score, prediction, margin, ms, ts."
+          },
+          {
+            "const": "alert",
+            "description": "Carries monitor_id, score, action, ts."
+          },
+          {
+            "const": "warning",
+            "description": "Carries monitor_id, message, recovered."
+          },
+          {
+            "const": "device",
+            "description": "Carries printer_id, status, progress, job."
+          },
+          {
+            "const": "error",
+            "description": "Carries message."
+          },
+          {
+            "const": "state",
+            "description": "The snapshot your permissions allow."
+          }
+        ]
+      }
+    },
+    "tick_s": {
+      "type": "number",
+      "description": "Run worker.js this often as well, in seconds. 0, or 5 at the least.",
+      "anyOf": [
+        {
+          "const": 0
+        },
+        {
+          "minimum": 5.0,
+          "maximum": 86400
+        }
+      ]
+    }
+  }
+}

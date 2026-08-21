@@ -1,4 +1,4 @@
-"""Desktop app: runs hub mode behind a tray icon on macOS and Windows.
+"""Desktop app that runs hub mode behind a tray icon on macOS and Windows.
 
 Packaged with PyInstaller, this is the install-free, no-terminal way to run a hub
 on a personal computer. The hub server and a system-tray icon live in this
@@ -119,19 +119,26 @@ def _set_windows_app_id() -> None:
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(ctypes.c_wchar_p(APP_NAME))
 
 
-def _enable_wkwebview_camera() -> None:
-    """Lets the macOS WKWebView use this device's camera for the "this device" source.
+def _enable_wkwebview_media() -> None:
+    """Turns on the macOS WKWebView media features the dashboard needs.
 
     WKWebView ships with the media-stream feature disabled, so ``navigator.mediaDevices``
     is undefined even on a secure localhost page and the UI reports the camera as blocked.
-    Turn the WebKit media preferences on and auto-grant the capture permission that
-    pywebview otherwise leaves unhandled (WebKit then defaults to deny); the bundle's
-    ``NSCameraUsageDescription`` covers the macOS device-access prompt.
+    It also disables picture-in-picture off iOS, which leaves ``document.pictureInPictureEnabled``
+    true while every request is refused, so the picture-in-picture plugin drew a button that
+    could never float anything. Turn the WebKit preferences on and auto-grant the capture
+    permission that pywebview otherwise leaves unhandled (WebKit then defaults to deny); the
+    bundle's ``NSCameraUsageDescription`` covers the macOS device-access prompt.
     """
     import objc
     from webview.platforms import cocoa
 
-    media_preferences = ("mediaDevicesEnabled", "mediaStreamEnabled", "peerConnectionEnabled")
+    media_preferences = (
+        "mediaDevicesEnabled",
+        "mediaStreamEnabled",
+        "peerConnectionEnabled",
+        "allowsPictureInPictureMediaPlayback",
+    )
     host_class = cocoa.BrowserView.WebKitHost
 
     class WebKitHost(objc.Category(host_class)):
@@ -149,7 +156,7 @@ def _enable_wkwebview_camera() -> None:
 
 
 def _run_webview(**contents: Any) -> None:
-    """Child-process entry point: shows the hub, or why it is not there, in a native window.
+    """Child-process entry point that shows the hub, or why it is not there, in a native window.
 
     The window owns its process's main thread, so it never contends with the
     tray's, and closing it ends only this process. The webview must keep its
@@ -159,7 +166,7 @@ def _run_webview(**contents: Any) -> None:
     so a reopened window would never resume them.
     """
     if sys.platform == "darwin":
-        _enable_wkwebview_camera()
+        _enable_wkwebview_media()
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     webview.create_window(APP_NAME, width=1280, height=820, **contents)
     webview.start(private_mode=False, storage_path=os.path.join(os.environ["DATA_DIR"], "webview"))
@@ -301,7 +308,7 @@ def _watch_termination(window: _Window, server: _Server) -> None:
         watched = {int(signal.SIGTERM), int(signal.SIGINT)}
         while received.recv(1)[0] not in watched:
             pass
-        logger.info("termination signal received — shutting down")
+        logger.info("termination signal received, shutting down")
         notify.close()
         window.close()
         server.stop()
@@ -353,7 +360,7 @@ def _show_tray(icon: pystray.Icon) -> None:
 
 
 def main() -> None:
-    """Console entry point: serves the hub behind a tray icon on the main thread.
+    """Console entry point that serves the hub behind a tray icon on the main thread.
 
     The window runs in a child process; closing it leaves the tray and the hub
     server running so the printer stays watched, and the tray's Quit exits.

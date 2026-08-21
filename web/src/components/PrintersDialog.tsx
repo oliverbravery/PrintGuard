@@ -29,7 +29,7 @@ function TestRow({ provider, config }: { provider: string; config: Record<string
       <button className="btn" disabled={!provider || testing} onClick={() => testPrinter(provider, config)}>
         {testing ? "Testing…" : "Test connection"}
       </button>
-      {printerTest?.ok && <span className="chip chip-ok">ok — {printerTest.status}</span>}
+      {printerTest?.ok && <span className="chip chip-ok">ok, {printerTest.status}</span>}
       {printerTest && !printerTest.ok && <span className="chip chip-bad chip-message">{printerTest.error || printerTest.status || "failed"}</span>}
     </div>
   );
@@ -117,7 +117,7 @@ function RegisterPrinter() {
       </select>
       {meta && (
         <>
-          <input className="field" placeholder={`Name (e.g. ${meta.label} — Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="field" placeholder={`Name (e.g. ${meta.label} Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
           {mixedContent(mode, config) && <MixedContentNote />}
           <TestRow provider={provider} config={config} />

@@ -1,4 +1,4 @@
-"""FastAPI application: serves the UI, model assets and the engine socket.
+"""FastAPI application serving the UI, model assets and the engine socket.
 
 The same image serves both modes - hub mode runs the engine here, while
 local mode only needs the static UI, the model files and the Python
@@ -8,6 +8,7 @@ source archive that Pyodide unpacks in the browser.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import os
@@ -16,19 +17,22 @@ import secrets
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
+from string import Template
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
+from starlette.requests import HTTPConnection
 from starlette.types import Scope
 
 import printguard
 
-from ..engine import logs
+from ..engine import logs, oauth
 from ..engine.engine import Engine
 from ..pysrc import build_pysrc
 from .api import ApiAuth, build_api_app
@@ -75,6 +79,43 @@ def origin_allowed(websocket: WebSocket, allowed: set[str]) -> bool:
     return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
 
 
+GATE_EXEMPT_PREFIXES = ("/api/health",)
+GATE_CACHE_TTL_S = 10.0
+PLUGIN_REQUEST_HEADERS = ("cookie", "authorization", "accept", "content-type", "x-forwarded-for", "user-agent")
+PLUGIN_RESPONSE_HEADERS = ("set-cookie", "location", "cache-control")
+PLUGIN_BODY_LIMIT = 64 * 1024
+PLUGIN_PAGE_CSP = "sandbox allow-forms allow-scripts; frame-ancestors 'none'"
+SIGN_IN_PAGE = Template("""<!doctype html>
+<meta charset="utf-8">
+<title>PrintGuard</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.6 -apple-system, "Segoe UI", system-ui, sans-serif; margin: 0; display: grid; place-items: center; height: 100vh; }
+</style>
+<p>$message</p>
+""")
+"""A plugin's own pages are served into a sandboxed, opaque origin. They may
+render and script themselves, but they are not the dashboard's origin, so they
+cannot read its storage, and the engine socket's origin check turns them away."""
+
+
+def plugin_request(connection: HTTPConnection, method: str, body: str | None = None) -> dict[str, Any]:
+    """Describes a request for a plugin's route or gate handler.
+
+    Args:
+        connection: The request or the WebSocket handshake being described.
+        method: Its HTTP method, which a handshake does not carry itself.
+        body: The request body, for a route that is given one.
+    """
+    return {
+        "method": method,
+        "path": connection.url.path,
+        "query": dict(connection.query_params),
+        "headers": {k: v for k, v in connection.headers.items() if k.lower() in PLUGIN_REQUEST_HEADERS},
+        "body": body,
+    }
+
+
 def create_app() -> FastAPI:
     """Builds the application with the engine attached to its lifespan."""
     logs.setup_from_env()
@@ -109,7 +150,7 @@ def create_app() -> FastAPI:
                 await streamer.start()
                 resources.push_async_callback(streamer.stop)
             else:
-                logger.warning("no bundled MediaMTX binary (%r) — expecting an external MediaMTX at %s", mediamtx_binary, mediamtx_api)
+                logger.warning("no bundled MediaMTX binary (%r), expecting an external MediaMTX at %s", mediamtx_binary, mediamtx_api)
             platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset)
             resources.push_async_callback(platform.close)
             engine = Engine(platform)
@@ -128,6 +169,75 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="PrintGuard", lifespan=lifespan)
     pysrc = build_pysrc()
+    gate_cache: dict[tuple[str, ...], float] = {}
+
+    async def gate_allows(request: Request) -> bool:
+        """Asks a gating plugin whether a request may proceed.
+
+        Answers are cached per credential and path for a few seconds so a
+        dashboard polling HLS does not wake the sandbox on every segment.
+        Refusals are never cached, so signing in takes effect at once.
+        """
+        runtime = app.state.engine.platform.plugin_runtime
+        if runtime is None or request.url.path.startswith(GATE_EXEMPT_PREFIXES + runtime.gate_paths()):
+            return True
+        key = (request.headers.get("cookie", ""), request.headers.get("authorization", ""), request.method, request.url.path)
+        if gate_cache.get(key, 0.0) > time.monotonic():
+            return True
+        verdict = await runtime.authorise(plugin_request(request, request.method))
+        if verdict is None or verdict:
+            gate_cache[key] = time.monotonic() + GATE_CACHE_TTL_S
+            return True
+        return False
+
+    async def socket_allowed(websocket: WebSocket) -> bool:
+        """Runs a gating plugin over a WebSocket handshake.
+
+        HTTP middleware never sees these, so the sockets ask for themselves, the
+        way they already check the request's origin.
+        """
+        runtime = app.state.engine.platform.plugin_runtime
+        if runtime is None:
+            return True
+        return await runtime.authorise(plugin_request(websocket, "GET")) is not False
+
+    @app.middleware("http")
+    async def plugin_gate(request: Request, call_next):
+        """Lets a plugin holding the gate permission refuse requests."""
+        if await gate_allows(request):
+            return await call_next(request)
+        return Response("refused by a plugin", status_code=403)
+
+    @app.api_route("/plugins/{plugin_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+    async def plugin_route(plugin_id: str, path: str, request: Request) -> Response:
+        """Serves a plugin's own pages and endpoints from its sandbox."""
+        runtime = app.state.engine.platform.plugin_runtime
+        if runtime is None:
+            raise HTTPException(404, "plugins are not running")
+        body = (await request.body())[:PLUGIN_BODY_LIMIT].decode("utf-8", "replace")
+        answer = await runtime.serve(plugin_id, plugin_request(request, request.method, body))
+        if answer is None:
+            raise HTTPException(404, f"plugin {plugin_id!r} serves no routes")
+        headers = {k: str(v) for k, v in (answer.get("headers") or {}).items() if k.lower() in PLUGIN_RESPONSE_HEADERS}
+        return Response(
+            str(answer.get("body", "")),
+            status_code=int(answer.get("status", 200)),
+            media_type=str(answer.get("type", "text/plain")),
+            headers={**headers, "Content-Security-Policy": PLUGIN_PAGE_CSP, "X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get(oauth.CALLBACK_PATH)
+    async def oauth_callback(request: Request, code: str = "", state: str = "", error: str = "") -> Response:
+        """Takes the user back from a provider a plugin sent them to."""
+        if error or not code:
+            return HTMLResponse(SIGN_IN_PAGE.substitute(message=html.escape(error or "no code came back")), status_code=400)
+        try:
+            name = await request.app.state.engine.finish_sign_in(state, code)
+        except (PermissionError, RuntimeError) as exc:
+            return HTMLResponse(SIGN_IN_PAGE.substitute(message=html.escape(str(exc))), status_code=403)
+        if name is None:
+            return HTMLResponse(SIGN_IN_PAGE.substitute(message="nothing was waiting for that sign-in"), status_code=404)
+        return HTMLResponse(SIGN_IN_PAGE.substitute(message=f"{html.escape(name)} is connected. You can close this tab."))
 
     @app.get("/api/health")
     def health(response: Response) -> dict[str, bool | str]:
@@ -146,6 +256,9 @@ def create_app() -> FastAPI:
         if not origin_allowed(websocket, allowed_origins):
             logger.warning("rejected cross-origin engine socket (origin=%s)", websocket.headers.get("origin"))
             await websocket.close(code=1008, reason="origin not allowed")
+            return
+        if not await socket_allowed(websocket):
+            await websocket.close(code=1008, reason="refused by a plugin")
             return
         await websocket.accept()
         logger.info("UI connected")
@@ -184,7 +297,13 @@ def create_app() -> FastAPI:
         An unreachable MediaMTX answers 502 with a throttled warning - the
         dashboard polls playlists every second, so letting the error escape
         would flood the log with one ASGI traceback per poll.
+
+        A request from an opaque origin is refused. Plugin pages are served into
+        one, and nothing else in a browser sends ``Origin: null``. Without this a
+        plugin could serve itself a page that pulls the live feed.
         """
+        if request.headers.get("origin") == "null":
+            raise HTTPException(403, "camera streams are not served to sandboxed pages")
         await app.state.engine.platform.view_camera(path.split("/", 1)[0])
         client: httpx.AsyncClient = app.state.hls
         try:
@@ -208,7 +327,7 @@ def create_app() -> FastAPI:
     @app.websocket("/api/publish/{path}")
     async def publish_socket(websocket: WebSocket, path: str) -> None:
         """Receives a browser camera recording and republishes it over RTSP."""
-        if not re.fullmatch(r"[\w-]+", path) or not origin_allowed(websocket, allowed_origins):
+        if not re.fullmatch(r"[\w-]+", path) or not origin_allowed(websocket, allowed_origins) or not await socket_allowed(websocket):
             logger.warning("rejected publish socket (path=%r, origin=%s)", path, websocket.headers.get("origin"))
             await websocket.close(code=1008, reason="invalid request")
             return

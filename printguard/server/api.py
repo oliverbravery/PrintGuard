@@ -137,7 +137,7 @@ class ActionBody(BaseModel):
 
 
 class _ReadModel(BaseModel):
-    """Base for the read-surface response models: it documents each field for
+    """Base for the read-surface response models, documenting each field for
     `/api/v1/docs` yet passes any unlisted field straight through and tolerates
     absent ones, so a response still mirrors the resource's `.public()` exactly."""
 
@@ -259,7 +259,7 @@ def public_state(engine: Engine) -> dict[str, Any]:
 
 
 def build_api_app(auth: ApiAuth) -> FastAPI:
-    """Builds the /api/v1 sub-application; the engine is attached at startup."""
+    """Builds the /api/v1 sub-application, with the engine attached at startup."""
     api = FastAPI(
         title="PrintGuard API",
         version="1",
@@ -280,7 +280,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
 
     @api.get("/state", operation_id="get_state", tags=["read"])
     async def get_state(engine: Engine = Depends(get_engine)) -> dict[str, Any]:
-        """Returns the full snapshot: cameras, printers, monitors, settings and stats."""
+        """Returns the full snapshot of cameras, printers, monitors, settings and stats."""
         return public_state(engine)
 
     @api.get("/monitors", operation_id="list_monitors", tags=["read"], response_model=list[MonitorOut])
