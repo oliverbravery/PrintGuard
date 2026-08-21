@@ -113,9 +113,11 @@ body {
 }
 
 [data-painted] {
-  --painted-surface: color-mix(in srgb, var(--color-ink-1) 88%, transparent);
-  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 94%, transparent);
-  --painted-muted: color-mix(in srgb, var(--color-text-2) 50%, var(--color-text-1));
+  --painted-surface: color-mix(in srgb, var(--color-ink-1) 86%, transparent);
+  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 90%, transparent);
+  --painted-muted: color-mix(in srgb, var(--color-text-2) 35%, var(--color-text-1));
+  --painted-glass: blur(20px) saturate(180%);
+  --painted-edge: color-mix(in srgb, var(--color-text-0) 14%, transparent);
   isolation: isolate;
 }
 
@@ -130,22 +132,27 @@ body {
   z-index: -1;
   pointer-events: none;
   background: var(--painted-image) center / cover no-repeat;
-  filter: blur(6px);
-  transform: scale(1.05);
+  filter: blur(16px);
+  transform: scale(1.08);
 }
 
 [data-painted] .panel,
 [data-painted] .tile {
   background: var(--painted-surface);
+  backdrop-filter: var(--painted-glass);
+  border-color: var(--painted-edge);
+  box-shadow: 0 12px 32px -16px rgb(0 0 0 / 0.55);
 }
 
 [data-painted] header,
 [data-painted] nav {
   background: var(--painted-chrome) !important;
+  backdrop-filter: var(--painted-glass);
 }
 
 [data-painted] .plate {
   background: var(--painted-chrome);
+  backdrop-filter: var(--painted-glass);
   border-radius: 4px;
   padding-inline: 0.5rem;
   margin-inline-start: -0.5rem;
@@ -171,6 +178,8 @@ body {
   [data-painted] {
     --painted-surface: var(--color-ink-1);
     --painted-chrome: var(--color-ink-0);
+    --painted-glass: none;
+    --painted-edge: var(--color-line-0);
   }
 }
 
