@@ -69,6 +69,15 @@ export function reachesLocal(pattern: string): boolean {
   return rule !== null && (rule.host === "*" || isLocalAddress(rule.host.replace(/^\*\./, "")));
 }
 
+export function webUrl(raw: string): string | null {
+  try {
+    const url = new URL(String(raw));
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export function phrase(pattern: string): string {
   const rule = parse(pattern);
   if (!rule) return pattern;

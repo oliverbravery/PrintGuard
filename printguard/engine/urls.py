@@ -36,6 +36,17 @@ LOCAL_SUFFIXES = (".local", ".localhost", ".internal", ".home", ".lan")
 """Names that resolve inside a network by convention rather than by address."""
 
 
+def link(raw: Any) -> str:
+    """A manifest's link, kept only when it is an ordinary web address.
+
+    Anything else, ``javascript:`` above all, is dropped here so the dashboard
+    never renders it as an anchor.
+    """
+    url = str(raw).strip()[:200]
+    parts = urlsplit(url)
+    return url if parts.scheme in ("http", "https") and parts.netloc else ""
+
+
 def parse(raw: str) -> dict[str, str] | None:
     """Reads one pattern, or None if it is not one.
 

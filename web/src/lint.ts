@@ -40,7 +40,7 @@ function literalField(node: any, field: string): string | null {
 }
 
 function scriptsIn(html: string): string {
-  return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((found) => found[1]).join("\n;\n");
+  return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)].map((found) => found[1]).join("\n;\n");
 }
 
 function callsIn(code: string, tables: Tables, owners: string[]): { calls: Call[]; secrets: string[]; failed: string | null } {

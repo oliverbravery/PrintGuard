@@ -561,7 +561,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "version": version,
         "description": str(raw.get("description", "")).strip()[:400],
         "author": str(raw.get("author", "")).strip()[:80],
-        "homepage": str(raw.get("homepage", "")).strip()[:200],
+        "homepage": urls.link(raw.get("homepage")),
         "permissions": permissions,
         "reasons": reasons,
         "surfaces": surfaces,
@@ -629,7 +629,7 @@ def sanitise_oauth(raw: Any) -> dict[str, Any]:
         raise ValueError("oauth needs an https authorize_url and token_url")
     return {
         **endpoints,
-        "register_url": str(raw.get("register_url", "")).strip()[:200],
+        "register_url": urls.link(raw.get("register_url")),
         "scopes": [str(scope).strip() for scope in raw.get("scopes", []) if str(scope).strip()][:20],
         "label": str(raw.get("label", "")).strip()[:80] or urlsplit(endpoints["authorize_url"]).hostname or "",
     }
