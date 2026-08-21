@@ -91,3 +91,15 @@ export function phrase(pattern: string): string {
   const what = rule.path === "/*" ? "anything on" : `${rule.path.replace(/\*+$/, "")} on`;
   return `${what} ${where}${port}`;
 }
+
+export function openExternally(raw: string): void {
+  const url = webUrl(raw);
+  if (!url) return;
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}

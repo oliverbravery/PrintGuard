@@ -8,7 +8,7 @@ import { commandAllowed, outboundLink, outboundRequest, outboundSocket, PluginHo
 import { play, playFile } from "./sound";
 import { resumePublishers } from "./stream";
 import { applyTheme, measureCover } from "./theme";
-import { webUrl } from "./urls";
+import { openExternally } from "./urls";
 import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
@@ -437,8 +437,7 @@ export const useStore = create<PgStore>((set, get) => {
       }
       case "plugin_oauth": {
         clearPending(event.req_id);
-        const signIn = webUrl(event.url);
-        if (signIn) window.open(signIn, "_blank", "noopener");
+        openExternally(event.url);
         break;
       }
       case "plugin_effect":
