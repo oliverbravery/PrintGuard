@@ -420,7 +420,7 @@ transparent and the panel is as tall as it draws itself, up to 900px.
 A panel can show a picture but not fetch one. Pull it through `pg.http` with `binary: true` and
 it arrives base64 encoded on the `http` event, ready to be a `data:` URL.
 `pg.background(image)` puts one behind the dashboard, which needs `background` and clears when
-passed nothing.
+passed nothing. The Glass theme frosts the panels over it.
 
 A panel joins the dashboard's layout, so it drags, pins and hides with the monitors.
 

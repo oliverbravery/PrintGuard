@@ -89,7 +89,7 @@ function ThemeToggle() {
   const theme = useStore((s) => s.engine?.settings.theme ?? "system");
   const themes = useStore((s) => s.engine?.settings.themes ?? []);
   const send = useStore((s) => s.send);
-  const glyph = theme === "light" ? "☀" : theme === "dark" ? "☾" : themes.some((t) => t.id === theme) ? "✦" : "◐";
+  const glyph = theme === "light" ? "☀" : theme === "dark" ? "☾" : theme === "glass" ? "◈" : themes.some((t) => t.id === theme) ? "✦" : "◐";
   return (
     <button
       className="chip cursor-pointer hover:opacity-80"

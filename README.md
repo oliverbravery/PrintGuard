@@ -138,8 +138,9 @@ native window on your own computer.
 
 ## Themes and layout
 
-Choose **System**, **Light**, **Dark**, or design your own in the built-in theme editor. Themes
-are saved on the hub and follow every browser that opens it.
+Choose **System**, **Light**, **Dark**, **Glass**, or design your own in the built-in theme
+editor. Themes are saved on the hub and follow every browser that opens it. Glass makes the
+panels frosted, so a plugin putting a picture behind the dashboard shows through them.
 
 <table>
 <tr>

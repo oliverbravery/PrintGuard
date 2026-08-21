@@ -191,6 +191,7 @@ const SCENES: Scene[] = [
     plugins: ["spotify", "picture-in-picture"],
     mutate: (e) => {
       e.plugin_events = { http: ["tag", "status", "body"] };
+      e.settings.theme = "glass";
       e.monitors = e.monitors.slice(0, 2);
       e.plugins = [
         installed("spotify", "Spotify", ["net", "oauth", "background"], ["panel"], ["panel.html"]),

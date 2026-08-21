@@ -19,6 +19,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - Four come as standard. Picture in picture floats a camera above your other windows, alert
   sounds plays a horn when a defect is caught, progress reports sends a tally of a print through
   your alert channels, and Spotify puts the current cover behind the dashboard.
+- A Glass theme, alongside System, Light and Dark. The panels frost over whatever is behind
+  them, which is what the Spotify plugin's cover shows through.
+
 - Plugins install switched off. Enable lists every permission with the author's reason for it,
   and it is all or nothing. An update that asks for more waits until you accept it.
 - What you gave a plugin carries across updates from the repository it came from. A bundle that

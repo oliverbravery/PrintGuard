@@ -112,17 +112,48 @@ body {
   border-radius: 6px;
 }
 
-[data-painted] {
-  --painted-surface: color-mix(in srgb, var(--color-ink-1) 86%, transparent);
-  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 90%, transparent);
-  --painted-muted: color-mix(in srgb, var(--color-text-2) 35%, var(--color-text-1));
-  --painted-glass: blur(20px) saturate(180%);
-  --painted-edge: color-mix(in srgb, var(--color-text-0) 14%, transparent);
-  isolation: isolate;
+:root[data-glass] {
+  --painted-surface: color-mix(in srgb, var(--color-ink-1) 65%, transparent);
+  --painted-chrome: color-mix(in srgb, var(--color-ink-0) 72%, transparent);
+  --painted-glass: blur(28px) saturate(190%);
+  --painted-ink: #ffffff;
+  --painted-edge: color-mix(in srgb, var(--painted-ink) 18%, transparent);
+  --theme-text-0: var(--color-text-0);
+  --theme-text-1: var(--color-text-1);
+  --theme-text-2: var(--color-text-2);
 }
 
-[data-painted] > * {
-  --color-text-2: var(--painted-muted);
+:root[data-glass] .panel,
+:root[data-glass] .tile {
+  background: var(--painted-surface);
+  backdrop-filter: var(--painted-glass);
+  border-color: var(--painted-edge);
+  box-shadow: 0 12px 32px -16px rgb(0 0 0 / 0.55);
+}
+
+:root[data-glass] header,
+:root[data-glass] nav,
+:root[data-glass] .plate {
+  background: var(--painted-chrome) !important;
+  backdrop-filter: var(--painted-glass);
+}
+
+:root[data-glass] .plate {
+  border-radius: 4px;
+  padding-inline: 0.5rem;
+  margin-inline-start: -0.5rem;
+}
+
+:root[data-glass] .feed {
+  background: transparent;
+}
+
+:root[data-glass] dialog .panel {
+  background: linear-gradient(180deg, var(--color-ink-2), var(--color-ink-1));
+}
+
+[data-painted] {
+  isolation: isolate;
 }
 
 [data-painted]::before {
@@ -132,42 +163,22 @@ body {
   z-index: -1;
   pointer-events: none;
   background: var(--painted-image) center / cover no-repeat;
-  filter: blur(16px);
-  transform: scale(1.08);
+  filter: blur(28px);
+  transform: scale(1.12);
 }
 
-[data-painted] .panel,
-[data-painted] .tile {
-  background: var(--painted-surface);
-  backdrop-filter: var(--painted-glass);
-  border-color: var(--painted-edge);
-  box-shadow: 0 12px 32px -16px rgb(0 0 0 / 0.55);
+/* Glass diffuses whatever a plugin puts behind it, so text goes to white while
+   a picture is up. At this tint that clears 4.5:1 over any cover. */
+:root[data-glass] [data-painted] > * {
+  --color-text-0: var(--painted-ink);
+  --color-text-1: var(--painted-ink);
+  --color-text-2: color-mix(in srgb, var(--painted-ink) 85%, transparent);
 }
 
-[data-painted] header,
-[data-painted] nav {
-  background: var(--painted-chrome) !important;
-  backdrop-filter: var(--painted-glass);
-}
-
-[data-painted] .plate {
-  background: var(--painted-chrome);
-  backdrop-filter: var(--painted-glass);
-  border-radius: 4px;
-  padding-inline: 0.5rem;
-  margin-inline-start: -0.5rem;
-}
-
-[data-painted] .feed {
-  background: transparent;
-}
-
-[data-painted] .feed-veil {
-  background: color-mix(in srgb, var(--color-ink-0) 30%, transparent);
-}
-
-[data-painted] dialog .panel {
-  background: linear-gradient(180deg, var(--color-ink-2), var(--color-ink-1));
+:root[data-glass] [data-painted] dialog {
+  --color-text-0: var(--theme-text-0);
+  --color-text-1: var(--theme-text-1);
+  --color-text-2: var(--theme-text-2);
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -175,11 +186,15 @@ body {
     display: none;
   }
 
-  [data-painted] {
+  :root[data-glass],
+  :root[data-glass] [data-painted] > * {
     --painted-surface: var(--color-ink-1);
     --painted-chrome: var(--color-ink-0);
     --painted-glass: none;
     --painted-edge: var(--color-line-0);
+    --color-text-0: var(--theme-text-0);
+    --color-text-1: var(--theme-text-1);
+    --color-text-2: var(--theme-text-2);
   }
 }
 

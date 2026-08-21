@@ -161,7 +161,9 @@ export const GUIDE: GuideSection[] = [
     body: (
       <>
         Add a panel to the dashboard or a job on the hub, from the catalogue or any GitHub repo.
-        Plugins are third-party code, so they run in a sandbox with only what you grant them.{" "}
+        Plugins are third-party code, so they run in a sandbox with only what you grant them. One
+        can put a picture behind the dashboard, which the <strong>Glass</strong> theme shows through
+        the panels.{" "}
         <strong>Picture in picture</strong>, <strong>Alert sounds</strong> and <strong>Progress reports</strong>{" "}
         come as standard.{" "}
         <a className={link} href={docs("plugins.md")} target="_blank" rel="noreferrer">

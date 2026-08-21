@@ -13,6 +13,7 @@ const SCHEMES: { id: string; name: string; glyph: string }[] = [
   { id: "system", name: "System", glyph: "◐" },
   { id: "light", name: "Light", glyph: "☀" },
   { id: "dark", name: "Dark", glyph: "☾" },
+  { id: "glass", name: "Glass", glyph: "◈" },
 ];
 
 function Swatch({ colors }: { colors: CustomTheme["colors"] }) {

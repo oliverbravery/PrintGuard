@@ -386,6 +386,34 @@ test("a plugin panel rearranges with the monitors", async ({ page }) => {
 });
 
 
+test("glass turns the text white while a cover is up", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP);
+  const textOn = () =>
+    page.evaluate(() => {
+      const tile = document.querySelector("[data-painted] .panel, main .panel") as HTMLElement;
+      const probe = document.createElement("div");
+      probe.style.color = getComputedStyle(tile).getPropertyValue("--color-text-1");
+      tile.appendChild(probe);
+      const shown = getComputedStyle(probe).color;
+      probe.remove();
+      return shown;
+    });
+
+  await page.evaluate(async () => {
+    const { applyTheme } = await import("/src/theme.ts");
+    applyTheme("glass", []);
+  });
+  expect(await textOn()).not.toBe("rgb(255, 255, 255)");
+
+  await page.evaluate(() =>
+    (window as any).__pg.setState({
+      background: { id: "pip", image: "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" },
+    }),
+  );
+  expect(await textOn()).toBe("rgb(255, 255, 255)");
+});
+
+
 test("a camera the plugin may not view is never floated", async ({ page }) => {
   await stubFloat(page);
   await dashboardWithPlugin(page, MONITOR_PIP, ["state:read"], ["monitor"]);

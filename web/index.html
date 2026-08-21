@@ -32,6 +32,7 @@
           var root = document.documentElement;
           root.dataset.theme = base;
           root.style.colorScheme = base;
+          if (c && c.glass) root.setAttribute("data-glass", "");
           if (c && c.vars) for (var k in c.vars) root.style.setProperty(k, c.vars[k]);
           var bg = explicit && c.bg ? c.bg : base === "dark" ? "#0b0c0a" : "#e7e8e0";
           var m = document.querySelector('meta[name="theme-color"]');

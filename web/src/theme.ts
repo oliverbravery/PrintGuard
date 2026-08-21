@@ -62,6 +62,7 @@ export const PALETTES: Record<ThemeBase, Palette> = {
 };
 
 const STORAGE_KEY = "pg.theme";
+export const GLASS = "glass";
 const MEDIA = "(prefers-color-scheme: dark)";
 
 interface Resolved {
@@ -73,6 +74,7 @@ export function resolveTheme(themeId: string, themes: CustomTheme[]): Resolved {
   const custom = themes.find((t) => t.id === themeId);
   if (custom) return { base: custom.base, colors: { ...PALETTES[custom.base], ...custom.colors } };
   if (themeId === "light" || themeId === "dark") return { base: themeId, colors: null };
+  if (themeId === GLASS) return { base: "dark", colors: null };
   return { base: window.matchMedia(MEDIA).matches ? "dark" : "light", colors: null };
 }
 
@@ -106,6 +108,7 @@ export function applyTheme(themeId: string, themes: CustomTheme[], force = false
   const root = document.documentElement;
   root.dataset.theme = base;
   root.style.colorScheme = base;
+  root.toggleAttribute("data-glass", themeId === GLASS);
   for (const t of TOKENS) {
     if (colors) root.style.setProperty(t.cssVar, colors[t.key]);
     else root.style.removeProperty(t.cssVar);
@@ -118,14 +121,14 @@ export function applyTheme(themeId: string, themes: CustomTheme[], force = false
   const vars = colors
     ? { ...Object.fromEntries(TOKENS.map((t) => [t.cssVar, colors[t.key]])), "--color-on-accent": readableOn(colors.accent) }
     : null;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ id: themeId, base, vars, bg }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ id: themeId, base, vars, bg, glass: themeId === GLASS }));
 }
 
 window.matchMedia(MEDIA).addEventListener("change", () => {
   if (current.themeId === "system") applyTheme(current.themeId, current.themes);
 });
 
-const ORDER = ["system", "light", "dark"] as const;
+const ORDER = ["system", "light", "dark", GLASS] as const;
 
 export function nextScheme(themeId: string): string {
   const i = ORDER.indexOf(themeId as (typeof ORDER)[number]);
