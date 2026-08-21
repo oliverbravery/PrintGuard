@@ -201,9 +201,9 @@ async function dashboardWithPlugin(
           printers: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
           settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
           stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
-          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces }, granted, files: worker ? ["plugin.js", "worker.js"] : ["plugin.js"] }],
+          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result"] }, granted, files: worker ? ["plugin.js", "worker.js"] : ["plugin.js"] }],
           plugin_permissions: permissions,
-          plugin_events: { state: [] },
+          plugin_events: { state: [], result: ["monitor_id", "prediction"] },
           plugin_assets: { png: "image/png", txt: "text/plain", mp3: "audio/mpeg" },
           plugin_host: !worker,
         },
@@ -414,14 +414,15 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
 });
 
 
-test("a worker half never wipes the view its panel half drew", async ({ page }) => {
+test("an event never wipes the per-monitor views the plugin drew", async ({ page }) => {
   await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor"], {}, "plugin.on('result', () => {});");
+  const float = page.getByRole("button", { name: "Float Bench" });
 
-  await expect(page.getByRole("button", { name: "Float Bench" })).toBeVisible();
-  for (let round = 0; round < 3; round += 1) {
+  await expect(float).toBeVisible();
+  for (let round = 0; round < 5; round += 1) {
     await page.evaluate(() => (window as any).__pgEvent({ event: "result", monitor_id: "m1", prediction: "failure" }));
+    await expect(float).toBeVisible();
   }
-  await expect(page.getByRole("button", { name: "Float Bench" })).toBeVisible();
 });
 
 

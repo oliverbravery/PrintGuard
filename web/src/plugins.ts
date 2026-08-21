@@ -189,8 +189,8 @@ export class PluginHost {
     return this.call({ t: "action", name, arg, state, targets });
   }
 
-  event(event: Record<string, unknown>, state: Record<string, unknown>): Promise<void> {
-    return this.call({ t: "event", event, state });
+  event(event: Record<string, unknown>, state: Record<string, unknown>, targets: PluginTarget[]): Promise<void> {
+    return this.call({ t: "event", event, state, targets });
   }
 
   private fail(reason: string): void {

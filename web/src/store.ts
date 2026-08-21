@@ -342,7 +342,7 @@ export const useStore = create<PgStore>((set, get) => {
     const seen = projectEvent(event, engine.plugin_events, plugin.granted, engine.plugin_permissions, engine.plugin_event_permissions);
     if (!seen) return;
     for (const [key, host] of hosts) {
-      if (key.startsWith(`${id}:`)) void host.event(seen, pluginState(plugin));
+      if (key.startsWith(`${id}:`)) void host.event(seen, pluginState(plugin), pluginTargets(plugin));
     }
     panels.get(id)?.event(seen);
   };
