@@ -65,7 +65,7 @@ export function HeaderActions({ className }: { className?: string }) {
 
 export function MobileActionBar() {
   return (
-    <HeaderActions className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 gap-2 border-t border-line-0 bg-ink-0/95 px-4 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden" />
+    <HeaderActions className="action-bar fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 gap-2 border-t border-line-0 bg-ink-0/95 px-4 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden" />
   );
 }
 

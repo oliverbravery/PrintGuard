@@ -114,9 +114,10 @@ body {
 
 :root[data-glass] {
   --painted-surface: var(--glass-surface, rgb(20 20 20 / 0.38));
-  --painted-glass: var(--glass-filter, blur(30px) saturate(180%) brightness(0.6));
+  --painted-glass: blur(30px) saturate(180%);
   --painted-ink: var(--glass-ink, #ffffff);
   --painted-muted: var(--glass-muted, rgb(255 255 255 / 0.85));
+  --painted-wash: var(--glass-wash, rgb(0 0 0 / 0.16));
   --painted-edge: color-mix(in srgb, var(--painted-ink) 26%, transparent);
   --painted-sheen: inset 0 1px 0 color-mix(in srgb, var(--painted-ink) 24%, transparent);
   --theme-text-0: var(--color-text-0);
@@ -133,11 +134,23 @@ body {
 :root[data-glass] .panel,
 :root[data-glass] .tile,
 :root[data-glass] header,
-:root[data-glass] nav,
+:root[data-glass] .action-bar,
 :root[data-glass] .plate {
   background: var(--painted-surface) !important;
   backdrop-filter: var(--painted-glass);
   border-color: var(--painted-edge);
+}
+
+:root[data-glass] .btn:not(.btn-primary),
+:root[data-glass] .chip,
+:root[data-glass] .field {
+  background: var(--painted-wash) !important;
+  border-color: var(--painted-edge);
+}
+
+:root[data-glass] .btn:not(.btn-primary):hover,
+:root[data-glass] .chip:hover {
+  border-color: color-mix(in srgb, var(--painted-ink) 55%, transparent);
 }
 
 :root[data-glass] .panel,

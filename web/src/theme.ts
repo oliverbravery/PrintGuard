@@ -66,6 +66,8 @@ export const GLASS = "glass";
 export const GLASS_DEFAULT: Glass = { tint: 0.38, tone: 0.08 };
 const PREFERRED_MUTED = 0.85;
 const AA = 4.5;
+const BACKDROP_CELLS = 8;
+const SATURATION_HEADROOM = 0.05;
 const MEDIA = "(prefers-color-scheme: dark)";
 
 interface Resolved {
@@ -75,6 +77,10 @@ interface Resolved {
 
 function grey(level: number): number {
   return level <= 0.03928 ? level / 12.92 : ((level + 0.055) / 1.055) ** 2.4;
+}
+
+function levelOf(luminance: number): number {
+  return luminance <= 0.0031308 ? luminance * 12.92 : 1.055 * luminance ** (1 / 2.4) - 0.055;
 }
 
 function mutedRatio(level: number, ink: number, alpha: number): number {
@@ -106,34 +112,91 @@ function mutedAlpha(level: number, ink: number): number {
   return high;
 }
 
-const LIGHTEST_UNDER_WHITE_INK = boundary(1, PREFERRED_MUTED);
+const LIGHTEST_UNDER_WHITE_INK = boundary(1, 1);
 const DARKEST_UNDER_BLACK_INK = boundary(0, 1);
 
+let cover: { lo: number; hi: number } | null = null;
+
+export function litGlass(tone: number): boolean {
+  return tone >= DARKEST_UNDER_BLACK_INK;
+}
+
+function behindTheGlass(tone: number): { lo: number; hi: number } {
+  const page = levelOf(luminance(PALETTES[litGlass(tone) ? "light" : "dark"].ink0));
+  return {
+    lo: Math.min(cover ? cover.lo : page, tone),
+    hi: Math.min(1, Math.max(cover ? cover.hi : page, tone) + SATURATION_HEADROOM),
+  };
+}
+
+function readableAt(tint: number, tone: number): boolean {
+  const { lo, hi } = behindTheGlass(tone);
+  return litGlass(tone)
+    ? tint * tone + (1 - tint) * lo >= DARKEST_UNDER_BLACK_INK
+    : tint * tone + (1 - tint) * hi <= LIGHTEST_UNDER_WHITE_INK;
+}
+
+export function clearestTint(tone: number): number {
+  if (readableAt(0, tone)) return 0;
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 16; step += 1) {
+    const mid = (low + high) / 2;
+    if (readableAt(mid, tone)) high = mid;
+    else low = mid;
+  }
+  return high;
+}
+
 export function glassMaterial({ tint, tone }: Glass): { lit: boolean; vars: Record<string, string> } {
-  const floor = tint * tone;
-  const lit = floor >= DARKEST_UNDER_BLACK_INK;
-  const headroom = (LIGHTEST_UNDER_WHITE_INK - floor) / Math.max(1 - tint, 1e-3);
-  const through = lit ? 1 : Math.max(0, Math.min(1, headroom));
-  const ink = lit ? 0 : 1;
-  const alpha = mutedAlpha(lit ? floor : floor + (1 - tint) * through, ink);
+  const lit = litGlass(tone);
+  const settled = Math.max(tint, clearestTint(tone));
+  const { lo, hi } = behindTheGlass(tone);
+  const alpha = mutedAlpha(settled * tone + (1 - settled) * (lit ? lo : hi), lit ? 0 : 1);
   const level = Math.round(tone * 255);
-  const channels = ink ? "255 255 255" : "0 0 0";
+  const channels = lit ? "0 0 0" : "255 255 255";
   return {
     lit,
     vars: {
-      "--glass-surface": `rgb(${level} ${level} ${level} / ${tint})`,
-      "--glass-filter": `blur(30px) saturate(180%) brightness(${through.toFixed(3)})`,
+      "--glass-surface": `rgb(${level} ${level} ${level} / ${settled.toFixed(3)})`,
       "--glass-ink": `rgb(${channels})`,
       "--glass-muted": `rgb(${channels} / ${alpha.toFixed(3)})`,
+      "--glass-wash": `rgb(${lit ? "255 255 255" : "0 0 0"} / 0.16)`,
     },
   };
+}
+
+export async function measureCover(src: string | null): Promise<void> {
+  if (!src) cover = null;
+  else {
+    const picture = new Image();
+    picture.src = src;
+    await picture.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = BACKDROP_CELLS;
+    canvas.height = BACKDROP_CELLS;
+    const paper = canvas.getContext("2d", { willReadFrequently: true })!;
+    paper.drawImage(picture, 0, 0, BACKDROP_CELLS, BACKDROP_CELLS);
+    const { data } = paper.getImageData(0, 0, BACKDROP_CELLS, BACKDROP_CELLS);
+    let lo = 1;
+    let hi = 0;
+    for (let at = 0; at < data.length; at += 4) {
+      const level = levelOf(
+        0.2126 * grey(data[at] / 255) + 0.7152 * grey(data[at + 1] / 255) + 0.0722 * grey(data[at + 2] / 255),
+      );
+      lo = Math.min(lo, level);
+      hi = Math.max(hi, level);
+    }
+    cover = { lo, hi };
+  }
+  applyTheme(current.themeId, current.themes, current.glass);
 }
 
 export function resolveTheme(themeId: string, themes: CustomTheme[], glass: Glass = GLASS_DEFAULT): Resolved {
   const custom = themes.find((t) => t.id === themeId);
   if (custom) return { base: custom.base, colors: { ...PALETTES[custom.base], ...custom.colors } };
   if (themeId === "light" || themeId === "dark") return { base: themeId, colors: null };
-  if (themeId === GLASS) return { base: glassMaterial(glass).lit ? "light" : "dark", colors: null };
+  if (themeId === GLASS) return { base: litGlass(glass.tone) ? "light" : "dark", colors: null };
   return { base: window.matchMedia(MEDIA).matches ? "dark" : "light", colors: null };
 }
 

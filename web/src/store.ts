@@ -7,7 +7,7 @@ import { PluginPanelHost } from "./panel";
 import { commandAllowed, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
 import { play, playFile } from "./sound";
 import { resumePublishers } from "./stream";
-import { applyTheme } from "./theme";
+import { applyTheme, measureCover } from "./theme";
 import { webUrl } from "./urls";
 import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
 
@@ -209,6 +209,11 @@ export const useStore = create<PgStore>((set, get) => {
     updateTimers[key] = setTimeout(() => flushKey(key), UPDATE_DEBOUNCE_MS);
   };
 
+  const showBackground = (next: { id: string; image: string } | null) => {
+    set({ background: next });
+    void measureCover(next?.image ?? null);
+  };
+
   const hosts = new Map<string, PluginHost>();
   const codeRequests = new Map<number, string>();
   const savedConfigs = new Map<string, string>();
@@ -256,7 +261,7 @@ export const useStore = create<PgStore>((set, get) => {
       } else if (effect.kind === "background") {
         if (!plugin.granted.includes("background")) continue;
         const image = String(effect.image ?? "").slice(0, MAX_BACKGROUND_CHARS);
-        set({ background: image.startsWith("data:image/") ? { id, image } : null });
+        showBackground(image.startsWith("data:image/") ? { id, image } : null);
       } else if (effect.kind === "log") {
         log("info", `plugin ${id}:`, effect.text);
       }
@@ -294,7 +299,7 @@ export const useStore = create<PgStore>((set, get) => {
       engine.plugins.filter((p) => p.enabled).flatMap((p) => runnableFiles(p, engine).map((file) => `${p.id}:${file}`)),
     );
     dropHosts((key) => !wanted.has(key));
-    if (get().background && !engine.plugins.some((p) => p.id === get().background?.id && p.enabled)) set({ background: null });
+    if (get().background && !engine.plugins.some((p) => p.id === get().background?.id && p.enabled)) showBackground(null);
     for (const [id, panel] of panels) {
       if (engine.plugins.some((p) => p.id === id && p.enabled)) continue;
       panel.close();
