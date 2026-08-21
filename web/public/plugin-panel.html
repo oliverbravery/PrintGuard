@@ -7,6 +7,13 @@
       content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>PrintGuard plugin panel</title>
+    <style>
+      html,
+      body {
+        background: transparent;
+        margin: 0;
+      }
+    </style>
     <script>
       (function () {
         "use strict";
@@ -110,7 +117,7 @@
             document.head.insertBefore(themed, document.head.firstChild);
           }
           const vars = Object.entries(tokens).map(([k, v]) => `${k}:${v}`).join(";");
-          themed.textContent = `:root{${vars};color-scheme:${tokens["color-scheme"] || "dark"}}html,body{background:transparent;margin:0}`;
+          themed.textContent = `:root{${vars};color-scheme:${tokens["color-scheme"] || "dark"}}`;
         }
 
         function reportHeight() {

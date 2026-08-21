@@ -10,24 +10,14 @@
   sign-in, filled in as the request leaves, so this file never sees one.
 -->
 <style>
-  /* The cover sets the mood, so the panel locks to the Glass theme whatever the
-     dashboard is on. The tokens PrintGuard injects arrive on :root ahead of
-     this, so overriding them here is all it takes. */
-  :root {
-    color-scheme: dark;
-    --color-text-0: #ffffff;
-    --color-text-1: rgb(255 255 255 / 0.85);
-    --color-text-2: rgb(255 255 255 / 0.85);
-    --color-line-0: rgb(255 255 255 / 0.18);
-  }
+  /* PrintGuard injects its theme tokens on :root before this, and the tile the
+     panel sits in already paints the background, so nothing here sets a colour
+     of its own. */
   body {
-    background: color-mix(in srgb, #11130e 65%, transparent);
-    border-radius: 6px;
     color: var(--color-text-0);
     display: flex;
     font-family: var(--font-body);
     gap: 14px;
-    padding: 12px;
   }
   #cover {
     border-radius: 4px;

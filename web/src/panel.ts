@@ -20,7 +20,7 @@ export interface PanelHandlers {
 }
 
 export function themeTokens(): Record<string, string> {
-  const computed = getComputedStyle(document.documentElement);
+  const computed = getComputedStyle(document.body);
   return {
     ...Object.fromEntries(THEME_TOKENS.map((token) => [token, computed.getPropertyValue(token).trim()])),
     "color-scheme": computed.colorScheme,
