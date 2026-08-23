@@ -180,6 +180,30 @@ async def test_standby_gating() -> None:
     assert resumed > 0, "inference did not resume when printing started"
 
 
+async def test_unreadable_printer_state_keeps_watching_and_warns(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.05)
+    monkeypatch.setattr(watchdog, "OFFLINE_GRACE_S", 0.2)
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    platform.device_status = "Detecting serial connection"
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await asyncio.sleep(1.0)
+        assert engine.printers.get(printer_id).device_state["status"] == "unknown"
+        assert engine.state_event()["monitors"][0]["watching"], "a state the adapter cannot read must keep watching"
+        assert any(e.get("event") == "result" for e in events), "watching monitor did not infer"
+        warnings = [e for e in events if e.get("event") == "warning" and not e["recovered"]]
+        assert any("Cannot tell whether the printer" in w["message"] for w in warnings), "unreadable printer state did not warn"
+
+        platform.device_status = "Operational"
+        await asyncio.sleep(1.0)
+        recoveries = [e for e in events if e.get("event") == "warning" and e["recovered"]]
+        assert any("reporting its state again" in r["message"] for r in recoveries), "recovery was never announced"
+
+
 async def test_restored_camera_attachment_is_single_flight(monkeypatch) -> None:
     from fakes import FakeSource
     from printguard.engine import engine as engine_module

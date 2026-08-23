@@ -42,7 +42,9 @@ print or cancels it.
 
 Linked printers report job name, progress and state on every monitor that uses them, and they
 gate inference. A printer that positively reports "not printing" stands its monitors down, so
-an idle printer costs nothing. Losing contact with a printer never stands monitoring down. See
+an idle printer costs nothing. Losing contact with a printer never stands monitoring down, and
+neither does a state the adapter cannot read, so a monitor left watching an apparently idle
+printer warns and says which state it is getting. See
 [failing safely](architecture.md#failing-safely).
 
 ## Supported print services
