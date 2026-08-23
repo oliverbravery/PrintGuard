@@ -154,6 +154,12 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
                 standby, printer is {printer?.device_state?.status ?? "not printing"}, inference resumes when it prints
               </p>
             )}
+            {monitor.enabled && monitor.watching !== false && printer && !printer.online && (
+              <p className="mono text-[0.7rem] text-text-2">
+                watching, the printer reports {printer.device_state?.status ?? "nothing yet"}, so inference runs until it says it is
+                not printing
+              </p>
+            )}
             <label className="block">
               <span className="label block mb-1">Camera</span>
               <select className="field" value={monitor.camera_id} onChange={(e) => updateMonitor(monitor.id, { camera_id: e.target.value })}>
