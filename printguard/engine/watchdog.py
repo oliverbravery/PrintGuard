@@ -91,19 +91,32 @@ class Watchdog:
             await asyncio.sleep(DEVICE_POLL_S)
 
     async def watch_health(self) -> None:
-        """Warns when a watched camera or printer service drops out.
+        """Warns when a watched camera drops out or a printer stops reporting.
 
         Outages shorter than the grace period are ignored, and a sustained
         one warns exactly once; the recovery is only announced once health
         has held for _recover_hold(), so a source that reconnects and drops
         again is one warning rather than a notification per cycle. A camera
         that stays online but stops producing fresh frames counts as stalled
-        - frozen feeds must not pass for monitoring.
+        - frozen feeds must not pass for monitoring. Printer health is checked
+        for every enabled monitor, since a printer that reports nothing usable
+        is the reason its monitor is watching in the first place.
         """
         while True:
             now = time.monotonic()
             for monitor in list(self._engine.monitors.values()):
                 mid = monitor["id"]
+                printer = self._engine.printers.get(monitor["printer_id"]) if monitor.get("printer_id") else None
+                if monitor.get("enabled") and printer is not None:
+                    await self._edge(
+                        f"device:{mid}",
+                        printer.online,
+                        now,
+                        OFFLINE_GRACE_S,
+                        monitor,
+                        f"Cannot tell whether the printer for '{monitor['name']}' is printing, so it keeps watching and a defect cannot pause the print",
+                        f"Printer for '{monitor['name']}' is reporting its state again",
+                    )
                 camera = self._engine.cameras.get(monitor["camera_id"]) if monitor["camera_id"] else None
                 if not monitor_watching(monitor, self._engine.printers) or camera is None:
                     self._online_since.pop(mid, None)
@@ -140,18 +153,6 @@ class Watchdog:
                 )
                 if stalled:
                     await self._engine.restart_camera(camera)
-                printer = self._engine.printers.get(monitor["printer_id"]) if monitor.get("printer_id") else None
-                if printer is not None:
-                    reachable = (printer.device_state or {}).get("status") != "offline"
-                    await self._edge(
-                        f"device:{mid}",
-                        reachable,
-                        now,
-                        OFFLINE_GRACE_S,
-                        monitor,
-                        f"Printer service for '{monitor['name']}' is unreachable, so defects cannot pause this print",
-                        f"Printer service for '{monitor['name']}' is reachable again",
-                    )
             await asyncio.sleep(WATCH_TICK_S)
 
     async def _edge(

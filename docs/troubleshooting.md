@@ -34,6 +34,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | Camera is **offline** in the registry but the feed works elsewhere | Wrong scheme or path, or a source that needs credentials in the URL | Re-test the URL. RTSP sources are pulled by MediaMTX, so it must reach them too |
 | **This device** camera will not start | Browsers only allow camera access on secure pages | Serve the hub over HTTPS or open it on `localhost`. [Deployment](deployment.md) covers both |
 | Feed plays but the risk score never moves | The monitor is in standby because its printer positively reports "not printing" | This is by design. See [failing safely](architecture.md#failing-safely) |
+| Risk score keeps moving with the printer sitting idle | The service reports a state PrintGuard cannot read, so the monitor cannot be stood down | This is by design, and the monitor's panel says which state it is getting. A warning goes out once the state has been unreadable for a few seconds |
 | Video is smooth for one camera and choppy for several | The host's sustainable capacity is shared across cameras | Check the **capacity** and **latency** readouts, then [Hardware](hardware.md#how-much-hardware-you-need) |
 | **Capacity** fell sharply after upgrading to 2.3.7 | 2.3.7 ran inference on two workers on hosts that could sustain many more | Fixed in 2.3.8, which measures the worker count. The startup log line `inference ready:` reports what it settled on |
 

@@ -324,7 +324,10 @@ stateDiagram-v2
 
 The three watchdog conditions are a watched camera going offline, a watched camera staying
 online but producing no fresh frames, since a frozen RTSP feed must not pass for monitoring,
-and a linked printer service becoming unreachable, since defects could no longer pause it.
+and a linked printer whose state cannot be read, whether it is unreachable or reporting
+something the adapter does not recognise. The last one is why the monitor is watching, and
+it means a defect could not pause the print, so it is checked for every enabled monitor
+rather than only for watched ones.
 
 Warnings surface as dashboard toasts and go out through the notification channels, so the
 watchdog suppresses flapping rather than repeating itself. A source that reconnects and drops
