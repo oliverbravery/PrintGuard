@@ -114,9 +114,9 @@ export function GettingStarted() {
         </ol>
         <button
           className="mt-5 text-xs text-text-2 underline transition-colors hover:text-accent"
-          onClick={() => openDialog("guide")}
+          onClick={() => openDialog("intro")}
         >
-          New here? Open the guide →
+          New here? How PrintGuard works →
         </button>
       </div>
     </div>
