@@ -58,6 +58,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   path, since Intel publishes no current driver for them.
 - The compute readout names the hardware, so `intel openvino` now reads `intel gpu` or
   `intel cpu`, and the log lists what the providers offered at start.
+- A monitor whose printer reports a state PrintGuard cannot read now warns and says so on its
+  panel. It keeps watching, which is the safe direction, but only an unreachable printer warned
+  before, so a printer stuck in something like OctoPrint's "Connecting" ran inference at the
+  camera's full frame rate with nothing explaining why. A printer that starts reporting again
+  is announced as recovered even if it comes back idle.
 
 ## [2.3.12] - 2026-08-12
 
