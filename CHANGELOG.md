@@ -19,6 +19,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - Four come as standard. Picture in picture floats a camera above your other windows, alert
   sounds plays a horn when a defect is caught, progress reports sends a tally of a print through
   your alert channels, and Spotify puts the current cover behind the dashboard.
+- A five-page walkthrough on first load, covering what PrintGuard does, cameras and printers,
+  monitors, and when inference runs and when it stands down. It only appears on an install with no
+  monitors yet, and the full guide stays behind the ? in the header.
 - A Glass theme, alongside System, Light and Dark. The panels frost over whatever is behind
   them, which is what the Spotify plugin's cover shows through. Picking it drops out two
   sliders for how clear the panels are and how light or dark, and text takes whichever colour

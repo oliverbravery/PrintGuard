@@ -11,9 +11,105 @@ export interface GuideSection {
   led: string;
   title: string;
   body: ReactNode;
+  visual?: ReactNode;
   action?: { label: string; dialog: DialogKind };
   hubOnly?: boolean;
 }
+
+const STEPS = ["Camera", "Score every frame", "Pause and alert"];
+
+const WATCH_STATES: { led: string; when: string; then: string }[] = [
+  { led: "led-on", when: "Printing, or no printer linked", then: "Watching, every frame scored" },
+  { led: "led-off", when: "Positively idle, paused or errored", then: "Standby, nothing scored" },
+  { led: "led-warn", when: "A dropped camera, a frozen feed, or a printer state it cannot read", then: "Keeps watching, and warns you" },
+];
+
+export const INTRO: GuideSection[] = [
+  {
+    id: "what",
+    led: "led-infer",
+    title: "What PrintGuard does",
+    body: (
+      <>
+        A vision model running on your own hardware scores every frame from your printer camera. When
+        a defect holds it pauses or cancels the print and sends you a snapshot. No frame ever leaves
+        your network.
+      </>
+    ),
+    visual: (
+      <div className="flex flex-wrap items-center gap-2">
+        {STEPS.map((step, i) => (
+          <span key={step} className="flex items-center gap-2">
+            {i > 0 && <span className="text-text-2">·</span>}
+            <span className="chip">{step}</span>
+          </span>
+        ))}
+      </div>
+    ),
+  },
+  {
+    id: "sources",
+    led: "led-on",
+    title: "Cameras and printers",
+    body: (
+      <>
+        A camera is any video source PrintGuard can read, so a USB device or an RTSP, MJPEG or WebRTC
+        stream. A printer is optional, and connecting one lets PrintGuard read whether it is printing
+        and stop it when something goes wrong.
+      </>
+    ),
+  },
+  {
+    id: "monitors",
+    led: "led-infer",
+    title: "Monitors are what you tune",
+    body: (
+      <>
+        A monitor binds one camera to one printer and carries the alert threshold, how many detections
+        in a row count as a defect, and what happens when one holds. Everything is set per monitor
+        from its detail panel.
+      </>
+    ),
+  },
+  {
+    id: "watching",
+    led: "led-warn",
+    title: "When inference runs",
+    body: (
+      <>
+        Only a printer that positively reports it is not printing stands a monitor down, so an idle
+        printer costs you nothing. Everything else keeps watching, which is why losing a camera or a
+        printer never leaves a print unwatched.
+      </>
+    ),
+    visual: (
+      <ul className="space-y-2">
+        {WATCH_STATES.map((state) => (
+          <li key={state.led} className="flex gap-3 rounded border border-line-0 bg-ink-0/40 px-3.5 py-2.5">
+            <span className={`led ${state.led} mt-[0.4rem]`} />
+            <div className="min-w-0">
+              <div className="text-sm text-text-0">{state.when}</div>
+              <div className="text-xs leading-relaxed text-text-2">{state.then}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    ),
+  },
+  {
+    id: "start",
+    led: "led-on",
+    title: "Start watching",
+    body: (
+      <>
+        Register a camera, then add a monitor binding it. Connect a printer and a notification channel
+        such as ntfy or Telegram for the full net. The rest of the guide sits behind the ? in the
+        header.
+      </>
+    ),
+    action: { label: "Register a camera", dialog: "cameras" },
+  },
+];
 
 export const GUIDE: GuideSection[] = [
   {
@@ -92,9 +188,7 @@ export const GUIDE: GuideSection[] = [
         Every frame is scored against failure prototypes. <strong>Alert threshold</strong> sets how
         high that score must reach, <strong>sensitivity</strong> widens or narrows the margin, and a
         defect must hold for a number of <strong>consecutive detections</strong> before PrintGuard
-        acts. <strong>On sustained defect</strong> chooses nothing, pause or cancel, and{" "}
-        <strong>cooldown</strong> is the quiet window afterwards. Tune these per monitor from its
-        detail panel.
+        acts. Tune it all per monitor from its detail panel.
       </>
     ),
   },
@@ -161,11 +255,9 @@ export const GUIDE: GuideSection[] = [
     body: (
       <>
         Add a panel to the dashboard or a job on the hub, from the catalogue or any GitHub repo.
-        Plugins are third-party code, so they run in a sandbox with only what you grant them. One
-        can put a picture behind the dashboard, which the <strong>Glass</strong> theme shows through
-        the panels.{" "}
-        <strong>Picture in picture</strong>, <strong>Alert sounds</strong> and <strong>Progress reports</strong>{" "}
-        come as standard.{" "}
+        Plugins are third-party code, so they run in a sandbox with only what you grant them.{" "}
+        <strong>Picture in picture</strong>, <strong>Alert sounds</strong>, <strong>Progress reports</strong>{" "}
+        and <strong>Spotify</strong> come as standard.{" "}
         <a className={link} href={docs("plugins.md")} target="_blank" rel="noreferrer">
           Writing one ↗
         </a>
@@ -191,8 +283,7 @@ export const GUIDE: GuideSection[] = [
     body: (
       <>
         Report a bug from the <BugIcon className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" /> chip in the header,
-        anonymously, no account needed. Describe what happened, attach screenshots if they help, and optionally
-        leave an email for follow-up. A diagnostics bundle goes with it, with every credential stripped and no
+        anonymously, no account needed. A diagnostics bundle goes with it, with every credential stripped and no
         camera frames. Download the same bundle from that dialog to read it or send it somewhere else yourself.
       </>
     ),

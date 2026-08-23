@@ -8,6 +8,7 @@ import { DemoDialog } from "./DemoDialog";
 import { DetailPanel } from "./DetailPanel";
 import { GettingStarted } from "./GettingStarted";
 import { GuideDialog } from "./GuideDialog";
+import { IntroDialog } from "./IntroDialog";
 import { Header, MobileActionBar } from "./Header";
 import { MonitorDialog } from "./MonitorDialog";
 import { MonitorTile } from "./MonitorTile";
@@ -111,6 +112,7 @@ export function Dashboard() {
       {dialog === "settings" && <SettingsDialog />}
       {dialog === "update" && <UpdateDialog />}
       {dialog === "guide" && <GuideDialog />}
+      {dialog === "intro" && <IntroDialog />}
       {dialog === "report" && <ReportDialog />}
       {dialog === "demo" && <DemoDialog />}
       {detail && <DetailPanel monitor={detail} />}
