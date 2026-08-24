@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fromBase64, renderMarkdown } from "../markdown";
 import { pluginFile, runsHere } from "../plugins";
 import { useStore } from "../store";
-import type { CatalogueEntry, Permission, PluginManifest, PluginRecord } from "../types";
+import type { CatalogueEntry, PluginManifest, PluginRecord } from "../types";
 import { ConsentDialog, PermissionList } from "./PluginConsent";
 import { PluginSecrets } from "./PluginSecrets";
 import { Toggle } from "./Toggle";
@@ -89,103 +89,26 @@ function InstallButton({ entry, installed }: { entry: CatalogueEntry; installed:
   );
 }
 
-function Installed({
-  plugin,
-  permissions,
-  hubOnly,
-  onOpen,
-}: {
-  plugin: PluginRecord;
-  permissions: Permission[];
-  hubOnly: boolean;
-  onOpen: () => void;
-}) {
+function EnableToggle({ plugin }: { plugin: PluginRecord }) {
   const send = useStore((s) => s.send);
-  const page = useStore((s) => s.pluginPages[plugin.id]);
-  const fetchPluginPage = useStore((s) => s.fetchPluginPage);
-  const [open, setOpen] = useState(false);
+  const permissions = useStore((s) => s.engine?.plugin_permissions ?? []);
+  const hubOnly = useStore((s) => s.engine?.plugin_host ?? false);
   const [consenting, setConsenting] = useState(false);
   const accepted = plugin.manifest.permissions.every((p) => plugin.granted.includes(p));
-  const fromRepo = plugin.source.kind === "github";
-  const origin = fromRepo
-    ? `${plugin.source.repo}${plugin.source.path ? `/${plugin.source.path}` : ""} @ ${String(plugin.source.ref).slice(0, 7)}`
-    : (plugin.source.filename ?? "imported file");
-
-  useEffect(() => {
-    if (!fromRepo && plugin.manifest.icon) fetchPluginPage(plugin.id);
-  }, [plugin.id]);
-
   return (
-    <div className="rounded border border-line-0 bg-ink-1 p-3 space-y-2.5">
-      <div className="flex items-center gap-3">
-        <button
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
-          aria-label={`Open ${plugin.manifest.name}'s page`}
-          onClick={onOpen}
-        >
-          <PluginIcon
-            url={fromRepo ? pluginFile(plugin.source, plugin.manifest.icon) : dataUrl(page ?? {}, plugin.manifest.icon)}
-            name={plugin.manifest.name}
-            size={36}
-          />
-          <span className="text-xs text-text-0 truncate flex-1">
-            {plugin.manifest.name} <span className="text-text-2">v{plugin.manifest.version}</span>
-          </span>
-        </button>
-        <span className={`chip ${plugin.verified ? "chip-ok" : ""}`}>{plugin.verified ? "verified" : "third party"}</span>
-        <Toggle
-          label={`Enable ${plugin.manifest.name}`}
-          hideLabel
-          on={plugin.enabled}
-          onChange={(on) =>
-            on && !accepted ? setConsenting(true) : send({ cmd: "plugin.update", id: plugin.id, patch: { enabled: on } })
-          }
-        />
-      </div>
-      <Runs platforms={plugin.manifest.platforms} />
-      {plugin.failure && <span className="block text-[0.7rem] text-bad">Stopped: {plugin.failure}</span>}
-      <span className="mono block truncate text-[0.65rem] text-text-2">{origin}</span>
-      <div className="flex items-center gap-2">
-        <button className="btn" aria-expanded={open} onClick={() => setOpen(!open)}>
-          {open ? "Hide" : "Permissions"}
-        </button>
-        {plugin.source.kind === "github" && (
-          <button className="btn" onClick={() => send({ cmd: "plugin.install", source: { ...plugin.source, ref: "HEAD" } })}>
-            Update
-          </button>
-        )}
-        <button className="btn btn-danger" onClick={() => send({ cmd: "plugin.remove", id: plugin.id })}>
-          Remove
-        </button>
-      </div>
-      {!accepted && <span className="block text-[0.7rem] text-warn">Waiting on permissions you have not accepted.</span>}
-      {open && <PermissionList plugin={plugin} permissions={permissions} hubOnly={hubOnly} />}
-      {plugin.enabled && <PluginSecrets plugin={plugin} />}
+    <span onClick={(event) => event.stopPropagation()}>
+      <Toggle
+        label={`Enable ${plugin.manifest.name}`}
+        hideLabel
+        on={plugin.enabled}
+        onChange={(on) =>
+          on && !accepted ? setConsenting(true) : send({ cmd: "plugin.update", id: plugin.id, patch: { enabled: on } })
+        }
+      />
       {consenting && (
         <ConsentDialog plugin={plugin} permissions={permissions} hubOnly={hubOnly} onClose={() => setConsenting(false)} />
       )}
-    </div>
-  );
-}
-
-function StoreCard({ entry, installed, onOpen }: { entry: CatalogueEntry; installed: boolean; onOpen: () => void }) {
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      className="flex cursor-pointer items-center gap-3 rounded border border-line-0 bg-ink-1 p-3 text-left transition-colors hover:border-accent"
-      onClick={onOpen}
-      onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && (event.preventDefault(), onOpen())}
-    >
-      <PluginIcon url={pluginFile(entry, entry.icon)} name={entry.name} size={44} />
-      <div className="min-w-0 flex-1 space-y-0.5">
-        <span className="block truncate text-xs text-text-0">
-          {entry.name} {entry.version && <span className="text-text-2">v{entry.version}</span>}
-        </span>
-        <span className="clamp-2 block text-[0.7rem] leading-snug text-text-2">{entry.description}</span>
-      </div>
-      <InstallButton entry={entry} installed={installed} />
-    </div>
+    </span>
   );
 }
 
@@ -196,6 +119,52 @@ function dataUrl(page: Record<string, string>, path: string | undefined): string
   if (!data || !path) return null;
   const kind = IMAGE_TYPES[path.split(".").pop()!.toLowerCase()] ?? "png";
   return `data:image/${kind};base64,${data}`;
+}
+
+function installedIcon(plugin: PluginRecord, page: Record<string, string> | undefined): string | null {
+  return plugin.source.kind === "github"
+    ? pluginFile(plugin.source, plugin.manifest.icon)
+    : dataUrl(page ?? {}, plugin.manifest.icon);
+}
+
+interface StoreItem {
+  id: string;
+  entry?: CatalogueEntry;
+  plugin?: PluginRecord;
+}
+
+function PluginCard({ item, onOpen }: { item: StoreItem; onOpen: () => void }) {
+  const page = useStore((s) => s.pluginPages[item.id]);
+  const fetchPluginPage = useStore((s) => s.fetchPluginPage);
+  const { entry, plugin } = item;
+  const name = plugin?.manifest.name ?? entry?.name ?? item.id;
+  const version = plugin?.manifest.version ?? entry?.version;
+  const description = plugin?.manifest.description || entry?.description || "";
+  const attention = plugin && (plugin.failure || !plugin.manifest.permissions.every((p) => plugin.granted.includes(p)));
+
+  useEffect(() => {
+    if (plugin && plugin.source.kind !== "github" && plugin.manifest.icon) fetchPluginPage(plugin.id);
+  }, [plugin?.id]);
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className="flex cursor-pointer items-center gap-3 rounded border border-line-0 bg-ink-1 p-3 text-left transition-colors hover:border-accent"
+      onClick={onOpen}
+      onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && (event.preventDefault(), onOpen())}
+    >
+      <PluginIcon url={plugin ? installedIcon(plugin, page) : pluginFile(entry!, entry!.icon)} name={name} size={44} />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <span className="block truncate text-xs text-text-0">
+          {name} {version && <span className="text-text-2">v{version}</span>}
+          {attention && <span className="chip chip-bad ml-2">needs attention</span>}
+        </span>
+        <span className="clamp-2 block text-[0.7rem] leading-snug text-text-2">{description}</span>
+      </div>
+      {plugin ? <EnableToggle plugin={plugin} /> : <InstallButton entry={entry!} installed={false} />}
+    </div>
+  );
 }
 
 function PluginPage({
@@ -211,6 +180,7 @@ function PluginPage({
   manifest,
   origin,
   onBack,
+  children,
 }: {
   icon: string | null;
   name: string;
@@ -224,6 +194,7 @@ function PluginPage({
   manifest: PluginManifest;
   origin: string;
   onBack: () => void;
+  children?: ReactNode;
 }) {
   const permissions = useStore((s) => s.engine?.plugin_permissions ?? []);
   const hubOnly = useStore((s) => s.engine?.plugin_host ?? false);
@@ -278,6 +249,8 @@ function PluginPage({
         <p className="text-[0.78rem] leading-relaxed text-text-1">{fallback}</p>
       )}
 
+      {children}
+
       <div>
         <span className="label mb-2 block">{action ? "Permissions it will ask for" : "Permissions it asks for"}</span>
         <PermissionList plugin={{ manifest }} permissions={permissions} hubOnly={hubOnly} />
@@ -289,11 +262,13 @@ function PluginPage({
 }
 
 function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () => void }) {
+  const send = useStore((s) => s.send);
   const page = useStore((s) => s.pluginPages[plugin.id]);
   const fetchPluginPage = useStore((s) => s.fetchPluginPage);
   const [fetched, setFetched] = useState<string | null | undefined>(undefined);
   const fromRepo = plugin.source.kind === "github";
   const manifest = plugin.manifest;
+  const accepted = manifest.permissions.every((p) => plugin.granted.includes(p));
 
   useEffect(() => {
     if (!fromRepo) fetchPluginPage(plugin.id);
@@ -336,18 +311,42 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
 
   return (
     <PluginPage
-      icon={fromRepo ? pluginFile(plugin.source, manifest.icon) : dataUrl(page ?? {}, manifest.icon)}
+      icon={installedIcon(plugin, page)}
       name={manifest.name}
       author={manifest.author}
       version={manifest.version}
       platforms={manifest.platforms}
+      action={<EnableToggle plugin={plugin} />}
       media={media}
       readme={readme}
       fallback={manifest.description}
       manifest={manifest}
       origin={origin}
       onBack={onBack}
-    />
+    >
+      <div className="space-y-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`chip ${plugin.verified ? "chip-ok" : ""}`}>{plugin.verified ? "verified" : "third party"}</span>
+          {fromRepo && (
+            <button className="btn" onClick={() => send({ cmd: "plugin.install", source: { ...plugin.source, ref: "HEAD" } })}>
+              Update
+            </button>
+          )}
+          <button
+            className="btn btn-danger"
+            onClick={() => {
+              send({ cmd: "plugin.remove", id: plugin.id });
+              onBack();
+            }}
+          >
+            Remove
+          </button>
+        </div>
+        {plugin.failure && <span className="block text-[0.7rem] text-bad">Stopped: {plugin.failure}</span>}
+        {!accepted && <span className="block text-[0.7rem] text-warn">Waiting on permissions you have not accepted.</span>}
+        {plugin.enabled && <PluginSecrets plugin={plugin} />}
+      </div>
+    </PluginPage>
   );
 }
 
@@ -428,11 +427,10 @@ export function PluginsTab() {
   const { engine, catalogue, fetchCatalogue, installPlugin, isPending, toast } = useStore();
   const [repo, setRepo] = useState("");
   const [query, setQuery] = useState("");
-  const [platform, setPlatform] = useState<string | null>(null);
-  const [view, setView] = useState<{ kind: "entry" | "installed"; id: string } | null>(null);
+  const [filter, setFilter] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const plugins = engine?.plugins ?? [];
-  const permissions = engine?.plugin_permissions ?? [];
   const labels = engine?.plugin_platforms ?? {};
   const host = engine?.host ?? "";
 
@@ -440,25 +438,32 @@ export function PluginsTab() {
     if (catalogue === null) fetchCatalogue();
   }, []);
 
+  const items: StoreItem[] = [
+    ...(catalogue ?? []).map((entry) => ({ id: entry.id, entry, plugin: plugins.find((p) => p.id === entry.id) })),
+    ...plugins.filter((p) => !(catalogue ?? []).some((entry) => entry.id === p.id)).map((plugin) => ({ id: plugin.id, plugin })),
+  ];
+
   const bases = Object.keys(labels).filter((id) => !id.includes("-"));
-  const chosen = platform ?? bases.find((id) => runsHere([id], host)) ?? "";
-  const target = chosen === "" ? "" : runsHere([chosen], host) ? host : chosen;
+  const chosen = filter ?? bases.find((id) => runsHere([id], host)) ?? "";
+  const target = chosen === "" || chosen === "installed" ? "" : runsHere([chosen], host) ? host : chosen;
   const needle = query.trim().toLowerCase();
-  const listed = (catalogue ?? []).filter(
-    (entry) =>
-      (target === "" || runsHere(entry.platforms, target)) &&
-      (needle === "" ||
-        [entry.name, entry.description ?? "", entry.author ?? "", entry.id].some((text) => text.toLowerCase().includes(needle))),
-  );
-  if (view?.kind === "installed") {
-    const opened = plugins.find((p) => p.id === view.id);
-    if (opened) return <InstalledDetail plugin={opened} onBack={() => setView(null)} />;
-  }
-  if (view?.kind === "entry") {
-    const opened = (catalogue ?? []).find((entry) => entry.id === view.id);
-    if (opened) {
-      return <StoreDetail entry={opened} installed={plugins.some((p) => p.id === opened.id)} onBack={() => setView(null)} />;
-    }
+  const listed = items.filter((item) => {
+    const platforms = item.entry?.platforms ?? item.plugin?.manifest.platforms;
+    const words = [
+      item.plugin?.manifest.name ?? item.entry?.name ?? "",
+      item.plugin?.manifest.description ?? item.entry?.description ?? "",
+      item.plugin?.manifest.author ?? item.entry?.author ?? "",
+      item.id,
+    ];
+    if (chosen === "installed" && !item.plugin) return false;
+    if (target !== "" && !runsHere(platforms, target)) return false;
+    return needle === "" || words.some((text) => text.toLowerCase().includes(needle));
+  });
+
+  const opened = items.find((item) => item.id === openId);
+  if (opened?.plugin) return <InstalledDetail plugin={opened.plugin} onBack={() => setOpenId(null)} />;
+  if (opened?.entry) {
+    return <StoreDetail entry={opened.entry} installed={false} onBack={() => setOpenId(null)} />;
   }
 
   const installFromRepo = () => {
@@ -478,28 +483,23 @@ export function PluginsTab() {
         </span>
       </div>
 
-      {plugins.length > 0 && (
-        <div className="space-y-2">
-          {plugins.map((plugin) => (
-            <Installed
-              key={plugin.id}
-              plugin={plugin}
-              permissions={permissions}
-              hubOnly={engine?.plugin_host ?? false}
-              onOpen={() => setView({ kind: "installed", id: plugin.id })}
-            />
-          ))}
-        </div>
-      )}
-
       <div className="flex flex-wrap items-center gap-2">
         <span className="label flex-1">Catalogue</span>
+        {plugins.length > 0 && (
+          <button
+            className={`chip cursor-pointer hover:opacity-80 ${chosen === "installed" ? "chip-accent" : ""}`}
+            aria-pressed={chosen === "installed"}
+            onClick={() => setFilter("installed")}
+          >
+            Installed
+          </button>
+        )}
         {bases.map((id) => (
           <button
             key={id}
             className={`chip cursor-pointer hover:opacity-80 ${chosen === id ? "chip-accent" : ""}`}
             aria-pressed={chosen === id}
-            onClick={() => setPlatform(id)}
+            onClick={() => setFilter(id)}
           >
             {labels[id]}
           </button>
@@ -507,7 +507,7 @@ export function PluginsTab() {
         <button
           className={`chip cursor-pointer hover:opacity-80 ${chosen === "" ? "chip-accent" : ""}`}
           aria-pressed={chosen === ""}
-          onClick={() => setPlatform("")}
+          onClick={() => setFilter("")}
         >
           Everything
         </button>
@@ -526,21 +526,18 @@ export function PluginsTab() {
         <span className="block text-[0.7rem] text-text-2">Loading the catalogue…</span>
       ) : listed.length === 0 ? (
         <span className="block text-[0.7rem] text-text-2">
-          {catalogue.length === 0
+          {items.length === 0
             ? "Nothing listed, or the catalogue is unreachable."
             : needle
               ? `Nothing matches "${query.trim()}".`
-              : `Nothing listed for ${labels[chosen] ?? chosen}.`}
+              : chosen === "installed"
+                ? "Nothing installed yet."
+                : `Nothing listed for ${labels[chosen] ?? chosen}.`}
         </span>
       ) : (
         <div className="space-y-2">
-          {listed.map((entry) => (
-            <StoreCard
-              key={entry.id}
-              entry={entry}
-              installed={plugins.some((p) => p.id === entry.id)}
-              onOpen={() => setView({ kind: "entry", id: entry.id })}
-            />
+          {listed.map((item) => (
+            <PluginCard key={item.id} item={item} onOpen={() => setOpenId(item.id)} />
           ))}
         </div>
       )}
