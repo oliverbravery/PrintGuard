@@ -89,6 +89,8 @@ def entry(directory: Path) -> dict:
         "description": manifest["description"],
         "author": manifest["author"],
         "version": manifest["version"],
+        "icon": manifest["icon"],
+        "media": manifest["media"],
         "permissions": manifest["permissions"],
         "surfaces": manifest["surfaces"],
         "platforms": manifest["platforms"],

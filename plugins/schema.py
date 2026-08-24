@@ -132,6 +132,18 @@ def schema() -> dict:
                 "description": "Where it runs. Leave it out for everywhere, and name a bare platform to cover its variants.",
                 "items": {"anyOf": choices(plugins.PLATFORMS)},
             },
+            "icon": {
+                "type": "string",
+                "pattern": plugins.MEDIA_PATTERN.pattern,
+                "description": "An image in your plugin's folder shown beside its name in the catalogue and the installed list. Square reads best. Read from your repository at the pinned commit, never installed.",
+            },
+            "media": {
+                "type": "array",
+                "uniqueItems": True,
+                "maxItems": plugins.MAX_MEDIA,
+                "description": "Screenshots or GIFs in your plugin's folder, shown as a gallery on your catalogue page. Read from your repository at the pinned commit, never installed.",
+                "items": {"type": "string", "pattern": plugins.MEDIA_PATTERN.pattern},
+            },
             "assets": {
                 "type": "array",
                 "uniqueItems": True,

@@ -86,6 +86,15 @@ export function outboundLink(id: string, action: string, request: Record<string,
   };
 }
 
+export function pluginFile(
+  source: { repo?: string; path?: string; ref?: string },
+  file: string | undefined,
+): string | null {
+  if (!source.repo || !source.ref || !file) return null;
+  const prefix = source.path ? `${source.path}/` : "";
+  return `https://raw.githubusercontent.com/${source.repo}/${source.ref}/${prefix}${file}`;
+}
+
 export function runsHere(platforms: string[] | undefined, host: string): boolean {
   return !platforms?.length || platforms.some((name) => host === name || host.startsWith(`${name}-`));
 }

@@ -89,20 +89,30 @@ const CATALOGUE = [
   {
     id: "picture-in-picture", name: "Picture in picture", version: "1.2.0", author: "oliverbravery",
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
+    icon: "icon.png", media: ["shots/monitor.png"],
     repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40),
     permissions: ["state:read", "camera:view"], platforms: [], surfaces: ["monitor", "float"], digests: {},
   },
   {
     id: "alert-sounds", name: "Alert sounds", version: "1.1.0", author: "oliverbravery",
     description: "Sounds a horn, a bell or an alarm the moment a defect is caught, on the monitors you switch it on for.",
+    icon: "icon.png", media: ["shots/settings.png"],
     repo: "oliverbravery/PrintGuard", path: "plugins/alert-sounds", ref: "c".repeat(40),
     permissions: ["state:read", "sound"], platforms: [], surfaces: ["settings"], digests: {},
   },
   {
     id: "progress-reports", name: "Progress reports", version: "1.0.0", author: "oliverbravery",
     description: "Sends how far a print has got and how many defects it has seen, as often as you ask, on the monitors you switch it on for.",
+    icon: "icon.png", media: ["shots/settings.png"],
     repo: "oliverbravery/PrintGuard", path: "plugins/progress-reports", ref: "d".repeat(40),
     permissions: ["state:read", "alert:send"], platforms: [], surfaces: ["settings"], digests: {},
+  },
+  {
+    id: "spotify", name: "Spotify", version: "1.0.0", author: "oliverbravery",
+    description: "Puts the current cover behind the dashboard, with the track and the transport in a panel.",
+    icon: "icon.png", media: ["shots/dashboard.jpg"],
+    repo: "oliverbravery/PrintGuard", path: "plugins/spotify", ref: "e".repeat(40),
+    permissions: ["net", "oauth", "background"], platforms: [], surfaces: ["panel"], digests: {},
   },
   {
     id: "print-log", name: "Print log", version: "0.3.0", author: "community",
@@ -126,6 +136,7 @@ function installed(id: string, name: string, permissions: string[], surfaces: st
     id,
     manifest: {
       id, name, version: "1.0.0", description: "", author: "oliverbravery", homepage: "",
+      icon: "icon.png", media: [],
       permissions, reasons: {}, surfaces, platforms: [], assets: [], urls: [],
       secrets: {}, provides: {}, consumes: [], oauth: {}, events: files.includes("panel.html") ? ["http"] : [], tick_s: 0,
     },
@@ -146,6 +157,7 @@ const INSTALLED = {
   id: "picture-in-picture",
   manifest: {
     id: "picture-in-picture", name: "Picture in picture", version: "1.2.0", author: "oliverbravery", homepage: "",
+    icon: "icon.png", media: ["shots/monitor.png"],
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
     permissions: ["state:read", "camera:view"], reasons: {}, surfaces: ["monitor"], platforms: [], assets: [],
     urls: [], secrets: {}, provides: {}, consumes: [], oauth: {}, events: [], tick_s: 0,
@@ -175,6 +187,7 @@ interface Scene {
   history?: Record<string, ScorePoint[]>;
   hideFeeds?: boolean;
   catalogue?: unknown[];
+  prepare?: (page: Page) => Promise<void>;
   tuner?: boolean;
   mutate?: (engine: EngineState) => void;
 }
@@ -208,9 +221,24 @@ const SCENES: Scene[] = [
       e.plugins = [INSTALLED as never];
     },
   },
+  {
+    name: "plugin-page", width: 1360, height: 900, theme: "dark", settingsTab: "plugins", catalogue: CATALOGUE,
+    prepare: async (page) => {
+      await page.getByText("Spotify v1.0.0").click();
+      await page.waitForTimeout(700);
+      await page.waitForFunction(() => Array.from(document.images).every((i) => i.complete));
+    },
+  },
   { name: "plugins-live", width: 1360, height: 720, theme: "dark", plugins: ["spotify", "picture-in-picture"], mutate: live },
   { name: "glass", width: 1360, height: 720, theme: "dark", plugins: ["spotify", "picture-in-picture"], tuner: true, mutate: live },
 ];
+
+const surfaces = (e: EngineState) => {
+  e.plugins = [
+    installed("alert-sounds", "Alert sounds", ["state:read", "sound"], ["settings"], ["plugin.js"]),
+    installed("progress-reports", "Progress reports", ["state:read", "alert:send"], ["settings"], ["plugin.js", "worker.js"]),
+  ] as never;
+};
 
 const stoodDown = (e: EngineState) => {
   e.monitors = [
@@ -322,6 +350,12 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
     (window as unknown as { WebSocket: unknown }).WebSocket = UnconnectedSocket;
     Object.defineProperty(Document.prototype, "pictureInPictureEnabled", { get: () => true, configurable: true });
   });
+  await page.route("https://raw.githubusercontent.com/**", async (route) => {
+    const wanted = new URL(route.request().url()).pathname.split("/").slice(4).join("/");
+    const local = resolve(here, "../..", wanted);
+    if (wanted.startsWith("plugins/") && existsSync(local)) await route.fulfill({ path: local });
+    else await route.fulfill({ status: 404, body: "" });
+  });
   await page.goto("/");
   await page.evaluate(
     ({ state, theme }) => {
@@ -362,6 +396,7 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
 
 async function capture(browser: Browser, scene: Scene): Promise<void> {
   const { page, close } = await stage(browser, scene);
+  if (scene.prepare) await scene.prepare(page);
   await page.screenshot({ path: asset(`${scene.name}.png`) });
   await close();
 }
@@ -431,6 +466,67 @@ async function runPlugins(page: import("@playwright/test").Page, ids: string[]):
 for (const scene of SCENES) {
   test(scene.name, async ({ browser }) => {
     await capture(browser, scene);
+  });
+}
+
+const pluginShot = (id: string, name: string) => resolve(here, "../../plugins", id, "shots", name);
+
+interface PluginShot {
+  id: string;
+  file: string;
+  scene: Omit<Scene, "name" | "theme">;
+  target?: (page: Page) => Locator;
+  prepare?: (page: Page) => Promise<void>;
+  jpeg?: boolean;
+}
+
+const PLUGIN_SHOTS: PluginShot[] = [
+  {
+    id: "spotify",
+    file: "dashboard.jpg",
+    jpeg: true,
+    scene: { width: 1200, height: 700, plugins: ["spotify", "picture-in-picture"], mutate: live },
+  },
+  {
+    id: "picture-in-picture",
+    file: "monitor.png",
+    scene: { width: 1200, height: 700, plugins: ["spotify", "picture-in-picture"], mutate: live },
+    target: (page) => page.locator(".tile").first(),
+  },
+  {
+    id: "alert-sounds",
+    file: "settings.png",
+    scene: { width: 1000, height: 1400, detailId: "m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
+    prepare: async (page) => {
+      await page.locator("section").filter({ hasText: "Alert sounds" }).getByRole("switch").click();
+      await page.waitForTimeout(500);
+    },
+    target: (page) => page.locator("section").filter({ hasText: "Alert sounds" }).first(),
+  },
+  {
+    id: "progress-reports",
+    file: "settings.png",
+    scene: { width: 1000, height: 1400, detailId: "m1", plugins: ["alert-sounds", "progress-reports"], mutate: surfaces },
+    prepare: async (page) => {
+      await page.locator("section").filter({ hasText: "Progress reports" }).getByRole("switch").click();
+      await page.waitForTimeout(500);
+    },
+    target: (page) => page.locator("section").filter({ hasText: "Progress reports" }).first(),
+  },
+];
+
+async function capturePluginShot(browser: Browser, shot: PluginShot): Promise<void> {
+  const { page, close } = await stage(browser, { ...shot.scene, name: `plugin-${shot.id}`, theme: "dark" });
+  if (shot.prepare) await shot.prepare(page);
+  const kind = shot.jpeg ? ({ type: "jpeg", quality: 88 } as const) : {};
+  if (shot.target) await shot.target(page).screenshot({ path: pluginShot(shot.id, shot.file), ...kind });
+  else await page.screenshot({ path: pluginShot(shot.id, shot.file), ...kind });
+  await close();
+}
+
+for (const shot of PLUGIN_SHOTS) {
+  test(`plugin shot ${shot.id}`, async ({ browser }) => {
+    await capturePluginShot(browser, shot);
   });
 }
 

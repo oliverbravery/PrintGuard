@@ -17,6 +17,7 @@
     "@tailwindcss/vite": "^4.3.0",
     "acorn": "^8.18.0",
     "acorn-walk": "^8.3.5",
+    "dompurify": "^3.4.14",
     "hls.js": "^1.6.16",
     "marked": "^18.0.5",
     "parse5": "^8.0.1",
