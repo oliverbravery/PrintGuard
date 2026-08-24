@@ -265,7 +265,7 @@ const DESK = { width: 1000, height: 820 } as const;
 
 const CROPS: Crop[] = [
   {
-    id: "alert", ...DESK, pad: 0, tallest: 240,
+    id: "alert", ...DESK, pad: 0,
     mutate: (e) => {
       e.monitors = e.monitors.slice(0, 2);
     },
@@ -276,47 +276,41 @@ const CROPS: Crop[] = [
     target: (page) => page.locator(".tile").nth(1),
   },
   {
-    id: "checklist", ...DESK,
+    id: "checklist", ...DESK, height: 1000,
     mutate: (e) => {
       e.cameras = [];
       e.printers = [];
       e.monitors = [];
     },
     target: (page) => page.locator(".panel").filter({ hasText: "GET PRINTGUARD WATCHING" }).first(),
-    tallest: 296,
   },
   {
     id: "cameras", ...DESK,
     target: (page) => page.locator("section").filter({ hasText: "CAMERA REGISTRY" }).locator(".panel").first(),
   },
   {
-    id: "tuning", ...DESK, height: 1200, detailId: "m1",
+    id: "tuning", ...DESK, height: 1500, detailId: "m1",
     target: (page) => page.locator("section").filter({ hasText: "Watch this monitor" }).first(),
-    tallest: 250,
   },
   {
-    id: "printers", ...DESK, dialog: "printers", pad: 0,
+    id: "printers", ...DESK, height: 1000, dialog: "printers", pad: 0,
     target: (page) => page.locator("dialog > .panel"),
-    tallest: 215,
   },
   {
-    id: "alerts", ...DESK, settingsTab: "alerts",
+    id: "alerts", ...DESK, height: 1200, settingsTab: "alerts",
     target: (page) => page.locator("#settings-panel-alerts"),
-    tallest: 250,
     mutate: (e) => {
       e.notifiers = NOTIFIERS as never;
       e.settings.notifiers = { ntfy: { url: "https://ntfy.sh/my-prints" } };
     },
   },
   {
-    id: "customise", ...DESK, customising: true,
+    id: "customise", ...DESK, customising: true, pad: 0,
     target: (page) => page.locator(".tile").first(),
-    tallest: 90,
   },
   {
-    id: "plugins", ...DESK, settingsTab: "plugins", catalogue: CATALOGUE,
+    id: "plugins", ...DESK, height: 1600, settingsTab: "plugins", catalogue: CATALOGUE,
     target: (page) => page.locator("#settings-panel-plugins"),
-    tallest: 262,
     mutate: (e) => {
       e.plugins = [INSTALLED as never];
     },

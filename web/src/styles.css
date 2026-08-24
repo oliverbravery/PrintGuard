@@ -113,7 +113,7 @@ body {
 }
 
 :root[data-glass] {
-  --painted-surface: var(--glass-surface, rgb(20 20 20 / 0.38));
+  --painted-surface: var(--glass-surface, rgb(0 0 0 / 0.1));
   --painted-glass: blur(30px) saturate(180%);
   --painted-ink: var(--glass-ink, #ffffff);
   --painted-muted: var(--glass-muted, rgb(255 255 255 / 0.85));
@@ -493,7 +493,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .reveal {
-  animation: reveal 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: reveal 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: calc(var(--i, 0) * 55ms);
 }
 
@@ -537,6 +537,13 @@ dialog.modal[open] {
 dialog.modal::backdrop {
   background: rgba(5, 6, 4, 0.72);
   backdrop-filter: blur(3px);
+  transition: opacity 220ms ease;
+}
+
+@starting-style {
+  dialog.modal[open]::backdrop {
+    opacity: 0;
+  }
 }
 
 .modal-center {
@@ -557,7 +564,7 @@ dialog.modal::backdrop {
 }
 
 .slide-in {
-  animation: slide-in 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: slide-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes slide-in {
@@ -565,11 +572,19 @@ dialog.modal::backdrop {
 }
 
 .rise-in {
-  animation: rise-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: rise-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes rise-in {
-  from { transform: translateY(14px); opacity: 0; }
+  from { transform: translateY(18px) scale(0.985); opacity: 0; }
+}
+
+.page-swap {
+  animation: page-swap 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes page-swap {
+  from { transform: translateY(6px); opacity: 0; }
 }
 
 .toggle {
