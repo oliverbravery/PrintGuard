@@ -45,7 +45,7 @@ export function PluginIcon({ url, name, size }: { url: string | null; name: stri
       width={size}
       height={size}
       loading="lazy"
-      className="shrink-0 rounded-xl border border-line-0"
+      className="shrink-0 rounded-xl border border-line-0 bg-ink-2"
       style={{ width: size, height: size }}
       onError={() => setBroken(true)}
     />
@@ -276,6 +276,7 @@ function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; inst
 export function PluginsTab() {
   const { engine, catalogue, fetchCatalogue, installPlugin, isPending, toast } = useStore();
   const [repo, setRepo] = useState("");
+  const [query, setQuery] = useState("");
   const [platform, setPlatform] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
@@ -291,7 +292,13 @@ export function PluginsTab() {
   const bases = Object.keys(labels).filter((id) => !id.includes("-"));
   const chosen = platform ?? bases.find((id) => runsHere([id], host)) ?? "";
   const target = chosen === "" ? "" : runsHere([chosen], host) ? host : chosen;
-  const listed = (catalogue ?? []).filter((entry) => target === "" || runsHere(entry.platforms, target));
+  const needle = query.trim().toLowerCase();
+  const listed = (catalogue ?? []).filter(
+    (entry) =>
+      (target === "" || runsHere(entry.platforms, target)) &&
+      (needle === "" ||
+        [entry.name, entry.description ?? "", entry.author ?? "", entry.id].some((text) => text.toLowerCase().includes(needle))),
+  );
   const detail = detailId === null ? null : (catalogue ?? []).find((entry) => entry.id === detailId);
 
   if (detail) {
@@ -346,13 +353,24 @@ export function PluginsTab() {
         </button>
       </div>
 
+      <input
+        className="field"
+        type="search"
+        placeholder="Search the catalogue"
+        aria-label="Search the catalogue"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+
       {catalogue === null ? (
         <span className="block text-[0.7rem] text-text-2">Loading the catalogue…</span>
       ) : listed.length === 0 ? (
         <span className="block text-[0.7rem] text-text-2">
           {catalogue.length === 0
             ? "Nothing listed, or the catalogue is unreachable."
-            : `Nothing listed for ${labels[chosen] ?? chosen}.`}
+            : needle
+              ? `Nothing matches "${query.trim()}".`
+              : `Nothing listed for ${labels[chosen] ?? chosen}.`}
         </span>
       ) : (
         <div className="space-y-2">

@@ -114,12 +114,6 @@ const CATALOGUE = [
     repo: "oliverbravery/PrintGuard", path: "plugins/spotify", ref: "e".repeat(40),
     permissions: ["net", "oauth", "background"], platforms: [], surfaces: ["panel"], digests: {},
   },
-  {
-    id: "print-log", name: "Print log", version: "0.3.0", author: "community",
-    description: "Writes every alert to a webhook so you can keep a record outside PrintGuard.",
-    repo: "someone/printguard-print-log", ref: "b".repeat(40),
-    permissions: ["state:read", "notify"], platforms: [], surfaces: ["panel"], digests: {},
-  },
 ];
 
 const NOW_PLAYING = {
