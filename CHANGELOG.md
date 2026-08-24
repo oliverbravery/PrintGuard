@@ -19,7 +19,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - Each catalogue plugin has a page: an icon, screenshots or GIFs and its README, rendered the
   way GitHub renders it, with the permissions it will ask for and the author's reason for each.
   Everything is read from the plugin's repository at the pinned commit, so nothing new is
-  installed or executed by looking. A search box filters the catalogue.
+  installed or executed by looking. A search box filters the catalogue, every installed
+  plugin's page opens from its card, and a plugin installed from a zip carries its page
+  inside the zip.
 - Four come as standard. Picture in picture floats a camera above your other windows, alert
   sounds plays a horn when a defect is caught, progress reports sends a tally of a print through
   your alert channels, and Spotify puts the current cover behind the dashboard.

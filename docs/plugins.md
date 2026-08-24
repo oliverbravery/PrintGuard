@@ -223,9 +223,10 @@ my-plugin/
 deciding whether to enable it. Say what your plugin does with it, not what the permission is.
 
 `icon`, `media` and a `README.md` are how a plugin presents itself. The icon sits beside its
-name, the media images open the catalogue page as a gallery, and the README renders under
-them the way GitHub renders it, relative image paths included. These files are read from your
-repository at the pinned commit and are never installed, so they add nothing to what runs.
+name, the media images open the plugin's page as a gallery, and the README renders under
+them the way GitHub renders it, relative image paths included. Every installed plugin's page
+opens from its card. For a repository install these files are read from the repository at the
+pinned commit; a zip carries them inside it. Either way they add nothing to what runs.
 
 `surfaces` says where the panel appears.
 

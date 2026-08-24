@@ -239,6 +239,10 @@ class Plugin:
             bytes stay the ones that were hashed at install.
         assets: The files the plugin ships beside its code, base64 encoded and
             keyed by name, held for the same reason.
+        page: The icon, media and README presenting a zip-installed plugin,
+            base64 encoded and keyed by manifest path. Empty for repository
+            installs, whose page is read from the repository at the pinned
+            commit.
         digests: SHA-256 of the canonical manifest and of every file with it.
         source: Where it was installed from, for reinstalling and for display.
         granted: Permissions the user has actually granted, a subset of those
@@ -258,6 +262,7 @@ class Plugin:
     digests: dict[str, str]
     source: dict[str, Any]
     assets: dict[str, str] = field(default_factory=dict)
+    page: dict[str, str] = field(default_factory=dict)
     granted: list[str] = field(default_factory=list)
     config: dict[str, Any] = field(default_factory=dict)
     secrets: dict[str, str] = field(default_factory=dict)
@@ -294,6 +299,7 @@ class Plugin:
             "manifest": self.manifest,
             "sources": self.sources,
             "assets": self.assets,
+            "page": self.page,
             "digests": self.digests,
             "source": self.source,
             "granted": self.granted,

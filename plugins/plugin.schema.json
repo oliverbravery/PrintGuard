@@ -310,13 +310,13 @@
     "icon": {
       "type": "string",
       "pattern": "^[a-z0-9][\\w-]*(?:/[\\w-]+)*\\.(?:png|jpe?g|webp|gif|svg)$",
-      "description": "An image in your plugin's folder shown beside its name in the catalogue and the installed list. Square reads best. Read from your repository at the pinned commit, never installed."
+      "description": "An image in your plugin's folder shown beside its name in the catalogue and the installed list. Square reads best. Read from your repository at the pinned commit, or carried inside a zip install."
     },
     "media": {
       "type": "array",
       "uniqueItems": true,
       "maxItems": 8,
-      "description": "Screenshots or GIFs in your plugin's folder, shown as a gallery on your catalogue page. Read from your repository at the pinned commit, never installed.",
+      "description": "Screenshots or GIFs in your plugin's folder, shown as a gallery on your page. Read from your repository at the pinned commit, or carried inside a zip install.",
       "items": {
         "type": "string",
         "pattern": "^[a-z0-9][\\w-]*(?:/[\\w-]+)*\\.(?:png|jpe?g|webp|gif|svg)$"

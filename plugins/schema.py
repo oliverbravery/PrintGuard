@@ -135,13 +135,13 @@ def schema() -> dict:
             "icon": {
                 "type": "string",
                 "pattern": plugins.MEDIA_PATTERN.pattern,
-                "description": "An image in your plugin's folder shown beside its name in the catalogue and the installed list. Square reads best. Read from your repository at the pinned commit, never installed.",
+                "description": "An image in your plugin's folder shown beside its name in the catalogue and the installed list. Square reads best. Read from your repository at the pinned commit, or carried inside a zip install.",
             },
             "media": {
                 "type": "array",
                 "uniqueItems": True,
                 "maxItems": plugins.MAX_MEDIA,
-                "description": "Screenshots or GIFs in your plugin's folder, shown as a gallery on your catalogue page. Read from your repository at the pinned commit, never installed.",
+                "description": "Screenshots or GIFs in your plugin's folder, shown as a gallery on your page. Read from your repository at the pinned commit, or carried inside a zip install.",
                 "items": {"type": "string", "pattern": plugins.MEDIA_PATTERN.pattern},
             },
             "assets": {

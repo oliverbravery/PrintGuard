@@ -120,10 +120,12 @@ interface PgStore {
   pluginAssets: Record<string, Record<string, string>>;
   pluginFailures: Record<string, string>;
   catalogue: CatalogueEntry[] | null;
+  pluginPages: Record<string, Record<string, string>>;
   pluginAct(id: string, action: string, arg: unknown): void;
   checkPlugin(id: string): void;
   mountPanel(id: string, frame: HTMLIFrameElement | null): void;
   fetchCatalogue(): void;
+  fetchPluginPage(id: string): void;
   installPlugin(source: Record<string, unknown>, zip?: string): void;
   setCustomising(on: boolean): void;
   mutateLayout(key: keyof Layout, fn: (section: LayoutSection) => LayoutSection): void;
@@ -435,6 +437,11 @@ export const useStore = create<PgStore>((set, get) => {
         syncPlugins(engine);
         break;
       }
+      case "plugin_page": {
+        clearPending(event.req_id);
+        set((s) => ({ pluginPages: { ...s.pluginPages, [event.id]: event.page ?? {} } }));
+        break;
+      }
       case "plugin_code": {
         if (codeRequests.get(event.req_id) !== event.id) break;
         codeRequests.delete(event.req_id);
@@ -604,6 +611,7 @@ export const useStore = create<PgStore>((set, get) => {
     pluginAssets: {},
     pluginFailures: {},
     catalogue: null,
+    pluginPages: {},
 
     pluginAct(id, action, arg) {
       const plugin = get().engine?.plugins.find((p) => p.id === id);
@@ -614,6 +622,10 @@ export const useStore = create<PgStore>((set, get) => {
 
     fetchCatalogue() {
       get().send({ cmd: "plugin.catalogue" });
+    },
+
+    fetchPluginPage(id) {
+      if (get().pluginPages[id] === undefined) get().send({ cmd: "plugin.page", id });
     },
 
     installPlugin(source, zip) {

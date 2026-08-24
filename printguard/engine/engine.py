@@ -116,6 +116,7 @@ class Engine:
             "plugin.update": self._cmd_plugin_update,
             "plugin.code": self._cmd_plugin_code,
             "plugin.catalogue": self._cmd_plugin_catalogue,
+            "plugin.page": self._cmd_plugin_page,
             "plugin.http": self._cmd_plugin_http,
             "plugin.socket": self._cmd_plugin_socket,
             "plugin.call": self._cmd_plugin_call,
@@ -810,13 +811,15 @@ class Engine:
         accepted manifest stands down until the wider list is accepted.
         """
         source = dict(message.get("source") or {})
+        page: dict[str, str] = {}
         if source.get("kind") == "github":
             manifest, sources, files, sha = await plugins.fetch_github(
                 self.platform.http, str(source.get("repo", "")), str(source.get("path", "")), str(source.get("ref") or "HEAD")
             )
             source = {"kind": "github", "repo": source["repo"], "path": str(source.get("path", "")), "ref": sha}
         elif source.get("kind") == "file":
-            manifest, sources, files = plugins.unpack(base64.b64decode(message["zip"]))
+            manifest, sources, files, page_files = plugins.unpack(base64.b64decode(message["zip"]))
+            page = plugins.sanitise_page(page_files)
             source = {"kind": "file", "filename": str(source.get("filename", "") or "bundle.zip")}
         else:
             raise ValueError(f"unknown plugin source {source.get('kind')!r}")
@@ -843,6 +846,7 @@ class Engine:
                 manifest=manifest,
                 sources=sources,
                 assets=assets,
+                page=page,
                 digests=digests,
                 source=source,
                 granted=granted,
@@ -901,8 +905,20 @@ class Engine:
         )
 
     async def _cmd_plugin_catalogue(self, message: dict[str, Any]) -> None:
-        await self._refresh_catalogue()
+        await self._refresh_catalogue(quiet=True)
         self.emit({"event": "catalogue", "plugins": self.catalogue, "req_id": message.get("req_id")})
+
+    async def _cmd_plugin_page(self, message: dict[str, Any]) -> None:
+        """Hands over the page files a zip-installed plugin carries.
+
+        The state snapshot broadcasts every second, so the page travels on
+        request the way the code does. Repository installs answer empty and
+        the dashboard reads their page from the repository instead.
+        """
+        plugin = self.plugins.get(message["id"])
+        if not plugin:
+            raise KeyError(f"no plugin {message['id']}")
+        self.emit({"event": "plugin_page", "id": plugin.id, "page": plugin.page, "req_id": message.get("req_id")})
 
     async def _network_allows(self, plugin_id: str, url: str) -> Plugin:
         """Checks a plugin may reach a URL, and returns the plugin.

@@ -180,6 +180,45 @@ async def test_standby_gating() -> None:
     assert resumed > 0, "inference did not resume when printing started"
 
 
+async def test_zip_install_keeps_its_page_and_serves_it_on_request() -> None:
+    platform = FakePlatform()
+    engine = Engine(platform)
+    await engine.start()
+    events: list[dict] = []
+    engine.add_sink(events.append)
+    bundle = plugin_zip(
+        manifest={**MANIFEST, "icon": "icon.png", "media": ["shots/one.png"]},
+        files={"icon.png": b"\x89PNGfake", "shots/one.png": b"\x89PNGshot", "README.md": "# Demo\n\nWhat it does.".encode()},
+    )
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": bundle})
+
+    record = engine.plugins.get("demo")
+    assert set(record.page) == {"icon.png", "shots/one.png", "README.md"}, "the zip's page files were not kept"
+    assert "page" not in engine.state_event()["plugins"][0], "the page must not ride the every-second state snapshot"
+
+    await engine.handle({"cmd": "plugin.page", "id": "demo", "req_id": 9})
+    served = next(e for e in events if e.get("event") == "plugin_page")
+    assert served["req_id"] == 9 and base64.b64decode(served["page"]["README.md"]).decode().startswith("# Demo")
+
+    restored = Engine(platform)
+    await restored.start()
+    assert set(restored.plugins.get("demo").page) == set(record.page), "the page did not survive a restart"
+    await restored.stop()
+    await engine.stop()
+
+
+async def test_unreachable_catalogue_still_answers() -> None:
+    platform = FakePlatform()
+    engine = Engine(platform)
+    await engine.start()
+    events: list[dict] = []
+    engine.add_sink(events.append)
+    await engine.handle({"cmd": "plugin.catalogue", "req_id": 4})
+    answer = next(e for e in events if e.get("event") == "catalogue")
+    assert answer["plugins"] == [] and answer["req_id"] == 4, "an unreachable catalogue must answer empty, not error"
+    await engine.stop()
+
+
 async def test_unreadable_printer_state_keeps_watching_and_warns(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
     monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.05)

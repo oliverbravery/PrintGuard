@@ -58,6 +58,8 @@ _ASSET_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
 VERSION_PATTERN = re.compile(r"^[\w.+-]{1,32}$")
 MEDIA_PATTERN = re.compile(r"^[a-z0-9][\w-]*(?:/[\w-]+)*\.(?:png|jpe?g|webp|gif|svg)$")
 MAX_MEDIA = 8
+README_FILE = "README.md"
+MAX_README_BYTES = 64 * 1024
 
 PERMISSIONS: dict[str, dict[str, Any]] = {
     "state:read": {
@@ -739,18 +741,21 @@ def outbound_socket(plugin_id: str, action: str, request: Any) -> dict[str, Any]
     }
 
 
-def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes]]:
-    """Reads a manifest, sources and declared assets out of a zipped bundle.
+def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes], dict[str, bytes]]:
+    """Reads a manifest, sources, declared assets and page files out of a zipped bundle.
 
     Files may sit at the root or under a single directory, the shape a GitHub
-    archive comes in.
+    archive comes in. Page files are the icon, the media the manifest lists and
+    a README beside the manifest: a zip is the only copy of its plugin, so what
+    presents it travels with it.
 
     Args:
         data: The zip as uploaded.
 
     Returns:
-        The parsed manifest, the source files as text, and every asset the
-        manifest declared as bytes.
+        The parsed manifest, the source files as text, every asset the
+        manifest declared as bytes, and the page files as bytes keyed by the
+        path the manifest uses.
 
     Raises:
         ValueError: If the zip is unreadable or carries no manifest.
@@ -764,6 +769,7 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
         entries.setdefault(entry.rsplit("/", 1)[-1], entry)
     if MANIFEST_FILE not in entries:
         raise ValueError(f"bundle has no {MANIFEST_FILE}")
+    prefix = entries[MANIFEST_FILE][: -len(MANIFEST_FILE)]
 
     def read(name: str, cap: int) -> bytes:
         entry = entries[name]
@@ -775,7 +781,39 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
     sources = {name: read(name, MAX_SOURCE_BYTES).decode("utf-8", "replace") for name in SOURCE_FILES if name in entries}
     declared = {str(name).strip().lower() for name in manifest.get("assets", []) if isinstance(manifest, dict)}
     assets = {name: read(name, MAX_ASSET_BYTES) for name in sorted(declared) if name in entries}
-    return manifest, sources, assets
+    listed = [str(manifest.get("icon", "")).strip().lower(), README_FILE]
+    listed += [str(shot).strip().lower() for shot in manifest.get("media", []) if isinstance(manifest, dict)]
+    named = set(archive.namelist())
+    page: dict[str, bytes] = {}
+    for path in listed:
+        entry = f"{prefix}{path}"
+        if path and entry in named:
+            cap = MAX_README_BYTES if path == README_FILE else MAX_ASSET_BYTES
+            if archive.getinfo(entry).file_size <= cap:
+                page[path] = archive.read(entry)
+    return manifest, sources, assets, page
+
+
+def sanitise_page(raw: dict[str, bytes]) -> dict[str, str]:
+    """Checks a bundle's page files and encodes them for the record.
+
+    Args:
+        raw: Icon, media and README bytes keyed by manifest path.
+
+    Returns:
+        Each file base64 encoded, dropped rather than refused when it fails a
+        check, since the page only presents the plugin.
+    """
+    page: dict[str, str] = {}
+    total = 0
+    for path, data in raw.items():
+        if path != README_FILE and not MEDIA_PATTERN.match(path):
+            continue
+        total += len(data)
+        if total > MAX_ASSETS_BYTES:
+            break
+        page[path] = base64.b64encode(data).decode()
+    return page
 
 
 async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes], str]:
