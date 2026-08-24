@@ -180,6 +180,7 @@ function PluginPage({
   manifest,
   origin,
   onBack,
+  meta,
   children,
 }: {
   icon: string | null;
@@ -194,6 +195,7 @@ function PluginPage({
   manifest: PluginManifest;
   origin: string;
   onBack: () => void;
+  meta?: ReactNode;
   children?: ReactNode;
 }) {
   const permissions = useStore((s) => s.engine?.plugin_permissions ?? []);
@@ -216,15 +218,17 @@ function PluginPage({
         {action}
       </div>
 
+      {meta}
+
       {media.length > 0 && (
-        <div className="flex snap-x gap-2 overflow-x-auto pb-1">
+        <div className="space-y-2">
           {media.map((shot) => (
-            <a key={shot.src} href={shot.href} target="_blank" rel="noreferrer" className="shrink-0 snap-start">
+            <a key={shot.src} href={shot.href} target="_blank" rel="noreferrer" className="block">
               <img
                 src={shot.src}
                 alt={`${name} screenshot`}
                 loading="lazy"
-                className="h-44 w-auto max-w-none rounded border border-line-0"
+                className="block w-full rounded border border-line-0"
               />
             </a>
           ))}
@@ -323,29 +327,31 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
       manifest={manifest}
       origin={origin}
       onBack={onBack}
-    >
-      <div className="space-y-2.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`chip ${plugin.verified ? "chip-ok" : ""}`}>{plugin.verified ? "verified" : "third party"}</span>
-          {fromRepo && (
-            <button className="btn" onClick={() => send({ cmd: "plugin.install", source: { ...plugin.source, ref: "HEAD" } })}>
-              Update
+      meta={
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`chip ${plugin.verified ? "chip-ok" : ""}`}>{plugin.verified ? "verified" : "third party"}</span>
+            {fromRepo && (
+              <button className="btn" onClick={() => send({ cmd: "plugin.install", source: { ...plugin.source, ref: "HEAD" } })}>
+                Update
+              </button>
+            )}
+            <button
+              className="btn btn-danger"
+              onClick={() => {
+                send({ cmd: "plugin.remove", id: plugin.id });
+                onBack();
+              }}
+            >
+              Remove
             </button>
-          )}
-          <button
-            className="btn btn-danger"
-            onClick={() => {
-              send({ cmd: "plugin.remove", id: plugin.id });
-              onBack();
-            }}
-          >
-            Remove
-          </button>
+          </div>
+          {plugin.failure && <span className="block text-[0.7rem] text-bad">Stopped: {plugin.failure}</span>}
+          {!accepted && <span className="block text-[0.7rem] text-warn">Waiting on permissions you have not accepted.</span>}
         </div>
-        {plugin.failure && <span className="block text-[0.7rem] text-bad">Stopped: {plugin.failure}</span>}
-        {!accepted && <span className="block text-[0.7rem] text-warn">Waiting on permissions you have not accepted.</span>}
-        {plugin.enabled && <PluginSecrets plugin={plugin} />}
-      </div>
+      }
+    >
+      {plugin.enabled && <PluginSecrets plugin={plugin} />}
     </PluginPage>
   );
 }

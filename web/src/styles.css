@@ -689,11 +689,28 @@ video {
   overflow: hidden;
 }
 
+.changelog {
+  overflow-wrap: anywhere;
+}
+
 .changelog img {
+  display: block;
   max-width: 100%;
+  height: auto;
   border: 1px solid var(--color-line-0);
   border-radius: 4px;
   margin: 0.5rem 0;
+}
+
+.changelog pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.changelog table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .changelog code {
