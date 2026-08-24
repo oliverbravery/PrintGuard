@@ -63,7 +63,7 @@ export const PALETTES: Record<ThemeBase, Palette> = {
 
 const STORAGE_KEY = "pg.theme";
 export const GLASS = "glass";
-export const GLASS_DEFAULT: Glass = { opacity: 0.38, tone: 0.08 };
+export const GLASS_DEFAULT: Glass = { opacity: 0, tone: 0 };
 const PREFERRED_MUTED = 0.85;
 const AA = 4.5;
 const BACKDROP_CELLS = 8;

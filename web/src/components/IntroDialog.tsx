@@ -17,7 +17,7 @@ export function IntroDialog() {
           {INTRO.map((entry, i) => (
             <div
               key={entry.id}
-              className="col-start-1 row-start-1"
+              className={`col-start-1 row-start-1 ${i === page ? "page-swap" : ""}`}
               style={{ visibility: i === page ? undefined : "hidden" }}
               aria-hidden={i !== page}
               inert={i !== page}

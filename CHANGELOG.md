@@ -28,9 +28,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   of the dashboard it describes, as does the guide behind the ? in the header. It opens once in
   every browser that has not seen it.
 - A Glass theme, alongside System, Light and Dark. The panels frost over whatever is behind
-  them, which is what the Spotify plugin's cover shows through. Picking it drops out two
-  sliders for how clear the panels are and how light or dark, and text takes whichever colour
-  holds 4.5:1 over what the glass lets through.
+  them, which is what the Spotify plugin's cover shows through. It opens dark and as clear as
+  the text can carry, and two sliders adjust how solid the panels are and how light or dark,
+  with text taking whichever colour holds 4.5:1 over what the glass lets through.
 
 - Plugins install switched off. Enable lists every permission with the author's reason for it,
   and it is all or nothing. An update that asks for more waits until you accept it.
@@ -52,6 +52,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Fixed
 
+- The walkthrough and guide screenshots show whole panels, where several stopped mid-slider or
+  mid-list. Dialogs and the walkthrough pages also move with a softer ease.
 - `state.json` is written readable only by the account running the hub. It holds printer
   passwords, notifier keys and API token hashes, and was taking the system default.
 - A plugin's credentials are scrubbed from bug reports.
