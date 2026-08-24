@@ -66,13 +66,13 @@ function modeFromUrl(): Mode | null {
 const DEMO_SEEN_KEY = "pg.demo.seen";
 const INTRO_SEEN_KEY = "pg.intro.seen";
 
-function introDue(monitorCount: number): boolean {
-  return monitorCount === 0 && !localStorage.getItem(INTRO_SEEN_KEY);
+function introDue(): boolean {
+  return !localStorage.getItem(INTRO_SEEN_KEY);
 }
 
-function firstRunDialog(mode: Mode | null, monitorCount: number): DialogKind {
+function firstRunDialog(mode: Mode | null): DialogKind {
   if (mode === "local" && !localStorage.getItem(DEMO_SEEN_KEY)) return "demo";
-  return introDue(monitorCount) ? "intro" : null;
+  return introDue() ? "intro" : null;
 }
 
 export interface Toast {
@@ -413,7 +413,7 @@ export const useStore = create<PgStore>((set, get) => {
         }
         const cleared = had && Object.keys(optimistic).length === 0;
         const arriving = get().phase !== "ready";
-        const firstRun = arriving ? firstRunDialog(get().mode, server.monitors.length) : null;
+        const firstRun = arriving ? firstRunDialog(get().mode) : null;
         const engine = Object.keys(optimistic).length ? applyOptimistic(server, optimistic) : server;
         let history = get().history;
         for (const monitor of server.monitors) {
@@ -718,7 +718,7 @@ export const useStore = create<PgStore>((set, get) => {
 
     dismissDemo() {
       localStorage.setItem(DEMO_SEEN_KEY, "1");
-      get().openDialog(introDue(get().engine?.monitors.length ?? 0) ? "intro" : null);
+      get().openDialog(introDue() ? "intro" : null);
     },
 
     openSettings(settingsTab = "alerts") {
