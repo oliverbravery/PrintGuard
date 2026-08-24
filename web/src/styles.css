@@ -720,6 +720,16 @@ video {
   margin-top: 0.75rem;
 }
 
+.shot-fill {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.shot-fill img {
+  max-height: 100%;
+  width: auto;
+}
+
 .shot img {
   display: block;
   width: 100%;

@@ -5,20 +5,20 @@ import { Dialog } from "./Dialog";
 const REPO = "https://github.com/oliverbravery/PrintGuard";
 const MODEL = "https://github.com/oliverbravery/Edge-FDM-Fault-Detection";
 
-export function GuideEntry({ section, lead }: { section: GuideSection; lead?: boolean }) {
+export function GuideEntry({ section, lead, fill }: { section: GuideSection; lead?: boolean; fill?: boolean }) {
   const openDialog = useStore((s) => s.openDialog);
   const { action } = section;
   return (
-    <section className="reveal">
-      <div className="mb-1.5 flex items-center gap-2.5">
+    <section className={`reveal ${fill ? "flex h-full min-h-0 flex-col" : ""}`}>
+      <div className="mb-1.5 flex shrink-0 items-center gap-2.5">
         <span className={`led ${section.led}`} />
         <h3 className={lead ? "display text-base font-bold" : "display text-sm font-semibold tracking-[0.14em]"}>
           {section.title}
         </h3>
       </div>
-      <p className={`leading-relaxed text-text-1 ${lead ? "text-sm" : "text-[0.84rem]"}`}>{section.body}</p>
+      <p className={`shrink-0 leading-relaxed text-text-1 ${lead ? "text-sm" : "text-[0.84rem]"}`}>{section.body}</p>
       {section.shot && (
-        <figure className="shot">
+        <figure className={`shot ${fill ? "shot-fill" : ""}`}>
           <img className="shot-dark" src={`guide/${section.shot}-dark.jpg`} alt="" loading="lazy" />
           <img className="shot-light" src={`guide/${section.shot}-light.jpg`} alt="" loading="lazy" />
         </figure>
