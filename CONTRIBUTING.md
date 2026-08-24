@@ -90,12 +90,16 @@ feed, by a Playwright script. Regenerate them whenever the UI changes:
 ```bash
 cd web
 npx playwright install chromium      # one-time: fetch the browser binary
-npm run screenshots                  # renders docs/assets/*.png from web/screenshots/
+npm run screenshots                  # renders docs/assets/*.png and web/public/guide/*.jpg
 ```
 
 Each image is one entry in `SCENES` in `web/screenshots/capture.spec.ts`; add a scene there
 to capture a new screen. A scene naming `plugins` runs those plugins from `plugins/` in the real
 sandbox, so a screenshot shows what the code actually draws.
+
+The same run renders the crops the in-app guide shows, from `CROPS` in that file. A crop names
+the element to frame and is captured in both themes, since the guide picks the one matching the
+theme the reader is on. Point a guide entry at one with `shot: "<id>"` in `web/src/guide.tsx`.
 
 ## Adding a printer integration
 

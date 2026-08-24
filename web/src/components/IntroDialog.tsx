@@ -13,8 +13,18 @@ export function IntroDialog() {
   return (
     <Dialog title="How PrintGuard works" onClose={close}>
       <div className="space-y-5">
-        <div aria-live="polite" className="sm:min-h-[13rem]">
-          <GuideEntry key={INTRO[page].id} section={INTRO[page]} lead />
+        <div aria-live="polite" className="grid max-h-[52vh] overflow-y-auto">
+          {INTRO.map((entry, i) => (
+            <div
+              key={entry.id}
+              className="col-start-1 row-start-1"
+              style={{ visibility: i === page ? undefined : "hidden" }}
+              aria-hidden={i !== page}
+              inert={i !== page}
+            >
+              <GuideEntry section={entry} lead />
+            </div>
+          ))}
         </div>
         <footer className="hairline flex items-center gap-2 pt-4">
           <Progress value={page + 1} total={INTRO.length} className="flex-1" />

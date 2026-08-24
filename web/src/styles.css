@@ -686,3 +686,24 @@ video {
     scroll-behavior: auto !important;
   }
 }
+
+.shot {
+  margin-top: 0.75rem;
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--color-line-0);
+  border-radius: 4px;
+}
+
+.shot .shot-light,
+:root[data-theme="light"] .shot .shot-dark {
+  display: none;
+}
+
+:root[data-theme="light"] .shot .shot-light {
+  display: block;
+}

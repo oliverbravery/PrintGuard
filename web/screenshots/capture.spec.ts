@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { test, type Browser } from "@playwright/test";
+import { test, type Browser, type Locator, type Page } from "@playwright/test";
 import type { Camera, EngineState, Monitor, Printer, ScorePoint } from "../src/types";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const asset = (name: string) => resolve(here, "../../docs/assets", name);
+const guideShot = (name: string) => resolve(here, "../public/guide", name);
 const dataUrl = (name: string) => `data:image/jpeg;base64,${readFileSync(resolve(here, "frames", name)).toString("base64")}`;
 const FRAMES = { healthy: dataUrl("healthy.jpg"), defect: dataUrl("defect.jpg") };
 const VERSION = readFileSync(resolve(here, "../../pyproject.toml"), "utf8").match(/^version = "(.+)"$/m)![1];
@@ -154,6 +155,13 @@ const INSTALLED = {
   granted: ["state:read", "camera:view"], config: {}, secrets_set: [], verified: true, enabled: true, installed: NOW / 1000, failure: null,
 }
 
+interface Crop extends Omit<Scene, "name" | "theme"> {
+  id: string;
+  target: (page: Page) => Locator;
+  pad?: number;
+  tallest?: number;
+}
+
 interface Scene {
   name: string;
   plugins?: string[];
@@ -163,6 +171,9 @@ interface Scene {
   detailId?: string;
   customising?: boolean;
   settingsTab?: string;
+  dialog?: string;
+  history?: Record<string, ScorePoint[]>;
+  hideFeeds?: boolean;
   catalogue?: unknown[];
   tuner?: boolean;
   mutate?: (engine: EngineState) => void;
@@ -201,6 +212,89 @@ const SCENES: Scene[] = [
   { name: "glass", width: 1360, height: 720, theme: "dark", plugins: ["spotify", "picture-in-picture"], tuner: true, mutate: live },
 ];
 
+const stoodDown = (e: EngineState) => {
+  e.monitors = [
+    { ...e.monitors[1], alert: null, watching: true },
+    { ...e.monitors[2], name: "Ender 3 V3", printer_id: "p2", watching: false },
+  ];
+  e.printers[1] = { ...e.printers[1], device_state: { status: "idle", progress: 0, job: null } };
+  e.cameras[2] = { ...e.cameras[2], name: "Garage - Ender", inferring: false, target_fps: 0, achieved_fps: 0, in_use: false };
+};
+
+const NOTIFIERS = [
+  {
+    id: "ntfy", label: "ntfy", docs_url: "",
+    schema: { properties: { url: { type: "string", title: "Topic URL", placeholder: "https://ntfy.sh/my-prints" } }, required: ["url"] },
+  },
+  {
+    id: "telegram", label: "Telegram", docs_url: "",
+    schema: { properties: { token: { type: "string", title: "Bot token", secret: true }, chat_id: { type: "string", title: "Chat ID" } }, required: ["token", "chat_id"] },
+  },
+  { id: "discord", label: "Discord", docs_url: "", schema: { properties: { webhook: { type: "string", title: "Webhook URL" } }, required: ["webhook"] } },
+];
+
+const DESK = { width: 1000, height: 820 } as const;
+
+const CROPS: Crop[] = [
+  {
+    id: "alert", ...DESK, pad: 0, tallest: 240,
+    mutate: (e) => {
+      e.monitors = e.monitors.slice(0, 2);
+    },
+    target: (page) => page.locator(".tile-alert"),
+  },
+  {
+    id: "standby", ...DESK, pad: 0, hideFeeds: true, mutate: stoodDown, history: { m3: series(() => 0) },
+    target: (page) => page.locator(".tile").nth(1),
+  },
+  {
+    id: "checklist", ...DESK,
+    mutate: (e) => {
+      e.cameras = [];
+      e.printers = [];
+      e.monitors = [];
+    },
+    target: (page) => page.locator(".panel").filter({ hasText: "GET PRINTGUARD WATCHING" }).first(),
+    tallest: 296,
+  },
+  {
+    id: "cameras", ...DESK,
+    target: (page) => page.locator("section").filter({ hasText: "CAMERA REGISTRY" }).locator(".panel").first(),
+  },
+  {
+    id: "tuning", ...DESK, height: 1200, detailId: "m1",
+    target: (page) => page.locator("section").filter({ hasText: "Watch this monitor" }).first(),
+    tallest: 250,
+  },
+  {
+    id: "printers", ...DESK, dialog: "printers", pad: 0,
+    target: (page) => page.locator("dialog > .panel"),
+    tallest: 215,
+  },
+  {
+    id: "alerts", ...DESK, settingsTab: "alerts",
+    target: (page) => page.locator("#settings-panel-alerts"),
+    tallest: 250,
+    mutate: (e) => {
+      e.notifiers = NOTIFIERS as never;
+      e.settings.notifiers = { ntfy: { url: "https://ntfy.sh/my-prints" } };
+    },
+  },
+  {
+    id: "customise", ...DESK, customising: true,
+    target: (page) => page.locator(".tile").first(),
+    tallest: 90,
+  },
+  {
+    id: "plugins", ...DESK, settingsTab: "plugins", catalogue: CATALOGUE,
+    target: (page) => page.locator("#settings-panel-plugins"),
+    tallest: 262,
+    mutate: (e) => {
+      e.plugins = [INSTALLED as never];
+    },
+  },
+];
+
 function pluginSources(id: string): Record<string, string> {
   const dir = resolve(here, "../../plugins", id);
   return Object.fromEntries(
@@ -210,7 +304,7 @@ function pluginSources(id: string): Record<string, string> {
   );
 }
 
-async function capture(browser: Browser, scene: Scene): Promise<void> {
+async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; close: () => Promise<void> }> {
   const built = engine();
   scene.mutate?.(built);
   const context = await browser.newContext({
@@ -238,16 +332,16 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
     {
       theme: scene.theme,
       state: {
-        mode: "hub", phase: "ready", engine: built, history,
+        mode: "hub", phase: "ready", engine: built, history: { ...history, ...scene.history },
         detailId: scene.detailId ?? null, customising: scene.customising ?? false,
-        dialog: scene.settingsTab ? "settings" : null, settingsTab: scene.settingsTab ?? null,
+        dialog: scene.dialog ?? (scene.settingsTab ? "settings" : null), settingsTab: scene.settingsTab ?? null,
         catalogue: scene.catalogue ?? null,
         ...(scene.plugins ? { link: null } : {}),
       },
     },
   );
   if (scene.plugins) await runPlugins(page, scene.plugins);
-  await page.waitForSelector(scene.settingsTab ? "dialog" : ".aspect-video");
+  await page.waitForSelector(scene.settingsTab || scene.dialog ? "dialog" : built.monitors.length ? ".aspect-video" : "main");
   await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}" });
   await page.evaluate((frames) => {
     for (const el of document.querySelectorAll<HTMLElement>(".aspect-video")) {
@@ -263,8 +357,31 @@ async function capture(browser: Browser, scene: Scene): Promise<void> {
   });
   await page.waitForFunction(() => Array.from(document.images).every((i) => i.complete));
   await page.waitForTimeout(200);
+  return { page, close: () => context.close() };
+}
+
+async function capture(browser: Browser, scene: Scene): Promise<void> {
+  const { page, close } = await stage(browser, scene);
   await page.screenshot({ path: asset(`${scene.name}.png`) });
-  await context.close();
+  await close();
+}
+
+async function captureCrop(browser: Browser, crop: Crop, theme: "dark" | "light"): Promise<void> {
+  const { page, close } = await stage(browser, { ...crop, name: crop.id, theme });
+  await page.addStyleTag({ content: `*{outline:none!important}${crop.hideFeeds ? ".aspect-video{display:none}" : ""}` });
+  const box = (await crop.target(page).boundingBox())!;
+  const pad = crop.pad ?? 10;
+  await page.screenshot({
+    path: guideShot(`${crop.id}-${theme}.jpg`),
+    quality: 90,
+    clip: {
+      x: Math.max(0, box.x - pad),
+      y: Math.max(0, box.y - pad),
+      width: Math.min(crop.width - Math.max(0, box.x - pad), box.width + pad * 2),
+      height: Math.min(crop.height - Math.max(0, box.y - pad), crop.tallest ?? box.height + pad * 2),
+    },
+  });
+  await close();
 }
 
 async function runPlugins(page: import("@playwright/test").Page, ids: string[]): Promise<void> {
@@ -315,4 +432,12 @@ for (const scene of SCENES) {
   test(scene.name, async ({ browser }) => {
     await capture(browser, scene);
   });
+}
+
+for (const crop of CROPS) {
+  for (const theme of ["dark", "light"] as const) {
+    test(`guide ${crop.id} ${theme}`, async ({ browser }) => {
+      await captureCrop(browser, crop, theme);
+    });
+  }
 }
