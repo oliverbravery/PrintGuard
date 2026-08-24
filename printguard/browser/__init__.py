@@ -1,1 +1,1 @@
-"""Pyodide-only platform: local mode capture and inference in the browser."""
+"""Pyodide-only platform for local mode capture and inference in the browser."""

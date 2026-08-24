@@ -5,17 +5,21 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import logging
 import zipfile
+from urllib.parse import parse_qs, urlparse
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 import numpy as np
+import pytest
 from fakes import FakePlatform
 
-from printguard.engine import logs, reports, vision, watchdog
+from printguard.engine import engine as engine_module
+from printguard.engine import logs, oauth, plugins, reports, vision, watchdog
 from printguard.engine.engine import EVENT_LOG_LEVELS, Engine
 from printguard.engine.integrations import INTEGRATIONS
 
@@ -176,6 +180,69 @@ async def test_standby_gating() -> None:
     assert resumed > 0, "inference did not resume when printing started"
 
 
+async def test_zip_install_keeps_its_page_and_serves_it_on_request() -> None:
+    platform = FakePlatform()
+    engine = Engine(platform)
+    await engine.start()
+    events: list[dict] = []
+    engine.add_sink(events.append)
+    bundle = plugin_zip(
+        manifest={**MANIFEST, "icon": "icon.png", "media": ["shots/one.png"]},
+        files={"icon.png": b"\x89PNGfake", "shots/one.png": b"\x89PNGshot", "README.md": "# Demo\n\nWhat it does.".encode()},
+    )
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": bundle})
+
+    record = engine.plugins.get("demo")
+    assert set(record.page) == {"icon.png", "shots/one.png", "README.md"}, "the zip's page files were not kept"
+    assert "page" not in engine.state_event()["plugins"][0], "the page must not ride the every-second state snapshot"
+
+    await engine.handle({"cmd": "plugin.page", "id": "demo", "req_id": 9})
+    served = next(e for e in events if e.get("event") == "plugin_page")
+    assert served["req_id"] == 9 and base64.b64decode(served["page"]["README.md"]).decode().startswith("# Demo")
+
+    restored = Engine(platform)
+    await restored.start()
+    assert set(restored.plugins.get("demo").page) == set(record.page), "the page did not survive a restart"
+    await restored.stop()
+    await engine.stop()
+
+
+async def test_unreachable_catalogue_still_answers() -> None:
+    platform = FakePlatform()
+    engine = Engine(platform)
+    await engine.start()
+    events: list[dict] = []
+    engine.add_sink(events.append)
+    await engine.handle({"cmd": "plugin.catalogue", "req_id": 4})
+    answer = next(e for e in events if e.get("event") == "catalogue")
+    assert answer["plugins"] == [] and answer["req_id"] == 4, "an unreachable catalogue must answer empty, not error"
+    await engine.stop()
+
+
+async def test_unreadable_printer_state_keeps_watching_and_warns(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.05)
+    monkeypatch.setattr(watchdog, "OFFLINE_GRACE_S", 0.2)
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    platform.device_status = "Detecting serial connection"
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await asyncio.sleep(1.0)
+        assert engine.printers.get(printer_id).device_state["status"] == "unknown"
+        assert engine.state_event()["monitors"][0]["watching"], "a state the adapter cannot read must keep watching"
+        assert any(e.get("event") == "result" for e in events), "watching monitor did not infer"
+        warnings = [e for e in events if e.get("event") == "warning" and not e["recovered"]]
+        assert any("Cannot tell whether the printer" in w["message"] for w in warnings), "unreadable printer state did not warn"
+
+        platform.device_status = "Operational"
+        await asyncio.sleep(1.0)
+        recoveries = [e for e in events if e.get("event") == "warning" and e["recovered"]]
+        assert any("reporting its state again" in r["message"] for r in recoveries), "recovery was never announced"
+
+
 async def test_restored_camera_attachment_is_single_flight(monkeypatch) -> None:
     from fakes import FakeSource
     from printguard.engine import engine as engine_module
@@ -242,6 +309,7 @@ async def test_watchdog_and_failed_action(monkeypatch) -> None:
     watchdog.WATCH_TICK_S = 0.05
     watchdog.OFFLINE_GRACE_S = 0.2
     watchdog.ACT_RETRY_S = 0.01
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.05)
     monkeypatch.setattr(engine_module, "REATTACH_EVERY_TICKS", 1)
     platform = FakePlatform(infer_s=0.02, failing=True)
@@ -277,6 +345,7 @@ async def test_watchdog_restarts_stalled_camera_after_fresh_inference(monkeypatc
 
     monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
     monkeypatch.setattr(watchdog, "STALL_GRACE_S", 0.1)
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
     platform = FakePlatform(infer_s=0.01)
     async with running_engine(platform, camera_fps=[20.0]) as (engine, events):
@@ -299,6 +368,48 @@ async def test_watchdog_restarts_stalled_camera_after_fresh_inference(monkeypatc
             if event.get("event") == "warning" and event["recovered"] and "feed recovered" in event["message"]
         )
         assert any(event.get("event") == "result" for event in events[stalled_index + 1 : recovered_index])
+
+
+async def test_flapping_camera_warns_once_per_outage(monkeypatch) -> None:
+    from printguard.engine import engine as engine_module
+
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
+    monkeypatch.setattr(watchdog, "OFFLINE_GRACE_S", 0.05)
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.2)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True}})
+        camera = next(iter(engine.cameras.values()))
+
+        def warnings(recovered: bool) -> list[dict]:
+            return [e for e in events if e.get("event") == "warning" and e["recovered"] is recovered]
+
+        async def hold_source(online: bool, seconds: float) -> None:
+            while camera.frame_source is None:
+                await asyncio.sleep(0.01)
+            camera.frame_source.online = online
+            await asyncio.sleep(seconds)
+
+        for _ in range(5):
+            await hold_source(False, 0.15)
+            await hold_source(True, 0.1)
+
+        assert len(warnings(False)) == 1, f"a reconnecting camera warned {len(warnings(False))} times about one episode"
+        assert not warnings(True), "recovery was announced while the camera was still flapping"
+        assert len(platform.http_calls) == 1, f"flapping pushed {len(platform.http_calls)} notifications"
+
+        await hold_source(True, 0.5)
+        assert len(warnings(True)) == 1, "sustained recovery was never announced"
+        assert len(platform.http_calls) == 2, "recovery should push exactly once"
+
+        await hold_source(False, 0.15)
+        await hold_source(True, 0.3)
+        assert len(warnings(True)) == 1, "a camera that fails again must settle for longer before recovery is announced"
+        await hold_source(True, 0.6)
+        assert len(warnings(True)) == 2, "recovery was never announced after the longer settled period"
 
 
 async def test_protocol_surfaces_errors_and_filters_settings() -> None:
@@ -671,3 +782,821 @@ async def test_token_secret_reaches_requester_but_is_never_logged(monkeypatch) -
     secret = created["token"]
     assert secret.startswith("pg_"), "requester did not receive the one-time secret"
     assert all(secret not in line for line in logs.recent()), "token secret leaked into the log tail"
+
+
+MANIFEST = {
+    "id": "demo",
+    "name": "Demo",
+    "version": "1.0.0",
+    "permissions": ["state:read", "monitor:control", "net"],
+    "reasons": {"state:read": "to read", "monitor:control": "to retune", "net": "to post"},
+    "urls": ["https://hooks.example.com/*", "wss://hooks.example.com/*"],
+}
+PLUGIN_JS = "plugin.render = (state) => ({ type: 'text', value: state.monitors.length + ' monitors' });"
+
+
+def plugin_zip(
+    manifest: dict | None = None, code: str = PLUGIN_JS, files: dict[str, bytes] | None = None, panel: str | None = None
+) -> str:
+    """Packs a plugin bundle the way an imported file arrives."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("plugin.json", json.dumps(manifest if manifest is not None else MANIFEST))
+        archive.writestr("plugin.js", code)
+        if panel is not None:
+            archive.writestr("panel.html", panel)
+        for name, data in (files or {}).items():
+            archive.writestr(name, data)
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+async def install_demo(engine: Engine, granted: list[str] | None = None, **extra) -> dict:
+    """Installs the demo plugin from a file, accepting its permissions as the user would."""
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(), **extra})
+    accepted = MANIFEST["permissions"] if granted is None else granted
+    await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": accepted, "enabled": True}})
+    return engine.plugins.get("demo").public()
+
+
+async def test_plugin_installs_from_a_file_without_its_code_in_the_snapshot() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        record = await install_demo(engine, granted=["state:read", "printer:control"])
+
+    assert record["verified"] is False, "nothing in the catalogue vouched for this bundle"
+    assert record["granted"] == ["state:read"], "a permission the manifest never asked for was granted"
+    assert record["digests"]["plugin.js"] == hashlib.sha256(PLUGIN_JS.encode()).hexdigest()
+    snapshot = json.dumps(next(e for e in events if e.get("event") == "state" and e.get("plugins")))
+    assert PLUGIN_JS not in snapshot, "plugin source rode along in the state snapshot"
+
+
+async def test_a_manifest_stored_by_an_older_version_comes_back_in_todays_shape() -> None:
+    """A record written before a manifest field existed still restores complete.
+
+    Both sandboxes and the dashboard read the sanitised manifest, so a stored
+    one missing whatever has been added since would arrive short.
+    """
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_demo(engine)
+    stored = platform.state["plugins"][0]
+    stored["manifest"] = {k: v for k, v in stored["manifest"].items() if k not in ("consumes", "provides", "oauth")}
+
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        restored = engine.plugins.get("demo")
+
+    assert restored is not None, "a plugin was dropped over a manifest an older version wrote"
+    assert restored.manifest["consumes"] == [] and restored.manifest["oauth"] == {}
+    assert restored.granted == MANIFEST["permissions"], "restoring the record threw the grants away"
+
+
+async def test_a_stored_manifest_that_no_longer_validates_is_dropped() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_demo(engine)
+    platform.state["plugins"][0]["manifest"]["reasons"] = {}
+
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        assert engine.plugins.get("demo") is None, "a manifest this version cannot read was restored anyway"
+
+
+async def test_plugin_code_reaches_only_the_tab_that_asked() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        await engine.handle({"cmd": "plugin.code", "id": "demo", "req_id": 12})
+
+    code = next(e for e in events if e.get("event") == "plugin_code")
+    assert code["req_id"] == 12 and code["sources"]["plugin.js"] == PLUGIN_JS
+
+
+async def test_plugin_installs_from_github_pinned_to_a_commit() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    sha = "a" * 40
+    platform.files = {
+        "https://api.github.com/repos/someone/pack/commits/main": (200, {"sha": sha}),
+        f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/plugin.json": (200, MANIFEST),
+        f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/plugin.js": (200, PLUGIN_JS),
+        f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/worker.js": (404, ""),
+    }
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle(
+            {"cmd": "plugin.install", "source": {"kind": "github", "repo": "someone/pack", "path": "kit", "ref": "main"}}
+        )
+        record = engine.plugins.get("demo")
+
+    assert record.source["ref"] == sha, "a moving branch was stored instead of the commit it resolved to"
+    assert list(record.sources) == ["plugin.js"]
+
+
+def github_files(sha: str, manifest: dict, repo: str = "someone/pack") -> dict:
+    """The GitHub endpoints an install of one plugin reads."""
+    return {
+        f"https://api.github.com/repos/{repo}/commits/main": (200, {"sha": sha}),
+        f"https://raw.githubusercontent.com/{repo}/{sha}/plugin.json": (200, manifest),
+        f"https://raw.githubusercontent.com/{repo}/{sha}/plugin.js": (200, PLUGIN_JS),
+        f"https://raw.githubusercontent.com/{repo}/{sha}/worker.js": (404, ""),
+        f"https://raw.githubusercontent.com/{repo}/{sha}/panel.html": (404, ""),
+    }
+
+
+async def install_from_github(engine: Engine, repo: str = "someone/pack") -> None:
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "github", "repo": repo, "ref": "main"}})
+
+
+async def test_an_update_from_the_same_repository_keeps_what_the_user_gave_it() -> None:
+    """The repository is the plugin's signature, so its own update carries on."""
+    platform = FakePlatform(infer_s=0.02)
+    platform.files = github_files("a" * 40, SECRET_MANIFEST)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_from_github(engine)
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
+        )
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
+        platform.files = github_files("b" * 40, {**SECRET_MANIFEST, "version": "1.1.0"})
+        await install_from_github(engine)
+        updated = engine.plugins.get("vault")
+
+    assert updated.manifest["version"] == "1.1.0", "the new revision did not replace the old one"
+    assert updated.secrets["api_key"] == "s3cr3t", "an update made the user type its credentials again"
+    assert updated.enabled and updated.granted == SECRET_MANIFEST["permissions"]
+
+
+async def test_an_update_that_reaches_further_stands_the_plugin_down() -> None:
+    """A wider manifest is a fresh question, the way a browser asks one again."""
+    platform = FakePlatform(infer_s=0.02)
+    platform.files = github_files("a" * 40, SECRET_MANIFEST)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_from_github(engine)
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
+        )
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
+        wider = {**SECRET_MANIFEST, "urls": [*SECRET_MANIFEST["urls"], "https://collector.example.com/*"]}
+        platform.files = github_files("b" * 40, wider)
+        await install_from_github(engine)
+        updated = engine.plugins.get("vault")
+
+    assert updated.granted == [], "an address nobody accepted was reached under the old consent"
+    assert not updated.enabled, "a plugin that widened its reach kept running"
+    assert updated.secrets["api_key"] == "s3cr3t", "the same plugin's own credentials were thrown away"
+
+
+async def test_a_bundle_from_somewhere_else_inherits_nothing_but_the_id() -> None:
+    """An id is not an identity, so a stranger holding one starts with nothing."""
+    platform = FakePlatform(infer_s=0.02)
+    platform.files = github_files("a" * 40, SECRET_MANIFEST)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_from_github(engine)
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
+        )
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
+        platform.files = github_files("c" * 40, SECRET_MANIFEST, repo="squatter/pack")
+        await install_from_github(engine, repo="squatter/pack")
+        squatted = engine.plugins.get("vault")
+
+    assert squatted.secrets == {}, "another author's bundle inherited the credentials"
+    assert squatted.granted == [] and not squatted.enabled, "it ran on consent given to somebody else"
+
+
+async def test_catalogue_verifies_only_the_exact_bytes_it_pinned() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    digests = plugins.digests(plugins.sanitise_manifest(MANIFEST), {"plugin.js": PLUGIN_JS}, {})
+    platform.files = {plugins.CATALOGUE_URL: (200, {"plugins": [{"id": "demo", "name": "Demo", "digests": digests}]})}
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        assert (await install_demo(engine))["verified"] is True
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(code=PLUGIN_JS + "//")})
+        tampered = engine.plugins.get("demo").public()
+
+    assert tampered["verified"] is False, "an edited plugin still passed as verified"
+
+
+async def test_plugin_network_is_refused_beyond_the_patterns_it_declared() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "req_id": 1})
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://elsewhere.example/a", "req_id": 2})
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "http://hooks.example.com/a", "req_id": 4})
+        await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": []}})
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "req_id": 3})
+
+    assert next(e for e in events if e.get("event") == "http")["req_id"] == 1
+    refused = [e for e in events if e.get("event") == "error" and e.get("req_id") in (2, 3, 4)]
+    assert len(refused) == 3, "an undeclared pattern, scheme or a revoked permission still got out"
+    assert not any("elsewhere.example" in url for _, url in platform.http_calls)
+
+
+async def test_a_request_naming_a_secret_it_has_not_got_never_leaves() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    wanting = {**MANIFEST, "secrets": {"api_key": "The key from your account page"}}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest=wanting)})
+        await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": MANIFEST["permissions"], "enabled": True}})
+        signed = {"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "headers": {"Authorization": "Bearer {{secret.api_key}}"}}
+        await engine.handle({**signed, "req_id": 1})
+        await engine.handle({"cmd": "plugin.secrets", "id": "demo", "secrets": {"api_key": "k3y"}})
+        await engine.handle({**signed, "req_id": 2})
+
+    refused = [e for e in events if e.get("event") == "error" and e.get("req_id") == 1]
+    assert len(refused) == 1, "a half-filled header went out instead of being refused"
+    assert "api_key" in refused[0]["message"], refused[0]["message"]
+    assert [e.get("req_id") for e in events if e.get("event") == "http"] == [2]
+
+
+async def test_a_plugin_reaching_this_network_needs_the_grant_that_covers_it() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {
+        **MANIFEST,
+        "permissions": ["net"],
+        "reasons": {"net": "to poke the printer"},
+        "urls": ["http://192.168.1.50/*"],
+    }
+    with pytest.raises(ValueError, match="net:local"):
+        plugins.sanitise_manifest(manifest)
+
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "req_id": 5})
+
+    assert any(e.get("event") == "http" and e.get("req_id") == 5 for e in events)
+
+
+async def test_a_plugin_stays_off_until_every_permission_it_asks_for_is_accepted() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip()})
+        fresh = (engine.plugins.get("demo").enabled, engine.plugins.get("demo").granted)
+        await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": ["net"], "enabled": True}})
+        partial = engine.plugins.get("demo").enabled
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "demo", "patch": {"granted": MANIFEST["permissions"], "enabled": True}}
+        )
+        accepted = (engine.plugins.get("demo").enabled, engine.plugins.get("demo").granted)
+
+    assert fresh == (False, []), "a plugin ran before anyone accepted anything"
+    assert not partial, "accepting some of the permissions was enough to enable it"
+    assert accepted == (True, MANIFEST["permissions"])
+
+
+async def test_a_plugin_asking_for_more_stands_down_until_the_wider_list_is_accepted() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    wider = {
+        **MANIFEST,
+        "permissions": [*MANIFEST["permissions"], "printer:control"],
+        "reasons": {**MANIFEST["reasons"], "printer:control": "to pause"},
+    }
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_demo(engine)
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(wider)})
+        widened = engine.plugins.get("demo")
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip()})
+        narrowed = engine.plugins.get("demo")
+
+    assert not widened.enabled, "an update that asked for more kept running"
+    assert not widened.may("printer:control")
+    assert not narrowed.enabled, "reinstalling re-enabled a plugin the user had not re-accepted"
+
+
+async def test_a_manifest_without_a_reason_for_a_permission_is_refused() -> None:
+    with pytest.raises(ValueError, match="reasons"):
+        plugins.sanitise_manifest({**MANIFEST, "reasons": {"state:read": "to read"}})
+
+
+async def test_a_plugins_request_comes_back_tagged_as_it_named_it() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.files["https://hooks.example.com/feed"] = (200, {"temp": 4})
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        await engine.handle(
+            {"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/feed", "tag": "forecast"}
+        )
+
+    answer = next(e for e in events if e.get("event") == "http")
+    assert answer["tag"] == "forecast" and answer["status"] == 200 and answer["body"] == {"temp": 4}
+    assert answer["id"] == "demo", "an answer that did not say whose request it was"
+
+
+async def test_a_plugin_making_requests_too_fast_is_refused() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        for index in range(engine_module.PLUGIN_RATE_LIMIT + 5):
+            await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/a", "req_id": index})
+
+    assert len([e for e in events if e.get("event") == "http"]) == engine_module.PLUGIN_RATE_LIMIT
+    assert any("faster than" in str(e.get("message")) for e in events if e.get("event") == "error")
+
+
+async def test_a_plugin_holds_a_socket_and_hears_what_arrives_on_it() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        await engine.handle(
+            {"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "feed", "url": "wss://hooks.example.com/live"}
+        )
+        socket = platform.sockets[-1]
+        socket.arrived("message", '{"hello": true}')
+        await engine.handle({"cmd": "plugin.socket", "id": "demo", "action": "send", "tag": "feed", "text": "ping"})
+        await engine.handle({"cmd": "plugin.socket", "id": "demo", "action": "close", "tag": "feed"})
+
+    frames = [e for e in events if e.get("event") == "socket"]
+    assert [f["state"] for f in frames] == ["open", "message", "closed"]
+    assert frames[1]["text"] == '{"hello": true}' and all(f["tag"] == "feed" for f in frames)
+    assert socket.sent == ["ping"] and socket.closed
+
+
+async def test_a_disabled_plugin_loses_the_sockets_it_was_holding() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_demo(engine)
+        await engine.handle(
+            {"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "feed", "url": "wss://hooks.example.com/live"}
+        )
+        await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"enabled": False}})
+
+    assert platform.sockets[-1].closed, "a socket outlived the plugin holding it"
+
+
+SOUND_MANIFEST = {
+    "id": "chimes",
+    "name": "Chimes",
+    "version": "1.0.0",
+    "permissions": ["sound"],
+    "reasons": {"sound": "to sound an alert"},
+}
+
+
+async def install_chimes(engine: Engine, granted: list[str]) -> None:
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(SOUND_MANIFEST)})
+    await engine.handle({"cmd": "plugin.update", "id": "chimes", "patch": {"granted": granted, "enabled": bool(granted)}})
+
+
+async def test_an_effect_only_a_dashboard_can_perform_is_passed_on_to_them() -> None:
+    """A worker has no speakers, so it asks and whoever has a dashboard open does it."""
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_chimes(engine, granted=["sound"])
+        await engine.handle({"cmd": "plugin.effect", "id": "chimes", "effect": {"kind": "sound", "asset": "horn.mp3"}})
+        passed = [e for e in events if e.get("event") == "plugin_effect"]
+
+    assert passed == [
+        {"event": "plugin_effect", "id": "chimes", "effect": {"kind": "sound", "asset": "horn.mp3"}, "req_id": None}
+    ]
+
+
+async def test_an_effect_the_plugin_was_not_granted_reaches_no_dashboard() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_chimes(engine, granted=[])
+        await engine.handle(
+            {"cmd": "plugin.effect", "id": "chimes", "effect": {"kind": "sound", "asset": "horn.mp3"}, "req_id": 1}
+        )
+        await install_chimes(engine, granted=["sound"])
+        await engine.handle(
+            {"cmd": "plugin.effect", "id": "chimes", "effect": {"kind": "command", "cmd": {"cmd": "monitor.remove"}}, "req_id": 2}
+        )
+        refused = [e for e in events if e.get("event") == "error" and e.get("req_id") in (1, 2)]
+        passed = [e for e in events if e.get("event") == "plugin_effect"]
+
+    assert len(refused) == 2, "an ungranted sound, or a command dressed as one, went to the dashboards"
+    assert passed == [], "an effect nobody granted was handed on"
+
+
+SECRET_MANIFEST = {
+    "id": "vault",
+    "name": "Vault",
+    "version": "1.0.0",
+    "permissions": ["net", "oauth"],
+    "reasons": {"net": "to post", "oauth": "to sign in"},
+    "urls": ["https://api.example.com/*"],
+    "secrets": {"api_key": "The key from your account page"},
+    "oauth": {
+        "authorize_url": "https://auth.example.com/authorize",
+        "token_url": "https://auth.example.com/token",
+        "scopes": ["read"],
+    },
+}
+
+
+async def install_vault(engine: Engine) -> None:
+    """Installs the secret-holding demo plugin, accepted and given a client id."""
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(SECRET_MANIFEST)})
+    await engine.handle(
+        {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
+    )
+    await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"oauth_client_id": "registered-app"}})
+
+
+async def test_a_secret_is_filled_in_on_the_way_out_and_read_back_by_nobody() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_vault(engine)
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
+        await engine.handle({
+            "cmd": "plugin.http", "id": "vault", "method": "POST", "url": "https://api.example.com/v1/ping",
+            "headers": {"Authorization": "Bearer {{secret.api_key}}"}, "json": {"key": "{{secret.api_key}}"},
+        })
+        record = engine.plugins.get("vault").public()
+
+    sent = platform.http_requests[-1]
+    assert sent["headers"]["Authorization"] == "Bearer s3cr3t", "the secret never reached the request"
+    assert sent["json"] == {"key": "s3cr3t"}
+    assert record["secrets_set"] == ["api_key", "oauth_client_id"] and "secrets" not in record, "a secret rode along in the state snapshot"
+    assert "s3cr3t" not in json.dumps([e for e in events if e.get("event") == "state"])
+
+
+async def test_a_secret_the_manifest_never_declared_is_not_stored() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "kept", "sneaky": "dropped"}})
+        held = engine.plugins.get("vault").secrets
+
+    assert held == {"api_key": "kept", "oauth_client_id": "registered-app"}
+
+
+async def test_a_sign_in_ends_with_tokens_the_plugin_can_use_but_never_see() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.files["https://auth.example.com/token"] = (
+        200, {"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600},
+    )
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_vault(engine)
+        await engine.handle({"cmd": "plugin.oauth", "id": "vault", "action": "start", "origin": "http://127.0.0.1:8000"})
+        opened = next(e for e in events if e.get("event") == "plugin_oauth")["url"]
+        state = parse_qs(urlparse(opened).query)["state"][0]
+        name = await engine.finish_sign_in(state, "code-1")
+
+        await engine.handle({
+            "cmd": "plugin.http", "id": "vault", "url": "https://api.example.com/v1/me",
+            "headers": {"Authorization": "Bearer {{secret.oauth}}"},
+        })
+        record = engine.plugins.get("vault").public()
+
+    query = parse_qs(urlparse(opened).query)
+    assert query["code_challenge_method"] == ["S256"] and "code_challenge" in query, "the sign-in skipped PKCE"
+    assert query["redirect_uri"] == ["http://127.0.0.1:8000/oauth/callback"]
+    assert name == "Vault"
+    assert platform.http_requests[-1]["headers"]["Authorization"] == "Bearer at-1"
+    assert "oauth" in record["secrets_set"] and "at-1" not in json.dumps(record)
+
+
+async def test_a_client_id_comes_from_whoever_installed_it_and_never_the_bundle() -> None:
+    """A plugin travels as a repo, a zip or a listing, so a client id in it would
+    be one app shared by everybody who installed it."""
+    platform = FakePlatform(infer_s=0.02)
+    shipped = {**SECRET_MANIFEST, "oauth": {**SECRET_MANIFEST["oauth"], "client_id": "the-authors-app"}}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(shipped)})
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "vault", "patch": {"granted": shipped["permissions"], "enabled": True}}
+        )
+        manifest = engine.plugins.get("vault").manifest
+        await engine.handle({"cmd": "plugin.oauth", "id": "vault", "action": "start", "origin": "http://127.0.0.1:8000", "req_id": 7})
+        refused = [e for e in events if e.get("event") == "error" and e.get("req_id") == 7]
+
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"oauth_client_id": "mine-1234"}})
+        await engine.handle({"cmd": "plugin.oauth", "id": "vault", "action": "start", "origin": "http://127.0.0.1:8000"})
+        opened = next(e for e in events if e.get("event") == "plugin_oauth")["url"]
+
+    assert "client_id" not in manifest["oauth"], "a client id in the bundle survived the install"
+    assert oauth.CLIENT_ID in manifest["secrets"], "nobody was asked for a client id"
+    assert len(refused) == 1, "a sign-in started before anyone supplied one"
+    assert parse_qs(urlparse(opened).query)["client_id"] == ["mine-1234"]
+
+
+async def test_disconnecting_keeps_the_client_id_the_user_registered() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        plugin = engine.plugins.get("vault")
+        plugin.secrets = {"oauth_client_id": "mine-1234", "oauth": "at-1", "oauth_refresh": "rt-1"}
+        await engine.handle({"cmd": "plugin.oauth", "id": "vault", "action": "forget"})
+
+    assert plugin.secrets == {"oauth_client_id": "mine-1234"}, "signing out threw away the registered app"
+
+
+async def test_a_callback_nobody_asked_for_is_refused() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        assert await engine.finish_sign_in("made-up", "code-1") is None
+
+
+async def test_an_expiring_access_token_is_renewed_before_the_request_goes_out() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.files["https://auth.example.com/token"] = (
+        200, {"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 3600},
+    )
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        plugin = engine.plugins.get("vault")
+        plugin.secrets = {**plugin.secrets, "oauth": "stale", "oauth_refresh": "rt-1", "oauth_expires": "0"}
+        await engine.handle({
+            "cmd": "plugin.http", "id": "vault", "url": "https://api.example.com/v1/me",
+            "headers": {"Authorization": "Bearer {{secret.oauth}}"},
+        })
+
+    assert platform.http_requests[-1]["headers"]["Authorization"] == "Bearer at-2", "a stale token went out"
+    assert plugin.secrets["oauth_refresh"] == "rt-2", "a rotated refresh token was thrown away"
+
+
+async def test_a_plugin_reaches_the_whole_command_table_it_was_granted() -> None:
+    """Every command a permission names dispatches, so the table cannot rot."""
+    unreachable = [command for command in plugins.PERMISSION_COMMANDS if command not in Engine(FakePlatform())._handlers]
+
+    assert unreachable == []
+
+
+async def test_a_plugin_can_take_a_still_of_a_camera_as_it_looks_now() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        camera_id = next(iter(engine.cameras.items))
+        await engine.handle({"cmd": "camera.snapshot", "camera_id": camera_id, "req_id": 9})
+
+    frame = next(e for e in events if e.get("event") == "frame")
+    assert frame["camera_id"] == camera_id and frame["req_id"] == 9
+    assert base64.b64decode(frame["jpeg"]), "the still came back empty"
+    assert "camera.snapshot" in plugins.PERMISSION_COMMANDS, "taking a still needs a permission"
+    assert plugins.PERMISSIONS[plugins.PERMISSION_COMMANDS["camera.snapshot"]]["risky"] is True
+
+
+async def test_a_camera_with_no_frame_yet_says_so_rather_than_handing_back_nothing() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "camera.snapshot", "camera_id": "nope", "req_id": 10})
+
+    assert any(e.get("event") == "error" and e.get("req_id") == 10 for e in events)
+    assert not any(e.get("event") == "frame" for e in events)
+
+
+async def test_risk_history_reaches_a_plugin_without_a_store_of_its_own() -> None:
+    """The rollups the detail page already draws, projected by the same table."""
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await asyncio.sleep(0.4)
+        await engine.handle({"cmd": "history.get", "monitor_id": monitor_id})
+
+    raw = next(e for e in events if e.get("event") == "history")
+    seen = plugins.project_event(raw, ["history:read"])
+
+    assert seen is not None and seen["monitor_id"] == monitor_id
+    assert set(seen) == {"event", "monitor_id", "now", "buckets", "alerts", "stats"}
+    assert "snaps" not in seen, "the snapshot index rode along to a plugin"
+
+
+async def test_an_event_carrying_something_a_permission_covers_reaches_nobody_else() -> None:
+    """A plugin naming an event cannot wait for another to ask and read the answer."""
+    still = {"event": "frame", "camera_id": "c1", "jpeg": "abc"}
+    history = {"event": "history", "monitor_id": "m1", "now": 1.0, "buckets": [], "alerts": [], "stats": {}}
+
+    assert plugins.project_event(still, ["camera:frames"]) is not None
+    assert plugins.project_event(still, ["state:read"]) is None
+    assert plugins.project_event(history, ["history:read"]) is not None
+    assert plugins.project_event(history, []) is None
+    assert plugins.project_event({"event": "alert", "monitor_id": "m1"}, []) is not None
+
+
+async def test_a_plugin_draws_its_own_panel_and_ships_the_media_for_it() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "id": "painter", "assets": ["loop.mp4"], "surfaces": ["panel"]}
+    files = {"loop.mp4": b"\x00\x00\x00\x20ftypisom" + b"\x00" * 64}
+    panel = "<style>body{margin:0}</style><video autoplay muted loop></video><script>pg.log('up')</script>"
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle(
+            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest, files=files, panel=panel)}
+        )
+        plugin = engine.plugins.get("painter")
+
+    assert plugin.sources["panel.html"] == panel
+    assert plugin.digests["panel.html"] == hashlib.sha256(panel.encode()).hexdigest()
+    assert plugin.digests["loop.mp4"] == hashlib.sha256(files["loop.mp4"]).hexdigest()
+    assert "loop.mp4" not in plugins.text_assets(plugin.assets), "a video reached the sandbox as text"
+
+
+async def test_a_file_claiming_to_be_video_but_is_not_never_installs() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "assets": ["loop.mp4"]}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle(
+            {"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest, files={"loop.mp4": b"<script>"})}
+        )
+
+    assert engine.plugins.get("demo") is None
+    assert any("not really video/mp4" in str(e.get("message")) for e in events if e.get("event") == "error")
+
+
+PROVIDER = {
+    "id": "spotify", "name": "Spotify", "version": "1.0.0",
+    "permissions": ["link:provide"], "reasons": {"link:provide": "to share the track"},
+    "provides": {"now-playing": "The track playing right now"},
+}
+CONSUMER = {
+    "id": "np-widget", "name": "Now playing", "version": "1.0.0",
+    "permissions": ["link:consume"], "reasons": {"link:consume": "to draw the track"},
+    "consumes": ["spotify:now-playing"],
+}
+
+
+async def install_pair(engine: Engine) -> None:
+    """Installs a provider and a consumer, both accepted."""
+    for manifest in (PROVIDER, CONSUMER):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
+        await engine.handle(
+            {"cmd": "plugin.update", "id": manifest["id"], "patch": {"granted": manifest["permissions"], "enabled": True}}
+        )
+
+
+async def test_one_plugin_asks_another_and_the_answer_comes_back_to_it() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_pair(engine)
+        await engine.handle(
+            {"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "now-playing", "tag": "np", "body": {"q": 1}}
+        )
+        asked = next(e for e in events if e.get("event") == "call")
+        await engine.handle(
+            {"cmd": "plugin.answer", "id": "spotify", "call_id": asked["call_id"], "channel": "now-playing", "body": {"track": "Blue"}}
+        )
+        answer = next(e for e in events if e.get("event") == "answer")
+
+    assert asked["id"] == "spotify" and asked["from"] == "np-widget" and asked["body"] == {"q": 1}
+    assert answer["id"] == "np-widget" and answer["tag"] == "np" and answer["body"] == {"track": "Blue"}
+    assert plugins.project_event(asked, ["link:provide"]) is not None
+    assert plugins.project_event(answer, ["state:read"]) is None, "an answer reached a plugin without the grant"
+
+
+async def test_a_plugin_reaches_no_channel_it_did_not_declare() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_pair(engine)
+        await engine.handle({"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "library", "req_id": 1})
+        await engine.handle({"cmd": "plugin.call", "id": "spotify", "to": "np-widget", "channel": "now-playing", "req_id": 2})
+
+    refused = [e for e in events if e.get("event") == "error" and e.get("req_id") in (1, 2)]
+    assert len(refused) == 2, "an undeclared channel or a plugin with no link:consume got through"
+    assert not any(e.get("event") == "call" for e in events)
+
+
+async def test_an_answer_to_a_question_nobody_asked_is_refused() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_pair(engine)
+        await engine.handle({"cmd": "plugin.answer", "id": "spotify", "call_id": "made-up", "body": {}, "req_id": 3})
+        await engine.handle(
+            {"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "now-playing", "tag": "np"}
+        )
+        asked = next(e for e in events if e.get("event") == "call")
+        await engine.handle({"cmd": "plugin.answer", "id": "np-widget", "call_id": asked["call_id"], "body": {}, "req_id": 4})
+
+    refused = [e for e in events if e.get("event") == "error" and e.get("req_id") in (3, 4)]
+    assert len(refused) == 2, "a made-up call id or the wrong plugin answered"
+
+
+async def test_a_broadcast_only_reaches_the_plugins_that_asked_for_that_channel() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    bystander = {**CONSUMER, "id": "elsewhere", "name": "Elsewhere", "consumes": ["spotify:library"]}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_pair(engine)
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(bystander)})
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "elsewhere", "patch": {"granted": ["link:consume"], "enabled": True}}
+        )
+        await engine.handle({"cmd": "plugin.publish", "id": "spotify", "channel": "now-playing", "body": {"track": "Blue"}})
+
+    heard = [e for e in events if e.get("event") == "message"]
+    assert [e["id"] for e in heard] == ["np-widget"]
+    assert heard[0]["from"] == "spotify" and heard[0]["body"] == {"track": "Blue"}
+
+
+async def test_a_disabled_provider_answers_nobody() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_pair(engine)
+        await engine.handle({"cmd": "plugin.update", "id": "spotify", "patch": {"enabled": False}})
+        await engine.handle(
+            {"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "now-playing", "req_id": 5}
+        )
+
+    assert any(e.get("event") == "error" and e.get("req_id") == 5 for e in events)
+
+
+async def test_a_plugin_can_ask_for_a_picture_back_as_bytes() -> None:
+    """A sandbox may show a picture it was handed but may not fetch one itself."""
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        await engine.handle({"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/art.jpg", "binary": True})
+
+    assert platform.http_requests[-1]["binary"] is True
+    assert any(e.get("event") == "http" for e in events)
+
+
+async def test_a_sign_in_sends_the_user_back_to_the_loopback_address() -> None:
+    """Providers refuse a redirect to the name, so the literal is what is sent."""
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_vault(engine)
+        await engine.handle({"cmd": "plugin.oauth", "id": "vault", "action": "start", "origin": "http://localhost:8000"})
+        opened = next(e for e in events if e.get("event") == "plugin_oauth")["url"]
+
+    assert parse_qs(urlparse(opened).query)["redirect_uri"] == ["http://127.0.0.1:8000/oauth/callback"]
+
+
+async def test_a_plugins_secrets_are_scrubbed_from_a_bug_report() -> None:
+    """It never holds one, but PrintGuard puts them in requests it makes."""
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t-key"}})
+        found = reports.collect_secrets(engine)
+        scrubbed = reports.scrub("GET https://api.example.com/?k=s3cr3t-key failed", found)
+
+    assert {"s3cr3t-key", "registered-app"} <= found
+    assert "s3cr3t-key" not in scrubbed
+
+
+async def test_plugin_state_view_carries_no_credentials() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        await _register_printer(engine)
+        view = plugins.project_state(engine.state_event(), ["state:read"])
+
+    assert view["printers"][0]["name"] == "P"
+    assert "config" not in view["printers"][0], "printer credentials reached a plugin"
+    assert "settings" not in view and "tokens" not in view
+
+
+PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+async def test_a_plugin_ships_its_own_files_and_they_are_hashed_with_its_code() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "assets": ["icon.png", "table.json"]}
+    files = {"icon.png": PNG, "table.json": b'{"a": 1}'}
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest, files=files)})
+        plugin = engine.plugins.get("demo")
+
+    assert sorted(plugin.assets) == ["icon.png", "table.json"]
+    assert plugin.digests["icon.png"] == hashlib.sha256(PNG).hexdigest()
+    assert plugins.text_assets(plugin.assets) == {"table.json": '{"a": 1}'}, "an image reached the sandbox"
+
+
+async def test_a_file_that_lies_about_what_it_is_never_installs() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "assets": ["icon.png"]}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle(
+            {"cmd": "plugin.install", "source": {"kind": "file"},
+             "zip": plugin_zip(manifest, files={"icon.png": b"<script>alert(1)</script>"})}
+        )
+
+    assert engine.plugins.get("demo") is None, "a script wearing an image's name was installed"
+    assert any(e.get("event") == "error" and "not really" in e["message"] for e in events)
+
+
+def test_a_manifest_refuses_a_kind_of_file_a_plugin_may_not_ship() -> None:
+    for name in ("payload.svg", "run.exe", "../escape.png", "alarm.mp3.exe"):
+        with pytest.raises(ValueError):
+            plugins.sanitise_manifest({**MANIFEST, "assets": [name]})
+
+
+def test_a_platform_covers_its_own_variants_and_nothing_else() -> None:
+    """A plugin naming a platform runs on the images built from it."""
+    assert plugins.runs_here([], "macos"), "a plugin naming nowhere runs everywhere"
+    assert plugins.runs_here(["docker"], "docker-nvidia")
+    assert not plugins.runs_here(["docker-nvidia"], "docker")
+    assert not plugins.runs_here(["docker", "windows"], "macos")
+
+
+async def test_a_manifest_keeps_only_platforms_printguard_runs_on() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "platforms": ["windows", "toaster"]}
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
+        record = engine.plugins.get("demo").public()
+
+    assert record["manifest"]["platforms"] == ["windows"]
+
+
+async def test_plugins_survive_a_restart() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_demo(engine, granted=["state:read"])
+        await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"config": {"picked": ["cam"]}}})
+
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        restored = restarted.plugins.get("demo")
+        assert restored.sources["plugin.js"] == PLUGIN_JS
+        assert restored.config == {"picked": ["cam"]} and restored.granted == ["state:read"]
+        await restarted.handle({"cmd": "plugin.remove", "id": "demo"})
+        assert restarted.plugins.get("demo") is None
+    finally:
+        await restarted.stop()

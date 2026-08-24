@@ -1,4 +1,4 @@
-"""Scoped API tokens: the capability vocabulary and token record helpers.
+"""Scoped API tokens, the capability vocabulary and token record helpers.
 
 Tokens gate the hub's REST and MCP transports. The engine owns them so they can
 be issued, named and revoked from the same protocol the UI already speaks and

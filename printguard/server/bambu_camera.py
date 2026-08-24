@@ -27,7 +27,7 @@ _HEADER_BYTES = 16
 
 
 def _auth_packet(access_code: str) -> bytes:
-    """The 80-byte handshake: a 16-byte header then bblp and the access code."""
+    """The 80-byte handshake, a 16-byte header then bblp and the access code."""
     return (
         struct.pack("<IIII", 0x40, 0x3000, 0, 0)
         + USERNAME.encode("ascii").ljust(32, b"\x00")

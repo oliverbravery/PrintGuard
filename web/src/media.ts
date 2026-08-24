@@ -1,6 +1,6 @@
 export function cameraApi(): MediaDevices {
   if (!navigator.mediaDevices) {
-    throw new Error("cameras are blocked on insecure pages — open PrintGuard over HTTPS or on localhost");
+    throw new Error("cameras are blocked on insecure pages, open PrintGuard over HTTPS or on localhost");
   }
   return navigator.mediaDevices;
 }

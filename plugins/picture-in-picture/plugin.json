@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.schema.json",
+  "id": "picture-in-picture",
+  "name": "Picture in picture",
+  "version": "1.0.0",
+  "description": "Puts a button on every monitor that floats its camera above your other windows.",
+  "author": "oliverbravery",
+  "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/picture-in-picture",
+  "icon": "icon.png",
+  "media": [
+    "shots/monitor.png"
+  ],
+  "permissions": [
+    "state:read",
+    "camera:view"
+  ],
+  "reasons": {
+    "state:read": "To find which camera each monitor is watching.",
+    "camera:view": "To float that camera above your other windows."
+  },
+  "surfaces": [
+    "monitor"
+  ]
+}

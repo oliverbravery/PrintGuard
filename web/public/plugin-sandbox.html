@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; connect-src 'none'; img-src 'none'; media-src 'none'; style-src 'none'; font-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <title>PrintGuard plugin sandbox</title>
+  </head>
+  <body>
+    <!--
+      Runs one plugin file inside an opaque origin whose policy permits no
+      network, no images, no styles and no frames of its own.
+
+      Everything here is inline on purpose. The document has an opaque origin,
+      where 'self' matches nothing, so WebKit refuses an external script and the
+      sandbox would load and quietly run nothing. A module script is out for the
+      same reason: it is always fetched in CORS mode, which an opaque origin can
+      never satisfy.
+
+      The plugin is a pure function. It is handed state and its own stored data,
+      and hands back a view and a list of effects for PrintGuard to carry out,
+      every one of which is checked against the permissions the user granted
+      before anything happens.
+    -->
+    <script>
+      (function () {
+        "use strict";
+
+        for (const name of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches", "AudioContext", "webkitAudioContext", "speechSynthesis"]) {
+          try {
+            delete window[name];
+          } catch {
+            /* frozen on some engines; the policy above is what actually closes these */
+          }
+        }
+        try {
+          delete navigator.sendBeacon;
+        } catch {
+          /* as above */
+        }
+
+        let hooks = { view: null, action: null, serve: null, events: new Map() };
+        let effects = [];
+        let store = {};
+        let assets = {};
+
+        function context(state, target, surface) {
+          return {
+            store,
+            state,
+            target,
+            surface,
+            assets,
+            command(cmd) {
+              effects.push({ kind: "command", cmd });
+            },
+            http(request) {
+              effects.push({ kind: "http", request });
+            },
+            socket(request) {
+              effects.push({ kind: "socket", action: "open", request });
+            },
+            socketSend(tag, text) {
+              effects.push({ kind: "socket", action: "send", request: { tag, text: String(text) } });
+            },
+            socketClose(tag) {
+              effects.push({ kind: "socket", action: "close", request: { tag } });
+            },
+            call(request) {
+              effects.push({ kind: "link", action: "call", request });
+            },
+            publish(request) {
+              effects.push({ kind: "link", action: "publish", request });
+            },
+            notify(text) {
+              effects.push({ kind: "notify", text: String(text) });
+            },
+            sound(sound) {
+              effects.push(
+                typeof sound === "string" ? { kind: "sound", asset: sound } : { kind: "sound", tones: Array.isArray(sound) ? sound : [sound] },
+              );
+            },
+            background(image) {
+              effects.push({ kind: "background", image: String(image) });
+            },
+            log(text) {
+              effects.push({ kind: "log", text: String(text) });
+            },
+          };
+        }
+
+        function load(code) {
+          hooks = { view: null, action: null, serve: null, events: new Map() };
+          new Function("plugin", code)({
+            render(fn) {
+              hooks.view = fn;
+            },
+            action(fn) {
+              hooks.action = fn;
+            },
+            on(name, fn) {
+              hooks.events.set(String(name), fn);
+            },
+            serve(fn) {
+              hooks.serve = fn;
+            },
+          });
+        }
+
+        function run(message) {
+          if (message.store) store = message.store;
+          const ctx = context(message.state || {});
+          effects = [];
+          let tree;
+          let targets;
+          if (message.t === "action" && hooks.action) hooks.action(message.name, message.arg, ctx);
+          else if (message.t === "event") {
+            if (message.event.event === "call" && hooks.serve) {
+              const body = hooks.serve(message.event, ctx);
+              effects.push({ kind: "link", action: "answer", request: { call_id: message.event.call_id, channel: message.event.channel, body } });
+            }
+            hooks.events.get(String(message.event.event))?.(message.event, ctx);
+          }
+          // A half with no view of its own must not answer with one, or its empty
+          // reply would wipe the view the other half drew for the same plugin.
+          if (hooks.view) {
+            tree = hooks.view(ctx);
+            targets = {};
+            for (const at of message.targets || []) {
+              targets[at.surface + ":" + at.id] = hooks.view(context(message.state || {}, at.id, at.surface));
+            }
+          }
+          store = ctx.store;
+          return { tree, targets, store, effects };
+        }
+
+        addEventListener("message", (message) => {
+          if (message.source !== parent) return;
+          const { id, t } = message.data || {};
+          try {
+            if (t === "init") {
+              store = message.data.store || {};
+              assets = message.data.assets || {};
+              load(message.data.code);
+              parent.postMessage({ id, t: "ready" }, "*");
+              return;
+            }
+            parent.postMessage({ id, t: "result", ...run(message.data) }, "*");
+          } catch (err) {
+            parent.postMessage({ id, t: "failed", message: String((err && err.message) || err) }, "*");
+          }
+        });
+
+        parent.postMessage({ t: "booted" }, "*");
+      })();
+    </script>
+  </body>
+</html>

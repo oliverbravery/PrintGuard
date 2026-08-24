@@ -1,8 +1,8 @@
-import { cardButton } from "../a11y";
 import { section, toggleHidden, togglePinned } from "../layout";
 import { useStore } from "../store";
 import type { DeviceState, Monitor } from "../types";
 import { Feed } from "./Feed";
+import { PluginNodeView, usePluginSurface } from "./PluginNode";
 import { RiskGauge } from "./RiskGauge";
 import { SortableItem, type SortableHandle } from "./Sortable";
 
@@ -26,6 +26,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
   const score = history[monitor.id]?.at(-1)?.score ?? 0;
   const alerting = Boolean(monitor.alert);
   const pinned = section(engine?.settings.layout, "monitors").pinned.includes(monitor.id);
+  const tools = usePluginSurface("monitor", monitor.id);
 
   const content = (handle?: SortableHandle) => (
     <>
@@ -72,6 +73,11 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
           <>
             <DeviceChip state={printer?.device_state ?? undefined} />
             {!monitor.watching && <span className="chip">standby</span>}
+            {tools.map(({ plugin, node }) => (
+              <span key={plugin.id} className="relative z-[3]">
+                <PluginNodeView plugin={plugin} node={node} />
+              </span>
+            ))}
           </>
         )}
       </div>
@@ -104,10 +110,14 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
   if (!customising)
     return (
       <article
-        {...cardButton(() => openDetail(monitor.id), `Open ${monitor.name} monitor details`)}
         className={`panel tile reveal relative cursor-pointer transition-colors hover:border-line-1 ${alerting ? "tile-alert" : ""}`}
         style={{ "--i": index } as React.CSSProperties}
       >
+        <button
+          className="absolute inset-0 z-[2] cursor-pointer"
+          aria-label={`Open ${monitor.name} monitor details`}
+          onClick={() => openDetail(monitor.id)}
+        />
         {content()}
       </article>
     );

@@ -43,7 +43,7 @@ export function ReportDialog() {
     const added: Attachment[] = [];
     for (const file of Array.from(files)) {
       if (total + file.size > MAX_TOTAL_BYTES) {
-        toast("error", `Attachments are capped at ${MAX_TOTAL_BYTES / 1024 / 1024} MB per report — ${file.name} was skipped`);
+        toast("error", `Attachments are capped at ${MAX_TOTAL_BYTES / 1024 / 1024} MB per report, so ${file.name} was skipped`);
         continue;
       }
       total += file.size;
@@ -71,7 +71,7 @@ export function ReportDialog() {
       <Dialog title="Report a bug" onClose={close}>
         <div className="space-y-4">
           <p className="text-sm text-text-1">
-            Report sent — thank you.{" "}
+            Report sent, thank you.{" "}
             {email.trim()
               ? "If more information is needed, you'll hear back at the address you left."
               : "It was submitted anonymously."}
@@ -88,7 +88,7 @@ export function ReportDialog() {
     <Dialog title="Report a bug" onClose={close}>
       <div className="space-y-3">
         <p className="text-sm text-text-1">
-          Something broken? Describe it and it goes straight to the developer — anonymously, no account needed.
+          Something broken? Describe it and it goes straight to me, anonymously and with no account needed.
         </p>
         <textarea
           className="field min-h-28"
@@ -128,7 +128,7 @@ export function ReportDialog() {
           <p className="mt-1.5 leading-relaxed">
             Your description, any files you attach, and a diagnostics bundle: the app version and platform, your
             camera, printer, monitor and notification configuration with every credential removed, performance
-            stats, recent errors and warnings, and the app's recent logs — also scrubbed of credentials. No
+            stats, recent errors and warnings, and the app's recent logs, also scrubbed of credentials. No
             camera frames are included unless you attach them yourself. Download the same bundle to read it
             first, or to send it somewhere else yourself.
           </p>

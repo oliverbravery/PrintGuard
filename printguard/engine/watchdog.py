@@ -1,7 +1,7 @@
-"""Defect response: streak detection, printer actions, notifications and
-the health watchdog that keeps failures loud.
+"""Defect response, covering streak detection, printer actions, notifications
+and the health watchdog that keeps failures loud.
 
-Nothing in the alert path fails silently: failed printer actions, failed
+Nothing in the alert path fails silently. Failed printer actions, failed
 notification deliveries and dropped-out cameras or printer services all
 emit protocol events, and sustained outages are pushed through the
 configured notifiers so the user hears about them away from the dashboard.
@@ -28,6 +28,8 @@ DEVICE_POLL_S = 5.0
 NOTIFY_COOLDOWN_S = 30.0
 WATCH_TICK_S = 2.0
 OFFLINE_GRACE_S = 12.0
+RECOVER_HOLD_S = 60.0
+FLAP_HOLD_MAX_S = 900.0
 STALL_GRACE_S = 30.0
 ACT_ATTEMPTS = 3
 ACT_RETRY_S = 1.0
@@ -42,6 +44,8 @@ class Watchdog:
         self._cooldown_until: dict[str, float] = {}
         self._last_notified: dict[str, float] = {}
         self._down_since: dict[str, float] = {}
+        self._healthy_since: dict[str, float] = {}
+        self._flaps: dict[str, int] = {}
         self._warned: set[str] = set()
         self._online_since: dict[str, float] = {}
         self._tasks: set[asyncio.Task[None]] = set()
@@ -87,18 +91,32 @@ class Watchdog:
             await asyncio.sleep(DEVICE_POLL_S)
 
     async def watch_health(self) -> None:
-        """Warns when a watched camera or printer service drops out.
+        """Warns when a watched camera drops out or a printer stops reporting.
 
-        Outages shorter than the grace period are ignored so reconnecting
-        sources do not flap; each sustained outage warns exactly once and
-        announces its recovery. A camera that stays online but stops
-        producing fresh frames counts as stalled - frozen feeds must not
-        pass for monitoring.
+        Outages shorter than the grace period are ignored, and a sustained
+        one warns exactly once; the recovery is only announced once health
+        has held for _recover_hold(), so a source that reconnects and drops
+        again is one warning rather than a notification per cycle. A camera
+        that stays online but stops producing fresh frames counts as stalled
+        - frozen feeds must not pass for monitoring. Printer health is checked
+        for every enabled monitor, since a printer that reports nothing usable
+        is the reason its monitor is watching in the first place.
         """
         while True:
             now = time.monotonic()
             for monitor in list(self._engine.monitors.values()):
                 mid = monitor["id"]
+                printer = self._engine.printers.get(monitor["printer_id"]) if monitor.get("printer_id") else None
+                if monitor.get("enabled") and printer is not None:
+                    await self._edge(
+                        f"device:{mid}",
+                        printer.online,
+                        now,
+                        OFFLINE_GRACE_S,
+                        monitor,
+                        f"Cannot tell whether the printer for '{monitor['name']}' is printing, so it keeps watching and a defect cannot pause the print",
+                        f"Printer for '{monitor['name']}' is reporting its state again",
+                    )
                 camera = self._engine.cameras.get(monitor["camera_id"]) if monitor["camera_id"] else None
                 if not monitor_watching(monitor, self._engine.printers) or camera is None:
                     self._online_since.pop(mid, None)
@@ -113,8 +131,8 @@ class Watchdog:
                     now,
                     OFFLINE_GRACE_S,
                     monitor,
-                    f"Camera '{camera.name}' is offline — '{monitor['name']}' is NOT being monitored",
-                    f"Camera '{camera.name}' is back — '{monitor['name']}' is monitored again",
+                    f"Camera '{camera.name}' is offline, so '{monitor['name']}' is NOT being monitored",
+                    f"Camera '{camera.name}' is back, so '{monitor['name']}' is monitored again",
                 )
                 if offline:
                     await self._engine.restart_camera(camera)
@@ -130,23 +148,11 @@ class Watchdog:
                     now,
                     0.0,
                     monitor,
-                    f"Camera '{camera.name}' feed has stalled — '{monitor['name']}' is NOT being monitored",
-                    f"Camera '{camera.name}' feed recovered — '{monitor['name']}' is monitored again",
+                    f"Camera '{camera.name}' feed has stalled, so '{monitor['name']}' is NOT being monitored",
+                    f"Camera '{camera.name}' feed recovered, so '{monitor['name']}' is monitored again",
                 )
                 if stalled:
                     await self._engine.restart_camera(camera)
-                printer = self._engine.printers.get(monitor["printer_id"]) if monitor.get("printer_id") else None
-                if printer is not None:
-                    reachable = (printer.device_state or {}).get("status") != "offline"
-                    await self._edge(
-                        f"device:{mid}",
-                        reachable,
-                        now,
-                        OFFLINE_GRACE_S,
-                        monitor,
-                        f"Printer service for '{monitor['name']}' is unreachable — defects cannot pause this print",
-                        f"Printer service for '{monitor['name']}' is reachable again",
-                    )
             await asyncio.sleep(WATCH_TICK_S)
 
     async def _edge(
@@ -159,23 +165,43 @@ class Watchdog:
         down_message: str,
         up_message: str,
     ) -> bool:
-        if healthy:
-            self._down_since.pop(key, None)
-            if key in self._warned:
-                self._warned.discard(key)
-                await self._warn(monitor, up_message, recovered=True)
-            return False
-        since = self._down_since.setdefault(key, now)
-        if now - since >= grace and key not in self._warned:
+        if not healthy:
+            self._healthy_since.pop(key, None)
+            down_since = self._down_since.setdefault(key, now)
+            if now - down_since < grace or key in self._warned:
+                return False
             self._warned.add(key)
             await self._warn(monitor, down_message)
             return True
+        healthy_since = self._healthy_since.setdefault(key, now)
+        if key not in self._warned:
+            self._down_since.pop(key, None)
+            if now - healthy_since >= FLAP_HOLD_MAX_S:
+                self._flaps.pop(key, None)
+            return False
+        if now - healthy_since < self._recover_hold(key):
+            return False
+        self._warned.discard(key)
+        self._down_since.pop(key, None)
+        self._flaps[key] = self._flaps.get(key, 0) + 1
+        await self._warn(monitor, up_message, recovered=True)
         return False
+
+    def _recover_hold(self, key: str) -> float:
+        """How long a condition must stay healthy before its recovery is announced.
+
+        Every recovery doubles what the next one has to prove, up to
+        FLAP_HOLD_MAX_S, so a source that keeps dropping and reconnecting is
+        announced once for the whole unstable episode instead of on every
+        cycle. The requirement lapses once the condition has held for the
+        maximum without faulting again.
+        """
+        return min(FLAP_HOLD_MAX_S, RECOVER_HOLD_S * 2 ** self._flaps.get(key, 0))
 
     async def _warn(self, monitor: dict[str, Any], message: str, recovered: bool = False) -> None:
         self._engine.emit({"event": "warning", "monitor_id": monitor["id"], "message": message, "recovered": recovered})
         if monitor.get("notify"):
-            self._schedule(self._send_alerts(f"PrintGuard {'recovered' if recovered else 'warning'}", message, None))
+            self._schedule(self._engine.send_alerts(f"PrintGuard {'recovered' if recovered else 'warning'}", message, None))
 
     async def on_score(self, monitor: dict[str, Any], frame: Frame, score: float) -> None:
         """Advances the defect streak for a monitor and triggers responses.
@@ -234,18 +260,10 @@ class Watchdog:
         self._last_notified[monitor["id"]] = time.monotonic()
         title = f"PrintGuard: {monitor['name']} defect ({score * 100:.0f}%)"
         if action == "failed":
-            body = f"AUTOMATIC {monitor['on_defect'].upper()} FAILED — check the printer"
+            body = f"AUTOMATIC {monitor['on_defect'].upper()} FAILED, check the printer"
         elif action == "none":
             body = "Alert only: no printer action configured"
         else:
             body = f"Action taken: {action}"
-        await self._send_alerts(title, body, image)
+        await self._engine.send_alerts(title, body, image)
 
-    async def _send_alerts(self, title: str, body: str, image: bytes | None) -> None:
-        configured = {nid: config for nid, config in self._engine.settings.get("notifiers", {}).items() if nid in NOTIFIERS}
-        for notifier_id, config in configured.items():
-            try:
-                await NOTIFIERS[notifier_id].send(self._engine.platform.http, config, title, body, image)
-            except Exception as exc:
-                logger.debug("notifier %s delivery traceback", notifier_id, exc_info=True)
-                self._engine.emit({"event": "error", "message": f"{NOTIFIERS[notifier_id].label} notification failed: {exc}"})

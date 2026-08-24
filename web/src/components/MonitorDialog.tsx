@@ -33,7 +33,7 @@ export function MonitorDialog() {
           ))}
         </select>
         {!cameras.length && (
-          <p className="text-xs text-text-1">No cameras registered yet — add one from the camera registry first.</p>
+          <p className="text-xs text-text-1">No cameras registered yet, add one from the camera registry first.</p>
         )}
         <select className="field" value={printerId} onChange={(e) => setPrinterId(e.target.value)}>
           <option value="">No printer (alerts only)</option>

@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "alert-sounds",
+      "name": "Alert sounds",
+      "description": "Sounds a horn, a bell or an alarm when a defect is caught, on the monitors you pick.",
+      "author": "oliverbravery",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "media": [
+        "shots/settings.png"
+      ],
+      "permissions": [
+        "state:read",
+        "sound"
+      ],
+      "surfaces": [
+        "settings"
+      ],
+      "platforms": [],
+      "repo": "oliverbravery/PrintGuard",
+      "path": "plugins/alert-sounds",
+      "ref": "0d66af5a522c0a27f1c37ed24b829dc090ed9733",
+      "digests": {
+        "plugin.json": "31654ce20da493455ac0c0b5ac24df325785b08732b568a0af1af78511b9741b",
+        "plugin.js": "1b0a3241c6c0fd955bda75333bf1395d4ad375922d83332a06b1ef741aa734e4"
+      }
+    },
+    {
+      "id": "picture-in-picture",
+      "name": "Picture in picture",
+      "description": "Puts a button on every monitor that floats its camera above your other windows.",
+      "author": "oliverbravery",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "media": [
+        "shots/monitor.png"
+      ],
+      "permissions": [
+        "state:read",
+        "camera:view"
+      ],
+      "surfaces": [
+        "monitor"
+      ],
+      "platforms": [],
+      "repo": "oliverbravery/PrintGuard",
+      "path": "plugins/picture-in-picture",
+      "ref": "304afcb782668d361ac4401038f73566565866d1",
+      "digests": {
+        "plugin.json": "c6675a27abbf6c09fdbfabaff7dd8283ae2124796cfadccc44cc26dee9887d39",
+        "plugin.js": "9625952af0f6765e172104bea611cf27eb48fed6034cea4a154ca98ac6ccf233"
+      }
+    },
+    {
+      "id": "progress-reports",
+      "name": "Progress reports",
+      "description": "Sends how far a print has got and how many defects it has seen, as often as you ask.",
+      "author": "oliverbravery",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "media": [
+        "shots/settings.png"
+      ],
+      "permissions": [
+        "state:read",
+        "alert:send"
+      ],
+      "surfaces": [
+        "settings"
+      ],
+      "platforms": [],
+      "repo": "oliverbravery/PrintGuard",
+      "path": "plugins/progress-reports",
+      "ref": "0d66af5a522c0a27f1c37ed24b829dc090ed9733",
+      "digests": {
+        "plugin.json": "0837b48e1a3007ae32d2d06e5efbc0fc00cc79aa492c3bf4c94cc90f1468aa3f",
+        "plugin.js": "20b57c627bc6337c52ff0eef8cae642e2b2e38817fe1a9a402d089a9fa942a48",
+        "worker.js": "0e7bcff17d5c681dd90f3574ebbb6df47818535ae7d94a5f10dbefb1ea590af7"
+      }
+    },
+    {
+      "id": "spotify",
+      "name": "Spotify",
+      "description": "Puts the current cover behind the dashboard, with the track and the transport in a panel.",
+      "author": "oliverbravery",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "media": [
+        "shots/dashboard.jpg"
+      ],
+      "permissions": [
+        "net",
+        "oauth",
+        "background"
+      ],
+      "surfaces": [
+        "panel"
+      ],
+      "platforms": [],
+      "repo": "oliverbravery/PrintGuard",
+      "path": "plugins/spotify",
+      "ref": "304afcb782668d361ac4401038f73566565866d1",
+      "digests": {
+        "plugin.json": "6531ffe400068aca00c600db15dbb2c31d5c88dd04f5f3452380af582cebe61f",
+        "panel.html": "56a644a5b66ddc48b265f88bea41a22649126ac49827bdb48be82a372c628ed4"
+      }
+    }
+  ]
+}

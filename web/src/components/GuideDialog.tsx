@@ -5,16 +5,25 @@ import { Dialog } from "./Dialog";
 const REPO = "https://github.com/oliverbravery/PrintGuard";
 const MODEL = "https://github.com/oliverbravery/Edge-FDM-Fault-Detection";
 
-function GuideEntry({ section }: { section: GuideSection }) {
+export function GuideEntry({ section, lead, fill }: { section: GuideSection; lead?: boolean; fill?: boolean }) {
   const openDialog = useStore((s) => s.openDialog);
   const { action } = section;
   return (
-    <section className="reveal">
-      <div className="mb-1.5 flex items-center gap-2.5">
+    <section className={`reveal ${fill ? "flex h-full min-h-0 flex-col" : ""}`}>
+      <div className="mb-1.5 flex shrink-0 items-center gap-2.5">
         <span className={`led ${section.led}`} />
-        <h3 className="display text-sm font-semibold tracking-[0.14em]">{section.title}</h3>
+        <h3 className={lead ? "display text-base font-bold" : "display text-sm font-semibold tracking-[0.14em]"}>
+          {section.title}
+        </h3>
       </div>
-      <p className="text-[0.84rem] leading-relaxed text-text-1">{section.body}</p>
+      <p className={`shrink-0 leading-relaxed text-text-1 ${lead ? "text-sm" : "text-[0.84rem]"}`}>{section.body}</p>
+      {section.shot && (
+        <figure className={`shot ${fill ? "shot-fill" : ""}`}>
+          <img className="shot-dark" src={`guide/${section.shot}-dark.jpg`} alt="" loading="lazy" />
+          <img className="shot-light" src={`guide/${section.shot}-light.jpg`} alt="" loading="lazy" />
+        </figure>
+      )}
+      {section.visual && <div className="mt-3">{section.visual}</div>}
       {action && (
         <button className="btn mt-2.5" onClick={() => openDialog(action.dialog)}>
           {action.label} →
@@ -32,8 +41,8 @@ export function GuideDialog() {
     <Dialog title="Guide" size="wide" onClose={() => openDialog(null)}>
       <div className="space-y-6">
         <p className="text-sm text-text-1">
-          PrintGuard catches print failures for you. Here's what everything means and what you can do
-          — use a section's action to jump straight in.
+          What everything on the dashboard means, and what you can do with it. Use a section's action
+          to jump straight in.
         </p>
         {sections.map((section) => (
           <GuideEntry key={section.id} section={section} />

@@ -7,12 +7,19 @@ import json
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from printguard.engine import vision
-from printguard.server.inference import Inference, _measure_concurrency, _register_library
+from printguard.server.inference import (
+    Inference,
+    _device_label,
+    _execution_devices,
+    _measure_concurrency,
+    _register_library,
+)
 from printguard.server.platform import ServerPlatform
 
 
@@ -60,6 +67,34 @@ async def test_runtimes_agree_on_classification() -> None:
     assert drift < min(result["margin"] for result in classifications) / 2
 
 
+def _ep_device(ep_name: str, vendor: str, device_type: str, ep_metadata: dict[str, str]) -> SimpleNamespace:
+    """Builds a stand-in for one device an ONNX Runtime provider offers."""
+    return SimpleNamespace(
+        ep_name=ep_name,
+        ep_vendor=vendor,
+        ep_metadata=ep_metadata,
+        device=SimpleNamespace(type=SimpleNamespace(name=device_type), metadata={}),
+    )
+
+
+def test_the_accelerator_a_provider_offers_wins_and_is_the_one_named() -> None:
+    """An Intel image with a working GPU must run on it, and say so.
+
+    OpenVINO offers a CPU path under the same provider name as its GPU, so a GPU
+    that the host's driver never handed over is indistinguishable from one in use
+    unless the hardware behind the provider is what gets ranked and named. Its meta
+    devices pick again at inference time, so neither can stand in for the GPU.
+    """
+    devices = [
+        _ep_device("CPUExecutionProvider", "Microsoft", "CPU", {}),
+        _ep_device("OpenVINOExecutionProvider", "Intel", "CPU", {"ov_device": "CPU"}),
+        _ep_device("OpenVINOExecutionProvider.AUTO", "Intel", "GPU", {"ov_device": "GPU", "ov_meta_device": "AUTO"}),
+        _ep_device("OpenVINOExecutionProvider", "Intel", "GPU", {"ov_device": "GPU"}),
+    ]
+
+    assert [_device_label(device) for device in _execution_devices(devices)] == ["Intel GPU", "Intel CPU"]
+
+
 def test_provider_library_that_cannot_load_leaves_the_cpu(tmp_path: Path) -> None:
     """A GPU image whose provider libraries the host cannot supply must still start.
 
@@ -89,3 +124,14 @@ def test_measured_concurrency_tracks_scaling() -> None:
 
     assert _measure_concurrency(scales)[0] > 1
     assert _measure_concurrency(serialises)[0] == 1
+
+
+def test_the_state_file_is_readable_only_by_whoever_runs_the_hub(tmp_path) -> None:
+    """It holds printer passwords, API token hashes and plugin credentials."""
+    from printguard.server.platform import ServerPlatform
+
+    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
+    ServerPlatform.save_state(holder, {"printers": [{"config": {"password": "hunter2"}}]})
+
+    assert oct((tmp_path / "state.json").stat().st_mode)[-3:] == "600"
+    assert not (tmp_path / "state.tmp").exists(), "the temporary file was left behind"

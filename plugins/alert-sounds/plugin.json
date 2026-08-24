@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.schema.json",
+  "id": "alert-sounds",
+  "name": "Alert sounds",
+  "version": "1.0.0",
+  "description": "Sounds a horn, a bell or an alarm when a defect is caught, on the monitors you pick.",
+  "author": "oliverbravery",
+  "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/alert-sounds",
+  "icon": "icon.png",
+  "media": [
+    "shots/settings.png"
+  ],
+  "permissions": [
+    "state:read",
+    "sound"
+  ],
+  "reasons": {
+    "state:read": "To notice the moment a monitor raises an alert.",
+    "sound": "To play the sound you picked."
+  },
+  "surfaces": [
+    "settings"
+  ]
+}

@@ -29,7 +29,7 @@ class ChunkStream:
         self._eof = False
 
     def feed(self, chunk: bytes | None) -> None:
-        """Queues a chunk; None marks end of stream."""
+        """Queues a chunk, where None marks the end of the stream."""
         self._chunks.put(chunk)
 
     def read(self, size: int = -1) -> bytes:

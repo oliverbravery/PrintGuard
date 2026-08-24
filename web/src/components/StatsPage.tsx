@@ -142,7 +142,7 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
             )}
           </div>
           {snaps.length === 0 ? (
-            <p className="mono text-[0.7rem] text-text-2">No alerts have fired yet — a snapshot is captured each time a defect alert triggers.</p>
+            <p className="mono text-[0.7rem] text-text-2">No alerts have fired yet. A snapshot is captured each time a defect alert triggers.</p>
           ) : (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {history && snaps.map((snap) => (

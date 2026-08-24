@@ -182,6 +182,11 @@ export interface CustomTheme {
   colors: Record<ThemeTokenKey, string>;
 }
 
+export interface Glass {
+  opacity: number;
+  tone: number;
+}
+
 export interface LayoutSection {
   order: string[];
   pinned: string[];
@@ -191,6 +196,108 @@ export interface LayoutSection {
 export interface Layout {
   monitors: LayoutSection;
   cameras: LayoutSection;
+}
+
+export interface Permission {
+  id: string;
+  label: string;
+  description: string;
+  risky?: boolean;
+  hub_only?: boolean;
+  urls?: boolean;
+  channels?: boolean;
+  commands?: string[];
+  fields?: Record<string, string[]>;
+}
+
+export interface PluginManifest {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  homepage: string;
+  icon?: string;
+  media?: string[];
+  permissions: string[];
+  reasons: Record<string, string>;
+  surfaces: ("panel" | "monitor" | "settings")[];
+  platforms: string[];
+  urls: string[];
+  secrets: Record<string, string>;
+  provides: Record<string, string>;
+  consumes: string[];
+  oauth: { authorize_url: string; token_url: string; register_url: string; scopes: string[]; label: string } | Record<string, never>;
+  events: string[];
+  tick_s: number;
+}
+
+export interface PluginRecord {
+  id: string;
+  manifest: PluginManifest;
+  files: string[];
+  digests: Record<string, string>;
+  source: { kind: string; repo?: string; path?: string; ref?: string; filename?: string };
+  granted: string[];
+  config: Record<string, unknown>;
+  secrets_set: string[];
+  verified: boolean;
+  enabled: boolean;
+  installed: number;
+  failure: string | null;
+}
+
+export interface CatalogueEntry {
+  id: string;
+  name: string;
+  description?: string;
+  author?: string;
+  icon?: string;
+  media?: string[];
+  repo: string;
+  path?: string;
+  ref: string;
+  version?: string;
+  permissions?: string[];
+  surfaces?: string[];
+  platforms?: string[];
+  digests: Record<string, string>;
+}
+
+export interface PluginNode {
+  type: string;
+  value?: string;
+  label?: string;
+  tone?: string;
+  muted?: boolean;
+  camera_id?: string;
+  asset?: string;
+  secret?: boolean;
+  kind?: string;
+  placeholder?: string;
+  on?: boolean;
+  action?: string;
+  arg?: unknown;
+  options?: { value: string; label: string }[];
+  children?: PluginNode[];
+}
+
+export interface PluginTone {
+  hz: number;
+  ms: number;
+  shape?: string;
+  together?: boolean;
+}
+
+export interface PluginEffect {
+  image?: string;
+  action?: string;
+  kind: string;
+  cmd?: Record<string, unknown>;
+  request?: Record<string, unknown>;
+  text?: string;
+  tones?: PluginTone[];
+  asset?: string;
 }
 
 export interface EngineStats {
@@ -218,6 +325,7 @@ export interface UpdateInfo {
 
 export interface EngineState {
   mode: string;
+  host: string;
   version: string;
   update: UpdateInfo | null;
   cameras: Camera[];
@@ -229,13 +337,23 @@ export interface EngineState {
     mqtt?: MqttConfig;
     theme: string;
     themes: CustomTheme[];
+    glass: Glass;
     layout?: Layout;
     inference_runtime: "auto" | "litert" | "onnx";
+    catalogue_url: string;
   };
   tokens: ApiToken[];
   stats: EngineStats;
   integrations: AdapterMeta[];
   notifiers: AdapterMeta[];
+  plugins: PluginRecord[];
+  plugin_permissions: Permission[];
+  plugin_events: Record<string, string[]>;
+  plugin_event_permissions: Record<string, string>;
+  plugin_oauth_callback: string;
+  plugin_platforms: Record<string, string>;
+  plugin_assets: Record<string, string>;
+  plugin_host: boolean;
 }
 
 export interface ScorePoint {

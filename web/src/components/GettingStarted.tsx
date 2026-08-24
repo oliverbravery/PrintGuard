@@ -1,4 +1,5 @@
 import { useStore } from "../store";
+import { Progress } from "./Progress";
 import type { DialogKind } from "../store";
 
 interface Step {
@@ -93,20 +94,10 @@ export function GettingStarted() {
           <h2 className="display text-xl font-bold">GET PRINTGUARD WATCHING</h2>
         </div>
         <p className="mb-5 text-sm text-text-1">
-          Register a camera and add a monitor to start watching — connect a printer and alerts for the
+          Register a camera and add a monitor to start watching. Connect a printer and alerts for the
           full safety net.
         </p>
-        <div className="mb-4 flex items-center gap-3">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-ink-3">
-            <div
-              className="h-full bg-accent transition-[width] duration-500"
-              style={{ width: `${(doneCount / steps.length) * 100}%` }}
-            />
-          </div>
-          <span className="label whitespace-nowrap">
-            {doneCount} of {steps.length}
-          </span>
-        </div>
+        <Progress value={doneCount} total={steps.length} className="mb-4" />
         <ol className="space-y-2.5">
           {steps.map((step) => (
             <StepRow key={step.n} step={step} primary={step === primaryStep} />
@@ -114,9 +105,9 @@ export function GettingStarted() {
         </ol>
         <button
           className="mt-5 text-xs text-text-2 underline transition-colors hover:text-accent"
-          onClick={() => openDialog("guide")}
+          onClick={() => openDialog("intro")}
         >
-          New here? Open the guide →
+          New here? How PrintGuard works →
         </button>
       </div>
     </div>

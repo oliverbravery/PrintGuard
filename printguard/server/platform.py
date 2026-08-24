@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -20,12 +22,14 @@ from typing import Any, Callable
 import av
 import httpx
 import numpy as np
+import websockets
 from av.video.reformatter import VideoReformatter
 from ..engine import vision
 from ..engine.platform import Frame
 from .bambu_camera import open_bambu_jpeg_stream
 from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
+from .plugins import WasmPluginRuntime
 from .publish import H264Push
 
 FPS_SAMPLE_FRAMES = 25
@@ -39,14 +43,33 @@ DEVICE_OPEN_OPTIONS = ({"framerate": "30"}, {"framerate": "15"}, {})
 """Frame rates tried, most common first, when a device's own capture formats
 cannot be read ahead of time (Windows/Linux); macOS pins a real size and rate
 from AVFoundation in _device_open_options."""
+
+SOCKET_TIMEOUT_S = 10.0
+SOCKET_MAX_BYTES = 256 * 1024
 DEVICE_SIZE_CAP = 1280 * 720
 DEVICE_PIXEL_FORMATS = {"420v": "nv12", "420f": "nv12", "yuvs": "yuyv422", "2vuy": "uyvy422"}
 """AVFoundation format subtypes mapped to ffmpeg pixel formats. avfoundation
 defaults to yuv420p, which it silently downgrades to the packed uyvy422 formats
-— often capped to a few fps — so the biplanar nv12 formats that carry a device's
+(often capped to a few fps) so the biplanar nv12 formats that carry a device's
 full frame rate are requested by name instead."""
 
 logger = logging.getLogger(__name__)
+
+
+def deployment(packaged: bool) -> str:
+    """Names the deployment a plugin's declared platforms are matched against.
+
+    Args:
+        packaged: Whether this is the desktop app, which is the only build
+            carrying its own installer to update with.
+
+    Returns:
+        A ``PLATFORMS`` id. The image build arg carries the variant, so the
+        Intel and NVIDIA images name themselves and the plain one does not.
+    """
+    if packaged:
+        return "macos" if sys.platform == "darwin" else "windows"
+    return f"docker{os.environ.get('PRINTGUARD_VARIANT', '')}"
 
 
 def _video_devices() -> list[tuple[str, str]]:
@@ -205,7 +228,7 @@ def _authorize_macos_camera() -> None:
         if answered.wait(CAMERA_CONSENT_WAIT_S) and granted[0]:
             return
     raise RuntimeError(
-        "macOS camera access is not granted — allow PrintGuard under System Settings → Privacy & Security → Camera"
+        "macOS camera access is not granted. Allow PrintGuard under Privacy & Security, then Camera, in System Settings"
     )
 
 
@@ -386,8 +409,41 @@ class AVSource:
         self._wake.set()
 
 
+class WebSocket:
+    """One connection the hub holds open for a plugin."""
+
+    def __init__(self, connection: websockets.ClientConnection) -> None:
+        self._connection = connection
+        self._reader: asyncio.Task[None] | None = None
+
+    def read(self, arrived: Callable[[str, str], None]) -> None:
+        """Starts reporting frames, and reports the close whatever ends it."""
+
+        async def pump() -> None:
+            arrived("open", "")
+            try:
+                async for frame in self._connection:
+                    arrived("message", frame if isinstance(frame, str) else frame.decode("utf-8", "replace"))
+            except Exception as exc:
+                logger.info("plugin socket ended: %s", exc)
+            finally:
+                arrived("closed", "")
+
+        self._reader = asyncio.ensure_future(pump())
+
+    async def send(self, text: str) -> None:
+        """Writes one text frame."""
+        await self._connection.send(text)
+
+    async def close(self) -> None:
+        """Closes the connection and stops its reader."""
+        if self._reader is not None:
+            self._reader.cancel()
+        await self._connection.close()
+
+
 class ServerPlatform:
-    """Hub mode platform: hardware inference and frames via MediaMTX."""
+    """Hub mode platform, with hardware inference and frames via MediaMTX."""
 
     mode = "hub"
     update_repo = "oliverbravery/PrintGuard"
@@ -397,6 +453,7 @@ class ServerPlatform:
     ) -> None:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
+        self.host = deployment(update_asset is not None)
         data_dir.mkdir(parents=True, exist_ok=True)
         self._model_dir = model_dir
         self._inference: Inference | None = None
@@ -409,6 +466,9 @@ class ServerPlatform:
         self._client = httpx.AsyncClient(follow_redirects=True)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client)
         self._sources: dict[str, AVSource] = {}
+        self.plugin_runtime = None if os.environ.get("PRINTGUARD_PLUGINS") == "off" else WasmPluginRuntime()
+        if self.plugin_runtime is None:
+            logger.warning("plugins are disabled by PRINTGUARD_PLUGINS=off")
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Selects the requested inference runtime."""
@@ -536,14 +596,24 @@ class ServerPlatform:
         headers: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
         data: bytes | None = None,
+        binary: bool = False,
         timeout: float = 10.0,
     ) -> tuple[int, Any]:
-        """Performs an HTTP request with httpx."""
+        """Performs an HTTP request with httpx, base64 encoding a binary reply."""
         resp = await self._client.request(method, url, headers=headers, json=json, content=data, timeout=timeout)
+        if binary:
+            return resp.status_code, base64.b64encode(resp.content).decode()
         try:
             return resp.status_code, resp.json()
         except ValueError:
             return resp.status_code, resp.text
+
+    async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> WebSocket:
+        """Connects a WebSocket and reads it on a task of its own."""
+        connection = await websockets.connect(url, open_timeout=SOCKET_TIMEOUT_S, max_size=SOCKET_MAX_BYTES)
+        socket = WebSocket(connection)
+        socket.read(arrived)
+        return socket
 
     async def encode_jpeg(self, rgb: np.ndarray) -> bytes | None:
         """Encodes a frame as JPEG using PyAV's mjpeg encoder."""
@@ -581,7 +651,14 @@ class ServerPlatform:
             return {}
 
     def save_state(self, state: dict[str, Any]) -> None:
-        """Atomically writes engine state to the data directory."""
+        """Atomically writes engine state to the data directory, owner-readable only.
+
+        It holds printer passwords, notifier keys, API token hashes and whatever
+        credentials plugins have been given, so the mode is set on the temporary
+        file before the rename rather than after: anything else leaves a window
+        where the finished file is readable by everybody on the host.
+        """
         tmp = self._state_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(state, indent=2))
+        tmp.chmod(0o600)
         tmp.replace(self._state_path)

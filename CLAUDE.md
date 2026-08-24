@@ -60,6 +60,14 @@ essentials a change must respect:
   needs no other change in either mode - the config form, connection test, polling and
   actions all follow from the adapter. CONTRIBUTING.md has the step-by-step.
 
+- **Plugins are third-party code, and none of it runs in the engine.**
+  [`engine/plugins.py`](printguard/engine/plugins.py) only sources and hash-pins it; execution
+  is a sandbox on each side (an opaque-origin iframe in the browser, QuickJS in WebAssembly on
+  the hub, via `platform.plugin_runtime`). A plugin returns a view and a list of effects and
+  performs nothing itself, and each side checks every effect against the granted permissions
+  before acting: the engine cannot tell a plugin's command from the dashboard's. `PERMISSIONS`
+  in that module is the single policy both sides apply.
+
 - **Programmatic surface is hub-only.** The REST API (`server/api.py`, `/api/v1`) and MCP
   server (`server/mcp.py`, `/mcp`) are thin transports over `engine.request()`, scoped by
   cumulative `read ⊂ control ⊂ manage` tokens. The Home Assistant MQTT bridge
@@ -79,9 +87,15 @@ essentials a change must respect:
 ## Conventions
 
 - **No comments; let names document intent.** The TypeScript/React UI carries **no** comments
-  or JSDoc - never narrate what the code does. In the Python engine/server, every module, class
-  and public method gets a docstring, but still no inline comments unless the *why* is genuinely
-  non-obvious.
+  or JSDoc - never narrate what the code does. Everything under [`plugins/`](plugins) is the
+  exception, since it is what a plugin author reads to learn the API:
+  [`plugin.d.ts`](plugins/plugin.d.ts) carries TSDoc on every member for the hover, and the
+  shipped plugins are commented throughout to work as examples. In the Python engine/server,
+  every module, class and public method gets a docstring, but still no inline comments unless
+  the *why* is genuinely non-obvious.
+- **Docstrings are Google style.** A summary line, then `Args:`, `Returns:` and `Raises:`
+  whenever the function takes arguments, gives something back or fails. Never repeat a type
+  there: the signature is annotated, so say what a value means, not what it is.
 - **Minimal and consolidated.** No fallbacks, defensive guards or speculative abstractions
   unless asked. Prefer extending/refactoring existing code over adding parallel variants;
   delete code a change makes dead.
@@ -89,7 +103,10 @@ essentials a change must respect:
 - **The version lives only in `pyproject.toml`.** Read it at runtime via
   `importlib.metadata.version("printguard")`; bump it with `uv version --bump {patch,minor,major}`.
 - **Tests.** `tests/test_engine.py` simulates the engine against `tests/fakes.py`
-  (`FakePlatform`); `tests/test_adapters.py` pins each adapter's exact request shapes. New
+  (`FakePlatform`); `tests/test_adapters.py` pins each adapter's exact request shapes;
+  `tests/test_plugin_runtime.py` runs real JavaScript in the shipped QuickJS build to hold the
+  hub's plugin sandbox to what it promises, and `web/tests/sandbox.spec.ts` does the same for
+  the browser sandbox through Playwright (`npm run test:sandbox`, chromium and webkit). New
   scheduler/monitor/watchdog/protocol behaviour extends the former; a new adapter is tested
   in the latter. Tests reach the engine through `engine.handle()`/`engine.request()`, not by
   poking internals.
@@ -117,6 +134,7 @@ change made wrong or redundant. Never leave a doc describing something that no l
 | Model runtimes, execution providers, image variants, GPU setup | `docs/hardware.md` |
 | Exposure, proxies, origin checks, ports, hardening | `docs/deployment.md` |
 | A REST endpoint, MCP tool, scope or response shape | `docs/api.md` |
+| The plugin API, a permission, either sandbox, or the catalogue | `docs/plugins.md` |
 | A failure mode users will hit, or its fix | `docs/troubleshooting.md` |
 | Anything user-visible | `CHANGELOG.md` (see Release) |
 | The UI's appearance | `docs/assets/` screenshots: `cd web && npm run screenshots` |

@@ -2,7 +2,7 @@
 
 # Printers, cameras and notifications
 
-[Docs](README.md) · [Architecture](architecture.md) · **Printers & cameras** · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Architecture](architecture.md) · **Printers & cameras** · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -31,19 +31,21 @@ flowchart LR
     prn -. "job state gates inference" .-> mon
 ```
 
-The dotted lines are the optional parts: bind no printer and PrintGuard alerts without
-being able to stop the print.
+The dotted lines are the optional parts. Bind no printer and PrintGuard still alerts you, it
+just cannot stop the print.
 
 ## Register a printer
 
 Open the printer registry, choose the service, fill in the form and **Test** it before
-saving. Then bind it to a monitor and choose what a sustained defect does: **alert only**,
-**pause** or **cancel**.
+saving. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
+print or cancels it.
 
-Linked printers report job name, progress and state on every monitor that uses them, and
-they gate inference: a printer that positively reports "not printing" stands its monitors
-down, so an idle printer costs nothing. Losing contact with a printer never stands
-monitoring down. See [failing safely](architecture.md#failing-safely).
+Linked printers report job name, progress and state on every monitor that uses them, and they
+gate inference. A printer that positively reports "not printing" stands its monitors down, so
+an idle printer costs nothing. Losing contact with a printer never stands monitoring down, and
+neither does a state the adapter cannot read, so a monitor left watching an apparently idle
+printer warns and says which state it is getting. See
+[failing safely](architecture.md#failing-safely).
 
 ## Supported print services
 
@@ -65,8 +67,8 @@ Bambu printers speak MQTT over TLS rather than HTTP, and a browser cannot open a
 socket, so control is hub only.
 
 1. On the printer, enable **LAN Only Mode**, then **Developer Mode** under
-   Settings → Network. This opens the MQTT channel.
-2. Note the **access code** shown there, and the **serial number** under Settings → Device.
+   Network in Settings. This opens the MQTT channel.
+2. Note the **access code** shown there, and the **serial number** under Device in Settings.
 3. Register the printer with its IP address, serial number and access code.
 
 The chamber camera is registered automatically: RTSP on the X1 and H2 series, or the
@@ -104,10 +106,10 @@ MK4, MK4S, MK3.9, MK3.5, MINI, XL and CORE One, or on a Raspberry Pi attached to
 MK2.5. It authenticates with HTTP Digest, which a browser cannot perform, so Prusa is hub
 only.
 
-1. Enable **PrusaLink** on the printer under Settings → Network → PrusaLink.
+1. Enable **PrusaLink** on the printer under Settings, Network, then PrusaLink.
 2. Register it with its URL and the password shown there. The username is always `maker`.
 
-**PrusaConnect is not used**, so no frames or job data leave hardware you own. PrusaLink's
+PrusaConnect is not used, so no frames or job data leave hardware you own. PrusaLink's
 webcam feature pushes snapshots to PrusaConnect rather than serving a local video stream, so
 if the printer has a camera, add it separately as a **Stream URL**.
 
@@ -119,7 +121,7 @@ If a registered printer exposes a webcam, PrintGuard registers it as a camera fo
 no stream URL to copy. The camera registry's **Printer cameras** tab lists them and a
 **Refresh** button picks up a camera attached after the printer was registered.
 
-These cameras belong to their printer: they cannot be removed on their own and they are
+These cameras belong to their printer, so they cannot be removed on their own and they are
 dropped when the printer is.
 
 ## Adding cameras yourself
@@ -143,6 +145,11 @@ Alert channels live in **Settings**. Enable a channel, fill in the form and send
 alert. Every enabled channel receives defect snapshots and watchdog warnings for monitors
 that have notifications switched on.
 
+A monitor's **cooldown** is the quiet window after a defect alert. Watchdog warnings are
+separate, so a camera or printer that keeps dropping out warns once for the whole unstable
+episode, and the recovery is only announced once it has stayed healthy, so reconnections
+cannot turn into a stream of notifications.
+
 | Channel | Modes | Notes |
 |---|---|---|
 | [ntfy](https://ntfy.sh) | Hub and local | Self-hostable, no account needed |
@@ -152,7 +159,7 @@ that have notifications switched on.
 
 ## Networking caveats
 
-Most connection problems come down to *who* makes the request. In hub mode the server does,
+Most connection problems come down to who makes the request. In hub mode the server does,
 from inside the container. In local mode the browser does, under browser security rules.
 
 ```mermaid
@@ -165,24 +172,32 @@ flowchart LR
     end
 ```
 
-**Running in Docker.** The hub reaches printer services from inside the container, so
+### Running in Docker
+
+The hub reaches printer services from inside the container, so
 `localhost` means the container, not your host, and a URL like `http://localhost:5000`
-fails with *all connection attempts failed*. Use `http://host.docker.internal:5000`; the
+fails with *all connection attempts failed*. Use `http://host.docker.internal:5000`. The
 shipped [`docker-compose.yaml`](../docker-compose.yaml) maps that name for you. On a Linux
 host the print service must also listen on `0.0.0.0` rather than loopback only.
 
-**Local mode URLs.** Give the browser a URL it can reach itself: `http://localhost:5000`
+### Local mode URLs
+
+Give the browser a URL it can reach itself: `http://localhost:5000`
 when the service runs on the same machine, otherwise the host's LAN IP. Never
 `host.docker.internal`, which only resolves inside a container.
 
-**CORS in local mode.** The browser enforces CORS, so enable it in OctoPrint under
-Settings → API, or add `cors_domains` to `moonraker.conf`. Without it the connection test
+### CORS in local mode
+
+The browser enforces CORS, so enable it in OctoPrint under
+Settings, API, or add `cors_domains` to `moonraker.conf`. Without it the connection test
 fails with *access control checks*.
 
-**Mixed content.** If PrintGuard itself is served over HTTPS, for example through a
+### Mixed content
+
+If PrintGuard itself is served over HTTPS, for example through a
 Cloudflare Tunnel, the browser blocks calls to an `http://` printer. Safari reports *not
 allowed to request resource* even for `http://localhost`. To control an HTTP printer from
 an HTTPS deployment, use hub mode, where the server makes the request, or serve the printer
 over HTTPS.
 
-More symptoms and fixes: [Troubleshooting](troubleshooting.md).
+[Troubleshooting](troubleshooting.md) has more symptoms and fixes.

@@ -1,6 +1,6 @@
-"""Resource registries - cameras, integrated printers and API tokens - each an
-id-keyed collection of records carrying identity, access details and any live
-runtime state."""
+"""Resource registries - cameras, integrated printers, API tokens and installed
+plugins - each an id-keyed collection of records carrying identity, access
+details and any live runtime state."""
 
 from __future__ import annotations
 
@@ -226,6 +226,95 @@ class Token:
         }
 
 
+@dataclass
+class Plugin:
+    """An installed plugin, where it came from, what it may do, and its code.
+
+    Attributes:
+        id: The manifest's plugin id, unique across installed plugins.
+        manifest: The validated manifest, carrying the permissions the plugin
+            asks for and the surfaces it draws on.
+        sources: Plugin source files keyed by filename. Held here rather than
+            re-fetched so an installed plugin keeps working offline and the
+            bytes stay the ones that were hashed at install.
+        assets: The files the plugin ships beside its code, base64 encoded and
+            keyed by name, held for the same reason.
+        page: The icon, media and README presenting a zip-installed plugin,
+            base64 encoded and keyed by manifest path. Empty for repository
+            installs, whose page is read from the repository at the pinned
+            commit.
+        digests: SHA-256 of the canonical manifest and of every file with it.
+        source: Where it was installed from, for reinstalling and for display.
+        granted: Permissions the user has actually granted, a subset of those
+            the manifest asks for.
+        config: The plugin's own stored data, opaque to PrintGuard.
+        secrets: Credentials the user gave it, and the tokens an OAuth sign-in
+            returned. Named in the manifest, referenced by the plugin, and never
+            in anything the plugin or the dashboard reads back.
+        verified: Whether these exact bytes matched a catalogue entry.
+        enabled: Whether the plugin runs.
+        installed: Unix timestamp of the install.
+    """
+
+    id: str
+    manifest: dict[str, Any]
+    sources: dict[str, str]
+    digests: dict[str, str]
+    source: dict[str, Any]
+    assets: dict[str, str] = field(default_factory=dict)
+    page: dict[str, str] = field(default_factory=dict)
+    granted: list[str] = field(default_factory=list)
+    config: dict[str, Any] = field(default_factory=dict)
+    secrets: dict[str, str] = field(default_factory=dict)
+    verified: bool = False
+    enabled: bool = True
+    installed: float = 0.0
+    failure: str | None = None
+
+    def public(self) -> dict[str, Any]:
+        """Serialises the plugin without its code for the state event.
+
+        The state snapshot broadcasts every second, so the source travels on
+        request instead, through ``plugin.code``.
+        """
+        return {
+            "id": self.id,
+            "manifest": self.manifest,
+            "files": sorted(self.sources),
+            "digests": self.digests,
+            "source": self.source,
+            "granted": self.granted,
+            "config": self.config,
+            "secrets_set": sorted(self.secrets),
+            "verified": self.verified,
+            "enabled": self.enabled,
+            "installed": self.installed,
+            "failure": self.failure,
+        }
+
+    def persisted(self) -> dict[str, Any]:
+        """Serialises the plugin, code included, to restore it on boot."""
+        return {
+            "id": self.id,
+            "manifest": self.manifest,
+            "sources": self.sources,
+            "assets": self.assets,
+            "page": self.page,
+            "digests": self.digests,
+            "source": self.source,
+            "granted": self.granted,
+            "config": self.config,
+            "secrets": self.secrets,
+            "verified": self.verified,
+            "enabled": self.enabled,
+            "installed": self.installed,
+        }
+
+    def may(self, permission: str) -> bool:
+        """Whether the plugin was granted a permission it asked for."""
+        return permission in self.granted and permission in self.manifest["permissions"]
+
+
 class CameraRegistry(Registry[Camera]):
     """Holds all registered cameras keyed by id."""
 
@@ -238,7 +327,7 @@ class CameraRegistry(Registry[Camera]):
         return camera
 
     def schedulable(self) -> list[Camera]:
-        """Cameras eligible for inference: in use, online and attached."""
+        """Cameras eligible for inference, meaning in use, online and attached."""
         return [c for c in self.values() if c.in_use and c.online]
 
     def sync_in_use(self, monitors: dict[str, dict[str, Any]], printers: "PrinterRegistry") -> None:
@@ -256,3 +345,11 @@ class PrinterRegistry(Registry[Printer]):
 
 class TokenRegistry(Registry[Token]):
     """Holds all issued API tokens keyed by id."""
+
+
+class PluginRegistry(Registry[Plugin]):
+    """Holds all installed plugins keyed by their manifest id."""
+
+    def running(self) -> list[Plugin]:
+        """Enabled plugins, in install order."""
+        return [p for p in self.values() if p.enabled]

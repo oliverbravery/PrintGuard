@@ -2,11 +2,6 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 
 let openModals = 0;
 
-/** Modal shell built on the native `<dialog>` element: the browser owns the focus trap,
- *  Esc handling, top-layer rendering, background `inert` and focus return to the opener.
- *  Closing always flows through `onClose` (which unmounts this component); the effect
- *  cleanup calls `.close()` to restore focus. A module counter ref-locks body scroll so
- *  nested modals (a side panel opening a dialog) stay locked until the last one closes. */
 export function Modal({
   onClose,
   variant = "center",
@@ -62,20 +57,24 @@ export function Dialog({
   title,
   onClose,
   size = "default",
+  fixed = false,
   children,
 }: {
   title: string;
   onClose: () => void;
   size?: "default" | "wide";
+  fixed?: boolean;
   children: ReactNode;
 }) {
   const titleId = useId();
   return (
     <Modal onClose={onClose} labelledBy={titleId}>
       <div
-        className={`panel rise-in w-full ${size === "wide" ? "sm:max-w-2xl" : "sm:max-w-lg"} max-h-[92vh] overflow-y-auto rounded-b-none sm:rounded-md`}
+        className={`panel rise-in w-full ${size === "wide" ? "sm:max-w-2xl" : "sm:max-w-lg"} rounded-b-none sm:rounded-md ${
+          fixed ? "flex h-[min(92vh,46rem)] flex-col overflow-hidden" : "max-h-[92vh] overflow-y-auto"
+        }`}
       >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-line-0">
+        <div className="flex shrink-0 items-center justify-between px-5 py-3 border-b border-line-0">
           <h2 id={titleId} className="display text-sm font-semibold text-text-1">
             {title}
           </h2>
@@ -88,7 +87,7 @@ export function Dialog({
             ×
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className={`p-5 ${fixed ? "min-h-0 flex-1" : ""}`}>{children}</div>
       </div>
     </Modal>
   );

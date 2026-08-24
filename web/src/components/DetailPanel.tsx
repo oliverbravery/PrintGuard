@@ -4,6 +4,7 @@ import type { Monitor } from "../types";
 import { Modal } from "./Dialog";
 import { Feed } from "./Feed";
 import { DeviceChip } from "./MonitorTile";
+import { PluginNodeView, usePluginSurface } from "./PluginNode";
 import { RiskGauge } from "./RiskGauge";
 import { SaveStatus } from "./SaveStatus";
 import { Sparkline } from "./Sparkline";
@@ -60,6 +61,7 @@ function Slider({
 
 export function DetailPanel({ monitor }: { monitor: Monitor }) {
   const { engine, history, send, openDetail, openStats, openDialog, isPending, updateMonitor } = useStore();
+  const settingsPanels = usePluginSurface("settings", monitor.id);
   const titleId = useId();
   const actionRef = useRef<string | null>(null);
   const removeRef = useRef(false);
@@ -110,7 +112,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
           </div>
           {monitor.alert && (
             <p className="mono text-[0.7rem] text-bad mt-2">
-              defect at {(monitor.alert.score * 100).toFixed(0)}% — action: {monitor.alert.action}
+              defect at {(monitor.alert.score * 100).toFixed(0)}%, action {monitor.alert.action}
             </p>
           )}
           <button className="btn w-full mt-3" onClick={() => openStats(monitor.id)}>
@@ -149,7 +151,13 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
             <Toggle label="Watch this monitor" on={monitor.enabled} onChange={(v) => updateMonitor(monitor.id, { enabled: v })} />
             {monitor.enabled && monitor.watching === false && (
               <p className="mono text-[0.7rem] text-text-2">
-                standby — printer is {printer?.device_state?.status ?? "not printing"}; inference resumes when it prints
+                standby, printer is {printer?.device_state?.status ?? "not printing"}, inference resumes when it prints
+              </p>
+            )}
+            {monitor.enabled && monitor.watching !== false && printer && !printer.online && (
+              <p className="mono text-[0.7rem] text-text-2">
+                watching, the printer reports {printer.device_state?.status ?? "nothing yet"}, so inference runs until it says it is
+                not printing
               </p>
             )}
             <label className="block">
@@ -217,6 +225,12 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
             <Toggle label="Push notifications" on={monitor.notify} onChange={(v) => updateMonitor(monitor.id, { notify: v })} />
           </div>
         </Section>
+
+        {settingsPanels.map(({ plugin, node }) => (
+          <Section key={plugin.id} title={plugin.manifest.name}>
+            <PluginNodeView plugin={plugin} node={node} />
+          </Section>
+        ))}
 
         <Section title="Printer">
           <div className="space-y-3">

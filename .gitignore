@@ -15,3 +15,4 @@ web/public/pysrc.zip
 web/.pages-sim/
 web/test-results/
 web/playwright-report/
+plugins/*.zip
