@@ -5,6 +5,7 @@ import { useStore } from "../store";
 import type { CatalogueEntry, PluginManifest, PluginRecord } from "../types";
 import { ConsentDialog, PermissionList } from "./PluginConsent";
 import { PluginSecrets } from "./PluginSecrets";
+import { useSettingsFooter } from "./SettingsFooter";
 import { Toggle } from "./Toggle";
 
 const REPO_HINT = "owner/repo, or owner/repo/path@branch";
@@ -138,7 +139,6 @@ function PluginCard({ item, onOpen }: { item: StoreItem; onOpen: () => void }) {
   const fetchPluginPage = useStore((s) => s.fetchPluginPage);
   const { entry, plugin } = item;
   const name = plugin?.manifest.name ?? entry?.name ?? item.id;
-  const version = plugin?.manifest.version ?? entry?.version;
   const description = plugin?.manifest.description || entry?.description || "";
   const attention = plugin && (plugin.failure || !plugin.manifest.permissions.every((p) => plugin.granted.includes(p)));
 
@@ -157,7 +157,7 @@ function PluginCard({ item, onOpen }: { item: StoreItem; onOpen: () => void }) {
       <PluginIcon url={plugin ? installedIcon(plugin, page) : pluginFile(entry!, entry!.icon)} name={name} size={44} />
       <div className="min-w-0 flex-1 space-y-0.5">
         <span className="block truncate text-xs text-text-0">
-          {name} {version && <span className="text-text-2">v{version}</span>}
+          {name}
           {attention && <span className="chip chip-bad ml-2">needs attention</span>}
         </span>
         <span className="clamp-2 block text-[0.7rem] leading-snug text-text-2">{description}</span>
@@ -181,6 +181,7 @@ function PluginPage({
   origin,
   onBack,
   meta,
+  extra,
   children,
 }: {
   icon: string | null;
@@ -196,15 +197,20 @@ function PluginPage({
   origin: string;
   onBack: () => void;
   meta?: ReactNode;
+  extra?: ReactNode;
   children?: ReactNode;
 }) {
   const permissions = useStore((s) => s.engine?.plugin_permissions ?? []);
   const hubOnly = useStore((s) => s.engine?.plugin_host ?? false);
+  useSettingsFooter(origin);
   return (
     <div className="space-y-4">
-      <button className="btn" onClick={onBack}>
-        ← All plugins
-      </button>
+      <div className="flex items-center justify-between gap-3">
+        <button className="btn" onClick={onBack}>
+          ← All plugins
+        </button>
+        {extra}
+      </div>
       <div className="flex items-start gap-4">
         <PluginIcon url={icon} name={name} size={64} />
         <div className="min-w-0 flex-1 space-y-1">
@@ -259,8 +265,6 @@ function PluginPage({
         <span className="label mb-2 block">{action ? "Permissions it will ask for" : "Permissions it asks for"}</span>
         <PermissionList plugin={{ manifest }} permissions={permissions} hubOnly={hubOnly} />
       </div>
-
-      <span className="mono block truncate text-[0.65rem] text-text-2">{origin}</span>
     </div>
   );
 }
@@ -327,6 +331,17 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
       manifest={manifest}
       origin={origin}
       onBack={onBack}
+      extra={
+        <button
+          className="btn btn-danger"
+          onClick={() => {
+            send({ cmd: "plugin.remove", id: plugin.id });
+            onBack();
+          }}
+        >
+          Remove
+        </button>
+      }
       meta={
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -336,15 +351,6 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
                 Update
               </button>
             )}
-            <button
-              className="btn btn-danger"
-              onClick={() => {
-                send({ cmd: "plugin.remove", id: plugin.id });
-                onBack();
-              }}
-            >
-              Remove
-            </button>
           </div>
           {plugin.failure && <span className="block text-[0.7rem] text-bad">Stopped: {plugin.failure}</span>}
           {!accepted && <span className="block text-[0.7rem] text-warn">Waiting on permissions you have not accepted.</span>}

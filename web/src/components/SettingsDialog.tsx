@@ -4,6 +4,7 @@ import { applyTheme, beginPreview, endPreview, GLASS, GLASS_DEFAULT, PALETTES } 
 import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
 import { Dialog } from "./Dialog";
 import { PluginsTab } from "./PluginsTab";
+import { SettingsFooter } from "./SettingsFooter";
 import { SaveStatus } from "./SaveStatus";
 import { SchemaForm } from "./SchemaForm";
 import { GlassSliders } from "./GlassTuner";
@@ -124,6 +125,8 @@ export function SettingsDialog() {
   };
 
   return (
+    <SettingsFooter>
+      {(footer) => (
     <Dialog title="Settings" onClose={close}>
       <div className="space-y-5">
         {tabs.length > 1 && (
@@ -505,7 +508,8 @@ export function SettingsDialog() {
           </div>
         )}
 
-        <div className="hairline pt-4 flex items-center justify-between">
+        <div className="hairline flex items-center justify-between gap-3 pt-4">
+          <span className="mono min-w-0 flex-1 truncate text-[0.65rem] text-text-2">{footer}</span>
           <span className="text-xs text-text-1">
             Mode: <span className="mono text-accent">{engine?.mode}</span>
           </span>
@@ -517,5 +521,7 @@ export function SettingsDialog() {
         </div>
       </div>
     </Dialog>
+      )}
+    </SettingsFooter>
   );
 }

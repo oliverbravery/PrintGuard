@@ -682,6 +682,40 @@ video {
   font-weight: 600;
 }
 
+.perms {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.7rem;
+  table-layout: fixed;
+}
+
+.perms th {
+  text-align: left;
+  font-family: var(--font-display);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-2);
+  font-weight: 600;
+  padding: 0 0.6rem 0.35rem 0;
+  border-bottom: 1px solid var(--color-line-0);
+}
+
+.perms td {
+  vertical-align: top;
+  padding: 0.5rem 0.6rem 0.5rem 0;
+  border-bottom: 1px solid var(--color-line-0);
+  overflow-wrap: anywhere;
+}
+
+.perms tr > :last-child {
+  padding-right: 0;
+}
+
+.perms tbody tr:last-child td {
+  border-bottom: 0;
+}
+
 .clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;

@@ -218,7 +218,7 @@ const SCENES: Scene[] = [
   {
     name: "plugin-page", width: 1360, height: 900, theme: "dark", settingsTab: "plugins", catalogue: CATALOGUE,
     prepare: async (page) => {
-      await page.getByText("Spotify v1.0.0").click();
+      await page.locator('[role="button"]', { hasText: "Spotify" }).first().click();
       await page.waitForTimeout(700);
       await page.waitForFunction(() => Array.from(document.images).every((i) => i.complete));
     },
