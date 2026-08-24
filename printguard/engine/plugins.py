@@ -56,6 +56,8 @@ _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PATH_PATTERN = re.compile(r"^[\w./-]*$")
 _ASSET_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
 VERSION_PATTERN = re.compile(r"^[\w.+-]{1,32}$")
+MEDIA_PATTERN = re.compile(r"^[a-z0-9][\w-]*(?:/[\w-]+)*\.(?:png|jpe?g|webp|gif|svg)$")
+MAX_MEDIA = 8
 
 PERMISSIONS: dict[str, dict[str, Any]] = {
     "state:read": {
@@ -576,6 +578,12 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         raise ValueError("oauth needs the oauth permission")
     if sign_in:
         wanted[oauth.CLIENT_ID] = f"The client id of the {sign_in['label']} app you registered"
+    icon = str(raw.get("icon", "")).strip().lower()
+    if icon and not MEDIA_PATTERN.match(icon):
+        raise ValueError("icon names an image file inside the plugin's folder")
+    media = [str(shot).strip().lower() for shot in raw.get("media", []) if str(shot).strip()][:MAX_MEDIA]
+    if any(not MEDIA_PATTERN.match(shot) for shot in media):
+        raise ValueError("each media entry names an image file inside the plugin's folder")
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
     platforms = sorted({str(p).strip() for p in raw.get("platforms", [])} & set(PLATFORMS))
     assets = sorted({str(a).strip().lower() for a in raw.get("assets", [])} - {MANIFEST_FILE, *SOURCE_FILES})
@@ -599,6 +607,8 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "description": str(raw.get("description", "")).strip()[:400],
         "author": str(raw.get("author", "")).strip()[:80],
         "homepage": urls.link(raw.get("homepage")),
+        "icon": icon,
+        "media": media,
         "permissions": permissions,
         "reasons": reasons,
         "surfaces": surfaces,

@@ -16,6 +16,10 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   ones from the catalogue, or from a GitHub repo or a zip.
   [docs/plugins.md](docs/plugins.md) has the API, and [CONTRIBUTING.md](CONTRIBUTING.md) covers
   getting one listed.
+- Each catalogue plugin has a page: an icon, screenshots or GIFs and its README, rendered the
+  way GitHub renders it, with the permissions it will ask for and the author's reason for each.
+  Everything is read from the plugin's repository at the pinned commit, so nothing new is
+  installed or executed by looking.
 - Four come as standard. Picture in picture floats a camera above your other windows, alert
   sounds plays a horn when a defect is caught, progress reports sends a tally of a print through
   your alert channels, and Spotify puts the current cover behind the dashboard.

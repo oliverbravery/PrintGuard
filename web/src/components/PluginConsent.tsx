@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 import type { Finding } from "../lint";
 import { useStore } from "../store";
-import type { Permission, PluginRecord } from "../types";
+import type { Permission, PluginManifest, PluginRecord } from "../types";
 import { phrase, reachesLocal } from "../urls";
 import { Dialog } from "./Dialog";
 
-export function PermissionList({ plugin, permissions, hubOnly }: { plugin: PluginRecord; permissions: Permission[]; hubOnly: boolean }) {
+export function PermissionList({ plugin, permissions, hubOnly }: { plugin: { manifest: PluginManifest }; permissions: Permission[]; hubOnly: boolean }) {
   const asked = permissions.filter((p) => plugin.manifest.permissions.includes(p.id));
   if (asked.length === 0) return <span className="text-[0.7rem] text-text-2">Asks for nothing.</span>;
   return (

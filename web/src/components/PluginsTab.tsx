@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { runsHere } from "../plugins";
+import { renderMarkdown } from "../markdown";
+import { pluginFile, runsHere } from "../plugins";
 import { useStore } from "../store";
-import type { CatalogueEntry, Permission, PluginRecord } from "../types";
+import type { CatalogueEntry, Permission, PluginManifest, PluginRecord } from "../types";
 import { ConsentDialog, PermissionList } from "./PluginConsent";
 import { PluginSecrets } from "./PluginSecrets";
 import { Toggle } from "./Toggle";
@@ -24,6 +25,33 @@ function readZip(file: File): Promise<string> {
   });
 }
 
+export function PluginIcon({ url, name, size }: { url: string | null; name: string; size: number }) {
+  const [broken, setBroken] = useState(false);
+  if (!url || broken) {
+    return (
+      <span
+        aria-hidden
+        className="grid shrink-0 place-items-center rounded-xl border border-line-1 bg-ink-2 text-accent display font-bold"
+        style={{ width: size, height: size, fontSize: size * 0.44 }}
+      >
+        {name.slice(0, 1).toUpperCase()}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt=""
+      width={size}
+      height={size}
+      loading="lazy"
+      className="shrink-0 rounded-xl border border-line-0"
+      style={{ width: size, height: size }}
+      onError={() => setBroken(true)}
+    />
+  );
+}
+
 function Runs({ platforms }: { platforms: string[] | undefined }) {
   const engine = useStore((s) => s.engine);
   const labels = engine?.plugin_platforms ?? {};
@@ -42,6 +70,25 @@ function Runs({ platforms }: { platforms: string[] | undefined }) {
   );
 }
 
+function InstallButton({ entry, installed }: { entry: CatalogueEntry; installed: boolean }) {
+  const installPlugin = useStore((s) => s.installPlugin);
+  const isPending = useStore((s) => s.isPending);
+  const host = useStore((s) => s.engine?.host ?? "");
+  const here = runsHere(entry.platforms, host);
+  return (
+    <button
+      className="btn btn-primary shrink-0"
+      disabled={installed || !here || isPending("plugin.install")}
+      onClick={(event) => {
+        event.stopPropagation();
+        installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref });
+      }}
+    >
+      {installed ? "Installed" : "Install"}
+    </button>
+  );
+}
+
 function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; permissions: Permission[]; hubOnly: boolean }) {
   const send = useStore((s) => s.send);
   const [open, setOpen] = useState(false);
@@ -54,7 +101,8 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
 
   return (
     <div className="rounded border border-line-0 bg-ink-1 p-3 space-y-2.5">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
+        <PluginIcon url={pluginFile(plugin.source, plugin.manifest.icon)} name={plugin.manifest.name} size={36} />
         <span className="text-xs text-text-0 truncate flex-1">
           {plugin.manifest.name} <span className="text-text-2">v{plugin.manifest.version}</span>
         </span>
@@ -94,30 +142,133 @@ function Installed({ plugin, permissions, hubOnly }: { plugin: PluginRecord; per
   );
 }
 
-function Available({ entry, installed }: { entry: CatalogueEntry; installed: boolean }) {
-  const installPlugin = useStore((s) => s.installPlugin);
-  const isPending = useStore((s) => s.isPending);
-  const host = useStore((s) => s.engine?.host ?? "");
-  const here = runsHere(entry.platforms, host);
+function StoreCard({ entry, installed, onOpen }: { entry: CatalogueEntry; installed: boolean; onOpen: () => void }) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className="flex cursor-pointer items-center gap-3 rounded border border-line-0 bg-ink-1 p-3 text-left transition-colors hover:border-accent"
+      onClick={onOpen}
+      onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && (event.preventDefault(), onOpen())}
+    >
+      <PluginIcon url={pluginFile(entry, entry.icon)} name={entry.name} size={44} />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <span className="block truncate text-xs text-text-0">
+          {entry.name} {entry.version && <span className="text-text-2">v{entry.version}</span>}
+        </span>
+        <span className="clamp-2 block text-[0.7rem] leading-snug text-text-2">{entry.description}</span>
+      </div>
+      <InstallButton entry={entry} installed={installed} />
+    </div>
+  );
+}
+
+function bareManifest(entry: CatalogueEntry): PluginManifest {
+  return {
+    id: entry.id,
+    name: entry.name,
+    version: entry.version ?? "",
+    description: entry.description ?? "",
+    author: entry.author ?? "",
+    homepage: "",
+    icon: entry.icon,
+    media: entry.media,
+    permissions: entry.permissions ?? [],
+    reasons: {},
+    surfaces: (entry.surfaces ?? []) as PluginManifest["surfaces"],
+    platforms: entry.platforms ?? [],
+    urls: [],
+    secrets: {},
+    provides: {},
+    consumes: [],
+    oauth: {},
+    events: [],
+    tick_s: 0,
+  };
+}
+
+function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; installed: boolean; onBack: () => void }) {
+  const permissions = useStore((s) => s.engine?.plugin_permissions ?? []);
+  const hubOnly = useStore((s) => s.engine?.plugin_host ?? false);
+  const [readme, setReadme] = useState<string | null | undefined>(undefined);
+  const [manifest, setManifest] = useState<PluginManifest>(bareManifest(entry));
+  const base = pluginFile(entry, "README.md");
+
+  useEffect(() => {
+    const stop = new AbortController();
+    const grab = async (file: string) => {
+      const url = pluginFile(entry, file);
+      if (!url) return null;
+      const answer = await fetch(url, { signal: stop.signal });
+      return answer.ok ? answer : null;
+    };
+    grab("README.md")
+      .then(async (answer) => setReadme(answer ? await answer.text() : null))
+      .catch(() => setReadme(null));
+    grab("plugin.json")
+      .then(async (answer) => {
+        const raw = answer ? await answer.json() : null;
+        if (raw) setManifest({ ...bareManifest(entry), ...raw });
+      })
+      .catch(() => {});
+    return () => stop.abort();
+  }, [entry.id]);
 
   return (
-    <div className="rounded border border-line-0 bg-ink-1 p-3 space-y-2.5">
-      <div className="flex items-start gap-3">
+    <div className="space-y-4">
+      <button className="btn" onClick={onBack}>
+        ← All plugins
+      </button>
+      <div className="flex items-start gap-4">
+        <PluginIcon url={pluginFile(entry, entry.icon)} name={entry.name} size={64} />
         <div className="min-w-0 flex-1 space-y-1">
-          <span className="block truncate text-xs text-text-0">
-            {entry.name} {entry.version && <span className="text-text-2">v{entry.version}</span>}
+          <h3 className="display text-base font-bold leading-tight">{entry.name}</h3>
+          <span className="block text-[0.7rem] text-text-2">
+            {entry.author}
+            {entry.version && ` · v${entry.version}`}
           </span>
-          <span className="block text-[0.7rem] leading-relaxed text-text-2">{entry.description}</span>
+          <Runs platforms={entry.platforms} />
         </div>
-        <button
-          className="btn btn-primary"
-          disabled={installed || !here || isPending("plugin.install")}
-          onClick={() => installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref })}
-        >
-          {installed ? "Installed" : "Install"}
-        </button>
+        <InstallButton entry={entry} installed={installed} />
       </div>
-      <Runs platforms={entry.platforms} />
+
+      {(entry.media ?? []).length > 0 && (
+        <div className="flex snap-x gap-2 overflow-x-auto pb-1">
+          {(entry.media ?? []).map((shot) => (
+            <a key={shot} href={pluginFile(entry, shot) ?? undefined} target="_blank" rel="noreferrer" className="shrink-0 snap-start">
+              <img
+                src={pluginFile(entry, shot) ?? undefined}
+                alt={`${entry.name} screenshot`}
+                loading="lazy"
+                className="h-44 w-auto max-w-none rounded border border-line-0"
+              />
+            </a>
+          ))}
+        </div>
+      )}
+
+      {readme === undefined ? (
+        <span className="block text-[0.7rem] text-text-2">Reading its page…</span>
+      ) : readme ? (
+        <div
+          className="changelog text-[0.78rem]"
+          dangerouslySetInnerHTML={{
+            __html: renderMarkdown(readme, { base: base ?? undefined, dropTitle: true, skip: entry.media ?? [] }),
+          }}
+        />
+      ) : (
+        <p className="text-[0.78rem] leading-relaxed text-text-1">{entry.description}</p>
+      )}
+
+      <div>
+        <span className="label mb-2 block">Permissions it will ask for</span>
+        <PermissionList plugin={{ manifest }} permissions={permissions} hubOnly={hubOnly} />
+      </div>
+
+      <span className="mono block truncate text-[0.65rem] text-text-2">
+        {entry.repo}
+        {entry.path ? `/${entry.path}` : ""} @ {entry.ref.slice(0, 7)}
+      </span>
     </div>
   );
 }
@@ -126,6 +277,7 @@ export function PluginsTab() {
   const { engine, catalogue, fetchCatalogue, installPlugin, isPending, toast } = useStore();
   const [repo, setRepo] = useState("");
   const [platform, setPlatform] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const plugins = engine?.plugins ?? [];
   const permissions = engine?.plugin_permissions ?? [];
@@ -140,6 +292,13 @@ export function PluginsTab() {
   const chosen = platform ?? bases.find((id) => runsHere([id], host)) ?? "";
   const target = chosen === "" ? "" : runsHere([chosen], host) ? host : chosen;
   const listed = (catalogue ?? []).filter((entry) => target === "" || runsHere(entry.platforms, target));
+  const detail = detailId === null ? null : (catalogue ?? []).find((entry) => entry.id === detailId);
+
+  if (detail) {
+    return (
+      <StoreDetail entry={detail} installed={plugins.some((p) => p.id === detail.id)} onBack={() => setDetailId(null)} />
+    );
+  }
 
   const installFromRepo = () => {
     const source = parseRepo(repo);
@@ -198,7 +357,12 @@ export function PluginsTab() {
       ) : (
         <div className="space-y-2">
           {listed.map((entry) => (
-            <Available key={entry.id} entry={entry} installed={plugins.some((p) => p.id === entry.id)} />
+            <StoreCard
+              key={entry.id}
+              entry={entry}
+              installed={plugins.some((p) => p.id === entry.id)}
+              onOpen={() => setDetailId(entry.id)}
+            />
           ))}
         </div>
       )}

@@ -1,4 +1,4 @@
-import { marked } from "marked";
+import { renderMarkdown } from "../markdown";
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
@@ -66,7 +66,7 @@ export function UpdateDialog() {
             </div>
             <div
               className="changelog max-h-[40vh] overflow-y-auto pr-1"
-              dangerouslySetInnerHTML={{ __html: marked.parse(release.notes || "_No release notes._") as string }}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(release.notes || "_No release notes._") }}
             />
             <a
               href={update?.releases_url ?? release.url}

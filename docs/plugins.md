@@ -29,7 +29,7 @@ ways in.
 
 | From | How |
 |---|---|
-| The catalogue | Pick one. These are the ones I have reviewed |
+| The catalogue | Open a plugin's page for its screenshots, README and the permissions it will ask for, then install from there. These are the ones I have reviewed |
 | A GitHub repository | Paste `owner/repo`, or `owner/repo/path@branch` for one inside a larger repo |
 | A file | Import a `.zip` of the plugin's folder |
 
@@ -188,6 +188,9 @@ my-plugin/
   panel.html      draws its own panel instead  (optional)
   worker.js       runs in the background       (optional)
   alarm.mp3       anything it ships            (optional)
+  README.md       its page in the catalogue    (optional)
+  icon.png        shown beside its name        (optional)
+  shots/*.png     its screenshots or GIFs      (optional)
 ```
 
 ```json
@@ -199,6 +202,8 @@ my-plugin/
   "description": "One line about what it does.",
   "author": "you",
   "homepage": "https://github.com/you/bed-clearance",
+  "icon": "icon.png",
+  "media": ["shots/panel.png", "shots/alert.gif"],
   "permissions": ["state:read", "notify"],
   "reasons": {
     "state:read": "To see which monitors are printing.",
@@ -216,6 +221,11 @@ my-plugin/
 
 `reasons` is one line per permission, required for every one you ask for, shown to whoever is
 deciding whether to enable it. Say what your plugin does with it, not what the permission is.
+
+`icon`, `media` and a `README.md` are how a plugin presents itself. The icon sits beside its
+name, the media images open the catalogue page as a gallery, and the README renders under
+them the way GitHub renders it, relative image paths included. These files are read from your
+repository at the pinned commit and are never installed, so they add nothing to what runs.
 
 `surfaces` says where the panel appears.
 

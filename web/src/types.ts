@@ -217,6 +217,8 @@ export interface PluginManifest {
   description: string;
   author: string;
   homepage: string;
+  icon?: string;
+  media?: string[];
   permissions: string[];
   reasons: Record<string, string>;
   surfaces: ("panel" | "monitor" | "settings")[];
@@ -250,6 +252,8 @@ export interface CatalogueEntry {
   name: string;
   description?: string;
   author?: string;
+  icon?: string;
+  media?: string[];
   repo: string;
   path?: string;
   ref: string;
