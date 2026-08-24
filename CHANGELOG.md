@@ -61,6 +61,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   path, since Intel publishes no current driver for them.
 - The compute readout names the hardware, so `intel openvino` now reads `intel gpu` or
   `intel cpu`, and the log lists what the providers offered at start.
+- The Getting Started progress bar is visible in dark and Glass, where its track was taking a
+  colour that all but vanished into the panel behind it.
 - A monitor whose printer reports a state PrintGuard cannot read now warns and says so on its
   panel. It keeps watching, which is the safe direction, but only an unreachable printer warned
   before, so a printer stuck in something like OctoPrint's "Connecting" ran inference at the
