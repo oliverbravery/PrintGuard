@@ -17,6 +17,12 @@ export function GuideEntry({ section, lead }: { section: GuideSection; lead?: bo
         </h3>
       </div>
       <p className={`leading-relaxed text-text-1 ${lead ? "text-sm" : "text-[0.84rem]"}`}>{section.body}</p>
+      {section.shot && (
+        <figure className="shot">
+          <img className="shot-dark" src={`guide/${section.shot}-dark.jpg`} alt="" loading="lazy" />
+          <img className="shot-light" src={`guide/${section.shot}-light.jpg`} alt="" loading="lazy" />
+        </figure>
+      )}
       {section.visual && <div className="mt-3">{section.visual}</div>}
       {action && (
         <button className="btn mt-2.5" onClick={() => openDialog(action.dialog)}>

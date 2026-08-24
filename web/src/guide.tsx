@@ -11,12 +11,11 @@ export interface GuideSection {
   led: string;
   title: string;
   body: ReactNode;
+  shot?: string;
   visual?: ReactNode;
   action?: { label: string; dialog: DialogKind };
   hubOnly?: boolean;
 }
-
-const STEPS = ["Camera", "Score every frame", "Pause and alert"];
 
 const WATCH_STATES: { led: string; when: string; then: string }[] = [
   { led: "led-on", when: "Printing, or no printer linked", then: "Watching, every frame scored" },
@@ -29,6 +28,7 @@ export const INTRO: GuideSection[] = [
     id: "what",
     led: "led-infer",
     title: "What PrintGuard does",
+    shot: "alert",
     body: (
       <>
         A vision model running on your own hardware scores every frame from your printer camera. When
@@ -36,21 +36,12 @@ export const INTRO: GuideSection[] = [
         your network.
       </>
     ),
-    visual: (
-      <div className="flex flex-wrap items-center gap-2">
-        {STEPS.map((step, i) => (
-          <span key={step} className="flex items-center gap-2">
-            {i > 0 && <span className="text-text-2">·</span>}
-            <span className="chip">{step}</span>
-          </span>
-        ))}
-      </div>
-    ),
   },
   {
     id: "sources",
     led: "led-on",
     title: "Cameras and printers",
+    shot: "cameras",
     body: (
       <>
         A camera is any video source PrintGuard can read, so a USB device or an RTSP, MJPEG or WebRTC
@@ -63,6 +54,7 @@ export const INTRO: GuideSection[] = [
     id: "monitors",
     led: "led-infer",
     title: "Monitors are what you tune",
+    shot: "tuning",
     body: (
       <>
         A monitor binds one camera to one printer and carries the alert threshold, how many detections
@@ -75,11 +67,11 @@ export const INTRO: GuideSection[] = [
     id: "watching",
     led: "led-warn",
     title: "When inference runs",
+    shot: "standby",
     body: (
       <>
         Only a printer that positively reports it is not printing stands a monitor down, so an idle
-        printer costs you nothing. Everything else keeps watching, which is why losing a camera or a
-        printer never leaves a print unwatched.
+        printer costs you nothing. Everything else keeps watching.
       </>
     ),
     visual: (
@@ -100,6 +92,7 @@ export const INTRO: GuideSection[] = [
     id: "start",
     led: "led-on",
     title: "Start watching",
+    shot: "checklist",
     body: (
       <>
         Register a camera, then add a monitor binding it. Connect a printer and a notification channel
@@ -141,6 +134,7 @@ export const GUIDE: GuideSection[] = [
     id: "cameras",
     led: "led-on",
     title: "Cameras",
+    shot: "cameras",
     body: (
       <>
         A camera is any video source PrintGuard can read, so a USB or CSI device, an RTSP, MJPEG or
@@ -154,6 +148,7 @@ export const GUIDE: GuideSection[] = [
     id: "printers",
     led: "led-on",
     title: "Printers",
+    shot: "printers",
     body: (
       <>
         Connect a printer, whether <strong>OctoPrint</strong>, <strong>Klipper (Moonraker)</strong>, <strong>Elegoo</strong>,{" "}
@@ -170,6 +165,7 @@ export const GUIDE: GuideSection[] = [
     id: "monitors",
     led: "led-infer",
     title: "Monitors, the core unit",
+    shot: "alert",
     body: (
       <>
         A monitor binds one camera (and optionally one printer) and carries the detection thresholds
@@ -183,6 +179,7 @@ export const GUIDE: GuideSection[] = [
     id: "detection",
     led: "led-warn",
     title: "How detection works",
+    shot: "tuning",
     body: (
       <>
         Every frame is scored against failure prototypes. <strong>Alert threshold</strong> sets how
@@ -196,6 +193,7 @@ export const GUIDE: GuideSection[] = [
     id: "alerts",
     led: "led-bad",
     title: "Alerts",
+    shot: "alerts",
     body: (
       <>
         Add a notification channel, whether <strong>ntfy</strong>, <strong>Telegram</strong>,{" "}
@@ -210,6 +208,7 @@ export const GUIDE: GuideSection[] = [
     id: "failsafe",
     led: "led-warn",
     title: "Fail-safe by design",
+    shot: "standby",
     body: (
       <>
         A watchdog warns the instant a camera drops, a feed freezes or a printer stops answering,
@@ -222,6 +221,7 @@ export const GUIDE: GuideSection[] = [
     id: "customise",
     led: "led-on",
     title: "Make it yours",
+    shot: "customise",
     body: (
       <>
         Reorder, pin and hide monitors and cameras with the ▦ Customise toggle, and switch between
@@ -252,6 +252,7 @@ export const GUIDE: GuideSection[] = [
     id: "plugins",
     led: "led-infer",
     title: "Plugins",
+    shot: "plugins",
     body: (
       <>
         Add a panel to the dashboard or a job on the hub, from the catalogue or any GitHub repo.
