@@ -9,6 +9,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.4.1] - 2026-08-28
 
+### Changed
+
+- The README opens with a hero image, the printers PrintGuard can pause and the channels it
+  alerts through around the dashboard in both themes, rebuilt by the screenshot generator so
+  it tracks the UI.
+
 ## [2.4.0] - 2026-08-24
 
 ### Added

@@ -32,7 +32,7 @@ open model, over the same four unseen test sets:
 43x the throughput and more than double the F1. Method and results are in the
 [dissertation](https://github.com/oliverbravery/Edge-FDM-Fault-Detection/blob/main/dissertation.pdf).
 
-![PrintGuard dashboard: three cameras at a glance, one print mid-failure and auto-paused](docs/assets/dashboard.png)
+![The printers PrintGuard pauses and the channels it alerts through, around the dashboard in dark and light](docs/assets/hero.png)
 
 ## Contents
 
