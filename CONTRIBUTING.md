@@ -97,6 +97,10 @@ Each image is one entry in `SCENES` in `web/screenshots/capture.spec.ts`; add a 
 to capture a new screen. A scene naming `plugins` runs those plugins from `plugins/` in the real
 sandbox, so a screenshot shows what the code actually draws.
 
+The README's opening image is composed by `web/screenshots/hero.ts` from two of the scenes,
+with the printer and alert channel logos around them, and renders with the rest. The logos come
+from the `simple-icons` package apart from the two in `web/screenshots/logos/`.
+
 The same run renders the crops the in-app guide shows, from `CROPS` in that file. A crop names
 the element to frame and is captured in both themes, since the guide picks the one matching the
 theme the reader is on. Point a guide entry at one with `shot: "<id>"` in `web/src/guide.tsx`.

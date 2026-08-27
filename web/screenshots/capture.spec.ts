@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, type Browser, type Locator, type Page } from "@playwright/test";
 import type { Camera, EngineState, Monitor, Printer, ScorePoint } from "../src/types";
+import { heroHtml } from "./hero";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const asset = (name: string) => resolve(here, "../../docs/assets", name);
@@ -196,10 +197,13 @@ const live = (e: EngineState) => {
   ] as never;
 };
 
+const DASHBOARD: Scene = { name: "dashboard", width: 1360, height: 620, theme: "dark" };
+const DETAIL: Scene = { name: "printer-detail", width: 1360, height: 760, theme: "dark", detailId: "m1" };
+
 const SCENES: Scene[] = [
-  { name: "dashboard", width: 1360, height: 620, theme: "dark" },
+  DASHBOARD,
   { name: "dashboard-light", width: 1360, height: 620, theme: "light" },
-  { name: "printer-detail", width: 1360, height: 760, theme: "dark", detailId: "m1" },
+  DETAIL,
   {
     name: "customise", width: 1360, height: 860, theme: "dark", customising: true,
     mutate: (e) => {
@@ -456,6 +460,28 @@ for (const scene of SCENES) {
     await capture(browser, scene);
   });
 }
+
+async function captureHero(browser: Browser): Promise<void> {
+  const { page: dash, close: closeDash } = await stage(browser, DASHBOARD);
+  const dashboard = (await dash.screenshot()).toString("base64");
+  await closeDash();
+  const { page: detail, close: closeDetail } = await stage(browser, { ...DETAIL, name: "hero-detail", theme: "light" });
+  const drawer = (await detail.locator("aside").screenshot()).toString("base64");
+  await closeDetail();
+  const context = await browser.newContext({ viewport: { width: 1600, height: 800 }, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  await page.setContent(heroHtml(dashboard, drawer), { waitUntil: "networkidle" });
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  await page.waitForFunction(() => Array.from(document.images).every((i) => i.complete));
+  await page.screenshot({ path: asset("hero.png"), omitBackground: true });
+  await context.close();
+}
+
+test("hero", async ({ browser }) => {
+  await captureHero(browser);
+});
 
 const pluginShot = (id: string, name: string) => resolve(here, "../../plugins", id, "shots", name);
 
