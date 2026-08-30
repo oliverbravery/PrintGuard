@@ -76,7 +76,7 @@ class PushoverNotifier(NotifierAdapter):
 
     async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:
         """Posts the message, as multipart with the snapshot or form-encoded without."""
-        priority = str(config.get("priority") or "").strip()
+        priority = str(config.get("priority", "")).strip()
         fields = {
             "token": str(config["api_token"]).strip(),
             "user": str(config["user_key"]).strip(),
