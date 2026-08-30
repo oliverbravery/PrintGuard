@@ -249,6 +249,10 @@ const NOTIFIERS = [
     schema: { properties: { url: { type: "string", title: "Topic URL", placeholder: "https://ntfy.sh/my-prints" } }, required: ["url"] },
   },
   {
+    id: "pushover", label: "Pushover", docs_url: "",
+    schema: { properties: { api_token: { type: "string", title: "Application API token", secret: true }, user_key: { type: "string", title: "User key", secret: true } }, required: ["api_token", "user_key"] },
+  },
+  {
     id: "telegram", label: "Telegram", docs_url: "",
     schema: { properties: { token: { type: "string", title: "Bot token", secret: true }, chat_id: { type: "string", title: "Chat ID" } }, required: ["token", "chat_id"] },
   },

@@ -4,4 +4,4 @@ Sends a tally of a print through your alert channels as often as you ask: how fa
 
 ![Turning reports on for a monitor](shots/settings.png)
 
-Reports go through the same ntfy, Telegram or Discord channels your defect alerts use. Each monitor turns reports on in its settings and picks how often they come.
+Reports go through the same ntfy, Pushover, Telegram or Discord channels your defect alerts use. Each monitor turns reports on in its settings and picks how often they come.
