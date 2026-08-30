@@ -9,6 +9,15 @@ their own monthly allowance rather than a shared one.
 CORS on api.pushover.net is per-endpoint. The messages endpoint sends the
 headers, so this adapter runs in both modes, but users/validate.json and
 sounds.json do not; calling either would break local mode alone.
+
+Priority is configured rather than fixed, and applies to everything this
+channel carries: defect alerts, watchdog warnings and recoveries, and the
+settings test. NotifierAdapter.send() receives no severity, so an adapter
+cannot grade a message by kind, and High bypasses the quiet hours set on
+the device - which is worth having for a failed print and not for a camera
+reconnecting at 03:00. Emergency (2) is deliberately absent: it requires
+retry and expire parameters and an acknowledgement receipt to stop it
+re-alerting, none of which PrintGuard has anywhere to put.
 """
 
 from __future__ import annotations
@@ -19,6 +28,14 @@ from urllib.parse import urlencode
 from .base import HttpFn, NotifierAdapter, multipart_form
 
 API = "https://api.pushover.net/1/messages.json"
+PRIORITIES = ["-2", "-1", "0", "1"]
+PRIORITY_LABELS = [
+    "Lowest - no notification, badge only",
+    "Low - notifies without a sound",
+    "Normal - respects your quiet hours",
+    "High - bypasses your quiet hours",
+]
+DEFAULT_PRIORITY = "1"
 
 
 class PushoverNotifier(NotifierAdapter):
@@ -47,18 +64,25 @@ class PushoverNotifier(NotifierAdapter):
                 "secret": True,
                 "placeholder": "From your Pushover dashboard",
             },
+            "priority": {
+                "type": "string",
+                "title": "Priority (applies to every notice, defaults to High)",
+                "enum": PRIORITIES,
+                "enum_labels": PRIORITY_LABELS,
+            },
         },
         "required": ["api_token", "user_key"],
     }
 
     async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:
         """Posts the message, as multipart with the snapshot or form-encoded without."""
+        priority = str(config.get("priority") or "").strip()
         fields = {
             "token": str(config["api_token"]).strip(),
             "user": str(config["user_key"]).strip(),
             "title": title,
             "message": body,
-            "priority": "1",
+            "priority": priority if priority in PRIORITIES else DEFAULT_PRIORITY,
         }
         if image:
             headers, payload = multipart_form(fields, "attachment", "snapshot.jpg", image)

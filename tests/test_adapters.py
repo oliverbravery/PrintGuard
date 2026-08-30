@@ -132,6 +132,19 @@ async def test_pushover_surfaces_api_errors() -> None:
         await NOTIFIERS["pushover"].send(http, {"api_token": "x", "user_key": "y"}, "T", "B", None)
 
 
+async def test_pushover_sends_the_configured_priority() -> None:
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk", "priority": "-1"}, "T", "B", None)
+    assert http.last["data"] == b"token=ap&user=uk&title=T&message=B&priority=-1"
+
+
+async def test_pushover_defaults_priority_when_unset_or_invalid() -> None:
+    for config in ({"api_token": "ap", "user_key": "uk"}, {"api_token": "ap", "user_key": "uk", "priority": ""}, {"api_token": "ap", "user_key": "uk", "priority": "2"}):
+        http = RecordingHttp(body={"status": 1})
+        await NOTIFIERS["pushover"].send(http, config, "T", "B", None)
+        assert http.last["data"].endswith(b"priority=1"), config
+
+
 async def test_discord_uploads_snapshot_with_payload_json() -> None:
     http = RecordingHttp()
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", JPEG)

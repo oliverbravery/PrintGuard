@@ -153,7 +153,7 @@ cannot turn into a stream of notifications.
 | Channel | Modes | Notes |
 |---|---|---|
 | [ntfy](https://ntfy.sh) | Hub and local | Self-hostable, no account needed |
-| [Pushover](https://pushover.net) | Hub and local | One-off app purchase, needs an application token you create |
+| [Pushover](https://pushover.net) | Hub and local | One-off app purchase, needs an application token you create. Priority defaults to High, which bypasses the quiet hours set on the device; it applies to every notice, so turn it down if warnings and recoveries should stay quiet |
 | [Discord](https://discord.com) | Hub and local | Webhook URL |
 | [Telegram](https://telegram.org) | Hub only | Telegram's API sends no CORS headers |
 | Desktop notification | Desktop app only | Native OS notification on the computer running the app |
