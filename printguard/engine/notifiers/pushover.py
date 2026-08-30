@@ -66,9 +66,10 @@ class PushoverNotifier(NotifierAdapter):
             },
             "priority": {
                 "type": "string",
-                "title": "Priority (applies to every notice, defaults to High)",
+                "title": "Priority (applies to every notice)",
                 "enum": PRIORITIES,
                 "enum_labels": PRIORITY_LABELS,
+                "default": DEFAULT_PRIORITY,
             },
         },
         "required": ["api_token", "user_key"],

@@ -131,6 +131,7 @@ export interface SchemaProperty {
   placeholder?: string;
   enum?: string[];
   enum_labels?: string[];
+  default?: string;
 }
 
 export interface AdapterMeta {
