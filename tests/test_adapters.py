@@ -105,6 +105,33 @@ async def test_telegram_surfaces_api_description() -> None:
         await NOTIFIERS["telegram"].send(http, {"bot_token": "x", "chat_id": "0"}, "T", "B", None)
 
 
+async def test_pushover_attaches_snapshot_as_multipart() -> None:
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk"}, "T", "B", JPEG)
+    call = http.last
+    assert (call["method"], call["url"]) == ("POST", "https://api.pushover.net/1/messages.json")
+    assert call["headers"]["Content-Type"].startswith("multipart/form-data")
+    assert b'name="token"\r\n\r\nap\r\n' in call["data"]
+    assert b'name="user"\r\n\r\nuk\r\n' in call["data"]
+    assert b'name="message"\r\n\r\nB\r\n' in call["data"]
+    assert b'name="attachment"; filename="snapshot.jpg"' in call["data"]
+    assert JPEG in call["data"]
+
+
+async def test_pushover_posts_form_without_snapshot() -> None:
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk"}, "T", "B", None)
+    call = http.last
+    assert call["headers"]["Content-Type"] == "application/x-www-form-urlencoded"
+    assert call["data"] == b"token=ap&user=uk&title=T&message=B&priority=1"
+
+
+async def test_pushover_surfaces_api_errors() -> None:
+    http = RecordingHttp(status=400, body={"status": 0, "errors": ["application token is invalid"]})
+    with pytest.raises(RuntimeError, match="application token is invalid"):
+        await NOTIFIERS["pushover"].send(http, {"api_token": "x", "user_key": "y"}, "T", "B", None)
+
+
 async def test_discord_uploads_snapshot_with_payload_json() -> None:
     http = RecordingHttp()
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", JPEG)

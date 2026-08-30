@@ -89,6 +89,7 @@ async def test_defect_pipeline() -> None:
                 "patch": {
                     "notifiers": {
                         "ntfy": {"url": "http://ntfy/topic"},
+                        "pushover": {"api_token": "ap", "user_key": "uk"},
                         "telegram": {"bot_token": "t", "chat_id": "1"},
                         "discord": {"webhook_url": "http://disc/hook"},
                     }
@@ -110,6 +111,7 @@ async def test_defect_pipeline() -> None:
     assert results and all(r["prediction"] == "failure" for r in results)
     assert state_monitors[0]["alert"], "alert missing from state"
     assert ("PUT", "http://ntfy/topic") in platform.http_calls, "ntfy alert was never delivered"
+    assert ("POST", "https://api.pushover.net/1/messages.json") in platform.http_calls, "Pushover alert was never delivered"
     assert any(urlparse(url).hostname == "api.telegram.org" and url.endswith("/sendPhoto") for _, url in platform.http_calls), "Telegram alert was never delivered"
     assert ("POST", "http://disc/hook") in platform.http_calls, "Discord alert was never delivered"
 
