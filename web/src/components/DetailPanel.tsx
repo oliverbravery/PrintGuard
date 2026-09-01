@@ -4,6 +4,7 @@ import type { Monitor } from "../types";
 import { Modal } from "./Dialog";
 import { Feed } from "./Feed";
 import { DeviceChip } from "./MonitorTile";
+import { NameField } from "./NameField";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
 import { RiskGauge } from "./RiskGauge";
 import { SaveStatus } from "./SaveStatus";
@@ -148,6 +149,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
 
         <Section title="Monitoring">
           <div className="space-y-4">
+            <NameField name={monitor.name} onRename={(name) => updateMonitor(monitor.id, { name })} />
             <Toggle label="Watch this monitor" on={monitor.enabled} onChange={(v) => updateMonitor(monitor.id, { enabled: v })} />
             {monitor.enabled && monitor.watching === false && (
               <p className="mono text-[0.7rem] text-text-2">

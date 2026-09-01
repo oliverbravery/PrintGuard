@@ -21,7 +21,8 @@ how alerts are wired up.
 
 A camera and a printer are registered once each, then bound together by a monitor. One
 printer connection can back several monitors, and a monitor without a printer still watches
-and alerts.
+and alerts. Each of the three carries a name you can change later, from **Edit** in the camera
+or printer registry and from a monitor's settings panel.
 
 ```mermaid
 flowchart LR

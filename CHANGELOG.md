@@ -16,6 +16,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   user key into the Alerts tab in Settings. Defect snapshots arrive as an attachment. Priority
   covers every notice the channel carries, warnings and recoveries included, and defaults to
   High, which bypasses the quiet hours set on the device. It works in both hub and local mode.
+- Renaming a camera or a monitor. The name sits behind **Edit** in the camera registry and at
+  the top of a monitor's settings.
 
 ## [2.4.0] - 2026-08-24
 
