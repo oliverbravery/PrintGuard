@@ -19,6 +19,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - Renaming a camera or a monitor. The name sits behind **Edit** in the camera registry and at
   the top of a monitor's settings.
 
+### Fixed
+
+- A long error from a test alert or a printer connection test wraps in the dialog instead of
+  stretching it sideways.
+
 ## [2.4.0] - 2026-08-24
 
 ### Added
