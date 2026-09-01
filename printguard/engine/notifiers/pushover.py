@@ -3,21 +3,13 @@
 API reference: https://pushover.net/api
 Creating an application token: https://pushover.net/apps/build
 
-Each user supplies their own application token, so alerts count against
-their own monthly allowance rather than a shared one.
+CORS on api.pushover.net is per endpoint. The messages endpoint sends the
+headers, so this adapter runs in both modes, and it is the only endpoint the
+adapter calls: users/validate.json and sounds.json send none.
 
-CORS on api.pushover.net is per-endpoint. The messages endpoint sends the
-headers, so this adapter runs in both modes, but users/validate.json and
-sounds.json do not; calling either would break local mode alone.
-
-Priority is configured rather than fixed, and applies to everything this
-channel carries: defect alerts, watchdog warnings and recoveries, and the
-settings test. NotifierAdapter.send() receives no severity, so an adapter
-cannot grade a message by kind, and High bypasses the quiet hours set on
-the device - which is worth having for a failed print and not for a camera
-reconnecting at 03:00. Emergency (2) is deliberately absent: it requires
-retry and expire parameters and an acknowledgement receipt to stop it
-re-alerting, none of which PrintGuard has anywhere to put.
+Emergency (2) is absent from the priorities. It needs retry and expire
+parameters and an acknowledgement receipt to stop it re-alerting, and
+PrintGuard has nowhere to hold one.
 """
 
 from __future__ import annotations

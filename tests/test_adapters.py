@@ -138,8 +138,19 @@ async def test_pushover_sends_the_configured_priority() -> None:
     assert http.last["data"] == b"token=ap&user=uk&title=T&message=B&priority=-1"
 
 
+async def test_pushover_keeps_a_numeric_priority() -> None:
+    for value, expected in ((0, b"priority=0"), (-1, b"priority=-1")):
+        http = RecordingHttp(body={"status": 1})
+        await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk", "priority": value}, "T", "B", None)
+        assert http.last["data"].endswith(expected), value
+
+
 async def test_pushover_defaults_priority_when_unset_or_invalid() -> None:
-    for config in ({"api_token": "ap", "user_key": "uk"}, {"api_token": "ap", "user_key": "uk", "priority": ""}, {"api_token": "ap", "user_key": "uk", "priority": "2"}):
+    for config in (
+        {"api_token": "ap", "user_key": "uk"},
+        {"api_token": "ap", "user_key": "uk", "priority": ""},
+        {"api_token": "ap", "user_key": "uk", "priority": "2"},
+    ):
         http = RecordingHttp(body={"status": 1})
         await NOTIFIERS["pushover"].send(http, config, "T", "B", None)
         assert http.last["data"].endswith(b"priority=1"), config
