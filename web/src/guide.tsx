@@ -196,10 +196,10 @@ export const GUIDE: GuideSection[] = [
     shot: "alerts",
     body: (
       <>
-        Add a notification channel, whether <strong>ntfy</strong>, <strong>Telegram</strong>,{" "}
-        <strong>Discord</strong>, or <strong>native notifications</strong> in the desktop app, and
-        PrintGuard sends a snapshot the moment a defect holds. Turn notifications on per monitor in
-        its detail panel.
+        Add a notification channel, whether <strong>ntfy</strong>, <strong>Pushover</strong>,{" "}
+        <strong>Telegram</strong>, <strong>Discord</strong>, or <strong>native notifications</strong>{" "}
+        in the desktop app, and PrintGuard sends a snapshot the moment a defect holds. Turn
+        notifications on per monitor in its detail panel.
       </>
     ),
     action: { label: "Set up alerts", dialog: "settings" },

@@ -97,7 +97,7 @@ off, add `PRINTGUARD_PLUGINS=off` to its environment, then remove the plugin.
 | `monitor:control` | Enable, disable and retune any monitor | |
 | `printer:control` | Pause, resume and cancel prints | |
 | `notify` | Raise a message in the dashboard | |
-| `alert:send` | Send through your own ntfy, Telegram or Discord | |
+| `alert:send` | Send through your own ntfy, Pushover, Telegram or Discord | |
 | `net` | Reach the addresses its manifest lists | |
 | `net:local` | Reach addresses on this machine and the network around it | |
 | `monitor:manage` | Add monitors and delete them | |
