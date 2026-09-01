@@ -70,7 +70,7 @@ function NodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: st
   }
 
   if (node.type === "chip") {
-    return <span className={`chip ${TONES[node.tone ?? ""] ?? ""}`}>{node.value}</span>;
+    return <span className={`chip chip-message ${TONES[node.tone ?? ""] ?? ""}`}>{node.value}</span>;
   }
 
   if (node.type === "camera") {

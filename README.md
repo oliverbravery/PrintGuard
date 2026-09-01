@@ -66,7 +66,7 @@ Nothing is installed and no frame leaves your device. When you are ready to run 
 
 - Catches a failure early, before spaghetti runs for hours or burns a spool.
 - Pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab.
-- Sends a snapshot to your phone over ntfy, Telegram or Discord.
+- Sends a snapshot to your phone over ntfy, Pushover, Telegram or Discord.
 - Only watches while a linked printer is actually printing.
 - Warns you when a camera drops, a feed freezes or a printer stops answering.
 - Shares one model across as many cameras as your hardware can sustain.
@@ -179,7 +179,7 @@ for you.
 |---|---|
 | **Print services** | OctoPrint, Klipper via Moonraker, Elegoo, Prusa via PrusaLink, Bambu Lab |
 | **Cameras** | Printer webcams, RTSP, RTMP, HTTP/MJPEG, WHEP, anything pushed to the bundled MediaMTX, and the browser's own camera |
-| **Alerts** | ntfy, Telegram, Discord, and native notifications in the desktop app |
+| **Alerts** | ntfy, Pushover, Telegram, Discord, and native notifications in the desktop app |
 
 Connecting over Docker or HTTPS has a gotcha or two, as does linking an Elegoo, Prusa or Bambu
 printer. The full walk-through is in **[docs/printers.md](docs/printers.md)**.

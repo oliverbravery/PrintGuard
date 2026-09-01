@@ -73,7 +73,7 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/progress-reports",
-      "ref": "0d66af5a522c0a27f1c37ed24b829dc090ed9733",
+      "ref": "79f7566df210a0df6e6d91ab4930bcdfd34cf36c",
       "digests": {
         "plugin.json": "0837b48e1a3007ae32d2d06e5efbc0fc00cc79aa492c3bf4c94cc90f1468aa3f",
         "plugin.js": "20b57c627bc6337c52ff0eef8cae642e2b2e38817fe1a9a402d089a9fa942a48",

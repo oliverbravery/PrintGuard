@@ -7,6 +7,7 @@ import { PluginsTab } from "./PluginsTab";
 import { SettingsFooter } from "./SettingsFooter";
 import { SaveStatus } from "./SaveStatus";
 import { SchemaForm } from "./SchemaForm";
+import { TestRow } from "./TestRow";
 import { GlassSliders } from "./GlassTuner";
 import { ThemeEditor } from "./ThemeEditor";
 import { Toggle } from "./Toggle";
@@ -246,20 +247,18 @@ export function SettingsDialog() {
                         value={notifiers[meta.id]}
                         onChange={(config) => setNotifiers({ ...notifiers, [meta.id]: config })}
                       />
-                      <div className="flex items-center gap-3">
-                        <button
-                          className="btn"
-                          disabled={testingNotifier !== null}
-                          onClick={() => testNotifier(meta.id, notifiers[meta.id])}
-                        >
-                          {testingNotifier === meta.id ? "Sending…" : "Send test alert"}
-                        </button>
-                        {notifyTest?.provider === meta.id && (
-                          <span className={`chip ${notifyTest.ok ? "chip-ok" : "chip-bad"}`}>
-                            {notifyTest.ok ? "sent" : notifyTest.error || "failed"}
-                          </span>
-                        )}
-                      </div>
+                      <TestRow
+                        label="Send test alert"
+                        busyLabel="Sending…"
+                        busy={testingNotifier === meta.id}
+                        disabled={testingNotifier !== null}
+                        onTest={() => testNotifier(meta.id, notifiers[meta.id])}
+                        result={
+                          notifyTest?.provider === meta.id
+                            ? { ok: notifyTest.ok, message: notifyTest.ok ? "sent" : notifyTest.error || "failed" }
+                            : null
+                        }
+                      />
                     </>
                   )}
                 </div>

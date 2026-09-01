@@ -6,6 +6,7 @@ import { publishStream, published, stopPublishing } from "../stream";
 import { sourceLabel } from "./CameraRail";
 import { CropEditor } from "./CropEditor";
 import { Dialog } from "./Dialog";
+import { NameField } from "./NameField";
 import { SaveStatus } from "./SaveStatus";
 
 function slug(name: string): string {
@@ -65,7 +66,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
         )}
         {owner && <span className="chip" title="Managed by its printer integration, remove the printer to remove this camera">via {owner.name}</span>}
         <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
-          {open ? "Hide" : "Adjust"}
+          {open ? "Hide" : "Edit"}
         </button>
         {!owner && (
           <button
@@ -82,6 +83,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
+          <NameField name={camera.name} onRename={(name) => updateCamera(camera.id, { name })} />
           <Slider
             label="Brightness"
             value={camera.brightness ?? 1}

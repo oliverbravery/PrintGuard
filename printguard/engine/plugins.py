@@ -145,7 +145,7 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
     },
     "alert:send": {
         "label": "Use your alert channels",
-        "description": "Send through your ntfy, Telegram or Discord.",
+        "description": "Send through your ntfy, Pushover, Telegram or Discord.",
         "commands": ["notify.send"],
         "risky": True,
     },

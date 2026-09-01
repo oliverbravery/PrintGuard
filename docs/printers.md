@@ -21,7 +21,8 @@ how alerts are wired up.
 
 A camera and a printer are registered once each, then bound together by a monitor. One
 printer connection can back several monitors, and a monitor without a printer still watches
-and alerts.
+and alerts. Each of the three carries a name you can change later, from **Edit** in the camera
+or printer registry and from a monitor's settings panel.
 
 ```mermaid
 flowchart LR
@@ -153,6 +154,7 @@ cannot turn into a stream of notifications.
 | Channel | Modes | Notes |
 |---|---|---|
 | [ntfy](https://ntfy.sh) | Hub and local | Self-hostable, no account needed |
+| [Pushover](https://pushover.net) | Hub and local | One-off app purchase, and you create the application token. Priority covers every notice and defaults to High, which bypasses the quiet hours set on the device |
 | [Discord](https://discord.com) | Hub and local | Webhook URL |
 | [Telegram](https://telegram.org) | Hub only | Telegram's API sends no CORS headers |
 | Desktop notification | Desktop app only | Native OS notification on the computer running the app |

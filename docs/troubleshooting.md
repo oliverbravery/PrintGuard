@@ -57,6 +57,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | Failures caught too late | The opposite | Lower the threshold or the frame count. Watch the risk history on the monitor's detail page to pick a value |
 | No notifications arrive | The channel is off for that monitor, or the channel itself is failing | Send a test alert from **Settings**. Delivery failures raise an `error` event rather than passing silently |
 | A stream of camera offline and back notifications | The feed keeps dropping out. Before 2.4.0 every reconnection announced itself, and the monitor's cooldown only covers defect alerts | Update to 2.4.0, where one unstable episode is one warning. The drop-outs themselves are worth chasing, so check the camera's own connection and, for RTSP or WHEP, that MediaMTX holds the pull |
+| Pushover alerts arrive during quiet hours | Priority defaults to High, which bypasses them, and it covers every notice including warnings and recoveries | Set it to Normal in the Alerts tab in Settings. [Notifications](printers.md#notifications) |
 | Telegram is not offered | Telegram's API sends no CORS headers | Hub mode only. [Notifications](printers.md#notifications) |
 | Home Assistant shows nothing | The broker settings are wrong, or discovery is disabled in Home Assistant | Check the Home Assistant tab in Settings and the broker's own log |
 

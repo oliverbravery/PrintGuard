@@ -22,8 +22,8 @@ export function SchemaForm({
             {required.includes(key) && <span className="text-accent"> *</span>}
           </span>
           {prop.enum ? (
-            <select className="field" value={value[key] ?? ""} onChange={(e) => onChange({ ...value, [key]: e.target.value })}>
-              <option value="">Select…</option>
+            <select className="field" value={value[key] ?? prop.default ?? ""} onChange={(e) => onChange({ ...value, [key]: e.target.value })}>
+              {prop.default === undefined && <option value="">Select…</option>}
               {prop.enum.map((option, index) => (
                 <option key={option} value={option}>
                   {prop.enum_labels?.[index] ?? option}
