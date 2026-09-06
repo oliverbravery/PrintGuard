@@ -303,8 +303,9 @@ A monitor's watching state gates inference
 | `idle`, `paused`, `error` | No, standby | Positively not printing |
 
 Only a positive "not printing" stands inference down. The watchdog loop then keeps the
-pipeline honest. Each sustained condition warns exactly once, after a grace period so a brief
-outage passes unremarked, and announces recovery once health has held.
+pipeline honest. A condition has to hold for the grace period before it is announced, so a
+brief outage passes unremarked, and it is then repeated every thirty minutes for as long as
+it lasts. Recovery is announced once health has held.
 
 ```mermaid
 stateDiagram-v2
@@ -312,7 +313,9 @@ stateDiagram-v2
     [*] --> Watching
     Standby --> Watching: printing, or contact lost
     Watching --> Standby: positively not printing
-    Watching --> Warned: sustained fault
+    Watching --> Faulting: fault
+    Faulting --> Watching: recovered inside the grace period
+    Faulting --> Warned: held for the grace period
     Warned --> Watching: healthy for the recovery hold
     note right of Warned
         Still watching. A warning
@@ -322,19 +325,29 @@ stateDiagram-v2
     end note
 ```
 
-The three watchdog conditions are a watched camera going offline, a watched camera staying
+The four watchdog conditions are a watched camera going offline, a watched camera staying
 online but producing no fresh frames, since a frozen RTSP feed must not pass for monitoring,
-and a linked printer whose state cannot be read, whether it is unreachable or reporting
-something the adapter does not recognise. The last one is why the monitor is watching, and
-it means a defect could not pause the print, so it is checked for every enabled monitor
-rather than only for watched ones.
+a watched camera that delivered frames for under 90% of the last ten minutes, and a linked
+printer whose state cannot be read, whether it is unreachable or reporting something the
+adapter does not recognise. The last one is why the monitor is watching, and it means a
+defect could not pause the print, so it is checked for every enabled monitor rather than
+only for watched ones.
+
+The grace period is `settings.fault_grace_s`, two minutes by default, and it is clamped to
+between thirty seconds and fifteen minutes so it can be lengthened for a camera that drops
+out and comes straight back but never turned into an off switch. A camera that keeps
+dropping clears the grace period every time yet is only watching part of the print, which is
+what the coverage condition is for: the share of the recent window it delivered frames for
+is one warning about an unreliable feed rather than one per drop.
 
 Warnings surface as dashboard toasts and go out through the notification channels, so the
 watchdog suppresses flapping rather than repeating itself. A source that reconnects and drops
 again is still the same warning, and each announced recovery doubles how long the
-next one must hold before it is announced, up to fifteen minutes. Outages are never
-delayed, only recoveries. Notifier delivery failures and inference crashes emit `error`
-events. There is no silent `except: pass` anywhere in the alert path.
+next one must hold before it is announced, up to fifteen minutes. Only the notification
+waits on the grace period. The dashboard shows a fault as it happens, and re-attaching a
+failed camera runs on its own timer, so a longer grace period never delays recovery.
+Notifier delivery failures and inference crashes emit `error` events. There is no silent
+`except: pass` anywhere in the alert path.
 
 ## Repository layout
 

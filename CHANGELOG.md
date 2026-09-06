@@ -18,6 +18,21 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   High, which bypasses the quiet hours set on the device. It works in both hub and local mode.
 - Renaming a camera or a monitor. The name sits behind **Edit** in the camera registry and at
   the top of a monitor's settings.
+- A fault grace period, in the Alerts tab in Settings. A camera or printer fault has to last
+  this long before it pushes a notification, which is two minutes by default, so a wireless
+  camera that drops out and comes straight back no longer reaches your phone. Raise it as far
+  as fifteen minutes for a flaky one. It cannot be turned off, since an unwatched print is
+  worth hearing about, and the dashboard shows every fault as it happens whatever it is set to.
+
+### Changed
+
+- An outage that nobody has answered is announced again every thirty minutes rather than only
+  once, so a warning you slept through is still there in the morning.
+- A camera that keeps dropping out and reconnecting is warned about once, naming the share of
+  the last ten minutes it was actually delivering frames. Each drop is too short to announce on
+  its own, but a print that is only being watched some of the time is worth knowing about.
+- A dropped camera is re-attached on its own timer instead of waiting for the warning, so
+  lengthening the grace period delays the notification and never the recovery.
 
 ### Fixed
 
