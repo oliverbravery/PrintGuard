@@ -8,35 +8,10 @@ import { CropEditor } from "./CropEditor";
 import { Dialog } from "./Dialog";
 import { NameField } from "./NameField";
 import { SaveStatus } from "./SaveStatus";
+import { Slider } from "./Slider";
 
 function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
-}
-
-function Slider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="block">
-      <div className="flex justify-between mb-1">
-        <span className="label">{label}</span>
-        <span className="mono text-[0.68rem] text-text-0">{value.toFixed(2)}</span>
-      </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
-    </label>
-  );
 }
 
 function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
