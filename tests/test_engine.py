@@ -224,12 +224,13 @@ async def test_unreachable_catalogue_still_answers() -> None:
 async def test_unreadable_printer_state_keeps_watching_and_warns(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
     monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.05)
-    monkeypatch.setattr(watchdog, "OFFLINE_GRACE_S", 0.2)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
     monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)
     platform = FakePlatform(infer_s=0.02)
     platform.device_status = "Detecting serial connection"
     async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
         monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "settings.update", "patch": {"fault_grace_s": 0.2}})
         printer_id = await _register_printer(engine)
         await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
         await asyncio.sleep(1.0)
@@ -309,8 +310,9 @@ async def test_watchdog_and_failed_action(monkeypatch) -> None:
 
     watchdog.DEVICE_POLL_S = 0.1
     watchdog.WATCH_TICK_S = 0.05
-    watchdog.OFFLINE_GRACE_S = 0.2
     watchdog.ACT_RETRY_S = 0.01
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    monkeypatch.setattr(watchdog, "RESTART_AFTER_S", 0.3)
     monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.05)
     monkeypatch.setattr(engine_module, "REATTACH_EVERY_TICKS", 1)
@@ -318,7 +320,9 @@ async def test_watchdog_and_failed_action(monkeypatch) -> None:
     platform.reject_actions = True
     async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
         monitor_id = next(iter(engine.monitors))
-        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        await engine.handle(
+            {"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}, "fault_grace_s": 0.2}}
+        )
         printer_id = await _register_printer(engine)
         await engine.handle(
             {"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True, "printer_id": printer_id, "on_defect": "pause"}}
@@ -347,11 +351,14 @@ async def test_watchdog_restarts_stalled_camera_after_fresh_inference(monkeypatc
 
     monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
     monkeypatch.setattr(watchdog, "STALL_GRACE_S", 0.1)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    monkeypatch.setattr(watchdog, "RESTART_AFTER_S", 0.05)
     monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
     platform = FakePlatform(infer_s=0.01)
     async with running_engine(platform, camera_fps=[20.0]) as (engine, events):
         camera = next(iter(engine.cameras.values()))
+        await engine.handle({"cmd": "settings.update", "patch": {"fault_grace_s": 0.05}})
         await asyncio.sleep(0.1)
         stalled_source = camera.frame_source
         stalled_source.frozen = True
@@ -372,17 +379,114 @@ async def test_watchdog_restarts_stalled_camera_after_fresh_inference(monkeypatc
         assert any(event.get("event") == "result" for event in events[stalled_index + 1 : recovered_index])
 
 
+async def test_brief_outage_reattaches_without_notifying(monkeypatch) -> None:
+    from printguard.engine import engine as engine_module
+
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    monkeypatch.setattr(watchdog, "RESTART_AFTER_S", 0.05)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle(
+            {"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}, "fault_grace_s": 1.0}}
+        )
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True}})
+        camera = next(iter(engine.cameras.values()))
+        dropped_source = camera.frame_source
+        dropped_source.online = False
+        await asyncio.sleep(0.4)
+
+        assert camera.frame_source is not dropped_source and camera.online, "a dropped camera waited on the grace period to recover"
+        assert not [e for e in events if e.get("event") == "warning"], "an outage inside the grace period warned"
+        assert not platform.http_calls, "an outage inside the grace period pushed a notification"
+
+
+async def test_sustained_outage_keeps_reminding(monkeypatch) -> None:
+    from printguard.engine import engine as engine_module
+
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    monkeypatch.setattr(watchdog, "RESTART_AFTER_S", 10.0)
+    monkeypatch.setattr(watchdog, "REPEAT_EVERY_S", 0.2)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle(
+            {"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}, "fault_grace_s": 0.05}}
+        )
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True}})
+        camera = next(iter(engine.cameras.values()))
+        camera.frame_source.online = False
+        await asyncio.sleep(0.7)
+        monkeypatch.setattr(watchdog, "REPEAT_EVERY_S", 3600.0)
+        await asyncio.sleep(0.05)
+
+        warnings = [e for e in events if e.get("event") == "warning" and "is offline" in e["message"]]
+        assert len(warnings) >= 3, f"an outage nobody answered was announced {len(warnings)} times"
+        assert len(platform.http_calls) == len(warnings), "reminders were not pushed to the notifiers"
+
+
+async def test_camera_that_keeps_dropping_warns_about_the_feed(monkeypatch) -> None:
+    from printguard.engine import engine as engine_module
+
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    monkeypatch.setattr(watchdog, "RESTART_AFTER_S", 10.0)
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)
+    monkeypatch.setattr(watchdog, "COVERAGE_SAMPLES", 10)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle(
+            {"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}, "fault_grace_s": 1.0}}
+        )
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True}})
+        camera = next(iter(engine.cameras.values()))
+
+        for _ in range(6):
+            camera.frame_source.online = False
+            await asyncio.sleep(0.1)
+            camera.frame_source.online = True
+            await asyncio.sleep(0.05)
+
+        unreliable = [e for e in events if e.get("event") == "warning" and "dropped out for" in e["message"]]
+        assert len(unreliable) == 1, f"a camera that kept dropping warned {len(unreliable)} times"
+        assert not [e for e in events if e.get("event") == "warning" and "is offline" in e["message"]], (
+            "no single drop was long enough to be announced as an outage"
+        )
+        assert len(platform.http_calls) == 1, f"an unreliable feed pushed {len(platform.http_calls)} notifications"
+
+        await asyncio.sleep(0.4)
+        recoveries = [e for e in events if e.get("event") == "warning" and e["recovered"]]
+        assert any("steady again" in r["message"] for r in recoveries), "a feed that settled was never announced"
+
+
+async def test_fault_grace_cannot_be_turned_off() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _events):
+        await engine.handle({"cmd": "settings.update", "patch": {"fault_grace_s": 0}})
+        assert engine.settings["fault_grace_s"] == watchdog.GRACE_MIN_S, "an unwatched print must always be announced"
+        await engine.handle({"cmd": "settings.update", "patch": {"fault_grace_s": 86400}})
+        assert engine.settings["fault_grace_s"] == watchdog.GRACE_MAX_S, "the grace period must stay bounded"
+
+
 async def test_flapping_camera_warns_once_per_outage(monkeypatch) -> None:
     from printguard.engine import engine as engine_module
 
     monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
-    monkeypatch.setattr(watchdog, "OFFLINE_GRACE_S", 0.05)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
     monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.2)
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
         monitor_id = next(iter(engine.monitors))
-        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        await engine.handle(
+            {"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}, "fault_grace_s": 0.05}}
+        )
         await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True}})
         camera = next(iter(engine.cameras.values()))
 

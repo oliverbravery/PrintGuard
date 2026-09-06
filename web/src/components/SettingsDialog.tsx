@@ -9,6 +9,7 @@ import { SaveStatus } from "./SaveStatus";
 import { SchemaForm } from "./SchemaForm";
 import { TestRow } from "./TestRow";
 import { GlassSliders } from "./GlassTuner";
+import { Slider } from "./Slider";
 import { ThemeEditor } from "./ThemeEditor";
 import { Toggle } from "./Toggle";
 
@@ -225,6 +226,17 @@ export function SettingsDialog() {
 
         {tab === "alerts" && (
           <div role="tabpanel" id="settings-panel-alerts" aria-labelledby="settings-tab-alerts" tabIndex={0} className="space-y-4">
+            <span className="label block">When to alert</span>
+            <Slider
+              label="Fault grace period (seconds)"
+              value={engine?.settings.fault_grace_s ?? 120}
+              min={30}
+              max={900}
+              step={30}
+              format={String}
+              onChange={(v) => updateSettings({ fault_grace_s: v })}
+              hint="How long a camera or printer fault has to last before it pushes a notification. Raise it for a wireless camera that drops out and comes straight back."
+            />
             <span className="label block">Notification channels</span>
             {channels.map((meta) => {
               const enabled = meta.id in notifiers;

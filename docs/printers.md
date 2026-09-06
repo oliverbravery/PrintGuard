@@ -151,6 +151,13 @@ separate, so a camera or printer that keeps dropping out warns once for the whol
 episode, and the recovery is only announced once it has stayed healthy, so reconnections
 cannot turn into a stream of notifications.
 
+The **fault grace period**, in the Alerts tab, is how long a fault has to last before it is
+pushed. Two minutes by default, and worth raising for a wireless camera that drops out and
+comes straight back. It stops at fifteen minutes and cannot be turned off, since a print
+nothing is watching is worth hearing about, and an outage nobody has answered is announced
+again every thirty minutes. The dashboard shows every fault as it happens whatever it is set
+to.
+
 | Channel | Modes | Notes |
 |---|---|---|
 | [ntfy](https://ntfy.sh) | Hub and local | Self-hostable, no account needed |

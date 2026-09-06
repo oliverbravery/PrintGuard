@@ -342,6 +342,7 @@ export interface EngineState {
     layout?: Layout;
     inference_runtime: "auto" | "litert" | "onnx";
     catalogue_url: string;
+    fault_grace_s: number;
   };
   tokens: ApiToken[];
   stats: EngineStats;

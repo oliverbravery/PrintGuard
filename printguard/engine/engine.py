@@ -28,7 +28,7 @@ from .registry import Camera, CameraRegistry, Plugin, PluginRegistry, Printer, P
 from .scheduler import Scheduler
 from .sockets import SocketBroker
 from .tokens import new_token
-from .watchdog import Watchdog
+from .watchdog import GRACE_DEFAULT_S, Watchdog, clamp_grace
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "layout": {},
     "inference_runtime": "auto",
     "catalogue_url": plugins.CATALOGUE_URL,
+    "fault_grace_s": GRACE_DEFAULT_S,
 }
 
 
@@ -735,6 +736,7 @@ class Engine:
         settings = {**self.settings, **patch}
         if settings["inference_runtime"] not in ("auto", "litert", "onnx"):
             raise ValueError("inference runtime must be auto, litert or onnx")
+        settings["fault_grace_s"] = clamp_grace(settings["fault_grace_s"])
         if settings["inference_runtime"] != self.settings["inference_runtime"]:
             await self.scheduler.reconfigure(lambda: self.platform.configure(settings))
         self.settings = settings
