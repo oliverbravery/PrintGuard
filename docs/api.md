@@ -227,6 +227,7 @@ The camera object, from `GET /cameras` and `GET /cameras/{id}`:
   "name": "Left printer",
   "source": { /* redacted of any access_code / credentials */ },
   "printer_id": "prn_…" | null,
+  "declared": false,                                        // passed in by the deployment
   "max_fps": 5.0, "target_fps": 2.0, "achieved_fps": 1.9,   // rate
   "inferring": true, "in_use": true, "online": true,        // health
   "last_result": {                                          // latest score (per FRAME)

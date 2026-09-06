@@ -1,9 +1,11 @@
-"""Server platform model execution tests."""
+"""Server platform tests, from model execution to camera discovery."""
 
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
+import struct
 import threading
 import time
 from pathlib import Path
@@ -20,7 +22,10 @@ from printguard.server.inference import (
     _measure_concurrency,
     _register_library,
 )
-from printguard.server.platform import ServerPlatform
+from printguard.server.platform import V4L2_CAP_DEVICE_CAPS, V4L2_CAP_VIDEO_CAPTURE, ServerPlatform, _v4l2_card
+
+V4L2_CAP_META_CAPTURE = 0x00800000
+V4L2_CAPABILITY_FILLED = "16s32s32sIII12x"
 
 
 @pytest.mark.parametrize("runtime", ["auto", "litert", "onnx"])
@@ -128,10 +133,54 @@ def test_measured_concurrency_tracks_scaling() -> None:
 
 def test_the_state_file_is_readable_only_by_whoever_runs_the_hub(tmp_path) -> None:
     """It holds printer passwords, API token hashes and plugin credentials."""
-    from printguard.server.platform import ServerPlatform
-
     holder = SimpleNamespace(_state_path=tmp_path / "state.json")
     ServerPlatform.save_state(holder, {"printers": [{"config": {"password": "hunter2"}}]})
 
     assert oct((tmp_path / "state.json").stat().st_mode)[-3:] == "600"
     assert not (tmp_path / "state.tmp").exists(), "the temporary file was left behind"
+
+
+def _capability(card: bytes, device_caps: int) -> bytes:
+    """A struct v4l2_capability as the kernel fills it for one node of a USB camera.
+
+    Args:
+        card: Name the driver reports for the camera.
+        device_caps: What this node itself can do, as against the whole device.
+
+    Returns:
+        The packed reply to a QUERYCAP on that node.
+    """
+    whole_device = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE | V4L2_CAP_DEVICE_CAPS
+    return struct.pack(V4L2_CAPABILITY_FILLED, b"uvcvideo", card, b"usb-0000:01:00.0-1.2", 0, whole_device, device_caps)
+
+
+def _answering(monkeypatch, reply: bytes) -> None:
+    """Answers every QUERYCAP with one filled capability struct."""
+
+    def ioctl(descriptor: int, request: int, buffer: bytearray) -> int:
+        buffer[:] = reply
+        return 0
+
+    monkeypatch.setattr(fcntl, "ioctl", ioctl)
+
+
+def test_a_capture_node_is_offered_under_its_card_name(tmp_path: Path, monkeypatch) -> None:
+    """The name a camera is registered with is the one its driver reports."""
+    node = tmp_path / "video0"
+    node.touch()
+    _answering(monkeypatch, _capability(b"HD Pro Webcam C920", V4L2_CAP_VIDEO_CAPTURE))
+
+    assert _v4l2_card(node) == "HD Pro Webcam C920"
+
+
+def test_the_metadata_node_beside_a_camera_is_not_offered(tmp_path: Path, monkeypatch) -> None:
+    """A USB camera registers two nodes and only one of them has any picture.
+
+    Both advertise capture in the device-wide capabilities, so anything reading
+    that field offers a second camera that opens and never delivers a frame.
+    """
+    node = tmp_path / "video1"
+    node.touch()
+    _answering(monkeypatch, _capability(b"HD Pro Webcam C920", V4L2_CAP_META_CAPTURE))
+
+    assert _v4l2_card(node) is None
