@@ -13,8 +13,12 @@ _TIMING_DEFAULTS = {
         "DEVICE_POLL_S",
         "NOTIFY_COOLDOWN_S",
         "WATCH_TICK_S",
-        "OFFLINE_GRACE_S",
+        "GRACE_MIN_S",
         "STALL_GRACE_S",
+        "REPEAT_EVERY_S",
+        "RESTART_AFTER_S",
+        "RESTART_COOLDOWN_S",
+        "COVERAGE_SAMPLES",
         "ACT_ATTEMPTS",
         "ACT_RETRY_S",
     )
