@@ -11,6 +11,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
+- USB cameras plugged into the machine running the hub. Pass one into the container with a
+  `devices:` entry and it registers itself, ready to name and bind to a monitor, so a Raspberry
+  Pi with webcams attached needs nothing else on it. The camera registry's **This machine** tab
+  lists them too, and `PRINTGUARD_CAMERAS=off` leaves them to be added by hand.
+  [docs/printers.md](docs/printers.md#cameras-plugged-into-the-hub) has the line to add.
 - Pushover as an alert channel, alongside ntfy, Telegram and Discord. Create an application at
   [pushover.net/apps/build](https://pushover.net/apps/build), then paste its API token and your
   user key into the Alerts tab in Settings. Defect snapshots arrive as an attachment. Priority

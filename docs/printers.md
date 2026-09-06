@@ -131,14 +131,37 @@ Beyond printer webcams, a hub takes cameras three ways:
 
 | Source | What it accepts | Notes |
 |---|---|---|
-| **Stream URL** | RTSP, RTMP, HTTP/MJPEG or WHEP | PrintGuard creates a MediaMTX pull path for it |
-| **This device** | The browser's own camera | Publishes to the hub over a WebSocket and reconnects after a hub restart |
-| **Discovered** | Anything already pushed to MediaMTX | For example `rtsp://host:8554/mycam` from a Raspberry Pi |
+| **Stream URL** | RTSP, RTMP, HTTP/MJPEG or WHEP, including anything already pushed to the bundled MediaMTX | PrintGuard creates a MediaMTX pull path for it |
+| **This machine** | A camera plugged into the machine PrintGuard runs on | Captured by the hub itself, so it keeps watching with every window closed |
+| **This browser** | The browser's own camera | Publishes to the hub over a WebSocket and reconnects after a hub restart |
 
 > [!IMPORTANT]
-> Browsers only grant camera access on secure pages. **This device** publishing and local
+> Browsers only grant camera access on secure pages. **This browser** publishing and local
 > mode both need the hub served over HTTPS or opened on `localhost`.
 > [Deployment](deployment.md) covers HTTPS with Tailscale or a tunnel.
+
+### Cameras plugged into the hub
+
+A USB camera reaches the container only if you pass it in, and once you have, it registers
+itself and appears in the camera registry. List the ones attached with `ls /dev/v4l/by-id/`,
+whose names still point at the same camera after a reboot renumbers the devices, and map each
+one in.
+
+```yaml
+    devices:
+      - /dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_A1B2C3-video-index0:/dev/nozzle-cam
+```
+
+A camera arrives named after itself, so rename it in the registry. There's no Remove button on
+it, since the compose file is what decides it exists. Drop the `devices:` entry and restart to
+remove it.
+
+Docker can't hand a running container a camera plugged in after it started, so a new camera
+means another `devices:` entry and `docker compose up -d`.
+
+Set `PRINTGUARD_CAMERAS=off` to leave them unregistered and add them by hand from **This
+machine** instead. The desktop app works that way already, since a computer's own webcam is
+rarely the one you want watched.
 
 ## Notifications
 

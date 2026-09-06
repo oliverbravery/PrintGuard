@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -31,6 +32,21 @@ def whep_endpoint(url: str) -> bool:
     if parsed.scheme in _WHEP_SCHEMES:
         return True
     return parsed.scheme in ("", "http", "https") and parsed.path.rstrip("/").rsplit("/", 1)[-1].lower() == "whep"
+
+
+def declared_camera_id(device_id: str) -> str:
+    """The id a device declared by the deployment registers under.
+
+    Derived from the device's own path, so the camera comes back to the same
+    registration after a restart, keeping the name and tuning it was given.
+
+    Args:
+        device_id: Path the platform opens the device at.
+
+    Returns:
+        A stable, path-safe camera id.
+    """
+    return f"dev-{hashlib.sha256(device_id.encode()).hexdigest()[:8]}"
 
 
 CAMERA_DEFAULTS: dict[str, Any] = {

@@ -9,6 +9,8 @@ import json
 import logging
 import os
 import re
+import stat
+import struct
 import subprocess
 import sys
 import threading
@@ -44,6 +46,20 @@ DEVICE_OPEN_OPTIONS = ({"framerate": "30"}, {"framerate": "15"}, {})
 cannot be read ahead of time (Windows/Linux); macOS pins a real size and rate
 from AVFoundation in _device_open_options."""
 
+V4L2_OPEN_OPTIONS = ({"input_format": "mjpeg", "framerate": "30"}, {"input_format": "mjpeg"}, *DEVICE_OPEN_OPTIONS)
+"""Capture options tried on Linux, MJPEG first. ffmpeg otherwise settles on a
+webcam's first listed format, routinely uncompressed YUYV, which saturates the
+USB bus and drops a 720p camera to a few frames a second, and several cameras
+on one controller to none at all."""
+
+V4L2_MAJOR = 81
+VIDIOC_QUERYCAP = 0x80685600
+V4L2_CAP_VIDEO_CAPTURE = 0x00000001
+V4L2_CAP_DEVICE_CAPS = 0x80000000
+V4L2_CAPABILITY = "16x32s32xIII12x"
+"""struct v4l2_capability in full, since the kernel writes all of it, unpacking
+only card, version, capabilities and device_caps."""
+
 SOCKET_TIMEOUT_S = 10.0
 SOCKET_MAX_BYTES = 256 * 1024
 DEVICE_SIZE_CAP = 1280 * 720
@@ -72,6 +88,60 @@ def deployment(packaged: bool) -> str:
     return f"docker{os.environ.get('PRINTGUARD_VARIANT', '')}"
 
 
+def _v4l2_card(node: Path) -> str | None:
+    """The card name of a V4L2 node that captures video, or None if it does not.
+
+    A USB camera registers a metadata node beside its video one, and only
+    ``device_caps`` tells the two apart: the device-wide ``capabilities`` field
+    advertises capture on both. Asking opens the node read-only and starts no
+    stream, so a camera already in use answers too.
+    """
+    import fcntl
+
+    try:
+        descriptor = os.open(node, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        buffer = bytearray(struct.calcsize(V4L2_CAPABILITY))
+        fcntl.ioctl(descriptor, VIDIOC_QUERYCAP, buffer)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+    card, _version, capabilities, device_caps = struct.unpack(V4L2_CAPABILITY, buffer)
+    node_caps = device_caps if capabilities & V4L2_CAP_DEVICE_CAPS else capabilities
+    if not node_caps & V4L2_CAP_VIDEO_CAPTURE:
+        return None
+    return card.split(b"\0")[0].decode(errors="replace").strip()
+
+
+def _v4l2_devices() -> list[tuple[str, str]]:
+    """Names the V4L2 capture nodes this process can see as (device_id, label).
+
+    Nodes are found by their character device major rather than by a ``video*``
+    glob, so a camera passed into a container under a name of its own, such as
+    ``/dev/nozzle-cam``, is found as readily. A node reached under both a
+    ``by-id`` name and a ``videoN`` one is listed under the ``by-id`` name,
+    which still points at the same camera after a reboot renumbers the devices.
+    """
+    found: dict[int, tuple[str, str]] = {}
+    for directory in (Path("/dev/v4l/by-id"), Path("/dev")):
+        for node in sorted(directory.glob("*")):
+            try:
+                described = node.stat()
+            except OSError:
+                continue
+            if not stat.S_ISCHR(described.st_mode) or os.major(described.st_rdev) != V4L2_MAJOR:
+                continue
+            if described.st_rdev in found:
+                continue
+            card = _v4l2_card(node)
+            if card:
+                found[described.st_rdev] = (str(node), card)
+    return list(found.values())
+
+
 def _video_devices() -> list[tuple[str, str]]:
     """Names the host's attachable video capture devices as (device_id, label).
 
@@ -82,14 +152,7 @@ def _video_devices() -> list[tuple[str, str]]:
     only opening a device does.
     """
     if sys.platform.startswith("linux"):
-        devices = []
-        for node in sorted(Path("/dev").glob("video*")):
-            name_file = Path("/sys/class/video4linux") / node.name / "name"
-            try:
-                devices.append((str(node), name_file.read_text().strip()))
-            except OSError:
-                devices.append((str(node), node.name))
-        return devices
+        return _v4l2_devices()
     import av.logging
 
     spec, container_format = ("", "avfoundation") if sys.platform == "darwin" else ("video=dummy", "dshow")
@@ -136,9 +199,11 @@ def _device_open_options(device_id: str) -> tuple[dict[str, str], ...]:
     and settles on the device's last-listed format - routinely its top
     resolution pinned to a handful of fps - so 30/15fps requests come back as
     EAGAIN. On macOS the real formats are read from AVFoundation and the largest
-    size within a sane cap that offers a usable rate is pinned explicitly; other
-    platforms negotiate over common frame rates.
+    size within a sane cap that offers a usable rate is pinned explicitly; Linux
+    asks for MJPEG and other platforms negotiate over common frame rates.
     """
+    if sys.platform.startswith("linux"):
+        return V4L2_OPEN_OPTIONS
     if sys.platform != "darwin":
         return DEVICE_OPEN_OPTIONS
     import objc
@@ -466,6 +531,7 @@ class ServerPlatform:
         self._client = httpx.AsyncClient(follow_redirects=True)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client)
         self._sources: dict[str, AVSource] = {}
+        self._declares_devices = os.environ.get("PRINTGUARD_CAMERAS") == "auto"
         self.plugin_runtime = None if os.environ.get("PRINTGUARD_PLUGINS") == "off" else WasmPluginRuntime()
         if self.plugin_runtime is None:
             logger.warning("plugins are disabled by PRINTGUARD_PLUGINS=off")
@@ -500,9 +566,18 @@ class ServerPlatform:
         return vision.classify(await self._inference.run(tensor), self.assets)
 
     async def discover_cameras(self) -> list[dict[str, Any]]:
-        """Lists the host's video devices and active MediaMTX paths as attachable sources."""
+        """Lists the host's video devices and active MediaMTX paths as attachable sources.
+
+        A device is declared when the deployment chose it rather than merely
+        having it attached, which ``PRINTGUARD_CAMERAS=auto`` says of this one.
+        The image sets it, since a container sees only the cameras its compose
+        file passes in and passing one in is already the decision to use it.
+        """
         devices = await asyncio.to_thread(_video_devices)
-        sources: list[dict[str, Any]] = [{"kind": "device", "device_id": device_id, "label": label} for device_id, label in devices]
+        sources: list[dict[str, Any]] = [
+            {"kind": "device", "device_id": device_id, "label": label, "declared": self._declares_devices}
+            for device_id, label in devices
+        ]
         try:
             paths = await self.mediamtx.list_paths()
         except Exception:

@@ -66,7 +66,7 @@ but cannot implement portably. Identical signatures, different runtimes:
 |---|---|---|
 | `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count | No-op |
 | `infer(rgb)` | Selected LiteRT or ONNX Runtime model | LiteRT.js in WASM via a JS bridge |
-| `discover_cameras()` | MediaMTX path list | `enumerateDevices()` |
+| `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list | `enumerateDevices()` |
 | `open_camera(id, source)` | PyAV reader thread; MediaMTX pulls RTSP and WHEP streams | `getUserMedia` and canvas grabs |
 | `http(...)` | httpx | `fetch`, so CORS applies |
 | `encode_jpeg(rgb)` | PyAV mjpeg | canvas `toBlob` |
@@ -134,6 +134,13 @@ series or the proprietary port 6000 protocol on the A1 and P1. The adapter's opt
 `cameras()` declares them, and the engine reconciles them on printer add and update, and on
 demand through `printer.cameras.refresh` to pick up a camera attached later. Such cameras
 cannot be removed on their own and are dropped with their printer.
+
+A deployment can declare video devices the same way. The Docker image sets
+`PRINTGUARD_CAMERAS=auto`, so every capture device passed into the container comes back from
+`discover_cameras()` marked `declared`, and the engine reconciles those into the registry at
+boot under a deterministic id through `Camera.declared`. A declared camera keeps the name and
+tuning it was given across restarts, cannot be removed on its own, and goes when the
+deployment stops passing it in.
 
 ## Updates and bug reports
 

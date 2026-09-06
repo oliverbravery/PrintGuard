@@ -119,6 +119,10 @@ them.
 Port `8554` only matters for cameras that push RTSP into PrintGuard, and `-p 1935:1935` for an
 RTMP push. Most setups pull from a URL or use a printer's own camera and need neither.
 
+A USB webcam plugged into the machine reaches the container only if you pass it in, and
+registers itself once you have.
+[docs/printers.md](docs/printers.md#cameras-plugged-into-the-hub) has the line to add.
+
 ## Local mode and hub mode
 
 The same detection engine runs in two places. Try it in the browser, then self-host it when you
@@ -130,7 +134,7 @@ are ready.
 | Model runs | [LiteRT.js in WASM](https://developers.google.com/edge/litert) | [LiteRT](https://github.com/google-ai-edge/LiteRT) or [ONNX Runtime](https://onnxruntime.ai/) |
 | Frames leave the device | Never | Only to your own server |
 | Survives closing the tab | No | Yes |
-| Cameras | This device's webcams | Any stream, plus printer cameras |
+| Cameras | This device's webcams | Any stream, plus printer webcams and cameras plugged into the hub |
 | Printers | OctoPrint and Klipper | All of them |
 
 The desktop app is hub mode without the setup, the same persistent engine as the container in a
@@ -178,7 +182,7 @@ for you.
 | | Supported |
 |---|---|
 | **Print services** | OctoPrint, Klipper via Moonraker, Elegoo, Prusa via PrusaLink, Bambu Lab |
-| **Cameras** | Printer webcams, RTSP, RTMP, HTTP/MJPEG, WHEP, anything pushed to the bundled MediaMTX, and the browser's own camera |
+| **Cameras** | Printer webcams, USB cameras plugged into the hub, RTSP, RTMP, HTTP/MJPEG, WHEP, anything pushed to the bundled MediaMTX, and the browser's own camera |
 | **Alerts** | ntfy, Pushover, Telegram, Discord, and native notifications in the desktop app |
 
 Connecting over Docker or HTTPS has a gotcha or two, as does linking an Elegoo, Prusa or Bambu

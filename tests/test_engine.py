@@ -598,6 +598,49 @@ async def test_printer_camera_registers_cascades_and_is_managed(monkeypatch) -> 
         assert engine.cameras.get(camera.id) is None, "removing the printer drops its camera"
 
 
+async def test_declared_camera_registers_is_managed_and_follows_the_deployment() -> None:
+    platform = FakePlatform()
+    platform.devices = [{"kind": "device", "device_id": "/dev/nozzle-cam", "label": "HD Pro Webcam C920", "declared": True}]
+    engine = Engine(platform)
+    events: list[dict] = []
+    await engine.start()
+    engine.add_sink(events.append)
+
+    camera = engine.cameras.values()[0]
+    assert camera.declared and camera.name == "HD Pro Webcam C920", "the declared device was not registered at boot"
+    assert camera.source == {"kind": "device", "device_id": "/dev/nozzle-cam", "label": "HD Pro Webcam C920"}
+
+    await engine.handle({"cmd": "camera.remove", "id": camera.id, "req_id": 7})
+    assert engine.cameras.get(camera.id) is not None, "a declared camera cannot be removed on its own"
+    assert any(e["event"] == "error" and e.get("req_id") == 7 for e in events)
+
+    await engine.handle({"cmd": "camera.update", "id": camera.id, "patch": {"name": "Nozzle"}})
+    await engine.stop()
+
+    restarted = Engine(platform)
+    await restarted.start()
+    assert [(c.id, c.name) for c in restarted.cameras.values()] == [(camera.id, "Nozzle")], "the camera was not restored to its name"
+    await restarted.stop()
+
+    platform.devices = []
+    undeclared = Engine(platform)
+    await undeclared.start()
+    assert not undeclared.cameras.values(), "the camera stayed registered after the deployment stopped passing it in"
+    await undeclared.stop()
+
+
+async def test_discovery_hides_registered_devices() -> None:
+    platform = FakePlatform()
+    platform.devices = [{"kind": "device", "device_id": "/dev/video0", "label": "Cam", "declared": False}]
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "discover", "req_id": 1})
+        assert next(e for e in events if e["event"] == "discovered")["sources"] == platform.devices
+
+        await engine.handle({"cmd": "camera.add", "name": "Cam", "source": {"kind": "device", "device_id": "/dev/video0"}})
+        await engine.handle({"cmd": "discover", "req_id": 2})
+        assert next(e for e in events if e.get("req_id") == 2 and e["event"] == "discovered")["sources"] == []
+
+
 async def test_camera_add_delegates_whep_url_to_platform() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[]) as (engine, events):
