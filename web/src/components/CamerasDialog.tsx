@@ -202,26 +202,28 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
         </>
       )}
       {devices.length > 0 && (
-        <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
-          <option value="">Select a camera…</option>
-          {devices.map((d) => (
-            <option key={d.device_id} value={d.device_id}>
-              {d.label}
-            </option>
-          ))}
-        </select>
+        <>
+          <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+            <option value="">Select a camera…</option>
+            {devices.map((d) => (
+              <option key={d.device_id} value={d.device_id}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+          <input className="field" placeholder="Name (e.g. Ender 3 nozzle cam)" value={name} onChange={(e) => setName(e.target.value)} />
+          <button
+            className="btn btn-primary w-full"
+            disabled={!deviceId || busy}
+            onClick={() => {
+              const device = devices.find((d) => d.device_id === deviceId)!;
+              onAdd(name || device.label || "Camera", { kind: "device", device_id: deviceId, label: device.label });
+            }}
+          >
+            {busy ? "Measuring fps…" : "Register camera"}
+          </button>
+        </>
       )}
-      <input className="field" placeholder="Name (e.g. Ender 3 nozzle cam)" value={name} onChange={(e) => setName(e.target.value)} />
-      <button
-        className="btn btn-primary w-full"
-        disabled={!deviceId || busy}
-        onClick={() => {
-          const device = devices.find((d) => d.device_id === deviceId)!;
-          onAdd(name || device.label || "Camera", { kind: "device", device_id: deviceId, label: device.label });
-        }}
-      >
-        {busy ? "Measuring fps…" : "Register camera"}
-      </button>
     </div>
   );
 }
