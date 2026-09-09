@@ -1,6 +1,6 @@
-"""Resource registries - cameras, integrated printers, API tokens and installed
-plugins - each an id-keyed collection of records carrying identity, access
-details and any live runtime state."""
+"""Resource registries - cameras, integrated printers, print files, API tokens
+and installed plugins - each an id-keyed collection of records carrying
+identity, access details and any live runtime state."""
 
 from __future__ import annotations
 
@@ -195,6 +195,64 @@ class Printer:
 
 
 @dataclass
+class PrintFile:
+    """A sliced file in the print library, ready to send to a printer.
+
+    Attributes:
+        id: Stable identifier, which also names the stored bytes.
+        name: Display name, and the name the printer is given for the job.
+        filename: The name it was uploaded as.
+        ext: Its format, which decides which services can print it.
+        size: Bytes.
+        printer_ids: Printers it was sliced for. Empty means any that prints
+            the format.
+        uploaded: Unix timestamp of the upload.
+        meta: What the slicer wrote into it: slicer, time_s, filament_g,
+            filament_mm and printer_model, each None where it did not say.
+        thumbnail: Media type of the stored preview image, or None when the
+            file carries none.
+    """
+
+    id: str
+    name: str
+    filename: str
+    ext: str
+    size: int
+    printer_ids: list[str]
+    uploaded: float
+    meta: dict[str, Any]
+    thumbnail: str | None = None
+
+    @property
+    def file_key(self) -> str:
+        """The file store key its bytes live under."""
+        return f"{self.id}.{self.ext}"
+
+    @property
+    def thumbnail_key(self) -> str:
+        """The file store key its preview image lives under."""
+        return f"{self.id}.thumb"
+
+    def public(self) -> dict[str, Any]:
+        """Serialises the record for the state event."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "filename": self.filename,
+            "ext": self.ext,
+            "size": self.size,
+            "printer_ids": list(self.printer_ids),
+            "uploaded": self.uploaded,
+            "meta": self.meta,
+            "thumbnail": self.thumbnail,
+        }
+
+    def persisted(self) -> dict[str, Any]:
+        """Serialises the record to restore it on boot, which is all of it."""
+        return self.public()
+
+
+@dataclass
 class Token:
     """A scoped bearer token gating the hub's REST and MCP transports.
 
@@ -348,6 +406,16 @@ class CameraRegistry(Registry[Camera]):
 
 class PrinterRegistry(Registry[Printer]):
     """Holds all registered integrated printers keyed by id."""
+
+
+class PrintRegistry(Registry[PrintFile]):
+    """Holds every sliced file in the library keyed by id."""
+
+    def untag(self, printer_id: str) -> None:
+        """Drops a printer from every file it was tagged for."""
+        for record in self.values():
+            if printer_id in record.printer_ids:
+                record.printer_ids.remove(printer_id)
 
 
 class TokenRegistry(Registry[Token]):

@@ -56,7 +56,18 @@ class DeviceState:
 
 
 class IntegrationAdapter(Adapter):
-    """Base class for printer service integrations."""
+    """Base class for printer service integrations.
+
+    Attributes:
+        formats: File extensions, without the dot, the service prints from an
+            upload. Empty means it takes no files, which is the default.
+    """
+
+    formats: tuple[str, ...] = ()
+
+    def meta(self) -> dict[str, Any]:
+        """Serialises adapter metadata, with the formats it prints."""
+        return {**super().meta(), "formats": list(self.formats)}
 
     @abstractmethod
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
@@ -99,6 +110,21 @@ class IntegrationAdapter(Adapter):
             picked up automatically.
         """
         return []
+
+    async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
+        """Uploads a sliced file to the service and starts printing it.
+
+        Args:
+            http: Platform HTTP function.
+            config: User-supplied values matching the adapter schema.
+            filename: Name the file is given on the service, carrying one of
+                the adapter's ``formats`` as its extension.
+            data: The file's bytes.
+
+        Raises:
+            RuntimeError: If the service rejects the file or the print.
+        """
+        raise RuntimeError(f"{self.label} cannot receive print files")
 
     async def close(self, config: dict[str, Any] | None = None) -> None:
         """Releases persistent connections for one configuration or all configurations."""

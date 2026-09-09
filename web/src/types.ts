@@ -58,6 +58,26 @@ export interface Printer {
   online: boolean;
 }
 
+export interface PrintMeta {
+  slicer?: string | null;
+  time_s?: number | null;
+  filament_g?: number | null;
+  filament_mm?: number | null;
+  printer_model?: string | null;
+}
+
+export interface PrintFile {
+  id: string;
+  name: string;
+  filename: string;
+  ext: string;
+  size: number;
+  printer_ids: string[];
+  uploaded: number;
+  meta: PrintMeta;
+  thumbnail: string | null;
+}
+
 export interface Alert {
   score: number;
   action: string;
@@ -144,6 +164,7 @@ export interface AdapterMeta {
   experimental?: boolean;
   setup_url?: string | null;
   setup_hint?: string | null;
+  formats?: string[];
   schema: {
     properties: Record<string, SchemaProperty>;
     required?: string[];
@@ -332,6 +353,8 @@ export interface EngineState {
   update: UpdateInfo | null;
   cameras: Camera[];
   printers: Printer[];
+  prints: PrintFile[];
+  print_store: boolean;
   monitors: Monitor[];
   settings: {
     notifiers: Record<string, Record<string, string>>;

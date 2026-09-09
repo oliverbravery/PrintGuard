@@ -112,6 +112,9 @@ HTTP function.
    - implement `fetch_state()`, normalising to the canonical `DeviceStatus` values.
      `offline` must mean "unreachable", not "idle", because it keeps inference watching.
    - implement `send()` for pause, resume and cancel, raising `RuntimeError` on rejection.
+   - set `formats` to the extensions the service prints from an upload and implement
+     `print_file()` to upload one and start it, raising `RuntimeError` on rejection. Leave
+     `formats` empty and the print library never offers the printer.
    - describe the config form as a JSON Schema, where `secret: true` masks fields,
      `placeholder` hints at the expected value, and `default` preselects an optional
      `enum`, so the form never offers an empty choice the adapter quietly fills in.
@@ -121,8 +124,8 @@ HTTP function.
 3. Add the service to the table in [docs/printers.md](docs/printers.md), with a `<details>`
    block if it needs setup steps of its own.
 
-The configuration form, connection test, device polling, inference gating and defect actions
-all follow from the adapter. No other change is needed in either mode.
+The configuration form, connection test, device polling, inference gating, defect actions and
+the print library all follow from the adapter. No other change is needed in either mode.
 
 ## Adding a notification provider
 

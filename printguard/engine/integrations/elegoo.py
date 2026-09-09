@@ -13,6 +13,8 @@ Centauri Python client: https://github.com/bjan/pycentauri
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
@@ -43,6 +45,7 @@ class ElegooAdapter(IntegrationAdapter):
     )
     browser_ok = False
     experimental = False
+    formats = ("gcode",)
     schema = {
         "type": "object",
         "properties": {
@@ -99,6 +102,26 @@ class ElegooAdapter(IntegrationAdapter):
         try:
             printer = await self._connect_centauri(config)
             await getattr(printer, _ACTIONS[action])()
+        except Exception:
+            await self.close(config)
+            raise
+
+    async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
+        """Uploads to the printer's internal storage and starts the print.
+
+        pycentauri transfers from a path, chunked and checksummed the way the
+        printer expects, so the bytes pass through a temporary file.
+        """
+        if self._family(config) == _MOONRAKER:
+            await self._moonraker.print_file(http, self._moonraker_config(config), filename, data)
+            return
+        try:
+            printer = await self._connect_centauri(config)
+            with tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / filename
+                await asyncio.to_thread(path.write_bytes, data)
+                remote = await printer.upload_file(path, remote_name=filename)
+            await printer.start_print(remote)
         except Exception:
             await self.close(config)
             raise

@@ -50,6 +50,8 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | Bambu, Elegoo or Prusa is missing from the list | Those services need a raw socket, an access code exchange or HTTP Digest, none of which a browser can do | Use hub mode. [Supported print services](printers.md#supported-print-services) |
 | Printer shows `offline` but is printing | The hub cannot reach the service | Monitoring keeps running by design. Fix reachability, then the state clears itself |
 | Pause or cancel did nothing | The service rejected the action | The failure is in the alert, the dashboard error feed and the notification. Check the service's own logs |
+| **Print** is greyed out in the library | The printer is not idle, or the file is tagged for other printers | Wait for the job to finish or cancel it, and tag this printer from the file's row. [Sending prints](printers.md#sending-prints) |
+| A Bambu printer refuses a file | It is not a sliced 3mf, or Developer Mode is off | Export the plate from Bambu Studio or Orca with the gcode included, and enable Developer Mode under Network in Settings |
 
 ## Detection and alerts
 

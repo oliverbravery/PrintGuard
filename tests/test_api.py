@@ -385,3 +385,56 @@ async def test_rejected_command_is_400() -> None:
             f"/printers/{printer_id}/action", json={"action": "pause"}, headers={"Authorization": f"Bearer {tokens['manage']}"}
         )
         assert rejected.status_code == 400
+
+
+async def test_print_library_over_rest(tmp_path) -> None:
+    from test_gcode import PRUSA
+
+    from printguard.server.platform import DiskFileStore
+
+    async with api(("read", "control", "manage")) as (client, engine, platform, _monitor_id, printer_id, _camera_id, tokens):
+        engine.platform.files = DiskFileStore(tmp_path)
+        read = {"Authorization": f"Bearer {tokens['read']}"}
+        control = {"Authorization": f"Bearer {tokens['control']}"}
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        octet = {**manage, "Content-Type": "application/octet-stream"}
+
+        assert (await client.post("/prints?filename=benchy.gcode", content=PRUSA, headers={**read, "Content-Type": "application/octet-stream"})).status_code == 403
+        assert (await client.post("/prints?filename=model.stl", content=b"solid", headers=octet)).status_code == 400
+        added = await client.post(f"/prints?filename=benchy.gcode&name=Boat&printer_ids={printer_id}", content=PRUSA, headers=octet)
+        assert added.status_code == 200, added.text
+        record = added.json()
+        assert record["name"] == "Boat" and record["printer_ids"] == [printer_id] and record["thumbnail"] == "image/png"
+        assert (tmp_path / f"{record['id']}.gcode").read_bytes() == PRUSA
+
+        listed = (await client.get("/prints", headers=read)).json()
+        assert [p["id"] for p in listed] == [record["id"]]
+        assert (await client.get(f"/prints/{record['id']}", headers=read)).json()["meta"]["printer_model"] == "MK4"
+        downloaded = await client.get(f"/prints/{record['id']}/file", headers=read)
+        assert downloaded.content == PRUSA and "benchy.gcode" in downloaded.headers["content-disposition"]
+
+        assert (await client.post(f"/prints/{record['id']}/start", json={"printer_id": printer_id}, headers=read)).status_code == 403
+        busy = await client.post(f"/prints/{record['id']}/start", json={"printer_id": printer_id}, headers=control)
+        assert busy.status_code == 400 and "printing" in busy.json()["detail"]
+        platform.device_status = "Operational"
+        started = await client.post(f"/prints/{record['id']}/start", json={"printer_id": printer_id}, headers=control)
+        assert started.status_code == 200 and started.json()["id"] == printer_id
+        assert any(url.endswith("/api/files/local") for _, url in platform.http_calls)
+
+        renamed = await client.patch(f"/prints/{record['id']}", json={"name": "Boat v2", "printer_ids": []}, headers=manage)
+        assert renamed.json()["name"] == "Boat v2" and renamed.json()["printer_ids"] == []
+        assert (await client.delete(f"/prints/{record['id']}", headers=manage)).json() == []
+        assert not list(tmp_path.iterdir()), "removing the record removes the file and its preview"
+
+
+async def test_print_upload_is_capped(tmp_path, monkeypatch) -> None:
+    from printguard.server import prints
+    from printguard.server.platform import DiskFileStore
+
+    monkeypatch.setattr(prints, "MAX_PRINT_BYTES", 16)
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        engine.platform.files = DiskFileStore(tmp_path)
+        manage = {"Authorization": f"Bearer {tokens['manage']}", "Content-Type": "application/octet-stream"}
+        too_big = await client.post("/prints?filename=big.gcode", content=b"G1 X1\n" * 10, headers=manage)
+        assert too_big.status_code == 413
+        assert not list(tmp_path.iterdir()), "nothing of an oversized upload is kept"

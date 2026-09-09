@@ -48,6 +48,35 @@ neither does a state the adapter cannot read, so a monitor left watching an appa
 printer warns and says which state it is getting. See
 [failing safely](architecture.md#failing-safely).
 
+## Sending prints
+
+The print library holds sliced files on the hub. Open **Prints** in the header, drop files in or
+browse for them, and each keeps the preview, estimated time, filament and printer model its
+slicer wrote into it. Open one to orbit its toolpath in 3D, layer by layer.
+
+Tag a file with the printers it was sliced for and it can only start on one of those. A file
+with no tags can go to any printer whose service takes the format. Either way the printer has to
+report idle at the moment you press **Print**, so nothing lands on top of a running job.
+
+| Service | Takes | How it starts |
+|---|---|---|
+| OctoPrint | `.gcode`, `.gco`, `.g` | Uploaded to local storage, selected and printed |
+| Klipper via Moonraker | `.gcode`, `.gco`, `.g` | Uploaded to the gcodes root and printed |
+| Elegoo | `.gcode` | Centauri: uploaded to internal storage and started. Neptune and OrangeStorm: through Moonraker |
+| Prusa via PrusaLink | `.gcode`, `.bgcode` | Put onto the USB stick, or local storage on a Raspberry Pi, and printed after upload |
+| Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the SD card over FTPS, then the first plate is started over MQTT |
+
+A file is sent under its library name, so rename it first if the printer's own file list
+matters to you. Binary gcode has no preview or 3D view, since its toolpath is compressed.
+
+A Bambu print uses the settings sliced into the file, with bed levelling on, flow and vibration
+calibration off, and filament from the external spool or the first AMS slot. Starting a 3mf
+needs Developer Mode, the same switch the MQTT connection needs. A project exported without its
+gcode is refused at upload.
+
+Files live in the data directory under `prints/`, so they survive a restart and travel with the
+`/data` volume.
+
 ## Supported print services
 
 | Service | Modes | Authentication | Exposes a camera |

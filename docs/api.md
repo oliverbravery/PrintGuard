@@ -63,9 +63,9 @@ Scopes are cumulative:
 
 | Scope | Grants |
 |---|---|
-| `read` | Status of monitors, printers and cameras, the current camera frame, recent events |
-| `control` | Everything in `read`, plus pause, resume and cancel |
-| `manage` | Everything in `control`, plus adding, editing and removing cameras, printers and monitors, changing settings, testing services and discovering cameras |
+| `read` | Status of monitors, printers and cameras, the current camera frame, recent events, the print library |
+| `control` | Everything in `read`, plus pause, resume and cancel, and starting a file from the print library |
+| `manage` | Everything in `control`, plus adding, editing and removing cameras, printers, monitors and print files, changing settings, testing services and discovering cameras |
 
 Issue tokens from the API & MCP access tab in Settings. Name a token, choose its scope and
 press **Generate**. The secret, a `pg_…` string, is only shown once:
@@ -105,6 +105,9 @@ at `/api/v1/docs`.
 | `GET` | `/cameras/{id}` | One camera |
 | `GET` | `/cameras/{id}/frame` | Freshest frame as `image/jpeg` |
 | `POST` | `/classify` | Classify a supplied frame, body `image/jpeg`, `?sensitivity=`. No registered camera needed |
+| `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
+| `GET` | `/prints/{id}` | One print file |
+| `GET` | `/prints/{id}/file` | Download a print file as it was uploaded |
 | `GET` | `/events` | Recent alerts, warnings, device changes and errors |
 
 </details>
@@ -115,6 +118,7 @@ at `/api/v1/docs`.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/printers/{id}/action` | `{"action": "pause" \| "resume" \| "cancel"}` |
+| `POST` | `/prints/{id}/start` | `{"printer_id"}`, sends the file to that printer and starts it. Refused unless the printer is idle, prints the format and is one the file is tagged for |
 
 </details>
 
@@ -135,6 +139,9 @@ at `/api/v1/docs`.
 | `DELETE` | `/cameras/{id}` | Remove a camera |
 | `POST` | `/cameras/discover` | List attachable, unregistered sources |
 | `POST` | `/cameras/refresh-printers` | Register cameras newly exposed by registered printers |
+| `POST` | `/prints?filename=` | Upload a sliced file as the raw request body. `name` and a comma-separated `printer_ids` are optional |
+| `PATCH` | `/prints/{id}` | Rename a print file or change the printers it is tagged for |
+| `DELETE` | `/prints/{id}` | Remove a print file |
 | `PATCH` | `/settings` | Update settings, for example notifiers |
 | `POST` | `/notifiers/test` | `{"provider", "config"}`, sends a test alert |
 
@@ -155,6 +162,12 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: image/jpeg" \
   --data-binary @frame.jpg https://host/api/v1/classify
 # gives {"prediction":"success","distances":{...},"margin":1.16,"defect_score":0.35}
+
+# Upload a sliced file tagged for one printer, then start it there
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/octet-stream" \
+  --data-binary @benchy.gcode "https://host/api/v1/prints?filename=benchy.gcode&printer_ids=$PRINTER"
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"printer_id\":\"$PRINTER\"}" https://host/api/v1/prints/$PRINT/start
 ```
 
 ## MCP server
@@ -165,10 +178,12 @@ filtered to the scopes its token holds.
 
 | Scope | Tools |
 |---|---|
-| `read` | `get_state`, `list_monitors`, `get_monitor`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `recent_events` |
+| `read` | `get_state`, `list_monitors`, `get_monitor`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `list_prints`, `get_print`, `recent_events` |
 | `read` | `get_camera_frame`, which returns the frame as image content an agent can look at |
-| `control` | `control_printer` |
-| `manage` | `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_settings`, `test_notifier` |
+| `control` | `control_printer`, `start_print` |
+| `manage` | `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_print`, `remove_print`, `update_settings`, `test_notifier` |
+
+Uploading and downloading a print file carry a binary body, so they are REST only.
 
 Point a client at the endpoint with the token as a bearer header:
 
@@ -197,6 +212,11 @@ Cameras and printers are registered resources, created and deleted only through 
 collection. A monitor binds one camera and optionally one printer by `camera_id` and
 `printer_id`, and carries the thresholds and defect-response policy. Removing a resource
 clears it from any monitor that referenced it.
+
+A print file is a third resource. It carries the printers it is tagged for as `printer_ids`,
+and removing a printer drops it from every file's tags. Its `meta` holds the slicer, `time_s`,
+`filament_g`, `filament_mm` and `printer_model` read from the file, each `null` where the file
+did not say, and `thumbnail` is the media type of its preview or `null`.
 
 > [!NOTE]
 > Credentials are redacted from this surface. Any printer or notifier config field its

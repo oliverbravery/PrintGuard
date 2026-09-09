@@ -9,8 +9,10 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urljoin
 
+from ..adapters import multipart_form
 from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
 
+_UPLOAD_TIMEOUT_S = 180.0
 _STATUS_MAP = {
     "printing": DeviceStatus.PRINTING,
     "resuming": DeviceStatus.PRINTING,
@@ -30,6 +32,7 @@ class OctoPrintAdapter(IntegrationAdapter):
     label = "OctoPrint"
     docs_url = "https://docs.octoprint.org/en/master/api/"
     setup_url = "https://docs.octoprint.org/en/master/bundledplugins/appkeys.html"
+    formats = ("gcode", "gco", "g")
     setup_hint = (
         "Copy an application key from OctoPrint under Settings > Application Keys. "
         "In local mode, also enable CORS under Settings > API."
@@ -77,6 +80,19 @@ class OctoPrintAdapter(IntegrationAdapter):
         )
         if status >= 400:
             raise RuntimeError(f"OctoPrint rejected {action.value}: HTTP {status}")
+
+    async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
+        """Uploads to local storage through /api/files/local, selected and printing."""
+        headers, body = multipart_form({"select": "true", "print": "true"}, "file", filename, data, "application/octet-stream")
+        status, _ = await http(
+            "POST",
+            f"{config['base_url'].rstrip('/')}/api/files/local",
+            headers={**self._headers(config), **headers},
+            data=body,
+            timeout=_UPLOAD_TIMEOUT_S,
+        )
+        if status >= 400:
+            raise RuntimeError(f"OctoPrint rejected {filename}: HTTP {status}")
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Reads the configured webcam stream from /api/settings.

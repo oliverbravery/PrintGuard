@@ -52,6 +52,26 @@ class FakeSocket:
         self.arrived("closed", "")
 
 
+class FakeFileStore:
+    """In-memory print file store."""
+
+    def __init__(self) -> None:
+        self.blobs: dict[str, bytes] = {}
+
+    async def store(self, key: str, chunks: Any) -> int:
+        data = b"".join([chunk async for chunk in chunks])
+        self.blobs[key] = data
+        return len(data)
+
+    async def read(self, key: str) -> bytes:
+        if key not in self.blobs:
+            raise FileNotFoundError(key)
+        return self.blobs[key]
+
+    async def remove(self, key: str) -> None:
+        self.blobs.pop(key, None)
+
+
 class FakePlatform:
     """In-memory platform with deterministic latency and HTTP."""
 
@@ -77,12 +97,13 @@ class FakePlatform:
         self.http_calls: list[tuple[str, str]] = []
         self.http_requests: list[dict[str, Any]] = []
         self.releases: list[dict[str, Any]] = []
-        self.files: dict[str, tuple[int, Any]] = {}
+        self.responses: dict[str, tuple[int, Any]] = {}
         self.sockets: list[FakeSocket] = []
         self.released_cameras: list[str] = []
         self.devices: list[dict[str, Any]] = []
         self.state: dict[str, Any] = {}
         self.inference_runtime = "auto"
+        self.files: FakeFileStore | None = FakeFileStore()
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Records the selected inference runtime."""
@@ -115,8 +136,8 @@ class FakePlatform:
         self.http_calls.append((method, url))
         self.http_requests.append({"method": method, "url": url, **kwargs})
         hostname = urlparse(url).hostname or ""
-        if url in self.files:
-            return self.files[url]
+        if url in self.responses:
+            return self.responses[url]
         if hostname == "api.github.com":
             return 200, self.releases
         if hostname == "sentry.io" or hostname.endswith(".sentry.io"):

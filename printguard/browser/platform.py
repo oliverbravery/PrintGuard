@@ -97,6 +97,7 @@ class BrowserPlatform:
     update_repo = None
     update_asset = None
     plugin_runtime = None
+    files = None
 
     def __init__(self, bridge: Any, assets: vision.Assets) -> None:
         self._bridge = bridge

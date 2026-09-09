@@ -8,6 +8,7 @@ mode).
 
 from __future__ import annotations
 
+import uuid
 from abc import ABC
 from typing import Any, Awaitable, Callable
 
@@ -70,3 +71,31 @@ class Adapter(ABC):
     def secret_keys(self) -> set[str]:
         """Config property names the schema marks secret (credentials)."""
         return {key for key, prop in self.schema.get("properties", {}).items() if prop.get("secret")}
+
+
+def multipart_form(
+    fields: dict[str, str], file_field: str, filename: str, file_bytes: bytes, content_type: str = "image/jpeg"
+) -> tuple[dict[str, str], bytes]:
+    """Encodes text fields plus one file as a multipart/form-data request.
+
+    Args:
+        fields: Plain form fields.
+        file_field: Form name of the file part.
+        filename: Filename reported for the file part.
+        file_bytes: Content of the file part.
+        content_type: Media type reported for the file part.
+
+    Returns:
+        (headers, body) ready for the platform HTTP function.
+    """
+    boundary = uuid.uuid4().hex
+    parts = [
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+        for name, value in fields.items()
+    ]
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
+        f"Content-Type: {content_type}\r\n\r\n".encode() + file_bytes + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode())
+    return {"Content-Type": f"multipart/form-data; boundary={boundary}"}, b"".join(parts)

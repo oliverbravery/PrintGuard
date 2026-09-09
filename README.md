@@ -66,6 +66,8 @@ Nothing is installed and no frame leaves your device. When you are ready to run 
 
 - Catches a failure early, before spaghetti runs for hours or burns a spool.
 - Pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab.
+- Keeps your sliced files on the hub and starts one on an idle printer, only ever one it was
+  tagged for.
 - Sends a snapshot to your phone over ntfy, Pushover, Telegram or Discord.
 - Only watches while a linked printer is actually printing.
 - Warns you when a camera drops, a feed freezes or a printer stops answering.
@@ -136,6 +138,7 @@ are ready.
 | Survives closing the tab | No | Yes |
 | Cameras | This device's webcams | Any stream, plus printer webcams and cameras plugged into the hub |
 | Printers | OctoPrint and Klipper | All of them |
+| Print library | No | Upload sliced files, view them in 3D and send them to a printer |
 
 The desktop app is hub mode without the setup, the same persistent engine as the container in a
 native window on your own computer.
@@ -185,6 +188,11 @@ for you.
 | **Cameras** | Printer webcams, USB cameras plugged into the hub, RTSP, RTMP, HTTP/MJPEG, WHEP, anything pushed to the bundled MediaMTX, and the browser's own camera |
 | **Alerts** | ntfy, Pushover, Telegram, Discord, and native notifications in the desktop app |
 
+Drop sliced files into the print library and they stay on the hub, with the preview, print time
+and filament the slicer wrote into them. Tag a file with the printers it was sliced for, then
+start it on one that is idle, from the library or from the 3D viewer. OctoPrint, Klipper and
+Elegoo take gcode, PrusaLink also takes bgcode and Bambu Lab takes a sliced 3mf.
+
 Connecting over Docker or HTTPS has a gotcha or two, as does linking an Elegoo, Prusa or Bambu
 printer. The full walk-through is in **[docs/printers.md](docs/printers.md)**.
 
@@ -224,7 +232,8 @@ two-way, so your automations can drive PrintGuard.
 
 Anything the dashboard can do, an agent or a script can do. Point an MCP client at
 `https://<host>/mcp/`, or use the REST API at `/api/v1`. Both read printer and camera status,
-fetch the current frame as an image, and pause, resume or cancel.
+fetch the current frame as an image, pause, resume or cancel, and start a file from the print
+library.
 
 Tokens are scoped and issued from Settings. `read` is status only, `control` adds the printer
 actions and `manage` adds the rest. `GET /api/health` needs no token and reports readiness and
