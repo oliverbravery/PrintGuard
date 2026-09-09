@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, type Browser, type Locator, type Page } from "@playwright/test";
 import { deflateSync } from "node:zlib";
-import type { Camera, EngineState, Monitor, PrintFile, Printer, ScorePoint } from "../src/types";
+import type { Camera, DeviceState, EngineState, Monitor, PrintFile, Printer, ScorePoint } from "../src/types";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const asset = (name: string) => resolve(here, "../../docs/assets", name);
@@ -21,8 +21,10 @@ const camera = (id: string, name: string, source: Camera["source"], inferring = 
   crop: null, rotation: 0, target_fps: 30, achieved_fps: 29.8, inferring, in_use: true, online: true, last_result: null,
 });
 
-const printer = (id: string, name: string, provider: string, status: string, progress: number, job: string): Printer => ({
-  id, name, provider, config: {}, online: true, device_state: { status, progress, job },
+const idle: DeviceState = { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: { actual: 24.3, target: 0 }, bed: { actual: 23.1, target: 0 } };
+const printer = (id: string, name: string, provider: string, status: string, progress: number, job: string, remaining_s: number, nozzle: number, bed: number): Printer => ({
+  id, name, provider, config: {}, online: true,
+  device_state: { status, progress, job, remaining_s, nozzle: { actual: nozzle - 0.4, target: nozzle }, bed: { actual: bed + 0.2, target: bed } },
 });
 
 const print = (id: string, name: string, ext: string, size: number, printer_ids: string[], meta: PrintFile["meta"], thumbnail = true): PrintFile => ({
@@ -31,9 +33,15 @@ const print = (id: string, name: string, ext: string, size: number, printer_ids:
 });
 
 const INTEGRATIONS = [
-  { id: "octoprint", label: "OctoPrint", docs_url: "", formats: ["gcode", "gco", "g"], schema: { properties: {} } },
-  { id: "klipper", label: "Klipper (Moonraker)", docs_url: "", formats: ["gcode", "gco", "g"], schema: { properties: {} } },
-  { id: "bambu", label: "Bambu Lab", docs_url: "", formats: ["3mf"], schema: { properties: {} } },
+  { id: "octoprint", label: "OctoPrint", docs_url: "", formats: ["gcode", "gco", "g"], heater_control: true, schema: { properties: {} } },
+  { id: "klipper", label: "Klipper (Moonraker)", docs_url: "", formats: ["gcode", "gco", "g"], heater_control: true, schema: { properties: {} } },
+  { id: "bambu", label: "Bambu Lab", docs_url: "", formats: ["3mf"], heater_control: true, schema: { properties: {} } },
+];
+
+const PREHEAT = [
+  { name: "PLA", nozzle: 210, bed: 60 },
+  { name: "PETG", nozzle: 240, bed: 85 },
+  { name: "ABS", nozzle: 250, bed: 100 },
 ];
 
 const monitor = (id: string, name: string, camera_id: string, printer_id: string, alerting = false): Monitor => ({
@@ -58,8 +66,8 @@ function engine(): EngineState {
       camera("c3", "Bambu X1C", { kind: "bambu", host: "10.0.0.30" }),
     ],
     printers: [
-      printer("p1", "Prusa MK4", "octoprint", "printing", 47, "calibration_cubes.gcode"),
-      printer("p2", "Ender 3 V3", "klipper", "paused", 62, "wall_bracket.gcode"),
+      printer("p1", "Prusa MK4", "octoprint", "printing", 47, "calibration_cubes.gcode", 4380, 215, 60),
+      printer("p2", "Ender 3 V3", "klipper", "paused", 62, "wall_bracket.gcode", 1500, 240, 85),
     ],
     prints: [
       print("f1", "spiral_vase", "gcode", 4_812_339, ["p1"], { slicer: "PrusaSlicer 2.8.1", time_s: 6127, filament_g: 15.3, printer_model: "MK4S" }),
@@ -72,7 +80,7 @@ function engine(): EngineState {
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120 },
+    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: INTEGRATIONS, notifiers: [],
     plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS, plugin_host: true,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },
@@ -216,13 +224,13 @@ const live = (e: EngineState) => {
 };
 
 const idlePrinters = (e: EngineState) => {
-  e.printers[1] = { ...e.printers[1], device_state: { status: "idle", progress: 0, job: null } };
+  e.printers[1] = { ...e.printers[1], device_state: idle };
 };
 
 const SCENES: Scene[] = [
   { name: "dashboard", width: 1360, height: 620, theme: "dark" },
   { name: "dashboard-light", width: 1360, height: 620, theme: "light" },
-  { name: "printer-detail", width: 1360, height: 760, theme: "dark", detailId: "m1" },
+  { name: "printer-detail", width: 1360, height: 860, theme: "dark", detailId: "m1" },
   { name: "prints", width: 1360, height: 860, theme: "dark", dialog: "prints", mutate: idlePrinters },
   { name: "print-viewer", width: 1360, height: 860, theme: "dark", printId: "f1", mutate: idlePrinters },
   {
@@ -264,7 +272,7 @@ const stoodDown = (e: EngineState) => {
     { ...e.monitors[1], alert: null, watching: true },
     { ...e.monitors[2], name: "Ender 3 V3", printer_id: "p2", watching: false },
   ];
-  e.printers[1] = { ...e.printers[1], device_state: { status: "idle", progress: 0, job: null } };
+  e.printers[1] = { ...e.printers[1], device_state: idle };
   e.cameras[2] = { ...e.cameras[2], name: "Garage - Ender", inferring: false, target_fps: 0, achieved_fps: 0, in_use: false };
 };
 
