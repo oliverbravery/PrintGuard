@@ -162,6 +162,21 @@ export const GUIDE: GuideSection[] = [
     action: { label: "Open printers", dialog: "printers" },
   },
   {
+    id: "prints",
+    led: "led-on",
+    title: "Print library",
+    shot: "prints",
+    hubOnly: true,
+    body: (
+      <>
+        Drop sliced files onto the hub and keep them there, with the preview, print time and filament the slicer
+        wrote into each. Tag a file with the printers it was sliced for and it can only ever start on those. Send it
+        to an idle printer from the library or from the 3D viewer, which lets you orbit the toolpath layer by layer.
+      </>
+    ),
+    action: { label: "Open the library", dialog: "prints" },
+  },
+  {
     id: "monitors",
     led: "led-infer",
     title: "Monitors, the core unit",

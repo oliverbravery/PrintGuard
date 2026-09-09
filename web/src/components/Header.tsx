@@ -44,6 +44,7 @@ function Readout({
 
 export function HeaderActions({ className }: { className?: string }) {
   const openDialog = useStore((s) => s.openDialog);
+  const printStore = useStore((s) => s.engine?.print_store ?? false);
   return (
     <nav className={className}>
       <button className="btn max-md:w-full max-md:py-2.5" onClick={() => openDialog("cameras")}>
@@ -52,6 +53,11 @@ export function HeaderActions({ className }: { className?: string }) {
       <button className="btn max-md:w-full max-md:py-2.5" onClick={() => openDialog("printers")}>
         Printers
       </button>
+      {printStore && (
+        <button className="btn max-md:w-full max-md:py-2.5" onClick={() => openDialog("prints")}>
+          Prints
+        </button>
+      )}
       <button className="btn btn-primary max-md:w-full max-md:py-2.5" onClick={() => openDialog("monitor")}>
         + Monitor
       </button>
@@ -64,8 +70,11 @@ export function HeaderActions({ className }: { className?: string }) {
 }
 
 export function MobileActionBar() {
+  const printStore = useStore((s) => s.engine?.print_store ?? false);
   return (
-    <HeaderActions className="action-bar fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 gap-2 border-t border-line-0 bg-ink-0/95 px-4 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden" />
+    <HeaderActions
+      className={`action-bar fixed inset-x-0 bottom-0 z-30 grid ${printStore ? "grid-cols-5" : "grid-cols-4"} gap-2 border-t border-line-0 bg-ink-0/95 px-4 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden`}
+    />
   );
 }
 

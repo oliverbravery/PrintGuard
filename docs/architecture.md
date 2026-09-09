@@ -72,6 +72,7 @@ but cannot implement portably. Identical signatures, different runtimes:
 | `encode_jpeg(rgb)` | PyAV mjpeg | canvas `toBlob` |
 | `load_state` / `save_state` | `data/state.json` | `localStorage` |
 | `plugin_runtime` | QuickJS in WebAssembly, under wasmtime | `None`: the browser runs workers in its own sandbox |
+| `files` | Print files and their previews on disk under `data/prints/` | `None`: a tab has nowhere to keep an upload |
 
 The UI is presentation-only and speaks one JSON command and event protocol, over a WebSocket
 in hub mode and over an in-page Pyodide bridge in local mode. The engine cannot tell which
@@ -91,6 +92,7 @@ Commands, UI to engine:
 |---|---|
 | Cameras | `discover`, `camera.add`, `camera.update`, `camera.remove` |
 | Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.test`, `printer.cameras.refresh` |
+| Prints | `print.add`, `print.update`, `print.remove`, `print.start` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
 | History | `history.get`, `snapshot.get` |
 | Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.http`, `plugin.effect` |
@@ -108,6 +110,7 @@ Events, engine to UI:
 | `alert` | A sustained defect, with the action taken |
 | `warning` | Watchdog conditions and their recovery |
 | `device` | A printer's status, progress and job |
+| `print_started` | A file from the library has been sent to a printer and started |
 | `discovered`, `printer_test`, `notify_test` | Command responses |
 | `history`, `snapshot` | Risk history buckets and stored alert snapshots |
 | `releases` | The changelog history the update dialog browses |
@@ -134,6 +137,14 @@ series or the proprietary port 6000 protocol on the A1 and P1. The adapter's opt
 `cameras()` declares them, and the engine reconciles them on printer add and update, and on
 demand through `printer.cameras.refresh` to pick up a camera attached later. Such cameras
 cannot be removed on their own and are dropped with their printer.
+
+A print file is the third registered resource, and it lives only on a hub. The bytes are far
+too large for the protocol, so the hub's own upload route streams them into the platform's
+`files` store under an id it mints and `print.add` then registers the record, reading the
+slicer's estimates and preview out of the file through [`engine/gcode.py`](../printguard/engine/gcode.py).
+A file carries the printers it is tagged for, checked against the adapter's `formats` when the
+tag is set, and `print.start` re-polls the printer and refuses unless it answers idle before
+the adapter's `print_file()` uploads and starts it.
 
 A deployment can declare video devices the same way. The Docker image sets
 `PRINTGUARD_CAMERAS=auto`, so every capture device passed into the container comes back from
@@ -364,6 +375,8 @@ printguard/
     registry.py      camera + printer registries (registered resources)
     monitors.py      monitor config: a camera + printer pairing and its thresholds
     printers.py      registered-printer (integration connection) validation
+    prints.py        print library records: formats, names and which printers a file may go to
+    gcode.py         what a sliced file says about itself: estimates, printer model, preview
     watchdog.py      defect response: streaks, printer actions, notifications, health
     updates.py       GitHub release check and changelog history
     reports.py       anonymous bug report and downloadable diagnostics bundle
@@ -374,6 +387,7 @@ printguard/
   server/            hub platform: FastAPI, bundled MediaMTX (child process), LiteRT / ONNX Runtime, PyAV
     api.py           REST API (/api/v1) over the engine protocol, scoped by token
     mcp.py           MCP server for agents, derived from the REST API
+    prints.py        print library uploads and downloads, shared by the dashboard and the REST API
     mqtt.py          Home Assistant MQTT bridge (device discovery + two-way control)
     plugins.py       plugin worker sandbox: QuickJS in WebAssembly, under wasmtime
     runtime/         the vendored quickjs-ng WASI build the sandbox runs
