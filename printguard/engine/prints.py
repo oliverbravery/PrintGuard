@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .registry import Printer, PrinterRegistry
 
 FORMATS = ("gcode", "gco", "g", "bgcode", "3mf")
+PREVIEW_TYPE = "image/png"
 NAME_MAX = 80
 FILENAME_MAX = 60
 

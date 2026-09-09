@@ -191,7 +191,7 @@ for you.
 | **Alerts** | ntfy, Pushover, Telegram, Discord, and native notifications in the desktop app |
 
 Drop sliced files into the print library and they stay on the hub, with the preview, print time
-and filament the slicer wrote into them. Tag a file with the printers it was sliced for, then
+and filament the slicer wrote into them, or a preview drawn from the toolpath where it wrote none. Tag a file with the printers it was sliced for, then
 start it on one that is idle, from the library or from the 3D viewer. OctoPrint, Klipper and
 Elegoo take gcode, PrusaLink also takes bgcode and Bambu Lab takes a sliced 3mf.
 

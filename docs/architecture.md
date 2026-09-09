@@ -92,7 +92,7 @@ Commands, UI to engine:
 |---|---|
 | Cameras | `discover`, `camera.add`, `camera.update`, `camera.remove` |
 | Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.heat`, `printer.test`, `printer.cameras.refresh` |
-| Prints | `print.add`, `print.update`, `print.remove`, `print.start` |
+| Prints | `print.add`, `print.update`, `print.preview`, `print.remove`, `print.start` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
 | History | `history.get`, `snapshot.get` |
 | Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.http`, `plugin.effect` |
@@ -142,6 +142,8 @@ A print file is the third registered resource, and it lives only on a hub. The b
 too large for the protocol, so the hub's own upload route streams them into the platform's
 `files` store under an id it mints and `print.add` then registers the record, reading the
 slicer's estimates and preview out of the file through [`engine/gcode.py`](../printguard/engine/gcode.py).
+Where the slicer wrote no preview the dashboard draws one from the toolpath, puts it to the
+same upload route and `print.preview` records it, so the library shows a picture either way.
 A file carries the printers it is tagged for, checked against the adapter's `formats` when the
 tag is set, and `print.start` re-polls the printer and refuses unless it answers idle before
 the adapter's `print_file()` uploads and starts it.

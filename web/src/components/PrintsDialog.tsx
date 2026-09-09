@@ -1,6 +1,7 @@
-import { useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { ACCEPT, ago, formatBytes, printerAccepts, summary } from "../prints";
 import { useStore } from "../store";
+import { drawMissingPreviews } from "../toolpath";
 import type { PrintFile, Printer } from "../types";
 import { Dialog } from "./Dialog";
 import { NameField } from "./NameField";
@@ -125,9 +126,9 @@ export function PrintsDialog() {
   const [tags, setTags] = useState<string[]>([]);
   const close = () => openDialog(null);
   const printers = engine?.printers ?? [];
-  const prints = (engine?.prints ?? [])
-    .filter((p) => !filter || p.printer_ids.includes(filter))
-    .sort((a, b) => b.uploaded - a.uploaded);
+  const library = engine?.prints ?? [];
+  const prints = library.filter((p) => !filter || p.printer_ids.includes(filter)).sort((a, b) => b.uploaded - a.uploaded);
+  useEffect(() => drawMissingPreviews(library), [library]);
   return (
     <Dialog title="Print library" size="wide" fixed onClose={close}>
       <div className="flex h-full min-h-0 flex-col gap-4">
