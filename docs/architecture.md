@@ -91,7 +91,7 @@ Commands, UI to engine:
 | Group | Commands |
 |---|---|
 | Cameras | `discover`, `camera.add`, `camera.update`, `camera.remove` |
-| Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.test`, `printer.cameras.refresh` |
+| Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.heat`, `printer.test`, `printer.cameras.refresh` |
 | Prints | `print.add`, `print.update`, `print.remove`, `print.start` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
 | History | `history.get`, `snapshot.get` |
@@ -109,7 +109,7 @@ Events, engine to UI:
 | `result` | One monitor's score, sampled at up to 5 Hz per monitor |
 | `alert` | A sustained defect, with the action taken |
 | `warning` | Watchdog conditions and their recovery |
-| `device` | A printer's status, progress and job |
+| `device` | A printer's status, progress, job, time left and heaters |
 | `print_started` | A file from the library has been sent to a printer and started |
 | `discovered`, `printer_test`, `notify_test` | Command responses |
 | `history`, `snapshot` | Risk history buckets and stored alert snapshots |

@@ -110,8 +110,13 @@ HTTP function.
 1. Create `printguard/engine/integrations/<service>.py` subclassing
    [`IntegrationAdapter`](printguard/engine/integrations/base.py):
    - implement `fetch_state()`, normalising to the canonical `DeviceStatus` values.
-     `offline` must mean "unreachable", not "idle", because it keeps inference watching.
+     `offline` must mean "unreachable", not "idle", because it keeps inference watching. Fill
+     in `remaining_s`, `nozzle` and `bed` where the service reports them, the heaters through
+     `Heater.reported()`, so the dashboard can show them.
    - implement `send()` for pause, resume and cancel, raising `RuntimeError` on rejection.
+   - set `heater_control` and implement `heat()` where the service takes a nozzle or bed
+     target, raising `RuntimeError` on rejection. Leave it off and the dashboard shows the
+     temperatures without a way to set them.
    - set `formats` to the extensions the service prints from an upload and implement
      `print_file()` to upload one and start it, raising `RuntimeError` on rejection. Leave
      `formats` empty and the print library never offers the printer.
@@ -124,8 +129,9 @@ HTTP function.
 3. Add the service to the table in [docs/printers.md](docs/printers.md), with a `<details>`
    block if it needs setup steps of its own.
 
-The configuration form, connection test, device polling, inference gating, defect actions and
-the print library all follow from the adapter. No other change is needed in either mode.
+The configuration form, connection test, device polling, inference gating, defect actions,
+temperature controls and the print library all follow from the adapter. No other change is
+needed in either mode.
 
 ## Adding a notification provider
 
