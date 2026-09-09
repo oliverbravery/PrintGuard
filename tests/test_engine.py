@@ -22,6 +22,7 @@ from printguard.engine import engine as engine_module
 from printguard.engine import logs, oauth, plugins, reports, vision, watchdog
 from printguard.engine.engine import EVENT_LOG_LEVELS, Engine
 from printguard.engine.integrations import INTEGRATIONS
+from printguard.engine.printers import PREHEAT_DEFAULTS
 
 OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
 
@@ -549,6 +550,46 @@ async def test_protocol_surfaces_errors_and_filters_settings() -> None:
 
     async with running_engine(platform, camera_fps=[]) as (engine, _):
         assert engine.settings["layout"] == layout, "layout settings survive a restart"
+
+
+async def test_printer_heat_sets_each_target_then_refreshes_the_state() -> None:
+    platform = FakePlatform()
+    platform.responses["http://op/api/printer?exclude=sd,state"] = (
+        200,
+        {"temperature": {"tool0": {"actual": 24.6, "target": 0.0}, "bed": {"actual": 23.1, "target": 0.0}}},
+    )
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "printer.heat", "id": printer_id, "nozzle": 215, "bed": 60, "req_id": 3})
+        posted = [(r["url"], r["json"]) for r in platform.http_requests if r["method"] == "POST"]
+        assert posted == [
+            ("http://op/api/printer/tool", {"command": "target", "targets": {"tool0": 215.0}}),
+            ("http://op/api/printer/bed", {"command": "target", "target": 60.0}),
+        ]
+        device = next(e for e in events if e.get("event") == "device")
+        assert device["nozzle"] == {"actual": 24.6, "target": 0.0} and device["bed"] == {"actual": 23.1, "target": 0.0}
+        assert engine.state_event()["printers"][0]["device_state"]["nozzle"] == {"actual": 24.6, "target": 0.0}
+
+        await engine.handle({"cmd": "printer.heat", "id": printer_id, "nozzle": 9000, "req_id": 4})
+        clamped = next(r for r in reversed(platform.http_requests) if r["method"] == "POST")
+        assert clamped["json"] == {"command": "target", "targets": {"tool0": 350.0}}, "a target is clamped to what a hotend can take"
+        await engine.handle({"cmd": "printer.heat", "id": printer_id, "req_id": 5})
+        assert any(e.get("event") == "error" and e.get("req_id") == 5 for e in events), "naming no heater is refused"
+
+
+async def test_preheat_presets_default_and_are_sanitised() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        assert engine.state_event()["settings"]["preheat"] == PREHEAT_DEFAULTS
+        await engine.handle(
+            {
+                "cmd": "settings.update",
+                "patch": {"preheat": [{"name": "  Nylon  6 ", "nozzle": 999, "bed": -5}, {"name": "", "nozzle": 200, "bed": 60}]},
+            }
+        )
+        assert engine.settings["preheat"] == [{"name": "Nylon 6", "nozzle": 350.0, "bed": 0.0}]
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        assert engine.settings["preheat"] == [{"name": "Nylon 6", "nozzle": 350.0, "bed": 0.0}], "presets survive a restart"
 
 
 async def test_provider_change_clears_stale_printer_state(monkeypatch) -> None:

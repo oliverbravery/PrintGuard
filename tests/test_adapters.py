@@ -40,6 +40,21 @@ class RecordingHttp:
         return self.calls[-1]
 
 
+class RoutedHttp(RecordingHttp):
+    """Recording stand-in answering each URL substring with its own status and body."""
+
+    def __init__(self, routes: dict[str, tuple[int, Any]]) -> None:
+        super().__init__()
+        self.routes = routes
+
+    async def __call__(self, method, url, *, headers=None, json=None, data=None, timeout=10.0):
+        await super().__call__(method, url, headers=headers, json=json, data=data, timeout=timeout)
+        return next((answer for key, answer in self.routes.items() if key in url), (404, {}))
+
+
+OCTOPRINT_HEATERS = {"temperature": {"tool0": {"actual": 209.6, "target": 210.0, "offset": 0}, "bed": {"actual": 60.2, "target": 60.0, "offset": 0}}}
+
+
 def test_multipart_form_builds_a_well_formed_body() -> None:
     headers, body = multipart_form({"chat_id": "7", "caption": "T\nB"}, "photo", "snap.jpg", JPEG)
     content_type = headers["Content-Type"]
@@ -221,8 +236,34 @@ async def test_octoprint_normalises_states(text: str, expected: DeviceStatus) ->
     assert state.status is expected
     assert state.progress == 42.0
     assert state.job == "x.gcode"
-    assert http.last["url"] == "http://op/api/job"
+    assert state.nozzle is None and state.bed is None and state.remaining_s is None
+    assert [call["url"] for call in http.calls] == ["http://op/api/job", "http://op/api/printer?exclude=sd,state"]
     assert http.last["headers"] == {"X-Api-Key": "k"}
+
+
+async def test_octoprint_reads_heaters_and_time_left() -> None:
+    job = {"state": "Printing", "progress": {"completion": 42.0, "printTimeLeft": 4321}, "job": {"file": {"name": "x.gcode"}}}
+    http = RoutedHttp({"/api/job": (200, job), "/api/printer": (200, OCTOPRINT_HEATERS)})
+    state = await INTEGRATIONS["octoprint"].fetch_state(http, {"base_url": "http://op", "api_key": "k"})
+    assert state.remaining_s == 4321
+    assert state.public()["nozzle"] == {"actual": 209.6, "target": 210.0}
+    assert state.public()["bed"] == {"actual": 60.2, "target": 60.0}
+    disconnected = RoutedHttp({"/api/job": (200, {"state": "Offline"}), "/api/printer": (409, "Printer is not operational")})
+    state = await INTEGRATIONS["octoprint"].fetch_state(disconnected, {"base_url": "http://op", "api_key": "k"})
+    assert state.status is DeviceStatus.OFFLINE and state.nozzle is None, "a 409 from /api/printer means no heaters, not a failure"
+
+
+async def test_octoprint_heater_targets() -> None:
+    http = RecordingHttp(status=204)
+    await INTEGRATIONS["octoprint"].heat(http, {"base_url": "http://op/", "api_key": "k"}, "nozzle", 215.0)
+    assert (http.last["method"], http.last["url"]) == ("POST", "http://op/api/printer/tool")
+    assert http.last["json"] == {"command": "target", "targets": {"tool0": 215.0}}
+    assert http.last["headers"] == {"X-Api-Key": "k"}
+    await INTEGRATIONS["octoprint"].heat(http, {"base_url": "http://op"}, "bed", 0.0)
+    assert http.last["url"] == "http://op/api/printer/bed"
+    assert http.last["json"] == {"command": "target", "target": 0.0}
+    with pytest.raises(RuntimeError, match="409"):
+        await INTEGRATIONS["octoprint"].heat(RecordingHttp(status=409), {"base_url": "http://op"}, "nozzle", 200.0)
 
 
 async def test_octoprint_unreachable_is_offline() -> None:
@@ -277,11 +318,43 @@ async def test_octoprint_action_payloads() -> None:
     ],
 )
 async def test_klipper_normalises_states(text: str, expected: DeviceStatus) -> None:
-    body = {"result": {"status": {"print_stats": {"state": text, "filename": "y.gcode"}, "virtual_sdcard": {"progress": 0.375}}}}
-    state = await INTEGRATIONS["klipper"].fetch_state(RecordingHttp(body=body), {"base_url": "http://kl"})
+    body = {
+        "result": {
+            "status": {
+                "print_stats": {"state": text, "filename": "y.gcode", "print_duration": 600.0},
+                "virtual_sdcard": {"progress": 0.375},
+                "extruder": {"temperature": 209.8, "target": 210.0, "power": 0.4},
+                "heater_bed": {"temperature": 59.9, "target": 60.0, "power": 0.2},
+            }
+        }
+    }
+    http = RecordingHttp(body=body)
+    state = await INTEGRATIONS["klipper"].fetch_state(http, {"base_url": "http://kl"})
+    assert http.last["url"] == "http://kl/printer/objects/query?print_stats&virtual_sdcard&extruder&heater_bed"
     assert state.status is expected
     assert state.progress == 37.5
     assert state.job == "y.gcode"
+    assert state.remaining_s == 1000, "the time left is projected from the run time against the file position"
+    assert state.public()["nozzle"] == {"actual": 209.8, "target": 210.0}
+    assert state.public()["bed"] == {"actual": 59.9, "target": 60.0}
+
+
+async def test_klipper_without_progress_has_no_time_left() -> None:
+    body = {"result": {"status": {"print_stats": {"state": "standby", "print_duration": 0.0}, "virtual_sdcard": {"progress": 0.0}}}}
+    state = await INTEGRATIONS["klipper"].fetch_state(RecordingHttp(body=body), {"base_url": "http://kl"})
+    assert state.remaining_s is None and state.nozzle is None
+
+
+async def test_klipper_heater_targets_go_through_gcode_script() -> None:
+    http = RecordingHttp()
+    await INTEGRATIONS["klipper"].heat(http, {"base_url": "http://kl/", "api_key": "kk"}, "nozzle", 215.0)
+    assert (http.last["method"], http.last["url"]) == ("POST", "http://kl/printer/gcode/script")
+    assert http.last["json"] == {"script": "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=215"}
+    assert http.last["headers"] == {"X-Api-Key": "kk"}
+    await INTEGRATIONS["klipper"].heat(http, {"base_url": "http://kl"}, "bed", 0.0)
+    assert http.last["json"] == {"script": "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=0"}
+    with pytest.raises(RuntimeError, match="bed"):
+        await INTEGRATIONS["klipper"].heat(RecordingHttp(status=400), {"base_url": "http://kl"}, "bed", 60.0)
 
 
 async def test_klipper_actions_and_auth() -> None:
@@ -423,12 +496,35 @@ BAMBU_CONFIG = {"host": "192.168.1.70", "serial": "01S00A", "access_code": "1234
     ],
 )
 async def test_bambu_normalises_states(monkeypatch, gcode_state: str, expected: DeviceStatus) -> None:
-    report = {"gcode_state": gcode_state, "mc_percent": 42, "subtask_name": "z.3mf"}
+    report = {
+        "gcode_state": gcode_state,
+        "mc_percent": 42,
+        "subtask_name": "z.3mf",
+        "mc_remaining_time": 75,
+        "nozzle_temper": 219.5,
+        "nozzle_target_temper": 220,
+        "bed_temper": 54.9,
+        "bed_target_temper": 55,
+    }
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_pull_report", lambda config: report)
     state = await INTEGRATIONS["bambu"].fetch_state(None, BAMBU_CONFIG)
     assert state.status is expected
     assert state.progress == 42.0
     assert state.job == "z.3mf"
+    assert state.remaining_s == 75 * 60, "the report counts minutes"
+    assert state.public()["nozzle"] == {"actual": 219.5, "target": 220.0}
+    assert state.public()["bed"] == {"actual": 54.9, "target": 55.0}
+
+
+async def test_bambu_heater_targets_are_gcode_lines(monkeypatch) -> None:
+    published: list[dict[str, Any]] = []
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_publish", lambda config, payload: published.append(payload))
+    await INTEGRATIONS["bambu"].heat(None, BAMBU_CONFIG, "nozzle", 220.0)
+    await INTEGRATIONS["bambu"].heat(None, BAMBU_CONFIG, "bed", 0.0)
+    assert published == [
+        {"print": {"sequence_id": "0", "command": "gcode_line", "param": "M104 S220\n"}},
+        {"print": {"sequence_id": "0", "command": "gcode_line", "param": "M140 S0\n"}},
+    ]
 
 
 async def test_bambu_silent_printer_is_offline(monkeypatch) -> None:
@@ -493,15 +589,28 @@ class FakeCentauri:
     """pycentauri client stand-in for adapter contract tests."""
 
     def __init__(self, print_status: int = 13, camera_port: int = 3031) -> None:
-        self.state = SimpleNamespace(print_status=print_status, progress=42, filename="boat.gcode")
+        self.state = SimpleNamespace(
+            print_status=print_status,
+            progress=42,
+            filename="boat.gcode",
+            temp_nozzle=204.7,
+            temp_nozzle_target=205.0,
+            temp_bed=None,
+            temp_bed_target=None,
+            raw={"_cc2": {"remaining_time_sec": 900}},
+        )
         self.camera_port = camera_port
         self.actions: list[str] = []
+        self.targets: list[dict[str, float]] = []
         self.closed = False
         self._closed = False
         self.mainboard_id = "mainboard-id"
 
     async def status(self) -> Any:
         return self.state
+
+    async def set_temperatures(self, **targets: float) -> None:
+        self.targets.append(targets)
 
     async def pause(self) -> None:
         self.actions.append("pause")
@@ -543,6 +652,18 @@ async def test_elegoo_centauri_normalises_states(monkeypatch, print_status: int,
     assert state.status is expected
     assert state.progress == 42.0
     assert state.job == "boat.gcode"
+    assert state.remaining_s == 900
+    assert state.public()["nozzle"] == {"actual": 204.7, "target": 205.0}
+    assert state.bed is None, "a heater the printer does not report is absent"
+    assert not client.closed
+
+
+async def test_elegoo_centauri_heater_targets(monkeypatch) -> None:
+    client = FakeCentauri()
+    monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
+    await INTEGRATIONS["elegoo"].heat(None, ELEGOO_CENTAURI_CONFIG, "nozzle", 205.0)
+    await INTEGRATIONS["elegoo"].heat(None, ELEGOO_CENTAURI_CONFIG, "bed", 0.0)
+    assert client.targets == [{"nozzle": 205.0}, {"bed": 0.0}]
     assert not client.closed
 
 
@@ -637,10 +758,13 @@ async def test_elegoo_moonraker_reuses_klipper_protocol() -> None:
     state = await INTEGRATIONS["elegoo"].fetch_state(http, ELEGOO_MOONRAKER_CONFIG)
     assert state.status is DeviceStatus.PRINTING
     assert state.progress == 50.0
-    assert http.last["url"] == "http://192.168.1.91:7125/printer/objects/query?print_stats&virtual_sdcard"
+    assert http.last["url"] == "http://192.168.1.91:7125/printer/objects/query?print_stats&virtual_sdcard&extruder&heater_bed"
     assert http.last["headers"] == {"X-Api-Key": "secret"}
     await INTEGRATIONS["elegoo"].send(http, ELEGOO_MOONRAKER_CONFIG, DeviceAction.PAUSE)
     assert http.last["url"] == "http://192.168.1.91:7125/printer/print/pause"
+    await INTEGRATIONS["elegoo"].heat(http, ELEGOO_MOONRAKER_CONFIG, "bed", 60.0)
+    assert http.last["url"] == "http://192.168.1.91:7125/printer/gcode/script"
+    assert http.last["json"] == {"script": "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=60"}
 
 
 def test_elegoo_runs_in_hub_mode_only() -> None:
@@ -651,6 +775,7 @@ def test_elegoo_runs_in_hub_mode_only() -> None:
 
 
 PRUSA_CONFIG = {"base_url": "http://192.168.1.80", "password": "secret"}
+PRUSA_STATUS = {"printer": {"state": "PRINTING", "temp_nozzle": 214.8, "target_nozzle": 215.0, "temp_bed": 59.6, "target_bed": 60.0}}
 
 
 def _prusa_job(value: Any):
@@ -658,6 +783,13 @@ def _prusa_job(value: Any):
         return value
 
     return _job
+
+
+def _prusa_read(job: Any, status: Any = PRUSA_STATUS):
+    async def _read(config: dict[str, Any]) -> Any:
+        return job, status
+
+    return _read
 
 
 @pytest.mark.parametrize(
@@ -672,35 +804,46 @@ def _prusa_job(value: Any):
     ],
 )
 async def test_prusa_normalises_job_states(monkeypatch, job_state: str, expected: DeviceStatus) -> None:
-    job = {"id": 3, "state": job_state, "progress": 42, "file": {"display_name": "boat.gcode", "name": "BOAT~1.GCO"}}
-    monkeypatch.setattr(INTEGRATIONS["prusa"], "_job", _prusa_job(job))
+    job = {"id": 3, "state": job_state, "progress": 42, "time_remaining": 1800, "file": {"display_name": "boat.gcode", "name": "BOAT~1.GCO"}}
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(job))
     state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
     assert state.status is expected
     assert state.progress == 42.0
     assert state.job == "boat.gcode"
+    assert state.remaining_s == 1800
+    assert state.public()["nozzle"] == {"actual": 214.8, "target": 215.0}
+    assert state.public()["bed"] == {"actual": 59.6, "target": 60.0}
 
 
 async def test_prusa_no_active_job_is_idle(monkeypatch) -> None:
-    monkeypatch.setattr(INTEGRATIONS["prusa"], "_job", _prusa_job(None))
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(None))
     state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
     assert state.status is DeviceStatus.IDLE
     assert state.job is None, "204 No Content from /api/v1/job is idle, not a phantom job"
+    assert state.public()["bed"] == {"actual": 59.6, "target": 60.0}, "an idle printer still reports its heaters"
 
 
 async def test_prusa_unreachable_is_offline(monkeypatch) -> None:
     async def boom(config: dict[str, Any]) -> Any:
         raise ConnectionError("no route to printer")
 
-    monkeypatch.setattr(INTEGRATIONS["prusa"], "_job", boom)
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", boom)
     state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
     assert state.status is DeviceStatus.OFFLINE, "an unreachable or unauthorised printer keeps inference watching"
 
 
 async def test_prusa_falls_back_to_raw_filename(monkeypatch) -> None:
     job = {"id": 1, "state": "PRINTING", "progress": 0, "file": {"name": "BOAT~1.GCO"}}
-    monkeypatch.setattr(INTEGRATIONS["prusa"], "_job", _prusa_job(job))
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(job, {"printer": {}}))
     state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
     assert state.job == "BOAT~1.GCO", "without a display name the raw 8.3 file name is used"
+    assert state.nozzle is None and state.remaining_s is None
+
+
+async def test_prusa_heaters_are_read_only() -> None:
+    assert INTEGRATIONS["prusa"].heater_control is False, "PrusaLink has no endpoint that sets a temperature"
+    with pytest.raises(RuntimeError, match="cannot set heater targets"):
+        await INTEGRATIONS["prusa"].heat(None, PRUSA_CONFIG, "nozzle", 200.0)
 
 
 async def test_prusa_commands_target_the_active_job_id(monkeypatch) -> None:
@@ -804,14 +947,14 @@ def test_classify_rejects_non_finite_embeddings() -> None:
     assert good["margin"] == 2.0
 
 
-def test_print_formats_travel_with_adapter_meta() -> None:
-    meta = {m["id"]: m["formats"] for m in (adapter.meta() for adapter in INTEGRATIONS.values())}
+def test_print_formats_and_heater_control_travel_with_adapter_meta() -> None:
+    meta = {m["id"]: (m["formats"], m["heater_control"]) for m in (adapter.meta() for adapter in INTEGRATIONS.values())}
     assert meta == {
-        "octoprint": ["gcode", "gco", "g"],
-        "klipper": ["gcode", "gco", "g"],
-        "prusa": ["gcode", "bgcode"],
-        "bambu": ["3mf"],
-        "elegoo": ["gcode"],
+        "octoprint": (["gcode", "gco", "g"], True),
+        "klipper": (["gcode", "gco", "g"], True),
+        "prusa": (["gcode", "bgcode"], False),
+        "bambu": (["3mf"], True),
+        "elegoo": (["gcode"], True),
     }
 
 
@@ -825,9 +968,12 @@ async def test_an_adapter_without_uploads_says_so() -> None:
         async def send(self, http, config, action):
             pass
 
-    assert Bare().formats == ()
+    assert Bare().formats == () and Bare().heater_control is False
     with pytest.raises(RuntimeError, match="cannot receive print files"):
         await Bare().print_file(None, {}, "x.gcode", b"")
+    with pytest.raises(RuntimeError, match="cannot set heater targets"):
+        await Bare().heat(None, {}, "nozzle", 200.0)
+    assert DeviceState(DeviceStatus.IDLE).public() == {"status": "idle", "progress": 0.0, "job": None, "remaining_s": None, "nozzle": None, "bed": None}
 
 
 async def test_octoprint_uploads_selected_and_printing() -> None:

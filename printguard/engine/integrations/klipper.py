@@ -11,9 +11,10 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from ..adapters import multipart_form
 from ..cameras import webrtc_endpoint, whep_endpoint
-from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 
 _UPLOAD_TIMEOUT_S = 180.0
+_HEATERS = {"nozzle": "extruder", "bed": "heater_bed"}
 _STATUS_MAP = {
     "printing": DeviceStatus.PRINTING,
     "paused": DeviceStatus.PAUSED,
@@ -32,6 +33,7 @@ class KlipperAdapter(IntegrationAdapter):
     docs_url = "https://moonraker.readthedocs.io/en/latest/external_api/introduction/"
     setup_url = "https://moonraker.readthedocs.io/en/latest/configuration/#authorization"
     formats = ("gcode", "gco", "g")
+    heater_control = True
     setup_hint = (
         "On a trusted LAN Moonraker needs no key. In local mode, add PrintGuard's origin "
         "to cors_domains in the [authorization] section of moonraker.conf."
@@ -55,16 +57,29 @@ class KlipperAdapter(IntegrationAdapter):
         return {"X-Api-Key": key} if key else {}
 
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
-        """Queries print_stats and virtual_sdcard for state and progress."""
-        url = f"{config['base_url'].rstrip('/')}/printer/objects/query?print_stats&virtual_sdcard"
+        """Queries print_stats, virtual_sdcard and the two heaters in one call.
+
+        Klipper keeps no estimate of its own, so the time left is projected
+        from how long the print has run against how far through the file it is.
+        """
+        url = f"{config['base_url'].rstrip('/')}/printer/objects/query?print_stats&virtual_sdcard&extruder&heater_bed"
         status, body = await http("GET", url, headers=self._headers(config))
         if status != 200 or not isinstance(body, dict):
             return DeviceState(DeviceStatus.OFFLINE)
         objects = (body.get("result") or {}).get("status") or {}
         stats = objects.get("print_stats") or {}
         matched = _STATUS_MAP.get(str(stats.get("state", "")).lower(), DeviceStatus.UNKNOWN)
-        progress = float((objects.get("virtual_sdcard") or {}).get("progress") or 0.0) * 100.0
-        return DeviceState(matched, progress, stats.get("filename") or None)
+        fraction = float((objects.get("virtual_sdcard") or {}).get("progress") or 0.0)
+        duration = float(stats.get("print_duration") or 0.0)
+        extruder, bed = objects.get("extruder") or {}, objects.get("heater_bed") or {}
+        return DeviceState(
+            matched,
+            fraction * 100.0,
+            stats.get("filename") or None,
+            remaining_s=int(duration * (1.0 - fraction) / fraction) if fraction > 0.0 and duration > 0.0 else None,
+            nozzle=Heater.reported(extruder.get("temperature"), extruder.get("target")),
+            bed=Heater.reported(bed.get("temperature"), bed.get("target")),
+        )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
         """Issues pause/resume/cancel through /printer/print endpoints."""
@@ -75,6 +90,17 @@ class KlipperAdapter(IntegrationAdapter):
         )
         if status >= 400:
             raise RuntimeError(f"Moonraker rejected {action.value}: HTTP {status}")
+
+    async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
+        """Sets a heater target with SET_HEATER_TEMPERATURE through /printer/gcode/script."""
+        status, _ = await http(
+            "POST",
+            f"{config['base_url'].rstrip('/')}/printer/gcode/script",
+            headers=self._headers(config),
+            json={"script": f"SET_HEATER_TEMPERATURE HEATER={_HEATERS[heater]} TARGET={target:g}"},
+        )
+        if status >= 400:
+            raise RuntimeError(f"Moonraker rejected the {heater} target: HTTP {status}")
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
         """Uploads into the gcodes root through /server/files/upload and starts it."""

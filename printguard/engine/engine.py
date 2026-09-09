@@ -19,11 +19,11 @@ from typing import Any, AsyncIterator, Callable
 from . import gcode, oauth, plugins, reports, updates, urls, vision
 from .cameras import declared_camera_id, sanitise_camera
 from .history import MonitorHistory
-from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
+from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, IntegrationAdapter, integrations_meta
 from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import FileStore, Frame, Platform
-from .printers import sanitise_printer
+from .printers import PREHEAT_DEFAULTS, sanitise_presets, sanitise_printer, sanitise_targets
 from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers
 from .registry import (
     Camera,
@@ -73,6 +73,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "inference_runtime": "auto",
     "catalogue_url": plugins.CATALOGUE_URL,
     "fault_grace_s": GRACE_DEFAULT_S,
+    "preheat": PREHEAT_DEFAULTS,
 }
 
 
@@ -113,6 +114,7 @@ class Engine:
             "printer.update": self._cmd_printer_update,
             "printer.remove": self._cmd_printer_remove,
             "printer.action": self._cmd_printer_action,
+            "printer.heat": self._cmd_printer_heat,
             "printer.test": self._cmd_printer_test,
             "printer.cameras.refresh": self._cmd_refresh_printer_cameras,
             "print.add": self._cmd_print_add,
@@ -721,8 +723,26 @@ class Engine:
         if not adapter:
             raise RuntimeError("no printer service linked")
         await adapter.send(self.platform.http, printer.config, DeviceAction(message["action"]))
-        state = await adapter.fetch_state(self.platform.http, printer.config)
-        printer.device_state = state.public()
+        await self._refresh_device(printer, adapter)
+
+    async def _cmd_printer_heat(self, message: dict[str, Any]) -> None:
+        """Sets a printer's nozzle and bed targets, then re-reads its state.
+
+        Raises:
+            RuntimeError: If the service takes no targets, or rejects one.
+            ValueError: If the command names no heater.
+        """
+        printer = self.printers.get(message["id"])
+        if not printer:
+            raise KeyError(f"no printer {message['id']}")
+        adapter = INTEGRATIONS[printer.provider]
+        for heater, target in sanitise_targets(message).items():
+            await adapter.heat(self.platform.http, printer.config, heater, target)
+        await self._refresh_device(printer, adapter)
+
+    async def _refresh_device(self, printer: Printer, adapter: IntegrationAdapter) -> None:
+        """Re-reads a printer's state after a command changed it, and announces it."""
+        printer.device_state = (await adapter.fetch_state(self.platform.http, printer.config)).public()
         self.emit({"event": "device", "printer_id": printer.id, **printer.device_state})
 
     async def _cmd_printer_test(self, message: dict[str, Any]) -> None:
@@ -831,8 +851,7 @@ class Engine:
         data = await self._files().read(record.file_key)
         await adapter.print_file(self.platform.http, printer.config, printer_filename(record.name, record.ext), data)
         logger.info("print '%s' started on printer '%s'", record.name, printer.name)
-        printer.device_state = (await adapter.fetch_state(self.platform.http, printer.config)).public()
-        self.emit({"event": "device", "printer_id": printer.id, **printer.device_state})
+        await self._refresh_device(printer, adapter)
         self.emit({"event": "print_started", "id": record.id, "printer_id": printer.id, "req_id": message.get("req_id")})
 
     async def _cmd_monitor_add(self, message: dict[str, Any]) -> None:
@@ -898,6 +917,7 @@ class Engine:
         if settings["inference_runtime"] not in ("auto", "litert", "onnx"):
             raise ValueError("inference runtime must be auto, litert or onnx")
         settings["fault_grace_s"] = clamp_grace(settings["fault_grace_s"])
+        settings["preheat"] = sanitise_presets(settings["preheat"])
         if settings["inference_runtime"] != self.settings["inference_runtime"]:
             await self.scheduler.reconfigure(lambda: self.platform.configure(settings))
         self.settings = settings

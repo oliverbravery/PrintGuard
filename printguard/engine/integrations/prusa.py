@@ -11,6 +11,9 @@ PrusaConnect is deliberately not used: it routes through Prusa's cloud, whereas
 PrintGuard keeps everything on hardware the user owns, and it exposes no
 documented third-party control API.
 
+PrusaLink reports the nozzle and bed temperatures but has no endpoint that sets
+them, so a Prusa printer's heaters are read-only here.
+
 API reference: https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml
 pyprusalink (digest workaround): https://github.com/home-assistant-libs/pyprusalink
 Printer-side setup (enabling PrusaLink, the password): https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293
@@ -21,7 +24,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
-from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 
 _USERNAME = "maker"
 _TIMEOUT_S = 10.0
@@ -71,21 +74,32 @@ class PrusaAdapter(IntegrationAdapter):
     }
 
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
-        """Reads the active job from /api/v1/job and normalises its state.
+        """Reads the active job from /api/v1/job and the heaters from /api/v1/status.
 
         No active job (HTTP 204) is idle; any failure to reach or authenticate
         with the printer is offline, which keeps inference watching. The HTTP
         function is unused - pyprusalink owns the digest-authenticated client.
         """
         try:
-            job = await self._job(config)
+            job, status = await self._read(config)
         except Exception:
             return DeviceState(DeviceStatus.OFFLINE)
+        printer = status.get("printer") or {}
+        heaters = {
+            "nozzle": Heater.reported(printer.get("temp_nozzle"), printer.get("target_nozzle")),
+            "bed": Heater.reported(printer.get("temp_bed"), printer.get("target_bed")),
+        }
         if not job:
-            return DeviceState(DeviceStatus.IDLE)
+            return DeviceState(DeviceStatus.IDLE, **heaters)
         file = job.get("file") or {}
-        status = _STATUS_MAP.get(str(job.get("state", "")).upper(), DeviceStatus.UNKNOWN)
-        return DeviceState(status, float(job.get("progress") or 0.0), file.get("display_name") or file.get("name"))
+        remaining = job.get("time_remaining")
+        return DeviceState(
+            _STATUS_MAP.get(str(job.get("state", "")).upper(), DeviceStatus.UNKNOWN),
+            float(job.get("progress") or 0.0),
+            file.get("display_name") or file.get("name"),
+            remaining_s=int(remaining) if remaining is not None else None,
+            **heaters,
+        )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
         """Pauses, resumes or cancels the active job by its id."""
@@ -121,6 +135,12 @@ class PrusaAdapter(IntegrationAdapter):
             response = await client.put(f"{str(config['base_url']).rstrip('/')}{path}", content=data, headers=headers, auth=auth)
         if response.status_code >= 400:
             raise RuntimeError(f"PrusaLink rejected the file: HTTP {response.status_code}")
+
+    async def _read(self, config: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        async with self._link(config) as link:
+            job = await link.get_job()
+            status = await link.get_status()
+        return (dict(job) if job else None), dict(status)
 
     async def _job(self, config: dict[str, Any]) -> dict[str, Any] | None:
         async with self._link(config) as link:
