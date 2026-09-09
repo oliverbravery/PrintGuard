@@ -80,6 +80,7 @@ class FakePlatform:
         self.files: dict[str, tuple[int, Any]] = {}
         self.sockets: list[FakeSocket] = []
         self.released_cameras: list[str] = []
+        self.devices: list[dict[str, Any]] = []
         self.state: dict[str, Any] = {}
         self.inference_runtime = "auto"
 
@@ -96,7 +97,7 @@ class FakePlatform:
         return {"prediction": "failure" if self.failing else "success", "distances": distances, "margin": 8.0}
 
     async def discover_cameras(self) -> list[dict[str, Any]]:
-        return []
+        return list(self.devices)
 
     async def open_camera(self, camera_id: str, source: dict[str, Any]) -> FakeSource:
         return FakeSource(float(source.get("fps", 15.0)))

@@ -27,6 +27,7 @@ export interface Camera {
   name: string;
   source: CameraSource;
   printer_id?: string | null;
+  declared?: boolean;
   max_fps: number;
   brightness: number;
   contrast: number;
@@ -131,6 +132,7 @@ export interface SchemaProperty {
   placeholder?: string;
   enum?: string[];
   enum_labels?: string[];
+  default?: string;
 }
 
 export interface AdapterMeta {
@@ -341,6 +343,7 @@ export interface EngineState {
     layout?: Layout;
     inference_runtime: "auto" | "litert" | "onnx";
     catalogue_url: string;
+    fault_grace_s: number;
   };
   tokens: ApiToken[];
   stats: EngineStats;

@@ -17,7 +17,7 @@ from collections import deque
 from typing import Any, Callable
 
 from . import oauth, plugins, reports, updates, urls, vision
-from .cameras import sanitise_camera
+from .cameras import declared_camera_id, sanitise_camera
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
 from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
@@ -28,7 +28,7 @@ from .registry import Camera, CameraRegistry, Plugin, PluginRegistry, Printer, P
 from .scheduler import Scheduler
 from .sockets import SocketBroker
 from .tokens import new_token
-from .watchdog import Watchdog
+from .watchdog import GRACE_DEFAULT_S, Watchdog, clamp_grace
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "layout": {},
     "inference_runtime": "auto",
     "catalogue_url": plugins.CATALOGUE_URL,
+    "fault_grace_s": GRACE_DEFAULT_S,
 }
 
 
@@ -160,6 +161,7 @@ class Engine:
                 name=record["name"],
                 source=record["source"],
                 printer_id=record.get("printer_id"),
+                declared=record.get("declared", False),
                 max_fps=record["max_fps"],
                 brightness=settings["brightness"],
                 contrast=settings["contrast"],
@@ -169,6 +171,7 @@ class Engine:
             )
             self.cameras.add(camera)
             self._schedule_attach(camera)
+        await self.reconcile_declared_cameras()
         self.cameras.sync_in_use(self.monitors, self.printers)
         runtime = self.platform.plugin_runtime
         if runtime is not None:
@@ -555,6 +558,8 @@ class Engine:
         camera = self.cameras.get(message["id"])
         if camera and camera.printer_id and self.printers.get(camera.printer_id):
             raise RuntimeError("camera is managed by its printer integration; remove the printer instead")
+        if camera and camera.declared:
+            raise RuntimeError("camera is passed in by the deployment; remove its devices entry instead")
         await self._drop_camera(message["id"])
 
     async def _drop_camera(self, camera_id: str) -> None:
@@ -568,6 +573,34 @@ class Engine:
         for monitor in self.monitors.values():
             if monitor["camera_id"] == camera_id:
                 monitor["camera_id"] = ""
+
+    async def reconcile_declared_cameras(self) -> None:
+        """Matches the registry to the video devices the deployment declares.
+
+        Runs at boot, which is as often as the set can change: a container is
+        given its devices when it starts. A declared device registers under a
+        deterministic id, so a restart returns the camera to the name and tuning
+        it was given, and dropping it from the deployment is what removes it.
+        """
+        declared = {
+            declared_camera_id(source["device_id"]): source
+            for source in await self.platform.discover_cameras()
+            if source.get("declared")
+        }
+        for camera in [c for c in self.cameras.values() if c.declared and c.id not in declared]:
+            await self._drop_camera(camera.id)
+        for camera_id, source in declared.items():
+            if self.cameras.get(camera_id):
+                continue
+            camera = Camera(
+                id=camera_id,
+                name=source["label"],
+                source={"kind": "device", "device_id": source["device_id"], "label": source["label"]},
+                max_fps=15.0,
+                declared=True,
+            )
+            self.cameras.add(camera)
+            self._schedule_attach(camera)
 
     async def _cmd_refresh_printer_cameras(self, message: dict[str, Any]) -> None:
         """Re-checks every printer and registers any newly exposed cameras.
@@ -735,6 +768,7 @@ class Engine:
         settings = {**self.settings, **patch}
         if settings["inference_runtime"] not in ("auto", "litert", "onnx"):
             raise ValueError("inference runtime must be auto, litert or onnx")
+        settings["fault_grace_s"] = clamp_grace(settings["fault_grace_s"])
         if settings["inference_runtime"] != self.settings["inference_runtime"]:
             await self.scheduler.reconfigure(lambda: self.platform.configure(settings))
         self.settings = settings

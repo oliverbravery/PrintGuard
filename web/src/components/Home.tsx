@@ -179,7 +179,7 @@ export function Home() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Feature index={2} led="led-infer" title="Detect" body="A compact encoder scores every frame against failure prototypes, scheduled fairly across all your cameras." />
           <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu, and inference rests while the printer is idle." />
-          <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, a snapshot lands on your phone over ntfy, Telegram or Discord." />
+          <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, a snapshot lands on your phone over ntfy, Pushover, Telegram or Discord." />
           <Feature index={5} led="led-warn" title="Fail safe" body="A watchdog warns the second a camera drops, a feed freezes or your printer stops answering. Nothing fails silently." />
         </div>
       </section>

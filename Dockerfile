@@ -44,6 +44,7 @@ COPY THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
 COPY --from=web /build/web/dist static/
 ENV PATH="/app/.venv/bin:$PATH" \
     PRINTGUARD_VARIANT=$VARIANT \
+    PRINTGUARD_CAMERAS=auto \
     MODEL_DIR=/app/models \
     DATA_DIR=/data \
     STATIC_DIR=/app/static \

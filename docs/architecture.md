@@ -54,7 +54,7 @@ flowchart LR
 
     server --- mediamtx["MediaMTX<br/>RTSP / RTMP / WHEP / HLS"]
     integrations --- printersvc["OctoPrint / Moonraker / Elegoo / PrusaLink / Bambu Lab"]
-    notifiers --- push["ntfy / Telegram / Discord / native"]
+    notifiers --- push["ntfy / Pushover / Telegram / Discord / native"]
 ```
 
 ## The platform contract
@@ -66,7 +66,7 @@ but cannot implement portably. Identical signatures, different runtimes:
 |---|---|---|
 | `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count | No-op |
 | `infer(rgb)` | Selected LiteRT or ONNX Runtime model | LiteRT.js in WASM via a JS bridge |
-| `discover_cameras()` | MediaMTX path list | `enumerateDevices()` |
+| `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list | `enumerateDevices()` |
 | `open_camera(id, source)` | PyAV reader thread; MediaMTX pulls RTSP and WHEP streams | `getUserMedia` and canvas grabs |
 | `http(...)` | httpx | `fetch`, so CORS applies |
 | `encode_jpeg(rgb)` | PyAV mjpeg | canvas `toBlob` |
@@ -134,6 +134,13 @@ series or the proprietary port 6000 protocol on the A1 and P1. The adapter's opt
 `cameras()` declares them, and the engine reconciles them on printer add and update, and on
 demand through `printer.cameras.refresh` to pick up a camera attached later. Such cameras
 cannot be removed on their own and are dropped with their printer.
+
+A deployment can declare video devices the same way. The Docker image sets
+`PRINTGUARD_CAMERAS=auto`, so every capture device passed into the container comes back from
+`discover_cameras()` marked `declared`, and the engine reconciles those into the registry at
+boot under a deterministic id through `Camera.declared`. A declared camera keeps the name and
+tuning it was given across restarts, cannot be removed on its own, and goes when the
+deployment stops passing it in.
 
 ## Updates and bug reports
 
@@ -303,8 +310,9 @@ A monitor's watching state gates inference
 | `idle`, `paused`, `error` | No, standby | Positively not printing |
 
 Only a positive "not printing" stands inference down. The watchdog loop then keeps the
-pipeline honest. Each sustained condition warns exactly once, after a grace period so a brief
-outage passes unremarked, and announces recovery once health has held.
+pipeline honest. A condition has to hold for the grace period before it is announced, so a
+brief outage passes unremarked, and it is then repeated every thirty minutes for as long as
+it lasts. Recovery is announced once health has held.
 
 ```mermaid
 stateDiagram-v2
@@ -312,7 +320,9 @@ stateDiagram-v2
     [*] --> Watching
     Standby --> Watching: printing, or contact lost
     Watching --> Standby: positively not printing
-    Watching --> Warned: sustained fault
+    Watching --> Faulting: fault
+    Faulting --> Watching: recovered inside the grace period
+    Faulting --> Warned: held for the grace period
     Warned --> Watching: healthy for the recovery hold
     note right of Warned
         Still watching. A warning
@@ -322,19 +332,29 @@ stateDiagram-v2
     end note
 ```
 
-The three watchdog conditions are a watched camera going offline, a watched camera staying
+The four watchdog conditions are a watched camera going offline, a watched camera staying
 online but producing no fresh frames, since a frozen RTSP feed must not pass for monitoring,
-and a linked printer whose state cannot be read, whether it is unreachable or reporting
-something the adapter does not recognise. The last one is why the monitor is watching, and
-it means a defect could not pause the print, so it is checked for every enabled monitor
-rather than only for watched ones.
+a watched camera that delivered frames for under 90% of the last ten minutes, and a linked
+printer whose state cannot be read, whether it is unreachable or reporting something the
+adapter does not recognise. The last one is why the monitor is watching, and it means a
+defect could not pause the print, so it is checked for every enabled monitor rather than
+only for watched ones.
+
+The grace period is `settings.fault_grace_s`, two minutes by default, and it is clamped to
+between thirty seconds and fifteen minutes so it can be lengthened for a camera that drops
+out and comes straight back but never turned into an off switch. A camera that keeps
+dropping clears the grace period every time yet is only watching part of the print, which is
+what the coverage condition is for: the share of the recent window it delivered frames for
+is one warning about an unreliable feed rather than one per drop.
 
 Warnings surface as dashboard toasts and go out through the notification channels, so the
 watchdog suppresses flapping rather than repeating itself. A source that reconnects and drops
 again is still the same warning, and each announced recovery doubles how long the
-next one must hold before it is announced, up to fifteen minutes. Outages are never
-delayed, only recoveries. Notifier delivery failures and inference crashes emit `error`
-events. There is no silent `except: pass` anywhere in the alert path.
+next one must hold before it is announced, up to fifteen minutes. Only the notification
+waits on the grace period. The dashboard shows a fault as it happens, and re-attaching a
+failed camera runs on its own timer, so a longer grace period never delays recovery.
+Notifier delivery failures and inference crashes emit `error` events. There is no silent
+`except: pass` anywhere in the alert path.
 
 ## Repository layout
 
@@ -349,7 +369,7 @@ printguard/
     reports.py       anonymous bug report and downloadable diagnostics bundle
     plugins.py       plugin sourcing, hash pinning and the permission table (never executes)
     integrations/    printer service adapters (OctoPrint, Klipper, Elegoo, PrusaLink, Bambu Lab, …)
-    notifiers/       alert channel adapters (ntfy, Telegram, Discord, native desktop, …)
+    notifiers/       alert channel adapters (ntfy, Pushover, Telegram, Discord, native desktop, …)
     adapters.py      shared adapter contract (id, label, docs_url, JSON-schema config)
   server/            hub platform: FastAPI, bundled MediaMTX (child process), LiteRT / ONNX Runtime, PyAV
     api.py           REST API (/api/v1) over the engine protocol, scoped by token

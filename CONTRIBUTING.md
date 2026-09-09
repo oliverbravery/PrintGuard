@@ -112,8 +112,9 @@ HTTP function.
    - implement `fetch_state()`, normalising to the canonical `DeviceStatus` values.
      `offline` must mean "unreachable", not "idle", because it keeps inference watching.
    - implement `send()` for pause, resume and cancel, raising `RuntimeError` on rejection.
-   - describe the config form as a JSON Schema, where `secret: true` masks fields and
-     `placeholder` hints at the expected value.
+   - describe the config form as a JSON Schema, where `secret: true` masks fields,
+     `placeholder` hints at the expected value, and `default` preselects an optional
+     `enum`, so the form never offers an empty choice the adapter quietly fills in.
    - set `docs_url` to the official API reference. It is required for review.
 2. Register an instance in
    [`integrations/__init__.py`](printguard/engine/integrations/__init__.py).

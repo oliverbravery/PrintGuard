@@ -63,6 +63,10 @@ class Camera:
         printer_id: Owning printer when the camera was exposed by a printer
             integration, else None. Such cameras are managed by their printer:
             they cannot be removed on their own and are dropped with it.
+        declared: Whether the deployment declared this device rather than a user
+            registering it, as the Docker image does for every camera passed
+            into the container. Such cameras are managed by the deployment: they
+            cannot be removed on their own and go when it stops declaring them.
         max_fps: Native frame rate measured when the camera was registered.
         target_fps: Inference rate currently allocated by the scheduler.
         achieved_fps: Smoothed rate of completed inferences.
@@ -76,6 +80,7 @@ class Camera:
     source: dict[str, Any]
     max_fps: float
     printer_id: str | None = None
+    declared: bool = False
     brightness: float = CAMERA_DEFAULTS["brightness"]
     contrast: float = CAMERA_DEFAULTS["contrast"]
     sharpness: float = CAMERA_DEFAULTS["sharpness"]
@@ -117,6 +122,7 @@ class Camera:
             "name": self.name,
             "source": self.source,
             "printer_id": self.printer_id,
+            "declared": self.declared,
             "max_fps": round(self.max_fps, 2),
             "target_fps": round(self.target_fps, 2),
             "achieved_fps": round(self.achieved_fps, 2),
@@ -139,6 +145,7 @@ class Camera:
             "name": self.name,
             "source": self.source,
             "printer_id": self.printer_id,
+            "declared": self.declared,
             "max_fps": self.max_fps,
             "brightness": self.brightness,
             "contrast": self.contrast,

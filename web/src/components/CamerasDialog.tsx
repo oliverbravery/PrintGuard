@@ -6,36 +6,12 @@ import { publishStream, published, stopPublishing } from "../stream";
 import { sourceLabel } from "./CameraRail";
 import { CropEditor } from "./CropEditor";
 import { Dialog } from "./Dialog";
+import { NameField } from "./NameField";
 import { SaveStatus } from "./SaveStatus";
+import { Slider } from "./Slider";
 
 function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
-}
-
-function Slider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="block">
-      <div className="flex justify-between mb-1">
-        <span className="label">{label}</span>
-        <span className="mono text-[0.68rem] text-text-0">{value.toFixed(2)}</span>
-      </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
-    </label>
-  );
 }
 
 function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
@@ -43,6 +19,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
   const [open, setOpen] = useState(focus);
   const ref = useRef<HTMLDivElement>(null);
   const owner = camera.printer_id ? engine?.printers.find((p) => p.id === camera.printer_id) : null;
+  const managed = Boolean(owner) || Boolean(camera.declared);
 
   useEffect(() => {
     if (focus) {
@@ -64,10 +41,13 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           <span className="chip chip-accent">publishing</span>
         )}
         {owner && <span className="chip" title="Managed by its printer integration, remove the printer to remove this camera">via {owner.name}</span>}
+        {camera.declared && (
+          <span className="chip" title="Passed in by the deployment, remove its devices entry to remove this camera">passed in</span>
+        )}
         <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
-          {open ? "Hide" : "Adjust"}
+          {open ? "Hide" : "Edit"}
         </button>
-        {!owner && (
+        {!managed && (
           <button
             className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
             disabled={isPending("camera.remove")}
@@ -82,6 +62,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
+          <NameField name={camera.name} onRename={(name) => updateCamera(camera.id, { name })} />
           <Slider
             label="Brightness"
             value={camera.brightness ?? 1}
@@ -177,7 +158,7 @@ function PrinterCameras() {
   );
 }
 
-function DevicePicker({ onAdd }: { onAdd: (name: string, source: CameraSource) => void }) {
+function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSource) => void; hint?: string }) {
   const { discovered, discovering, discover, isPending } = useStore();
   const busy = isPending("camera.add");
   const [name, setName] = useState("");
@@ -189,36 +170,45 @@ function DevicePicker({ onAdd }: { onAdd: (name: string, source: CameraSource) =
   return (
     <div className="space-y-3">
       {discovering && <p className="mono text-[0.7rem] text-text-2 boot-cursor">scanning devices</p>}
-      {!discovering && !devices.length && <p className="mono text-[0.7rem] text-text-2">no unregistered cameras found</p>}
-      {devices.length > 0 && (
-        <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
-          <option value="">Select a camera…</option>
-          {devices.map((d) => (
-            <option key={d.device_id} value={d.device_id}>
-              {d.label}
-            </option>
-          ))}
-        </select>
+      {!discovering && !devices.length && (
+        <>
+          <p className="mono text-[0.7rem] text-text-2">no unregistered cameras found</p>
+          {hint && <p className="text-xs text-text-1">{hint}</p>}
+        </>
       )}
-      <input className="field" placeholder="Name (e.g. Ender 3 nozzle cam)" value={name} onChange={(e) => setName(e.target.value)} />
-      <button
-        className="btn btn-primary w-full"
-        disabled={!deviceId || busy}
-        onClick={() => {
-          const device = devices.find((d) => d.device_id === deviceId)!;
-          onAdd(name || device.label || "Camera", { kind: "device", device_id: deviceId, label: device.label });
-        }}
-      >
-        {busy ? "Measuring fps…" : "Register camera"}
-      </button>
+      {devices.length > 0 && (
+        <>
+          <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+            <option value="">Select a camera…</option>
+            {devices.map((d) => (
+              <option key={d.device_id} value={d.device_id}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+          <input className="field" placeholder="Name (e.g. Ender 3 nozzle cam)" value={name} onChange={(e) => setName(e.target.value)} />
+          <button
+            className="btn btn-primary w-full"
+            disabled={!deviceId || busy}
+            onClick={() => {
+              const device = devices.find((d) => d.device_id === deviceId)!;
+              onAdd(name || device.label || "Camera", { kind: "device", device_id: deviceId, label: device.label });
+            }}
+          >
+            {busy ? "Measuring fps…" : "Register camera"}
+          </button>
+        </>
+      )}
     </div>
   );
 }
 
+type HubTab = "url" | "machine" | "browser";
+
 function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (name: string, source: CameraSource) => void }) {
   const { send, toast, isPending } = useStore();
   const desktopApp = "pywebview" in window;
-  const [tab, setTab] = useState<"url" | "publish">("url");
+  const [tab, setTab] = useState<HubTab>("url");
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -226,7 +216,7 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (tab === "publish" && !desktopApp) {
+    if (tab === "browser" && !desktopApp) {
       listVideoInputs()
         .then(setDevices)
         .catch((err) => toast("error", `camera access: ${err instanceof Error ? err.message : err}`));
@@ -253,9 +243,10 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
     }
   };
 
-  const tabs: Array<["url" | "publish", string]> = [
+  const tabs: Array<[HubTab, string]> = [
     ["url", "Stream URL"],
-    ["publish", "This device"],
+    ["machine", "This machine"],
+    ...(desktopApp ? [] : ([["browser", "This browser"]] as Array<[HubTab, string]>)),
   ];
   return (
     <div>
@@ -291,16 +282,19 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
           </button>
         </div>
       )}
-      {tab === "publish" && desktopApp && (
+      {tab === "machine" && (
         <div className="space-y-3">
           <p className="text-xs text-text-1">
-            This computer's cameras register on the hub itself, so they keep watching from the tray
-            with every window closed.
+            Cameras plugged into the machine PrintGuard runs on. They register on the hub itself, so
+            they keep watching with every window closed.
           </p>
-          <DevicePicker onAdd={onDeviceAdd} />
+          <DevicePicker
+            onAdd={onDeviceAdd}
+            hint={desktopApp ? undefined : "Pass each camera into the container with a devices: entry in your compose file."}
+          />
         </div>
       )}
-      {tab === "publish" && !desktopApp && (
+      {tab === "browser" && (
         <div className="space-y-3">
           <p className="text-xs text-text-1">
             Streams this device's camera to the hub. It reconnects if the hub restarts and resumes

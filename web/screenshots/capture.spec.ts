@@ -54,7 +54,7 @@ function engine(): EngineState {
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "" },
+    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120 },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: [], notifiers: [],
     plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS, plugin_host: true,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },
@@ -79,7 +79,7 @@ const PERMISSIONS = [
   { id: "camera:view", label: "Show live camera feeds", description: "Show a live feed in its panel." },
   { id: "notify", label: "Show notifications", description: "Show a message in the dashboard." },
   { id: "sound", label: "Play a sound", description: "Play a sound on this device." },
-  { id: "alert:send", label: "Use your alert channels", description: "Send through your ntfy, Telegram or Discord." },
+  { id: "alert:send", label: "Use your alert channels", description: "Send through your ntfy, Pushover, Telegram or Discord." },
   { id: "net", label: "Reach the internet", description: "Reach the addresses it lists.", urls: true },
   { id: "oauth", label: "Connect an account", description: "Sign you in to a service. PrintGuard holds the tokens.", risky: true },
   { id: "background", label: "Paint the dashboard's background", description: "Put a picture behind the dashboard." },
@@ -247,6 +247,10 @@ const NOTIFIERS = [
   {
     id: "ntfy", label: "ntfy", docs_url: "",
     schema: { properties: { url: { type: "string", title: "Topic URL", placeholder: "https://ntfy.sh/my-prints" } }, required: ["url"] },
+  },
+  {
+    id: "pushover", label: "Pushover", docs_url: "",
+    schema: { properties: { api_token: { type: "string", title: "Application API token", secret: true }, user_key: { type: "string", title: "User key", secret: true } }, required: ["api_token", "user_key"] },
   },
   {
     id: "telegram", label: "Telegram", docs_url: "",

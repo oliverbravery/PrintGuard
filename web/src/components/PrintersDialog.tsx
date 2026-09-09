@@ -4,6 +4,7 @@ import type { AdapterMeta, Printer } from "../types";
 import { Dialog } from "./Dialog";
 import { DeviceChip } from "./MonitorTile";
 import { SchemaForm } from "./SchemaForm";
+import { TestRow } from "./TestRow";
 
 function providerLabel(integrations: AdapterMeta[], id: string): string {
   return integrations.find((i) => i.id === id)?.label ?? id;
@@ -22,16 +23,22 @@ function MixedContentNote() {
   );
 }
 
-function TestRow({ provider, config }: { provider: string; config: Record<string, string> }) {
+function PrinterTest({ provider, config }: { provider: string; config: Record<string, string> }) {
   const { printerTest, testing, testPrinter } = useStore();
   return (
-    <div className="flex min-w-0 items-center gap-3">
-      <button className="btn" disabled={!provider || testing} onClick={() => testPrinter(provider, config)}>
-        {testing ? "Testing…" : "Test connection"}
-      </button>
-      {printerTest?.ok && <span className="chip chip-ok">ok, {printerTest.status}</span>}
-      {printerTest && !printerTest.ok && <span className="chip chip-bad chip-message">{printerTest.error || printerTest.status || "failed"}</span>}
-    </div>
+    <TestRow
+      label="Test connection"
+      busyLabel="Testing…"
+      busy={testing}
+      disabled={!provider || testing}
+      onTest={() => testPrinter(provider, config)}
+      result={
+        printerTest && {
+          ok: printerTest.ok,
+          message: printerTest.ok ? `ok, ${printerTest.status}` : printerTest.error || printerTest.status || "failed",
+        }
+      }
+    />
   );
 }
 
@@ -75,7 +82,7 @@ function PrinterRow({ printer }: { printer: Printer }) {
           <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
           {mixedContent(mode, config) && <MixedContentNote />}
-          <TestRow provider={printer.provider} config={config} />
+          <PrinterTest provider={printer.provider} config={config} />
           <button
             className="btn btn-primary w-full !py-1.5"
             disabled={!dirty || isPending("printer.update")}
@@ -120,7 +127,7 @@ function RegisterPrinter() {
           <input className="field" placeholder={`Name (e.g. ${meta.label} Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
           {mixedContent(mode, config) && <MixedContentNote />}
-          <TestRow provider={provider} config={config} />
+          <PrinterTest provider={provider} config={config} />
           <button
             className="btn btn-primary w-full"
             disabled={busy}

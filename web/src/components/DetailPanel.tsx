@@ -4,9 +4,11 @@ import type { Monitor } from "../types";
 import { Modal } from "./Dialog";
 import { Feed } from "./Feed";
 import { DeviceChip } from "./MonitorTile";
+import { NameField } from "./NameField";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
 import { RiskGauge } from "./RiskGauge";
 import { SaveStatus } from "./SaveStatus";
+import { Slider } from "./Slider";
 import { Sparkline } from "./Sparkline";
 import { Toggle } from "./Toggle";
 
@@ -16,46 +18,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <h3 className="display text-[0.68rem] font-semibold tracking-[0.24em] text-text-2 mb-3">{title}</h3>
       {children}
     </section>
-  );
-}
-
-function Slider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  hint,
-  format = (v) => v.toFixed(2),
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  hint?: string;
-  format?: (v: number) => string;
-  onChange: (v: number) => void;
-}) {
-  const hintId = useId();
-  return (
-    <label className="block">
-      <div className="flex justify-between mb-1">
-        <span className="label">{label}</span>
-        <span className="mono text-[0.72rem] text-text-0">{format(value)}</span>
-      </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        aria-describedby={hint ? hintId : undefined}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-      {hint && <p id={hintId} className="text-[0.7rem] leading-snug text-text-2 mt-1">{hint}</p>}
-    </label>
   );
 }
 
@@ -148,6 +110,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
 
         <Section title="Monitoring">
           <div className="space-y-4">
+            <NameField name={monitor.name} onRename={(name) => updateMonitor(monitor.id, { name })} />
             <Toggle label="Watch this monitor" on={monitor.enabled} onChange={(v) => updateMonitor(monitor.id, { enabled: v })} />
             {monitor.enabled && monitor.watching === false && (
               <p className="mono text-[0.7rem] text-text-2">

@@ -51,7 +51,7 @@ function Toasts() {
         <div
           key={toast.id}
           role={toast.kind === "alert" ? "alert" : "status"}
-          className={`panel rise-in px-4 py-2.5 text-sm border-l-2 ${
+          className={`panel rise-in px-4 py-2.5 text-sm break-words border-l-2 ${
             toast.kind === "alert" ? "!border-l-bad text-bad" : toast.kind === "error" ? "!border-l-warn" : "!border-l-accent"
           }`}
         >

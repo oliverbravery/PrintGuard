@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from typing import TYPE_CHECKING, Any, Coroutine
 
 from .integrations import INTEGRATIONS, DeviceAction
@@ -21,18 +22,43 @@ from .platform import Frame
 
 if TYPE_CHECKING:
     from .engine import Engine
+    from .registry import Camera
 
 logger = logging.getLogger(__name__)
 
 DEVICE_POLL_S = 5.0
 NOTIFY_COOLDOWN_S = 30.0
 WATCH_TICK_S = 2.0
-OFFLINE_GRACE_S = 12.0
+GRACE_DEFAULT_S = 120.0
+GRACE_MIN_S = 30.0
+GRACE_MAX_S = 900.0
+REPEAT_EVERY_S = 1800.0
+RESTART_AFTER_S = 15.0
+RESTART_COOLDOWN_S = 60.0
 RECOVER_HOLD_S = 60.0
 FLAP_HOLD_MAX_S = 900.0
 STALL_GRACE_S = 30.0
+COVERAGE_WINDOW_S = 600.0
+COVERAGE_SAMPLES = int(COVERAGE_WINDOW_S / WATCH_TICK_S)
+COVERAGE_MIN = 0.9
 ACT_ATTEMPTS = 3
 ACT_RETRY_S = 1.0
+
+
+def clamp_grace(seconds: Any) -> float:
+    """Clamps the configured fault grace period to a range that stays safe.
+
+    The floor keeps a fault from going unreported for long enough to matter and
+    the ceiling stops the grace period being turned into an off switch: an
+    unwatched print is the one thing the user always has to hear about.
+
+    Args:
+        seconds: The grace period the user asked for.
+
+    Returns:
+        The grace period the watchdog will actually apply.
+    """
+    return max(GRACE_MIN_S, min(GRACE_MAX_S, float(seconds)))
 
 
 class Watchdog:
@@ -47,7 +73,10 @@ class Watchdog:
         self._healthy_since: dict[str, float] = {}
         self._flaps: dict[str, int] = {}
         self._warned: set[str] = set()
+        self._last_warned: dict[str, float] = {}
+        self._restarted: dict[str, float] = {}
         self._online_since: dict[str, float] = {}
+        self._coverage: dict[str, deque[bool]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
 
     def _schedule(self, coroutine: Coroutine[Any, Any, None]) -> None:
@@ -93,17 +122,26 @@ class Watchdog:
     async def watch_health(self) -> None:
         """Warns when a watched camera drops out or a printer stops reporting.
 
-        Outages shorter than the grace period are ignored, and a sustained
-        one warns exactly once; the recovery is only announced once health
-        has held for _recover_hold(), so a source that reconnects and drops
-        again is one warning rather than a notification per cycle. A camera
-        that stays online but stops producing fresh frames counts as stalled
-        - frozen feeds must not pass for monitoring. Printer health is checked
-        for every enabled monitor, since a printer that reports nothing usable
-        is the reason its monitor is watching in the first place.
+        A fault has to hold for the configured grace period before it is
+        announced, so the blips a wireless camera produces pass unremarked,
+        and it is then repeated every REPEAT_EVERY_S for as long as it lasts,
+        so an outage slept through is not announced only once. Recovery is
+        announced once health has held for _recover_hold(). Re-attaching a
+        failed camera is on its own timer, so lengthening the grace period
+        delays the notification and never the recovery.
+
+        A camera that stays online but stops producing fresh frames counts as
+        stalled - frozen feeds must not pass for monitoring. One that keeps
+        dropping and returning clears the grace period every time yet is only
+        watching part of the print, so the share of the last COVERAGE_WINDOW_S
+        it delivered frames for is warned on separately. Printer health is
+        checked for every enabled monitor, since a printer that reports
+        nothing usable is the reason its monitor is watching in the first
+        place.
         """
         while True:
             now = time.monotonic()
+            grace = self._engine.settings["fault_grace_s"]
             for monitor in list(self._engine.monitors.values()):
                 mid = monitor["id"]
                 printer = self._engine.printers.get(monitor["printer_id"]) if monitor.get("printer_id") else None
@@ -112,7 +150,7 @@ class Watchdog:
                         f"device:{mid}",
                         printer.online,
                         now,
-                        OFFLINE_GRACE_S,
+                        grace,
                         monitor,
                         f"Cannot tell whether the printer for '{monitor['name']}' is printing, so it keeps watching and a defect cannot pause the print",
                         f"Printer for '{monitor['name']}' is reporting its state again",
@@ -120,21 +158,23 @@ class Watchdog:
                 camera = self._engine.cameras.get(monitor["camera_id"]) if monitor["camera_id"] else None
                 if not monitor_watching(monitor, self._engine.printers) or camera is None:
                     self._online_since.pop(mid, None)
+                    self._coverage.pop(mid, None)
                     continue
                 if camera.online:
                     self._online_since.setdefault(mid, now)
                 else:
                     self._online_since.pop(mid, None)
-                offline = await self._edge(
-                    f"offline:{mid}",
+                offline_key = f"offline:{mid}"
+                await self._edge(
+                    offline_key,
                     camera.online,
                     now,
-                    OFFLINE_GRACE_S,
+                    grace,
                     monitor,
                     f"Camera '{camera.name}' is offline, so '{monitor['name']}' is NOT being monitored",
                     f"Camera '{camera.name}' is back, so '{monitor['name']}' is monitored again",
                 )
-                if offline:
+                if not camera.online and self._due_restart(offline_key, now):
                     await self._engine.restart_camera(camera)
                 stall_key = f"stalled:{mid}"
                 progressing = (
@@ -142,18 +182,74 @@ class Watchdog:
                     if stall_key in self._warned
                     else not camera.online or now - max(camera.last_done, self._online_since.get(mid, now)) < STALL_GRACE_S
                 )
-                stalled = await self._edge(
+                await self._edge(
                     stall_key,
                     progressing,
                     now,
-                    0.0,
+                    grace,
                     monitor,
                     f"Camera '{camera.name}' feed has stalled, so '{monitor['name']}' is NOT being monitored",
                     f"Camera '{camera.name}' feed recovered, so '{monitor['name']}' is monitored again",
                 )
-                if stalled:
+                if not progressing and self._due_restart(stall_key, now):
                     await self._engine.restart_camera(camera)
+                await self._cover(monitor, camera, offline_key, now)
             await asyncio.sleep(WATCH_TICK_S)
+
+    async def _cover(self, monitor: dict[str, Any], camera: "Camera", offline_key: str, now: float) -> None:
+        """Warns when a camera has been up for too little of the recent window.
+
+        A camera that drops for a minute every few minutes never holds a fault
+        long enough to be announced, yet leaves the print unwatched for a real
+        share of its run. Sampling how much of the last COVERAGE_WINDOW_S it
+        delivered frames for catches that as one warning about an unreliable
+        feed rather than one per drop. A window that has not filled yet says
+        nothing, and an announced outage empties it, so this only ever speaks
+        about drops that were too short to announce on their own.
+
+        Args:
+            monitor: The monitor the camera is bound to.
+            camera: The camera being sampled.
+            offline_key: Watch key for that camera's outage condition.
+            now: Current monotonic time.
+        """
+        samples = self._coverage.setdefault(monitor["id"], deque(maxlen=COVERAGE_SAMPLES))
+        if offline_key in self._warned:
+            samples.clear()
+        samples.append(camera.online)
+        covered = sum(samples) / len(samples)
+        steady = len(samples) < samples.maxlen or covered >= COVERAGE_MIN
+        await self._edge(
+            f"unstable:{monitor['id']}",
+            steady,
+            now,
+            0.0,
+            monitor,
+            f"Camera '{camera.name}' dropped out for {(1 - covered) * 100:.0f}% of the last {COVERAGE_WINDOW_S / 60:.0f} minutes, so '{monitor['name']}' is not being monitored reliably",
+            f"Camera '{camera.name}' is steady again, so '{monitor['name']}' is monitored reliably",
+        )
+
+    def _due_restart(self, key: str, now: float) -> bool:
+        """Whether a faulting camera is due to be torn down and attached afresh.
+
+        A camera source reconnects on its own, so re-attaching is the heavier
+        fallback for one that has wedged rather than the first response. It
+        runs on its own timer and is rate limited, so it neither waits for the
+        grace period nor fires repeatedly at a camera that is flapping.
+
+        Args:
+            key: Watch key for the fault condition.
+            now: Current monotonic time.
+
+        Returns:
+            Whether to re-attach, recording the attempt when it says yes.
+        """
+        if now - self._down_since.get(key, now) < RESTART_AFTER_S:
+            return False
+        if now - self._restarted.get(key, now - RESTART_COOLDOWN_S) < RESTART_COOLDOWN_S:
+            return False
+        self._restarted[key] = now
+        return True
 
     async def _edge(
         self,
@@ -164,28 +260,31 @@ class Watchdog:
         monitor: dict[str, Any],
         down_message: str,
         up_message: str,
-    ) -> bool:
+    ) -> None:
         if not healthy:
             self._healthy_since.pop(key, None)
             down_since = self._down_since.setdefault(key, now)
-            if now - down_since < grace or key in self._warned:
-                return False
+            if key in self._warned:
+                if now - self._last_warned[key] >= REPEAT_EVERY_S:
+                    await self._warn(key, monitor, down_message)
+                return
+            if now - down_since < grace:
+                return
             self._warned.add(key)
-            await self._warn(monitor, down_message)
-            return True
+            await self._warn(key, monitor, down_message)
+            return
         healthy_since = self._healthy_since.setdefault(key, now)
         if key not in self._warned:
             self._down_since.pop(key, None)
             if now - healthy_since >= FLAP_HOLD_MAX_S:
                 self._flaps.pop(key, None)
-            return False
+            return
         if now - healthy_since < self._recover_hold(key):
-            return False
+            return
         self._warned.discard(key)
         self._down_since.pop(key, None)
         self._flaps[key] = self._flaps.get(key, 0) + 1
-        await self._warn(monitor, up_message, recovered=True)
-        return False
+        await self._warn(key, monitor, up_message, recovered=True)
 
     def _recover_hold(self, key: str) -> float:
         """How long a condition must stay healthy before its recovery is announced.
@@ -198,7 +297,8 @@ class Watchdog:
         """
         return min(FLAP_HOLD_MAX_S, RECOVER_HOLD_S * 2 ** self._flaps.get(key, 0))
 
-    async def _warn(self, monitor: dict[str, Any], message: str, recovered: bool = False) -> None:
+    async def _warn(self, key: str, monitor: dict[str, Any], message: str, recovered: bool = False) -> None:
+        self._last_warned[key] = time.monotonic()
         self._engine.emit({"event": "warning", "monitor_id": monitor["id"], "message": message, "recovered": recovered})
         if monitor.get("notify"):
             self._schedule(self._engine.send_alerts(f"PrintGuard {'recovered' if recovered else 'warning'}", message, None))

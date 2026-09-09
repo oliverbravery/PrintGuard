@@ -7,7 +7,9 @@ import { PluginsTab } from "./PluginsTab";
 import { SettingsFooter } from "./SettingsFooter";
 import { SaveStatus } from "./SaveStatus";
 import { SchemaForm } from "./SchemaForm";
+import { TestRow } from "./TestRow";
 import { GlassSliders } from "./GlassTuner";
+import { Slider } from "./Slider";
 import { ThemeEditor } from "./ThemeEditor";
 import { Toggle } from "./Toggle";
 
@@ -224,6 +226,17 @@ export function SettingsDialog() {
 
         {tab === "alerts" && (
           <div role="tabpanel" id="settings-panel-alerts" aria-labelledby="settings-tab-alerts" tabIndex={0} className="space-y-4">
+            <span className="label block">When to alert</span>
+            <Slider
+              label="Fault grace period (seconds)"
+              value={engine?.settings.fault_grace_s ?? 120}
+              min={30}
+              max={900}
+              step={30}
+              format={String}
+              onChange={(v) => updateSettings({ fault_grace_s: v })}
+              hint="How long a camera or printer fault has to last before it pushes a notification. Raise it for a wireless camera that drops out and comes straight back."
+            />
             <span className="label block">Notification channels</span>
             {channels.map((meta) => {
               const enabled = meta.id in notifiers;
@@ -246,20 +259,18 @@ export function SettingsDialog() {
                         value={notifiers[meta.id]}
                         onChange={(config) => setNotifiers({ ...notifiers, [meta.id]: config })}
                       />
-                      <div className="flex items-center gap-3">
-                        <button
-                          className="btn"
-                          disabled={testingNotifier !== null}
-                          onClick={() => testNotifier(meta.id, notifiers[meta.id])}
-                        >
-                          {testingNotifier === meta.id ? "Sending…" : "Send test alert"}
-                        </button>
-                        {notifyTest?.provider === meta.id && (
-                          <span className={`chip ${notifyTest.ok ? "chip-ok" : "chip-bad"}`}>
-                            {notifyTest.ok ? "sent" : notifyTest.error || "failed"}
-                          </span>
-                        )}
-                      </div>
+                      <TestRow
+                        label="Send test alert"
+                        busyLabel="Sending…"
+                        busy={testingNotifier === meta.id}
+                        disabled={testingNotifier !== null}
+                        onTest={() => testNotifier(meta.id, notifiers[meta.id])}
+                        result={
+                          notifyTest?.provider === meta.id
+                            ? { ok: notifyTest.ok, message: notifyTest.ok ? "sent" : notifyTest.error || "failed" }
+                            : null
+                        }
+                      />
                     </>
                   )}
                 </div>

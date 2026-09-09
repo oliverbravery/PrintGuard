@@ -39,7 +39,8 @@ class Adapter(ABC):
             for those same out-of-band steps.
         schema: JSON Schema describing the configuration form. Property
             extensions: "secret" marks sensitive fields, "placeholder"
-            provides input hints.
+            provides input hints. A standard "default" is preselected, so an
+            optional choice never renders as an empty one.
     """
 
     id: str

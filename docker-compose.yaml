@@ -12,3 +12,7 @@ services:
       - ./data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # A camera plugged into this machine registers itself once you pass it in. List yours with
+    # `ls /dev/v4l/by-id/`, and see "Cameras plugged into the hub" in docs/printers.md.
+    # devices:
+    #   - /dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_A1B2C3-video-index0:/dev/nozzle-cam

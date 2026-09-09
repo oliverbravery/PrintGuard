@@ -14,10 +14,12 @@ from .base import NotifierAdapter
 from .discord import DiscordNotifier
 from .native import NativeNotifier
 from .ntfy import NtfyNotifier
+from .pushover import PushoverNotifier
 from .telegram import TelegramNotifier
 
 NOTIFIERS: dict[str, NotifierAdapter] = {
-    adapter.id: adapter for adapter in (NtfyNotifier(), TelegramNotifier(), DiscordNotifier(), NativeNotifier())
+    adapter.id: adapter
+    for adapter in (NtfyNotifier(), PushoverNotifier(), TelegramNotifier(), DiscordNotifier(), NativeNotifier())
 }
 
 

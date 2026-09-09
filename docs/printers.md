@@ -21,7 +21,8 @@ how alerts are wired up.
 
 A camera and a printer are registered once each, then bound together by a monitor. One
 printer connection can back several monitors, and a monitor without a printer still watches
-and alerts.
+and alerts. Each of the three carries a name you can change later, from **Edit** in the camera
+or printer registry and from a monitor's settings panel.
 
 ```mermaid
 flowchart LR
@@ -130,14 +131,37 @@ Beyond printer webcams, a hub takes cameras three ways:
 
 | Source | What it accepts | Notes |
 |---|---|---|
-| **Stream URL** | RTSP, RTMP, HTTP/MJPEG or WHEP | PrintGuard creates a MediaMTX pull path for it |
-| **This device** | The browser's own camera | Publishes to the hub over a WebSocket and reconnects after a hub restart |
-| **Discovered** | Anything already pushed to MediaMTX | For example `rtsp://host:8554/mycam` from a Raspberry Pi |
+| **Stream URL** | RTSP, RTMP, HTTP/MJPEG or WHEP, including anything already pushed to the bundled MediaMTX | PrintGuard creates a MediaMTX pull path for it |
+| **This machine** | A camera plugged into the machine PrintGuard runs on | Captured by the hub itself, so it keeps watching with every window closed |
+| **This browser** | The browser's own camera | Publishes to the hub over a WebSocket and reconnects after a hub restart |
 
 > [!IMPORTANT]
-> Browsers only grant camera access on secure pages. **This device** publishing and local
+> Browsers only grant camera access on secure pages. **This browser** publishing and local
 > mode both need the hub served over HTTPS or opened on `localhost`.
 > [Deployment](deployment.md) covers HTTPS with Tailscale or a tunnel.
+
+### Cameras plugged into the hub
+
+A USB camera reaches the container only if you pass it in, and once you have, it registers
+itself and appears in the camera registry. List the ones attached with `ls /dev/v4l/by-id/`,
+whose names still point at the same camera after a reboot renumbers the devices, and map each
+one in.
+
+```yaml
+    devices:
+      - /dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_A1B2C3-video-index0:/dev/nozzle-cam
+```
+
+A camera arrives named after itself, so rename it in the registry. There's no Remove button on
+it, since the compose file is what decides it exists. Drop the `devices:` entry and restart to
+remove it.
+
+Docker can't hand a running container a camera plugged in after it started, so a new camera
+means another `devices:` entry and `docker compose up -d`.
+
+Set `PRINTGUARD_CAMERAS=off` to leave them unregistered and add them by hand from **This
+machine** instead. The desktop app works that way already, since a computer's own webcam is
+rarely the one you want watched.
 
 ## Notifications
 
@@ -150,9 +174,17 @@ separate, so a camera or printer that keeps dropping out warns once for the whol
 episode, and the recovery is only announced once it has stayed healthy, so reconnections
 cannot turn into a stream of notifications.
 
+The **fault grace period**, in the Alerts tab, is how long a fault has to last before it is
+pushed. Two minutes by default, and worth raising for a wireless camera that drops out and
+comes straight back. It stops at fifteen minutes and cannot be turned off, since a print
+nothing is watching is worth hearing about, and an outage nobody has answered is announced
+again every thirty minutes. The dashboard shows every fault as it happens whatever it is set
+to.
+
 | Channel | Modes | Notes |
 |---|---|---|
 | [ntfy](https://ntfy.sh) | Hub and local | Self-hostable, no account needed |
+| [Pushover](https://pushover.net) | Hub and local | One-off app purchase, and you create the application token. Priority covers every notice and defaults to High, which bypasses the quiet hours set on the device |
 | [Discord](https://discord.com) | Hub and local | Webhook URL |
 | [Telegram](https://telegram.org) | Hub only | Telegram's API sends no CORS headers |
 | Desktop notification | Desktop app only | Native OS notification on the computer running the app |
