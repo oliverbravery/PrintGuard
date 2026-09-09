@@ -56,7 +56,7 @@ export function summary(print: PrintFile): string[] {
 export function uploadPrint(file: File, printerIds: string[], onProgress: (fraction: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    const params = new URLSearchParams({ filename: file.name, printers: printerIds.join(",") });
+    const params = new URLSearchParams({ filename: file.name, printer_ids: printerIds.join(",") });
     request.open("POST", `api/prints?${params}`);
     request.setRequestHeader("Content-Type", "application/octet-stream");
     request.upload.onprogress = (event) => event.lengthComputable && onProgress(event.loaded / event.total);

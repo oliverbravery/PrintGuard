@@ -61,8 +61,9 @@ async def receive_print(engine: Engine, filename: str, name: str, printer_ids: l
         HTTPException: 400 for a file the library does not take or the engine
             refuses, 413 for one over the size limit.
     """
+    filename = filename.rsplit("/", 1)[-1]
     try:
-        ext = extension(filename.rsplit("/", 1)[-1])
+        ext = extension(filename)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     print_id = uuid.uuid4().hex[:8]

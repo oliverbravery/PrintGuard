@@ -242,11 +242,11 @@ def create_app() -> FastAPI:
         return HTMLResponse(SIGN_IN_PAGE.substitute(message=f"{html.escape(name)} is connected. You can close this tab."))
 
     @app.post("/api/prints")
-    async def upload_print(request: Request, filename: str, name: str = "", printers: str = "") -> dict[str, str]:
+    async def upload_print(request: Request, filename: str, name: str = "", printer_ids: str = "") -> dict[str, str]:
         """Takes a sliced file from the dashboard into the print library."""
         if not origin_allowed(request, allowed_origins):
             raise HTTPException(403, "origin not allowed")
-        tags = [printer_id for printer_id in printers.split(",") if printer_id]
+        tags = [printer_id for printer_id in printer_ids.split(",") if printer_id]
         record = await receive_print(app.state.engine, filename, name, tags, request.stream())
         return {"id": record.id}
 

@@ -203,17 +203,28 @@ class BambuAdapter(IntegrationAdapter):
 
     def _upload(self, config: dict[str, Any], filename: str, data: bytes) -> None:
         import ftplib
+        import ssl
 
         context = self._tls_context()
 
         class ImplicitFtps(ftplib.FTP_TLS):
-            """FTPS with TLS from the first byte, the data channel on the control channel's session."""
+            """FTPS with TLS from the first byte, the data channel on the control channel's session.
 
-            def connect(self, host: str = "", port: int = 0, timeout: float = -999, source_address: Any = None) -> str:
-                super().connect(host, port, timeout, source_address)
-                self.sock = context.wrap_socket(self.sock, server_hostname=host)
-                self.file = self.sock.makefile("r", encoding=self.encoding)
-                return self.getwelcome()
+            The control socket is wrapped the moment it is assigned, before ftplib
+            reads the welcome banner, which is what implicit TLS needs.
+            """
+
+            _sock: Any = None
+
+            @property
+            def sock(self) -> Any:
+                return self._sock
+
+            @sock.setter
+            def sock(self, value: Any) -> None:
+                if value is not None and not isinstance(value, ssl.SSLSocket):
+                    value = context.wrap_socket(value, server_hostname=self.host)
+                self._sock = value
 
             def ntransfercmd(self, cmd: str, rest: Any = None) -> tuple[Any, Any]:
                 conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
