@@ -19,7 +19,7 @@ from fractions import Fraction
 from functools import partial
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, AsyncIterable, Callable
 
 import av
 import httpx
@@ -507,6 +507,46 @@ class WebSocket:
         await self._connection.close()
 
 
+class DiskFileStore:
+    """Print files and their previews on disk, under the data directory.
+
+    A file is written beside its final name and renamed into place once it is
+    complete, so a read never sees a partial upload and an upload that fails
+    part way leaves nothing behind.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        root.mkdir(parents=True, exist_ok=True)
+
+    def path(self, key: str) -> Path:
+        """Where a key's bytes live, for serving straight from disk."""
+        return self.root / key
+
+    async def store(self, key: str, chunks: AsyncIterable[bytes]) -> int:
+        """Writes a file from its chunks, replacing any under that key."""
+        partial = self.path(f"{key}.part")
+        size = 0
+        try:
+            with partial.open("wb") as handle:
+                async for chunk in chunks:
+                    handle.write(chunk)
+                    size += len(chunk)
+            partial.replace(self.path(key))
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+        return size
+
+    async def read(self, key: str) -> bytes:
+        """Returns a stored file's bytes."""
+        return await asyncio.to_thread(self.path(key).read_bytes)
+
+    async def remove(self, key: str) -> None:
+        """Deletes a stored file, if there is one."""
+        await asyncio.to_thread(self.path(key).unlink, True)
+
+
 class ServerPlatform:
     """Hub mode platform, with hardware inference and frames via MediaMTX."""
 
@@ -533,6 +573,7 @@ class ServerPlatform:
         self._sources: dict[str, AVSource] = {}
         self._declares_devices = os.environ.get("PRINTGUARD_CAMERAS") == "auto"
         self.plugin_runtime = None if os.environ.get("PRINTGUARD_PLUGINS") == "off" else WasmPluginRuntime()
+        self.files = DiskFileStore(data_dir / "prints")
         if self.plugin_runtime is None:
             logger.warning("plugins are disabled by PRINTGUARD_PLUGINS=off")
 

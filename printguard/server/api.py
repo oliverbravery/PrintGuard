@@ -21,6 +21,7 @@ from ..engine.engine import Engine
 from ..engine.integrations import INTEGRATIONS
 from ..engine.notifiers import NOTIFIERS
 from ..engine.tokens import SCOPE_ORDER, expand_scope, hash_secret
+from .prints import file_response, receive_print
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,24 @@ class SettingsPatch(BaseModel):
 
 class ActionBody(BaseModel):
     action: Literal["pause", "resume", "cancel"]
+
+
+class PrintFields(BaseModel):
+    name: str | None = None
+    printer_ids: list[str] | None = None
+
+
+class StartBody(BaseModel):
+    printer_id: str
+
+
+UPLOAD_TIMEOUT_S = 600.0
+UPLOAD_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+    }
+}
 
 
 class _ReadModel(BaseModel):
@@ -373,6 +392,62 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         """Checks whether a printer service is reachable with the given config."""
         events = await engine.request({"cmd": "printer.test", "provider": body.provider, "config": body.config})
         return next((e for e in events if e.get("event") == "printer_test"), {"ok": False})
+
+    @api.get("/prints", operation_id="list_prints", tags=["read"])
+    async def list_prints(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
+        """Lists every sliced file in the print library with the printers it is tagged for."""
+        return public_state(engine)["prints"]
+
+    @api.get("/prints/{print_id}", operation_id="get_print", tags=["read"])
+    async def get_print(print_id: str, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Returns one print file's record: name, format, size, tags and what the slicer wrote into it."""
+        return _find(public_state(engine)["prints"], print_id, "print")
+
+    @api.get(
+        "/prints/{print_id}/file",
+        operation_id="get_print_file",
+        tags=["read"],
+        responses={200: {"content": {"application/octet-stream": {}}}},
+        response_class=Response,
+    )
+    async def get_print_file(print_id: str, engine: Engine = Depends(get_engine)) -> Response:
+        """Downloads a print file as it was uploaded."""
+        return file_response(engine, print_id)
+
+    @api.post("/prints", operation_id="add_print", tags=["manage"], openapi_extra=UPLOAD_BODY)
+    async def add_print(
+        request: Request,
+        filename: str,
+        name: str = "",
+        printer_ids: str = "",
+        engine: Engine = Depends(get_engine),
+    ) -> dict[str, Any]:
+        """Uploads a sliced file, sent as the raw body, into the print library.
+
+        ``filename`` names it and decides its format, ``name`` is the display
+        name and ``printer_ids`` a comma-separated list of printers to tag it for.
+        """
+        tags = [printer_id for printer_id in printer_ids.split(",") if printer_id]
+        record = await receive_print(engine, filename, name, tags, request.stream())
+        return record.public()
+
+    @api.patch("/prints/{print_id}", operation_id="update_print", tags=["manage"])
+    async def update_print(print_id: str, body: PrintFields, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Renames a print file or changes the printers it is tagged for."""
+        await engine.request({"cmd": "print.update", "id": print_id, "patch": body.model_dump(exclude_none=True)})
+        return _find(public_state(engine)["prints"], print_id, "print")
+
+    @api.delete("/prints/{print_id}", operation_id="remove_print", tags=["manage"])
+    async def remove_print(print_id: str, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
+        """Removes a print file and returns the updated library."""
+        await engine.request({"cmd": "print.remove", "id": print_id})
+        return public_state(engine)["prints"]
+
+    @api.post("/prints/{print_id}/start", operation_id="start_print", tags=["control"])
+    async def start_print(print_id: str, body: StartBody, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Sends a print file to an idle printer it is tagged for and starts it."""
+        await engine.request({"cmd": "print.start", "id": print_id, "printer_id": body.printer_id}, timeout=UPLOAD_TIMEOUT_S)
+        return _find(public_state(engine)["printers"], body.printer_id, "printer")
 
     @api.get("/cameras", operation_id="list_cameras", tags=["read"], response_model=list[CameraOut])
     async def list_cameras(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:

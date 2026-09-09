@@ -12,11 +12,11 @@ import pytest
 
 from printguard.engine import vision
 from printguard.engine.cameras import webrtc_endpoint, whep_endpoint
-from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceStatus
+from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
 from printguard.engine.integrations.elegoo import ElegooAdapter
 from printguard.engine.monitors import monitor_watching, sanitise_monitor
 from printguard.engine.notifiers import NOTIFIERS
-from printguard.engine.notifiers.base import multipart_form
+from printguard.engine.adapters import multipart_form
 from printguard.engine.printers import sanitise_printer
 from printguard.engine.registry import Printer, PrinterRegistry
 
@@ -802,3 +802,174 @@ def test_classify_rejects_non_finite_embeddings() -> None:
     good = vision.classify(np.zeros(4, np.float32), assets)
     assert good["prediction"] == "success"
     assert good["margin"] == 2.0
+
+
+def test_print_formats_travel_with_adapter_meta() -> None:
+    meta = {m["id"]: m["formats"] for m in (adapter.meta() for adapter in INTEGRATIONS.values())}
+    assert meta == {
+        "octoprint": ["gcode", "gco", "g"],
+        "klipper": ["gcode", "gco", "g"],
+        "prusa": ["gcode", "bgcode"],
+        "bambu": ["3mf"],
+        "elegoo": ["gcode"],
+    }
+
+
+async def test_an_adapter_without_uploads_says_so() -> None:
+    class Bare(IntegrationAdapter):
+        id, label, docs_url, schema = "bare", "Bare", "", {}
+
+        async def fetch_state(self, http, config):
+            return DeviceState(DeviceStatus.IDLE)
+
+        async def send(self, http, config, action):
+            pass
+
+    assert Bare().formats == ()
+    with pytest.raises(RuntimeError, match="cannot receive print files"):
+        await Bare().print_file(None, {}, "x.gcode", b"")
+
+
+async def test_octoprint_uploads_selected_and_printing() -> None:
+    http = RecordingHttp(status=201)
+    await INTEGRATIONS["octoprint"].print_file(http, {"base_url": "http://op/", "api_key": "k"}, "benchy.gcode", b"G1 X1\n")
+    call = http.last
+    assert (call["method"], call["url"]) == ("POST", "http://op/api/files/local")
+    assert call["headers"]["X-Api-Key"] == "k" and call["headers"]["Content-Type"].startswith("multipart/form-data")
+    assert b'name="select"\r\n\r\ntrue\r\n' in call["data"] and b'name="print"\r\n\r\ntrue\r\n' in call["data"]
+    assert b'name="file"; filename="benchy.gcode"\r\nContent-Type: application/octet-stream\r\n\r\nG1 X1\n' in call["data"]
+    with pytest.raises(RuntimeError, match="HTTP 415"):
+        await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=415), {"base_url": "http://op", "api_key": "k"}, "x.gcode", b"")
+
+
+async def test_klipper_uploads_into_gcodes_and_prints() -> None:
+    http = RecordingHttp(status=201)
+    await INTEGRATIONS["klipper"].print_file(http, {"base_url": "http://mr:7125", "api_key": "s"}, "benchy.gcode", b"G1 X1\n")
+    call = http.last
+    assert (call["method"], call["url"]) == ("POST", "http://mr:7125/server/files/upload")
+    assert call["headers"]["X-Api-Key"] == "s"
+    assert b'name="root"\r\n\r\ngcodes\r\n' in call["data"] and b'name="print"\r\n\r\ntrue\r\n' in call["data"]
+    assert b'filename="benchy.gcode"' in call["data"]
+    with pytest.raises(RuntimeError, match="HTTP 400"):
+        await INTEGRATIONS["klipper"].print_file(RecordingHttp(status=400), {"base_url": "http://mr:7125"}, "x.gcode", b"")
+
+
+async def test_prusa_puts_onto_the_first_available_storage_and_prints_after_upload(monkeypatch) -> None:
+    from contextlib import asynccontextmanager
+
+    uploads: list[tuple[str, dict[str, str], bytes]] = []
+
+    class FakeLink:
+        async def get_storage(self):
+            return [{"path": "/local", "available": False}, {"path": "/usb", "available": True}]
+
+    @asynccontextmanager
+    async def link(config):
+        yield FakeLink()
+
+    async def upload(config, path, headers, data):
+        uploads.append((path, headers, data))
+
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_link", link)
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_upload", upload)
+    await INTEGRATIONS["prusa"].print_file(None, PRUSA_CONFIG, "benchy.bgcode", b"GCDE")
+    assert uploads == [
+        (
+            "/api/v1/files/usb/benchy.bgcode",
+            {"Content-Type": "application/octet-stream", "Print-After-Upload": "?1", "Overwrite": "?1"},
+            b"GCDE",
+        )
+    ]
+
+
+async def test_prusa_without_storage_raises(monkeypatch) -> None:
+    from contextlib import asynccontextmanager
+
+    class FakeLink:
+        async def get_storage(self):
+            return [{"path": "/usb", "available": False}]
+
+    @asynccontextmanager
+    async def link(config):
+        yield FakeLink()
+
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_link", link)
+    with pytest.raises(RuntimeError, match="no storage"):
+        await INTEGRATIONS["prusa"].print_file(None, PRUSA_CONFIG, "benchy.gcode", b"G1")
+
+
+async def test_bambu_uploads_over_ftps_then_prints_the_plate(monkeypatch) -> None:
+    from test_gcode import sliced_3mf
+
+    steps: list[Any] = []
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_upload", lambda config, filename, data: steps.append(("upload", filename, data)))
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_publish", lambda config, payload: steps.append(("publish", payload)))
+    data = sliced_3mf(plate=3)
+    await INTEGRATIONS["bambu"].print_file(None, BAMBU_CONFIG, "benchy.3mf", data)
+    assert steps[0] == ("upload", "benchy.3mf", data), "the file is on the SD card before the print is asked for"
+    assert steps[1] == (
+        "publish",
+        {
+            "print": {
+                "sequence_id": "0",
+                "command": "project_file",
+                "param": "Metadata/plate_3.gcode",
+                "url": "file:///sdcard/benchy.3mf",
+                "subtask_name": "benchy",
+                "bed_type": "auto",
+                "timelapse": False,
+                "bed_leveling": True,
+                "flow_cali": False,
+                "vibration_cali": False,
+                "layer_inspect": False,
+                "use_ams": False,
+                "ams_mapping": [0],
+                "profile_id": "0",
+                "project_id": "0",
+                "subtask_id": "0",
+                "task_id": "0",
+            }
+        },
+    )
+
+
+async def test_bambu_refuses_an_unsliced_3mf_before_touching_the_printer(monkeypatch) -> None:
+    import io
+    import zipfile
+
+    touched: list[str] = []
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_upload", lambda config, filename, data: touched.append(filename))
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("3D/3dmodel.model", "<model/>")
+    with pytest.raises(ValueError, match="not been sliced"):
+        await INTEGRATIONS["bambu"].print_file(None, BAMBU_CONFIG, "model.3mf", buffer.getvalue())
+    assert touched == []
+
+
+async def test_elegoo_centauri_uploads_then_starts(monkeypatch) -> None:
+    from pathlib import Path
+
+    client = FakeCentauri()
+    steps: list[Any] = []
+
+    async def upload_file(path, *, remote_name=None):
+        steps.append(("upload", remote_name, Path(path).read_bytes()))
+        return remote_name
+
+    async def start_print(filename, *, storage="local"):
+        steps.append(("start", filename, storage))
+
+    client.upload_file = upload_file
+    client.start_print = start_print
+    monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
+    await INTEGRATIONS["elegoo"].print_file(None, ELEGOO_CENTAURI_CONFIG, "benchy.gcode", b"G1 X1\n")
+    assert steps == [("upload", "benchy.gcode", b"G1 X1\n"), ("start", "benchy.gcode", "local")]
+    assert not client.closed
+
+
+async def test_elegoo_moonraker_family_uploads_through_moonraker() -> None:
+    http = RecordingHttp(status=201)
+    await INTEGRATIONS["elegoo"].print_file(http, ELEGOO_MOONRAKER_CONFIG, "benchy.gcode", b"G1\n")
+    assert http.last["url"] == "http://192.168.1.91:7125/server/files/upload"
+    assert http.last["headers"]["X-Api-Key"] == "secret"

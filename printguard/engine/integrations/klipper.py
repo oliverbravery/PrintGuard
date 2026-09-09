@@ -9,9 +9,11 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
+from ..adapters import multipart_form
 from ..cameras import webrtc_endpoint, whep_endpoint
 from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
 
+_UPLOAD_TIMEOUT_S = 180.0
 _STATUS_MAP = {
     "printing": DeviceStatus.PRINTING,
     "paused": DeviceStatus.PAUSED,
@@ -29,6 +31,7 @@ class KlipperAdapter(IntegrationAdapter):
     label = "Klipper (Moonraker)"
     docs_url = "https://moonraker.readthedocs.io/en/latest/external_api/introduction/"
     setup_url = "https://moonraker.readthedocs.io/en/latest/configuration/#authorization"
+    formats = ("gcode", "gco", "g")
     setup_hint = (
         "On a trusted LAN Moonraker needs no key. In local mode, add PrintGuard's origin "
         "to cors_domains in the [authorization] section of moonraker.conf."
@@ -72,6 +75,19 @@ class KlipperAdapter(IntegrationAdapter):
         )
         if status >= 400:
             raise RuntimeError(f"Moonraker rejected {action.value}: HTTP {status}")
+
+    async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
+        """Uploads into the gcodes root through /server/files/upload and starts it."""
+        headers, body = multipart_form({"root": "gcodes", "print": "true"}, "file", filename, data, "application/octet-stream")
+        status, _ = await http(
+            "POST",
+            f"{config['base_url'].rstrip('/')}/server/files/upload",
+            headers={**self._headers(config), **headers},
+            data=body,
+            timeout=_UPLOAD_TIMEOUT_S,
+        )
+        if status >= 400:
+            raise RuntimeError(f"Moonraker rejected {filename}: HTTP {status}")
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Lists Moonraker's registered webcams via /server/webcams/list.

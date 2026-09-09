@@ -7,7 +7,7 @@ protocols; everything that consumes them is shared code.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
+from typing import TYPE_CHECKING, Any, AsyncIterable, Awaitable, Callable, Protocol
 
 import numpy as np
 
@@ -50,6 +50,39 @@ class FrameSource(Protocol):
 
     def close(self) -> None:
         """Releases the underlying capture resources."""
+        ...
+
+
+class FileStore(Protocol):
+    """Where uploaded print files and their previews live.
+
+    Only the hub has one. A sliced file is far too large for the state the
+    engine persists as JSON, so the bytes are kept here under a key the engine
+    chooses and the state carries only the record describing them.
+    """
+
+    async def store(self, key: str, chunks: AsyncIterable[bytes]) -> int:
+        """Writes a file from its chunks, replacing any under that key.
+
+        Args:
+            key: Name the file is read back by.
+            chunks: The bytes, in order.
+
+        Returns:
+            The number of bytes written.
+        """
+        ...
+
+    async def read(self, key: str) -> bytes:
+        """Returns a stored file's bytes.
+
+        Raises:
+            FileNotFoundError: If nothing is stored under the key.
+        """
+        ...
+
+    async def remove(self, key: str) -> None:
+        """Deletes a stored file, if there is one."""
         ...
 
 
@@ -112,6 +145,10 @@ class Platform(Protocol):
     plugin_runtime: PluginRuntime | None
     """Sandbox for the background half of plugins, or None where the runtime
     lives outside the engine (the browser runs it in its own sandbox)."""
+
+    files: FileStore | None
+    """Where uploaded print files are kept, or None where nothing can be
+    uploaded (the browser has no server to keep them on)."""
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Applies platform-owned settings before inference starts."""

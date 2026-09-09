@@ -26,6 +26,8 @@ READ_TOOLS = {
     "classify_frame",
     "get_monitor_history",
     "get_monitor_snapshot",
+    "list_prints",
+    "get_print",
     "recent_events",
 }
 
@@ -49,6 +51,10 @@ async def test_full_tool_set_is_derived_with_scope_tags() -> None:
         assert (await mcp.get_tool("add_printer")).tags == {"manage"}
         assert (await mcp.get_tool("add_monitor")).tags == {"manage"}
         assert (await mcp.get_tool("get_camera_frame")).tags == {"read"}
+        assert (await mcp.get_tool("start_print")).tags == {"control"}
+        assert (await mcp.get_tool("update_print")).tags == {"manage"}
+        names = {tool.name for tool in await mcp.list_tools()}
+        assert {"add_print", "get_print_file"}.isdisjoint(names), "binary upload and download are not tools"
     finally:
         await engine.stop()
 

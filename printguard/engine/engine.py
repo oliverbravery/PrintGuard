@@ -1,7 +1,7 @@
 """The shared application engine.
 
-Owns the camera and printer registries, the monitors, the scheduler and the
-watchdog, and exposes a JSON command/event protocol. The UI speaks this protocol
+Owns the camera, printer and print file registries, the monitors, the
+scheduler and the watchdog, and exposes a JSON command/event protocol. The UI speaks this protocol
 over a WebSocket in hub mode and over an in-page bridge in local mode; the engine
 cannot tell the difference.
 """
@@ -14,23 +14,40 @@ import logging
 import time
 import uuid
 from collections import deque
-from typing import Any, Callable
+from typing import Any, AsyncIterator, Callable
 
-from . import oauth, plugins, reports, updates, urls, vision
+from . import gcode, oauth, plugins, reports, updates, urls, vision
 from .cameras import declared_camera_id, sanitise_camera
 from .history import MonitorHistory
-from .integrations import INTEGRATIONS, DeviceAction, integrations_meta
+from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
 from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
-from .platform import Frame, Platform
+from .platform import FileStore, Frame, Platform
 from .printers import sanitise_printer
-from .registry import Camera, CameraRegistry, Plugin, PluginRegistry, Printer, PrinterRegistry, Token, TokenRegistry
+from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers
+from .registry import (
+    Camera,
+    CameraRegistry,
+    Plugin,
+    PluginRegistry,
+    Printer,
+    PrinterRegistry,
+    PrintFile,
+    PrintRegistry,
+    Token,
+    TokenRegistry,
+)
 from .scheduler import Scheduler
 from .sockets import SocketBroker
 from .tokens import new_token
 from .watchdog import GRACE_DEFAULT_S, Watchdog, clamp_grace
 
 logger = logging.getLogger(__name__)
+
+
+async def _chunks(data: bytes) -> AsyncIterator[bytes]:
+    yield data
+
 
 STATE_TICK_S = 1.0
 RESULT_EVENT_INTERVAL_S = 0.2
@@ -66,6 +83,7 @@ class Engine:
         self.platform = platform
         self.cameras = CameraRegistry()
         self.printers = PrinterRegistry()
+        self.prints = PrintRegistry()
         self.monitors: dict[str, dict[str, Any]] = {}
         self.history: dict[str, MonitorHistory] = {}
         self._results: dict[str, dict[str, float]] = {}
@@ -97,6 +115,10 @@ class Engine:
             "printer.action": self._cmd_printer_action,
             "printer.test": self._cmd_printer_test,
             "printer.cameras.refresh": self._cmd_refresh_printer_cameras,
+            "print.add": self._cmd_print_add,
+            "print.update": self._cmd_print_update,
+            "print.remove": self._cmd_print_remove,
+            "print.start": self._cmd_print_start,
             "monitor.add": self._cmd_monitor_add,
             "monitor.update": self._cmd_monitor_update,
             "monitor.remove": self._cmd_monitor_remove,
@@ -149,6 +171,8 @@ class Engine:
             self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=printer["config"]))
         for record in persisted.get("monitors", []):
             self.monitors[record["id"]] = sanitise_monitor(record["id"], record)
+        for record in persisted.get("prints", []):
+            self.prints.add(PrintFile(**record))
         for record in persisted.get("plugins", []):
             try:
                 self.plugins.add(Plugin(**{**record, "manifest": plugins.sanitise_manifest(record["manifest"])}))
@@ -187,12 +211,13 @@ class Engine:
         if self.platform.update_repo:
             self._tasks.append(asyncio.ensure_future(self._update_loop()))
         logger.info(
-            "engine started: v%s %s, %d cameras, %d printers, %d monitors restored",
+            "engine started: v%s %s, %d cameras, %d printers, %d monitors, %d prints restored",
             self.platform.version,
             self.platform.mode,
             len(self.cameras.items),
             len(self.printers.items),
             len(self.monitors),
+            len(self.prints.items),
         )
 
     async def stop(self) -> None:
@@ -257,6 +282,8 @@ class Engine:
             "update": self.update,
             "cameras": [c.public() for c in self.cameras.values()],
             "printers": [p.public() for p in self.printers.values()],
+            "prints": [p.public() for p in self.prints.values()],
+            "print_store": self.platform.files is not None,
             "monitors": [
                 {
                     **monitor,
@@ -369,6 +396,7 @@ class Engine:
             {
                 "cameras": [c.persisted() for c in self.cameras.values()],
                 "printers": [p.persisted() for p in self.printers.values()],
+                "prints": [p.persisted() for p in self.prints.values()],
                 "monitors": [persisted_monitor(m) for m in self.monitors.values()],
                 "settings": self.settings,
                 "tokens": [t.persisted() for t in self.tokens.values()],
@@ -666,6 +694,7 @@ class Engine:
             await INTEGRATIONS[existing.provider].close(existing.config)
         if record["provider"] != existing.provider:
             existing.device_state = None
+            self.prints.untag(existing.id)
             for camera in [c for c in self.cameras.values() if c.printer_id == existing.id]:
                 await self._drop_camera(camera.id)
         existing.name = record["name"]
@@ -677,6 +706,7 @@ class Engine:
         printer = self.printers.remove(message["id"])
         if printer:
             await INTEGRATIONS[printer.provider].close(printer.config)
+        self.prints.untag(message["id"])
         for camera in [c for c in self.cameras.values() if c.printer_id == message["id"]]:
             await self._drop_camera(camera.id)
         for monitor in self.monitors.values():
@@ -705,6 +735,105 @@ class Engine:
             self.emit({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
         except Exception as exc:
             self.emit({"event": "printer_test", "ok": False, "status": None, "error": str(exc), "req_id": message.get("req_id")})
+
+    def _files(self) -> FileStore:
+        """The platform's file store.
+
+        Raises:
+            RuntimeError: Where the platform has none, which is local mode.
+        """
+        if self.platform.files is None:
+            raise RuntimeError("print files are kept on a hub, not in the browser")
+        return self.platform.files
+
+    async def _cmd_print_add(self, message: dict[str, Any]) -> None:
+        """Registers a sliced file the platform's store already holds.
+
+        The bytes are far too large for the protocol, so whoever took the upload
+        stored them under the id it minted and only the record travels here. A
+        file that turns out not to be printable is removed again, so nothing
+        the library does not list is left behind.
+        """
+        files = self._files()
+        filename = str(message.get("filename") or "")
+        ext = extension(filename)
+        print_id = str(message["id"])
+        record = PrintFile(
+            id=print_id,
+            name="",
+            filename=filename,
+            ext=ext,
+            size=0,
+            printer_ids=[],
+            uploaded=time.time(),
+            meta={},
+        )
+        try:
+            data = await files.read(record.file_key)
+            sliced = await asyncio.to_thread(gcode.inspect, data, ext)
+            record.size = len(data)
+            record.name = sanitise_name(message.get("name"), filename.rsplit(".", 1)[0])
+            record.printer_ids = sanitise_printers(message.get("printer_ids"), ext, self.printers)
+            record.meta = sliced.meta
+            if sliced.thumbnail:
+                await files.store(record.thumbnail_key, _chunks(sliced.thumbnail))
+                record.thumbnail = sliced.thumbnail_type
+        except Exception:
+            await files.remove(record.file_key)
+            await files.remove(record.thumbnail_key)
+            raise
+        self.prints.add(record)
+
+    async def _cmd_print_update(self, message: dict[str, Any]) -> None:
+        record = self.prints.get(message["id"])
+        if not record:
+            raise KeyError(f"no print {message['id']}")
+        patch = message.get("patch", {})
+        if "name" in patch:
+            record.name = sanitise_name(patch["name"], record.name)
+        if "printer_ids" in patch:
+            record.printer_ids = sanitise_printers(patch["printer_ids"], record.ext, self.printers)
+
+    async def _cmd_print_remove(self, message: dict[str, Any]) -> None:
+        record = self.prints.remove(message["id"])
+        if record:
+            files = self._files()
+            await files.remove(record.file_key)
+            await files.remove(record.thumbnail_key)
+
+    async def _cmd_print_start(self, message: dict[str, Any]) -> None:
+        """Sends a file to a printer and starts it, once every check passes.
+
+        A file tagged for particular printers goes nowhere else, the service has
+        to print the format, and the printer has to answer idle right now rather
+        than at the last poll, so a job never lands on top of another.
+
+        Raises:
+            PermissionError: If the file is tagged for other printers.
+            RuntimeError: If the service cannot print the format, the printer
+                is not idle, or the service rejects the file.
+        """
+        record = self.prints.get(message["id"])
+        if not record:
+            raise KeyError(f"no print {message['id']}")
+        printer = self.printers.get(message["printer_id"])
+        if not printer:
+            raise KeyError(f"no printer {message['printer_id']}")
+        if record.printer_ids and printer.id not in record.printer_ids:
+            raise PermissionError(f"{record.name} is not tagged for {printer.name}")
+        try:
+            adapter = accepts(printer, record.ext)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        state = await adapter.fetch_state(self.platform.http, printer.config)
+        if state.status is not DeviceStatus.IDLE:
+            raise RuntimeError(f"{printer.name} is {state.status.value}, so {record.name} was not sent")
+        data = await self._files().read(record.file_key)
+        await adapter.print_file(self.platform.http, printer.config, printer_filename(record.name, record.ext), data)
+        logger.info("print '%s' started on printer '%s'", record.name, printer.name)
+        printer.device_state = (await adapter.fetch_state(self.platform.http, printer.config)).public()
+        self.emit({"event": "device", "printer_id": printer.id, **printer.device_state})
+        self.emit({"event": "print_started", "id": record.id, "printer_id": printer.id, "req_id": message.get("req_id")})
 
     async def _cmd_monitor_add(self, message: dict[str, Any]) -> None:
         monitor_id = uuid.uuid4().hex[:8]
