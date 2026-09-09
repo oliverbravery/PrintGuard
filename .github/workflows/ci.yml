@@ -89,4 +89,12 @@ jobs:
             echo "::error file=CHANGELOG.md::no '## [${version}]' section — describe the change in CHANGELOG.md; it becomes the release notes"
             exit 1
           fi
+          if [ "${{ github.base_ref }}" = "main" ]; then
+            today=$(TZ=Europe/London date +%F)
+            dated=$(grep -m1 "^## \[${version}\]" CHANGELOG.md | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+            if [ "${dated}" != "${today}" ]; then
+              echo "::error file=CHANGELOG.md::'## [${version}]' is dated '${dated}' but today is ${today} in London, a release carries the date it merges"
+              exit 1
+            fi
+          fi
           echo "v${version} is unreleased and documented"

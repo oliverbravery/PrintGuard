@@ -206,7 +206,10 @@ Then add a matching section at the top of [CHANGELOG.md](CHANGELOG.md) in
 ```
 
 The section is published verbatim as the GitHub release notes, so describe the user-visible
-effect, not the implementation.
+effect, not the implementation. Its date is the day the release merges into `main`, in London
+time. The check on a pull request into `main` compares it with today, and the release itself
+refuses a section dated any other day than its merge commit, so a release that waits a day
+needs its date moved on before it merges.
 
 A pull request can only merge once three required checks pass:
 
@@ -214,7 +217,7 @@ A pull request can only merge once three required checks pass:
 |---|---|
 | **tests** | The engine simulation suite |
 | **image** | Every production image variant builds, so a change that breaks an image can never reach `main` |
-| **version** | The version is bumped past the last release and has a matching `CHANGELOG.md` section, so every merge ships as a unique, documented, immutable version. Re-publishing an existing tag is refused |
+| **version** | The version is bumped past the last release and has a matching `CHANGELOG.md` section dated the day it merges into `main`, London time, so every merge ships as a unique, documented, immutable version. Re-publishing an existing tag is refused |
 
 On merge, the [release workflow](.github/workflows/release.yml):
 
