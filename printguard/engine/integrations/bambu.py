@@ -31,7 +31,7 @@ import threading
 from typing import Any
 
 from ..gcode import plate_gcode
-from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 
 _PORT = 8883
 _FTP_PORT = 990
@@ -54,6 +54,7 @@ _STATUS_MAP = {
 }
 
 _COMMANDS = {DeviceAction.PAUSE: "pause", DeviceAction.RESUME: "resume", DeviceAction.CANCEL: "stop"}
+_HEATER_GCODE = {"nozzle": "M104", "bed": "M140"}
 
 _PUSHALL = {"pushing": {"sequence_id": "0", "command": "pushall", "version": 1, "push_target": 1}}
 _PROJECT_FILE = {
@@ -88,6 +89,7 @@ class BambuAdapter(IntegrationAdapter):
     browser_ok = False
     experimental = False
     formats = ("3mf",)
+    heater_control = True
     schema = {
         "type": "object",
         "properties": {
@@ -106,7 +108,8 @@ class BambuAdapter(IntegrationAdapter):
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
         """Requests a full status push and normalises gcode_state.
 
-        The HTTP function is unused: Bambu speaks MQTT, not HTTP.
+        The HTTP function is unused: Bambu speaks MQTT, not HTTP. The report's
+        remaining time is in minutes.
         """
         loop = asyncio.get_running_loop()
         report = await asyncio.wait_for(loop.run_in_executor(None, self._pull_report, config), _DEADLINE_S)
@@ -115,11 +118,25 @@ class BambuAdapter(IntegrationAdapter):
         matched = _STATUS_MAP.get(str(report.get("gcode_state", "")).lower(), DeviceStatus.UNKNOWN)
         progress = float(report.get("mc_percent") or 0.0)
         job = report.get("subtask_name") or report.get("gcode_file") or None
-        return DeviceState(matched, progress, job)
+        remaining = report.get("mc_remaining_time")
+        return DeviceState(
+            matched,
+            progress,
+            job,
+            remaining_s=int(remaining) * 60 if remaining is not None else None,
+            nozzle=Heater.reported(report.get("nozzle_temper"), report.get("nozzle_target_temper")),
+            bed=Heater.reported(report.get("bed_temper"), report.get("bed_target_temper")),
+        )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
         """Publishes a pause/resume/stop command to the request topic."""
         payload = {"print": {"sequence_id": "0", "command": _COMMANDS[action], "param": ""}}
+        loop = asyncio.get_running_loop()
+        await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
+
+    async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
+        """Sets a heater target with the M104 or M140 line Bambu Studio sends over gcode_line."""
+        payload = {"print": {"sequence_id": "0", "command": "gcode_line", "param": f"{_HEATER_GCODE[heater]} S{target:g}\n"}}
         loop = asyncio.get_running_loop()
         await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
 

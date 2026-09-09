@@ -11,6 +11,8 @@ how alerts are wired up.
 
 - [How the pieces fit](#how-the-pieces-fit)
 - [Register a printer](#register-a-printer)
+- [Sending prints](#sending-prints)
+- [Temperatures and preheat](#temperatures-and-preheat)
 - [Supported print services](#supported-print-services)
 - [Printer cameras](#printer-cameras)
 - [Adding cameras yourself](#adding-cameras-yourself)
@@ -41,8 +43,8 @@ Open the printer registry, choose the service, fill in the form and **Test** it 
 saving. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
 print or cancels it.
 
-Linked printers report job name, progress and state on every monitor that uses them, and they
-gate inference. A printer that positively reports "not printing" stands its monitors down, so
+Linked printers report job name, progress, temperatures and state on every monitor that uses
+them, and they gate inference. A printer that positively reports "not printing" stands its monitors down, so
 an idle printer costs nothing. Losing contact with a printer never stands monitoring down, and
 neither does a state the adapter cannot read, so a monitor left watching an apparently idle
 printer warns and says which state it is getting. See
@@ -78,6 +80,26 @@ gcode is refused at upload.
 
 Files live in the data directory under `prints/`, so they survive a restart and travel with the
 `/data` volume.
+
+## Temperatures and preheat
+
+A linked printer's nozzle and bed temperatures sit on its monitor's tile and in the monitor's
+panel, where a running print also gets a progress bar and the time left. The panel takes a
+target for either heater, applied on Enter, and a row of preheat presets that set both at once.
+**Edit** beside them changes the presets, which every printer shares, and **Off** turns every
+heater off.
+
+| Service | Reads temperatures | Sets targets |
+|---|---|---|
+| OctoPrint | Yes | Yes, through its tool and bed endpoints |
+| Klipper via Moonraker | Yes | Yes, with `SET_HEATER_TEMPERATURE` |
+| Elegoo | Yes | Yes, on both families |
+| Prusa via PrusaLink | Yes | No, PrusaLink has no endpoint for it |
+| Bambu Lab | Yes | Yes, as the `M104` and `M140` lines Bambu Studio sends |
+
+A target is capped at 350 °C for the nozzle and 150 °C for the bed, and the printer's own
+firmware applies its limits on top. Temperatures refresh with the printer's state, every five
+seconds.
 
 ## Supported print services
 

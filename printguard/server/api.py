@@ -131,10 +131,16 @@ class SettingsPatch(BaseModel):
     notifiers: dict[str, dict[str, Any]] | None = None
     mqtt: dict[str, Any] | None = None
     inference_runtime: Literal["auto", "litert", "onnx"] | None = None
+    preheat: list[dict[str, Any]] | None = None
 
 
 class ActionBody(BaseModel):
     action: Literal["pause", "resume", "cancel"]
+
+
+class HeatBody(BaseModel):
+    nozzle: float | None = None
+    bed: float | None = None
 
 
 class PrintFields(BaseModel):
@@ -367,6 +373,13 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         """Pauses, resumes or cancels the print through the printer's service."""
         _find(public_state(engine)["printers"], printer_id, "printer")
         await engine.request({"cmd": "printer.action", "id": printer_id, "action": body.action})
+        return _find(public_state(engine)["printers"], printer_id, "printer")
+
+    @api.post("/printers/{printer_id}/heat", operation_id="heat_printer", tags=["control"])
+    async def heat_printer(printer_id: str, body: HeatBody, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Sets the nozzle and bed targets in degrees Celsius through the printer's service, 0 turning a heater off."""
+        _find(public_state(engine)["printers"], printer_id, "printer")
+        await engine.request({"cmd": "printer.heat", "id": printer_id, **body.model_dump(exclude_none=True)})
         return _find(public_state(engine)["printers"], printer_id, "printer")
 
     @api.post("/printers", operation_id="add_printer", tags=["manage"])

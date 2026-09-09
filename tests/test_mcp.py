@@ -48,6 +48,7 @@ async def test_full_tool_set_is_derived_with_scope_tags() -> None:
     engine, mcp, _ = await _server()
     try:
         assert (await mcp.get_tool("control_printer")).tags == {"control"}
+        assert (await mcp.get_tool("heat_printer")).tags == {"control"}
         assert (await mcp.get_tool("add_printer")).tags == {"manage"}
         assert (await mcp.get_tool("add_monitor")).tags == {"manage"}
         assert (await mcp.get_tool("get_camera_frame")).tags == {"read"}

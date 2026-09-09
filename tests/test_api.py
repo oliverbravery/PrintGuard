@@ -378,6 +378,21 @@ async def test_unknown_ids_and_events() -> None:
         assert isinstance((await client.get("/events")).json(), list)
 
 
+async def test_heat_route_needs_control_and_returns_the_printer() -> None:
+    async with api(("read", "control")) as (client, _engine, platform, _monitor_id, printer_id, _camera_id, tokens):
+        read = {"Authorization": f"Bearer {tokens['read']}"}
+        control = {"Authorization": f"Bearer {tokens['control']}"}
+        assert (await client.post(f"/printers/{printer_id}/heat", json={"nozzle": 200}, headers=read)).status_code == 403
+        heated = await client.post(f"/printers/{printer_id}/heat", json={"nozzle": 200, "bed": 60}, headers=control)
+        assert heated.status_code == 200 and heated.json()["id"] == printer_id
+        assert [r["url"] for r in platform.http_requests if r["method"] == "POST"] == [
+            "http://op/api/printer/tool",
+            "http://op/api/printer/bed",
+        ]
+        assert (await client.post(f"/printers/{printer_id}/heat", json={}, headers=control)).status_code == 400
+        assert (await client.post("/printers/nope/heat", json={"bed": 60}, headers=control)).status_code == 404
+
+
 async def test_rejected_command_is_400() -> None:
     async with api(("manage",)) as (client, _engine, platform, _monitor_id, printer_id, _camera_id, tokens):
         platform.reject_actions = True

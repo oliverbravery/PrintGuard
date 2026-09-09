@@ -19,6 +19,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   OctoPrint, Klipper and Elegoo take gcode, PrusaLink also takes bgcode and Bambu Lab takes a
   sliced 3mf. The REST API and MCP server can list, tag and start files too.
   [docs/printers.md](docs/printers.md#sending-prints) has the details.
+- Nozzle and bed temperatures for a linked printer, on its monitor tile and in the monitor's
+  panel, with a progress bar and the time left while it prints. The panel takes a target for
+  either heater and has preheat presets you can edit in place, starting with PLA, PETG and ABS,
+  plus an Off that cools everything. PrusaLink reports temperatures but has no way to set them,
+  so a Prusa printer's heaters are read-only. The REST API and MCP server can set targets too,
+  and Home Assistant gets a temperature sensor per heater.
+  [docs/printers.md](docs/printers.md#temperatures-and-preheat) has the details.
 
 ## [2.4.1] - 2026-09-09
 

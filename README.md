@@ -66,6 +66,7 @@ Nothing is installed and no frame leaves your device. When you are ready to run 
 
 - Catches a failure early, before spaghetti runs for hours or burns a spool.
 - Pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab.
+- Shows nozzle and bed temperatures and the print's progress, and preheats with one tap.
 - Keeps your sliced files on the hub and starts one on an idle printer, only ever one it was
   tagged for.
 - Sends a snapshot to your phone over ntfy, Pushover, Telegram or Discord.
@@ -172,7 +173,8 @@ camera rail rearranges the same way.
 
 ![Customise mode: drag to reorder, pin and hide monitors and cameras](docs/assets/customise.png)
 
-Open any monitor for its live risk score, score history and one-tap printer controls.
+Open any monitor for its live risk score, score history and printer controls, with the print's
+progress and temperatures.
 
 ![Monitor detail with live risk score and printer controls](docs/assets/printer-detail.png)
 
@@ -225,15 +227,15 @@ Access and oauth2-proxy, and ends with a hardening checklist.
 
 Point the hub at your MQTT broker in Settings and every monitor appears in Home Assistant
 through MQTT discovery, with a defect sensor, the score, the latest snapshot and an **Enabled**
-switch. A linked printer adds live status with **Pause**, **Resume** and **Cancel**. Control is
-two-way, so your automations can drive PrintGuard.
+switch. A linked printer adds live status and its temperatures, with **Pause**, **Resume** and
+**Cancel**. Control is two-way, so your automations can drive PrintGuard.
 
 ## Automate it with MCP and the API
 
 Anything the dashboard can do, an agent or a script can do. Point an MCP client at
 `https://<host>/mcp/`, or use the REST API at `/api/v1`. Both read printer and camera status,
-fetch the current frame as an image, pause, resume or cancel, and start a file from the print
-library.
+fetch the current frame as an image, pause, resume or cancel, set a heater target, and start a
+file from the print library.
 
 Tokens are scoped and issued from Settings. `read` is status only, `control` adds the printer
 actions and `manage` adds the rest. `GET /api/health` needs no token and reports readiness and

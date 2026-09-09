@@ -504,23 +504,16 @@ export const useStore = create<PgStore>((set, get) => {
         get().toast("info", `${name} sent to ${printer}`);
         break;
       }
-      case "device":
+      case "device": {
         clearPending(event.req_id);
+        const { event: _kind, printer_id, req_id: _req, ...device_state } = event;
         set((s) =>
           s.engine
-            ? {
-                engine: {
-                  ...s.engine,
-                  printers: s.engine.printers.map((p) =>
-                    p.id === event.printer_id
-                      ? { ...p, device_state: { status: event.status, progress: event.progress, job: event.job } }
-                      : p,
-                  ),
-                },
-              }
+            ? { engine: { ...s.engine, printers: s.engine.printers.map((p) => (p.id === printer_id ? { ...p, device_state } : p)) } }
             : s,
         );
         break;
+      }
       case "discovered":
         set({ discovered: event.sources, discovering: false });
         break;

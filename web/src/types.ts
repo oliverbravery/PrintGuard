@@ -43,10 +43,24 @@ export interface Camera {
   last_result: InferenceResult | null;
 }
 
+export interface Heater {
+  actual: number;
+  target: number;
+}
+
 export interface DeviceState {
   status: string;
   progress: number;
   job: string | null;
+  remaining_s: number | null;
+  nozzle: Heater | null;
+  bed: Heater | null;
+}
+
+export interface PreheatPreset {
+  name: string;
+  nozzle: number;
+  bed: number;
 }
 
 export interface Printer {
@@ -165,6 +179,7 @@ export interface AdapterMeta {
   setup_url?: string | null;
   setup_hint?: string | null;
   formats?: string[];
+  heater_control?: boolean;
   schema: {
     properties: Record<string, SchemaProperty>;
     required?: string[];
@@ -367,6 +382,7 @@ export interface EngineState {
     inference_runtime: "auto" | "litert" | "onnx";
     catalogue_url: string;
     fault_grace_s: number;
+    preheat: PreheatPreset[];
   };
   tokens: ApiToken[];
   stats: EngineStats;

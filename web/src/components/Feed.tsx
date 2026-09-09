@@ -1,9 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { registerFeed } from "../float";
 import { renderVideoFrame, useVideoStream } from "../image";
 import type { Camera } from "../types";
 
-export function Feed({ camera, mode, active = true }: { camera: Camera | undefined; mode: string; active?: boolean }) {
+export function Feed({
+  camera,
+  mode,
+  active = true,
+  children,
+}: {
+  camera: Camera | undefined;
+  mode: string;
+  active?: boolean;
+  children?: ReactNode;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -64,6 +74,7 @@ export function Feed({ camera, mode, active = true }: { camera: Camera | undefin
           </span>
         </div>
       )}
+      {children}
     </div>
   );
 }

@@ -15,7 +15,7 @@ import time
 from collections import deque
 from typing import TYPE_CHECKING, Any, Coroutine
 
-from .integrations import INTEGRATIONS, DeviceAction
+from .integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus
 from .monitors import monitor_watching
 from .notifiers import NOTIFIERS
 from .platform import Frame
@@ -107,7 +107,7 @@ class Watchdog:
                     state = await adapter.fetch_state(self._engine.platform.http, printer.config)
                     snapshot = state.public()
                 except Exception:
-                    snapshot = {"status": "offline", "progress": 0.0, "job": None}
+                    snapshot = DeviceState(DeviceStatus.OFFLINE).public()
                 if printer.device_state != snapshot:
                     printer.device_state = snapshot
                     changed = True
