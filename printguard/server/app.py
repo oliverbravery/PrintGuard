@@ -41,7 +41,7 @@ from .mcp import build_mcp_app
 from .mediamtx import EmbeddedMediaMTX
 from .mqtt import MqttBridge
 from .platform import ServerPlatform
-from .prints import gcode_response, receive_print, thumbnail_response
+from .prints import gcode_response, receive_preview, receive_print, thumbnail_response
 from .publish import ChunkStream, remux
 
 logger = logging.getLogger(__name__)
@@ -257,8 +257,16 @@ def create_app() -> FastAPI:
 
     @app.get("/api/prints/{print_id}/thumbnail")
     def print_thumbnail(print_id: str) -> Response:
-        """Serves the preview image a print carried."""
+        """Serves a print's preview image."""
         return thumbnail_response(app.state.engine, print_id)
+
+    @app.put("/api/prints/{print_id}/thumbnail")
+    async def store_print_thumbnail(request: Request, print_id: str) -> dict[str, bool]:
+        """Keeps the preview the dashboard drew for a print whose slicer wrote none."""
+        if not origin_allowed(request, allowed_origins):
+            raise HTTPException(403, "origin not allowed")
+        await receive_preview(app.state.engine, print_id, request.stream())
+        return {"ok": True}
 
     @app.get("/api/health")
     def health(response: Response) -> dict[str, bool | str]:

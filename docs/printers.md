@@ -52,7 +52,8 @@ printer warns and says which state it is getting. See
 
 The print library holds sliced files on the hub. Open **Prints** in the header, drop files in or
 browse for them, and each keeps the preview, estimated time, filament and printer model its
-slicer wrote into it. Open one to orbit its toolpath in 3D, layer by layer.
+slicer wrote into it. Cura and a few others write no preview, so PrintGuard draws one from the
+toolpath instead. Open a file to orbit that toolpath in 3D, layer by layer.
 
 Tag a file with the printers it was sliced for and it can only start on one of those. A file
 with no tags can go to any printer whose service takes the format. Either way the printer has to
@@ -67,7 +68,8 @@ report idle at the moment you press **Print**, so nothing lands on top of a runn
 | Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the SD card over FTPS, then the first plate is started over MQTT |
 
 A file is sent under its library name, so rename it first if the printer's own file list
-matters to you. Binary gcode has no preview or 3D view, since its toolpath is compressed.
+matters to you. Binary gcode has no 3D view and no drawn preview, since its toolpath is
+compressed, so it shows the preview PrusaSlicer embedded and nothing else.
 
 A Bambu print uses the settings sliced into the file, with bed levelling on, flow and vibration
 calibration off, and filament from the external spool or the first AMS slot. Starting a 3mf

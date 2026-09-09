@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { WebGLPreview } from "gcode-preview";
 import { formatBytes, formatDuration, formatFilament } from "../prints";
 import { useStore } from "../store";
+import { drawToolpath } from "../toolpath";
 import type { PrintFile } from "../types";
 import { Modal } from "./Dialog";
 import { SendToPrinter } from "./SendToPrinter";
@@ -42,26 +43,15 @@ export function PrintViewer({ print }: { print: PrintFile }) {
       if (!response.ok) return setStatus(response.status === 404 ? "none" : "failed");
       const text = await response.text();
       if (disposed) return;
-      const [{ init }, { Box3, Vector3 }] = await Promise.all([import("gcode-preview"), import("three")]);
-      if (disposed) return;
-      preview = init({
-        canvas,
+      preview = await drawToolpath(canvas, text, {
         backgroundColor: token("--color-ink-0"),
         extrusionColor: token("--color-text-1"),
         topLayerColor: token("--color-accent"),
         lastSegmentColor: token("--color-accent"),
         travelColor: token("--color-line-1"),
-        renderTravel: false,
-        lineWidth: 1.5,
       });
+      if (disposed) return preview.dispose();
       previewRef.current = preview;
-      preview.processGCode(text);
-      const bounds = new Box3().setFromObject(preview.scene);
-      const centre = bounds.getCenter(new Vector3());
-      const reach = bounds.getSize(new Vector3()).length() * 1.3;
-      preview.camera.position.set(centre.x + reach * 0.7, centre.y + reach * 0.6, centre.z + reach * 0.7);
-      preview.controls.target.copy(centre);
-      preview.controls.update();
       const count = preview.maxLayerIndex + 1;
       setLayers(count);
       setLayer(count);

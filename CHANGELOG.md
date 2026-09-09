@@ -12,9 +12,10 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Added
 
 - A print library, behind **Prints** in the header of a hub. Drop sliced files in and they stay
-  on the hub with the preview, print time and filament the slicer wrote into them. Open one to
-  orbit its toolpath in 3D, layer by layer. Tag a file with the printers it was sliced for and it
-  can only ever start on those, and a printer has to be idle before a file is sent to it.
+  on the hub with the preview, print time and filament the slicer wrote into them. Cura and a
+  few others write no preview, so PrintGuard draws one from the toolpath instead. Open a file
+  to orbit that toolpath in 3D, layer by layer. Tag a file with the printers it was sliced for
+  and it can only ever start on those, and a printer has to be idle before a file is sent to it.
   OctoPrint, Klipper and Elegoo take gcode, PrusaLink also takes bgcode and Bambu Lab takes a
   sliced 3mf. The REST API and MCP server can list, tag and start files too.
   [docs/printers.md](docs/printers.md#sending-prints) has the details.

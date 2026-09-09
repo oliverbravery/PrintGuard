@@ -24,7 +24,7 @@ from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import FileStore, Frame, Platform
 from .printers import sanitise_printer
-from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers
+from .prints import PREVIEW_TYPE, accepts, extension, printer_filename, sanitise_name, sanitise_printers
 from .registry import (
     Camera,
     CameraRegistry,
@@ -117,6 +117,7 @@ class Engine:
             "printer.cameras.refresh": self._cmd_refresh_printer_cameras,
             "print.add": self._cmd_print_add,
             "print.update": self._cmd_print_update,
+            "print.preview": self._cmd_print_preview,
             "print.remove": self._cmd_print_remove,
             "print.start": self._cmd_print_start,
             "monitor.add": self._cmd_monitor_add,
@@ -793,6 +794,21 @@ class Engine:
             record.name = sanitise_name(patch["name"], record.name)
         if "printer_ids" in patch:
             record.printer_ids = sanitise_printers(patch["printer_ids"], record.ext, self.printers)
+
+    async def _cmd_print_preview(self, message: dict[str, Any]) -> None:
+        """Records the preview image the platform's store already holds.
+
+        A file whose slicer wrote no preview is drawn from its toolpath by
+        whoever can render one, and stored under the key an embedded preview
+        would have used, so nothing downstream can tell the two apart.
+
+        Raises:
+            KeyError: If there is no such file in the library.
+        """
+        record = self.prints.get(message["id"])
+        if not record:
+            raise KeyError(f"no print {message['id']}")
+        record.thumbnail = PREVIEW_TYPE
 
     async def _cmd_print_remove(self, message: dict[str, Any]) -> None:
         record = self.prints.remove(message["id"])

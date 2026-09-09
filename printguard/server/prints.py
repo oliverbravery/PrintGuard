@@ -20,6 +20,7 @@ from ..engine.registry import PrintFile
 from .platform import DiskFileStore
 
 MAX_PRINT_BYTES = 512 * 1024 * 1024
+MAX_PREVIEW_BYTES = 2 * 1024 * 1024
 ADD_TIMEOUT_S = 120.0
 THUMBNAIL_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
@@ -67,7 +68,7 @@ async def receive_print(engine: Engine, filename: str, name: str, printer_ids: l
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     print_id = uuid.uuid4().hex[:8]
-    await store_of(engine).store(f"{print_id}.{ext}", _capped(body))
+    await store_of(engine).store(f"{print_id}.{ext}", _capped(body, MAX_PRINT_BYTES))
     try:
         await engine.request(
             {"cmd": "print.add", "id": print_id, "filename": filename, "name": name, "printer_ids": printer_ids},
@@ -78,12 +79,29 @@ async def receive_print(engine: Engine, filename: str, name: str, printer_ids: l
     return record_of(engine, print_id)
 
 
-async def _capped(body: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+async def receive_preview(engine: Engine, print_id: str, body: AsyncIterator[bytes]) -> None:
+    """Keeps a preview drawn from a file's toolpath, for one the slicer wrote none into.
+
+    Args:
+        engine: The hub's engine.
+        print_id: The library file the preview belongs to.
+        body: The PNG as it arrives.
+
+    Raises:
+        HTTPException: 404 for a file the library does not hold, 413 for a
+            preview over the size limit.
+    """
+    record = record_of(engine, print_id)
+    await store_of(engine).store(record.thumbnail_key, _capped(body, MAX_PREVIEW_BYTES))
+    await engine.request({"cmd": "print.preview", "id": print_id})
+
+
+async def _capped(body: AsyncIterator[bytes], limit: int) -> AsyncIterator[bytes]:
     size = 0
     async for chunk in body:
         size += len(chunk)
-        if size > MAX_PRINT_BYTES:
-            raise HTTPException(413, f"a print file is {MAX_PRINT_BYTES // 1024 // 1024} MB at most")
+        if size > limit:
+            raise HTTPException(413, f"that upload is over the {limit // 1024 // 1024} MB limit")
         yield chunk
 
 

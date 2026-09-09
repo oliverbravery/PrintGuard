@@ -1786,6 +1786,20 @@ async def test_print_library_registers_tags_and_starts_on_an_idle_printer() -> N
         assert any(e["event"] == "print_started" and e["printer_id"] == printer_id and e.get("req_id") == 6 for e in events)
 
 
+async def test_a_drawn_preview_is_recorded_like_an_embedded_one() -> None:
+    from test_gcode import CURA
+
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _events):
+        await platform.files.store("abcd1234.gcode", _chunks(CURA))
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "part.gcode"})
+        assert engine.state_event()["prints"][0]["thumbnail"] is None, "Cura writes no preview into its gcode"
+
+        await platform.files.store("abcd1234.thumb", _chunks(b"DRAWN"))
+        await engine.handle({"cmd": "print.preview", "id": "abcd1234"})
+        assert engine.state_event()["prints"][0]["thumbnail"] == "image/png", "a drawn preview is served like any other"
+
+
 async def test_print_start_honours_tags_and_formats() -> None:
     from test_gcode import PRUSA, sliced_3mf
 
