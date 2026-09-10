@@ -38,6 +38,14 @@ jobs:
             echo "::error file=CHANGELOG.md::no '## [${{ steps.read.outputs.version }}]' section, describe the change in CHANGELOG.md; it becomes the release notes"
             exit 1
           fi
+      - name: Refuse to release a changelog dated any day but the one it merged, London time
+        run: |
+          merged=$(TZ=Europe/London date -d "$(git log -1 --format=%cI)" +%F)
+          dated=$(grep -m1 "^## \[${{ steps.read.outputs.version }}\]" CHANGELOG.md | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+          if [ "${dated}" != "${merged}" ]; then
+            echo "::error file=CHANGELOG.md::'## [${{ steps.read.outputs.version }}]' is dated '${dated}' but it merged on ${merged} in London, correct the date and merge again"
+            exit 1
+          fi
 
   docker:
     name: image (${{ matrix.name }})

@@ -9,11 +9,10 @@ in printguard.engine.notifiers.NOTIFIERS.
 
 from __future__ import annotations
 
-import uuid
 from abc import abstractmethod
 from typing import Any
 
-from ..adapters import Adapter, HttpFn
+from ..adapters import Adapter, HttpFn, multipart_form
 
 
 class NotifierAdapter(Adapter):
@@ -35,26 +34,4 @@ class NotifierAdapter(Adapter):
         """
 
 
-def multipart_form(fields: dict[str, str], file_field: str, filename: str, file_bytes: bytes) -> tuple[dict[str, str], bytes]:
-    """Encodes text fields plus one JPEG as a multipart/form-data request.
-
-    Args:
-        fields: Plain form fields.
-        file_field: Form name of the file part.
-        filename: Filename reported for the file part.
-        file_bytes: JPEG content of the file part.
-
-    Returns:
-        (headers, body) ready for the platform HTTP function.
-    """
-    boundary = uuid.uuid4().hex
-    parts = [
-        f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
-        for name, value in fields.items()
-    ]
-    parts.append(
-        f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
-        "Content-Type: image/jpeg\r\n\r\n".encode() + file_bytes + b"\r\n"
-    )
-    parts.append(f"--{boundary}--\r\n".encode())
-    return {"Content-Type": f"multipart/form-data; boundary={boundary}"}, b"".join(parts)
+__all__ = ["HttpFn", "NotifierAdapter", "multipart_form"]

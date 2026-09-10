@@ -13,9 +13,11 @@ Centauri Python client: https://github.com/bjan/pycentauri
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from pathlib import Path
 from typing import Any
 
-from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 from .klipper import KlipperAdapter
 
 _CENTAURI = "centauri"
@@ -43,6 +45,8 @@ class ElegooAdapter(IntegrationAdapter):
     )
     browser_ok = False
     experimental = False
+    formats = ("gcode",)
+    heater_control = True
     schema = {
         "type": "object",
         "properties": {
@@ -85,10 +89,14 @@ class ElegooAdapter(IntegrationAdapter):
         except Exception:
             await self.close(config)
             raise
+        remaining = (status.raw.get("_cc2") or {}).get("remaining_time_sec")
         return DeviceState(
             self._status(status.print_status),
             float(status.progress or 0.0),
             status.filename or None,
+            remaining_s=int(remaining) if remaining is not None else None,
+            nozzle=Heater.reported(status.temp_nozzle, status.temp_nozzle_target),
+            bed=Heater.reported(status.temp_bed, status.temp_bed_target),
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
@@ -99,6 +107,38 @@ class ElegooAdapter(IntegrationAdapter):
         try:
             printer = await self._connect_centauri(config)
             await getattr(printer, _ACTIONS[action])()
+        except Exception:
+            await self.close(config)
+            raise
+
+    async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
+        """Sets a heater target, through Moonraker or pycentauri's set_temperatures."""
+        if self._family(config) == _MOONRAKER:
+            await self._moonraker.heat(http, self._moonraker_config(config), heater, target)
+            return
+        try:
+            printer = await self._connect_centauri(config)
+            await printer.set_temperatures(**{heater: target})
+        except Exception:
+            await self.close(config)
+            raise
+
+    async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
+        """Uploads to the printer's internal storage and starts the print.
+
+        pycentauri transfers from a path, chunked and checksummed the way the
+        printer expects, so the bytes pass through a temporary file.
+        """
+        if self._family(config) == _MOONRAKER:
+            await self._moonraker.print_file(http, self._moonraker_config(config), filename, data)
+            return
+        try:
+            printer = await self._connect_centauri(config)
+            with tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / filename
+                await asyncio.to_thread(path.write_bytes, data)
+                remote = await printer.upload_file(path, remote_name=filename)
+            await printer.start_print(remote)
         except Exception:
             await self.close(config)
             raise

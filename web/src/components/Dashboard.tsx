@@ -14,6 +14,8 @@ import { MonitorDialog } from "./MonitorDialog";
 import { MonitorTile } from "./MonitorTile";
 import { PluginPanel } from "./PluginPanel";
 import { PrintersDialog } from "./PrintersDialog";
+import { PrintsDialog } from "./PrintsDialog";
+import { PrintViewer } from "./PrintViewer";
 import { ReportDialog } from "./ReportDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { rectSortingStrategy, Sortable } from "./Sortable";
@@ -63,11 +65,12 @@ function Toasts() {
 }
 
 export function Dashboard() {
-  const { engine, dialog, detailId, statsMonitorId, customising, mutateLayout, background } = useStore();
+  const { engine, dialog, detailId, statsMonitorId, printId, customising, mutateLayout, background } = useStore();
   const monitors = engine?.monitors ?? [];
   const { visible } = applyLayout(tiles(engine), section(engine?.settings.layout, "monitors"));
   const detail = monitors.find((m) => m.id === detailId);
   const stats = monitors.find((m) => m.id === statsMonitorId);
+  const print = engine?.prints.find((p) => p.id === printId);
   return (
     <div
       className="min-h-screen"
@@ -108,6 +111,7 @@ export function Dashboard() {
       </main>
       {dialog === "cameras" && <CamerasDialog />}
       {dialog === "printers" && <PrintersDialog />}
+      {dialog === "prints" && <PrintsDialog />}
       {dialog === "monitor" && <MonitorDialog />}
       {dialog === "settings" && <SettingsDialog />}
       {dialog === "update" && <UpdateDialog />}
@@ -117,6 +121,7 @@ export function Dashboard() {
       {dialog === "demo" && <DemoDialog />}
       {detail && <DetailPanel monitor={detail} />}
       {stats && <StatsPage monitor={stats} />}
+      {print && <PrintViewer print={print} />}
       <Toasts />
       <MobileActionBar />
     </div>

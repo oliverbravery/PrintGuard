@@ -152,14 +152,29 @@ export const GUIDE: GuideSection[] = [
     body: (
       <>
         Connect a printer, whether <strong>OctoPrint</strong>, <strong>Klipper (Moonraker)</strong>, <strong>Elegoo</strong>,{" "}
-        <strong>PrusaLink</strong> or <strong>Bambu Lab</strong>, and PrintGuard can read its status and pause or cancel a print on
-        a defect. It's optional: without one, a monitor still watches and alerts.{" "}
+        <strong>PrusaLink</strong> or <strong>Bambu Lab</strong>, and PrintGuard can read its status, progress and temperatures,
+        preheat it and pause or cancel a print on a defect. It's optional: without one, a monitor still watches and alerts.{" "}
         <a className={link} href={docs("printers.md")} target="_blank" rel="noreferrer">
           Setup guides ↗
         </a>
       </>
     ),
     action: { label: "Open printers", dialog: "printers" },
+  },
+  {
+    id: "prints",
+    led: "led-on",
+    title: "Print library",
+    shot: "prints",
+    hubOnly: true,
+    body: (
+      <>
+        Drop sliced files onto the hub and keep them there, with the preview, print time and filament the slicer
+        wrote into each. Tag a file with the printers it was sliced for and it can only ever start on those. Send it
+        to an idle printer from the library or from the 3D viewer, which lets you orbit the toolpath layer by layer.
+      </>
+    ),
+    action: { label: "Open the library", dialog: "prints" },
   },
   {
     id: "monitors",

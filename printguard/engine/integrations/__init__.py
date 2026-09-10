@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from .bambu import BambuAdapter
-from .base import DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
+from .base import HEATERS, DeviceAction, DeviceState, DeviceStatus, Heater, IntegrationAdapter
 from .elegoo import ElegooAdapter
 from .klipper import KlipperAdapter
 from .octoprint import OctoPrintAdapter
@@ -32,6 +32,8 @@ __all__ = [
     "DeviceAction",
     "DeviceState",
     "DeviceStatus",
+    "HEATERS",
+    "Heater",
     "IntegrationAdapter",
     "INTEGRATIONS",
     "integrations_meta",

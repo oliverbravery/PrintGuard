@@ -503,7 +503,7 @@ These are the events a worker can name in `events`:
 | `result` | Every inference on a watched monitor, capped at 5 per second per monitor | `monitor_id`, `camera_id`, `score`, `prediction`, `margin`, `ms`, `ts` |
 | `alert` | A defect held long enough to act on | `monitor_id`, `score`, `action`, `ts` |
 | `warning` | A watchdog condition, and its recovery | `monitor_id`, `message`, `recovered` |
-| `device` | A printer's status changed | `printer_id`, `status`, `progress`, `job` |
+| `device` | A printer's status changed | `printer_id`, `status`, `progress`, `job`, `remaining_s`, `nozzle`, `bed` |
 | `error` | Anything that failed | `message` |
 | `state` | The full snapshot, once a second | Everything your permissions allow |
 

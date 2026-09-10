@@ -10,6 +10,12 @@ The user must enable LAN Only Mode and then Developer Mode on the printer
 current firmware. The access code is shown on that screen; the serial
 number is under Settings > Device.
 
+A sliced 3mf reaches the printer over FTPS on port 990, implicit TLS with the
+same credentials, and the print is then started over MQTT with the
+``project_file`` command, which is what Bambu Studio does when it sends a
+plate. The printer's FTP server insists the data connection reuses the control
+connection's TLS session, which ftplib does not do on its own.
+
 Printer-side setup (LAN Only Mode, Developer Mode): https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode
 Protocol reference: https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md
 TLS and command shapes mirror the bambulabs_api client:
@@ -19,19 +25,23 @@ https://github.com/acse-ci223/bambulabs_api/blob/main/bambulabs_api/mqtt_client.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import threading
 from typing import Any
 
-from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
+from ..gcode import plate_gcode
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 
 _PORT = 8883
+_FTP_PORT = 990
 _RTSP_PORT = 322
 _CAMERA_PORT = 6000
 _USERNAME = "bblp"
 _CONNECT_TIMEOUT_S = 5.0
 _REPLY_TIMEOUT_S = 5.0
 _DEADLINE_S = 12.0
+_UPLOAD_DEADLINE_S = 300.0
 _KEEPALIVE_S = 30
 
 _STATUS_MAP = {
@@ -44,8 +54,25 @@ _STATUS_MAP = {
 }
 
 _COMMANDS = {DeviceAction.PAUSE: "pause", DeviceAction.RESUME: "resume", DeviceAction.CANCEL: "stop"}
+_HEATER_GCODE = {"nozzle": "M104", "bed": "M140"}
 
 _PUSHALL = {"pushing": {"sequence_id": "0", "command": "pushall", "version": 1, "push_target": 1}}
+_PROJECT_FILE = {
+    "sequence_id": "0",
+    "command": "project_file",
+    "bed_type": "auto",
+    "timelapse": False,
+    "bed_leveling": True,
+    "flow_cali": False,
+    "vibration_cali": False,
+    "layer_inspect": False,
+    "use_ams": False,
+    "ams_mapping": [0],
+    "profile_id": "0",
+    "project_id": "0",
+    "subtask_id": "0",
+    "task_id": "0",
+}
 
 
 class BambuAdapter(IntegrationAdapter):
@@ -61,6 +88,8 @@ class BambuAdapter(IntegrationAdapter):
     )
     browser_ok = False
     experimental = False
+    formats = ("3mf",)
+    heater_control = True
     schema = {
         "type": "object",
         "properties": {
@@ -79,7 +108,8 @@ class BambuAdapter(IntegrationAdapter):
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
         """Requests a full status push and normalises gcode_state.
 
-        The HTTP function is unused: Bambu speaks MQTT, not HTTP.
+        The HTTP function is unused: Bambu speaks MQTT, not HTTP. The report's
+        remaining time is in minutes.
         """
         loop = asyncio.get_running_loop()
         report = await asyncio.wait_for(loop.run_in_executor(None, self._pull_report, config), _DEADLINE_S)
@@ -88,12 +118,47 @@ class BambuAdapter(IntegrationAdapter):
         matched = _STATUS_MAP.get(str(report.get("gcode_state", "")).lower(), DeviceStatus.UNKNOWN)
         progress = float(report.get("mc_percent") or 0.0)
         job = report.get("subtask_name") or report.get("gcode_file") or None
-        return DeviceState(matched, progress, job)
+        remaining = report.get("mc_remaining_time")
+        return DeviceState(
+            matched,
+            progress,
+            job,
+            remaining_s=int(remaining) * 60 if remaining is not None else None,
+            nozzle=Heater.reported(report.get("nozzle_temper"), report.get("nozzle_target_temper")),
+            bed=Heater.reported(report.get("bed_temper"), report.get("bed_target_temper")),
+        )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
         """Publishes a pause/resume/stop command to the request topic."""
         payload = {"print": {"sequence_id": "0", "command": _COMMANDS[action], "param": ""}}
         loop = asyncio.get_running_loop()
+        await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
+
+    async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
+        """Sets a heater target with the M104 or M140 line Bambu Studio sends over gcode_line."""
+        payload = {"print": {"sequence_id": "0", "command": "gcode_line", "param": f"{_HEATER_GCODE[heater]} S{target:g}\n"}}
+        loop = asyncio.get_running_loop()
+        await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
+
+    async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
+        """Uploads a sliced 3mf to the SD card over FTPS and prints its first plate.
+
+        The print carries the settings sliced into the file. Bed levelling is
+        left on and the flow and vibration calibrations off, and the filament
+        comes from the external spool or the first AMS slot, since a file says
+        nothing about the AMS it was sliced against.
+        """
+        plate, _ = plate_gcode(data)
+        loop = asyncio.get_running_loop()
+        await asyncio.wait_for(loop.run_in_executor(None, self._upload, config, filename, data), _UPLOAD_DEADLINE_S)
+        payload = {
+            "print": {
+                **_PROJECT_FILE,
+                "param": f"Metadata/plate_{plate}.gcode",
+                "url": f"file:///sdcard/{filename}",
+                "subtask_name": filename.rsplit(".", 1)[0],
+            }
+        }
         await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -144,16 +209,57 @@ class BambuAdapter(IntegrationAdapter):
         except OSError:
             return False
 
-    def _client(self, config: dict[str, Any]):
+    def _tls_context(self):
         import ssl
-
-        import paho.mqtt.client as mqtt
 
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
+        return context
 
+    def _upload(self, config: dict[str, Any], filename: str, data: bytes) -> None:
+        import ftplib
+        import ssl
+
+        context = self._tls_context()
+
+        class ImplicitFtps(ftplib.FTP_TLS):
+            """FTPS with TLS from the first byte, the data channel on the control channel's session.
+
+            The control socket is wrapped the moment it is assigned, before ftplib
+            reads the welcome banner, which is what implicit TLS needs.
+            """
+
+            _sock: Any = None
+
+            @property
+            def sock(self) -> Any:
+                return self._sock
+
+            @sock.setter
+            def sock(self, value: Any) -> None:
+                if value is not None and not isinstance(value, ssl.SSLSocket):
+                    value = context.wrap_socket(value, server_hostname=self.host)
+                self._sock = value
+
+            def ntransfercmd(self, cmd: str, rest: Any = None) -> tuple[Any, Any]:
+                conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
+                return context.wrap_socket(conn, server_hostname=self.host, session=self.sock.session), size
+
+        ftps = ImplicitFtps(context=context, timeout=_CONNECT_TIMEOUT_S)
+        ftps.connect(str(config["host"]), _FTP_PORT)
+        try:
+            ftps.login(_USERNAME, str(config.get("access_code", "")))
+            ftps.prot_p()
+            ftps.storbinary(f"STOR {filename}", io.BytesIO(data))
+        finally:
+            ftps.close()
+
+    def _client(self, config: dict[str, Any]):
+        import paho.mqtt.client as mqtt
+
+        context = self._tls_context()
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv311)
         client.connect_timeout = _CONNECT_TIMEOUT_S
         client.username_pw_set(_USERNAME, str(config.get("access_code", "")))

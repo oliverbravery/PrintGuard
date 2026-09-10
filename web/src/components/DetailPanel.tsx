@@ -6,6 +6,7 @@ import { Feed } from "./Feed";
 import { DeviceChip } from "./MonitorTile";
 import { NameField } from "./NameField";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
+import { PrinterControls } from "./PrinterControls";
 import { RiskGauge } from "./RiskGauge";
 import { SaveStatus } from "./SaveStatus";
 import { Slider } from "./Slider";
@@ -25,7 +26,6 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
   const { engine, history, send, openDetail, openStats, openDialog, isPending, updateMonitor } = useStore();
   const settingsPanels = usePluginSurface("settings", monitor.id);
   const titleId = useId();
-  const actionRef = useRef<string | null>(null);
   const removeRef = useRef(false);
   const removing = isPending("monitor.remove");
 
@@ -38,7 +38,6 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
   const printers = engine?.printers ?? [];
   const points = history[monitor.id] ?? [];
   const score = points.at(-1)?.score ?? 0;
-  const linked = Boolean(printer);
   const close = () => openDetail(null);
 
   return (
@@ -82,29 +81,9 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
           </button>
         </Section>
 
-        {linked && printer && (
+        {printer && (
           <Section title="Printer control">
-            <div className="grid grid-cols-3 gap-2">
-              {(["pause", "resume", "cancel"] as const).map((action) => {
-                const busy = isPending("printer.action");
-                return (
-                  <button
-                    key={action}
-                    className={`btn ${action === "cancel" ? "btn-danger" : ""}`}
-                    disabled={busy}
-                    onClick={() => {
-                      actionRef.current = action;
-                      send({ cmd: "printer.action", id: printer.id, action });
-                    }}
-                  >
-                    {busy && actionRef.current === action ? `${action}…` : action}
-                  </button>
-                );
-              })}
-            </div>
-            {printer.device_state?.job && (
-              <p className="mono text-[0.68rem] text-text-2 mt-2 truncate">job: {printer.device_state.job}</p>
-            )}
+            <PrinterControls printer={printer} />
           </Section>
         )}
 

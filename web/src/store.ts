@@ -9,6 +9,7 @@ import { play, playFile } from "./sound";
 import { resumePublishers } from "./stream";
 import { applyTheme, measureCover } from "./theme";
 import { openExternally } from "./urls";
+import { acceptedTags, extOf, uploadPrint } from "./prints";
 import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
@@ -81,7 +82,13 @@ export interface Toast {
   text: string;
 }
 
-export type DialogKind = "cameras" | "printers" | "monitor" | "settings" | "update" | "guide" | "intro" | "report" | "demo" | null;
+export type DialogKind = "cameras" | "printers" | "prints" | "monitor" | "settings" | "update" | "guide" | "intro" | "report" | "demo" | null;
+
+export interface Upload {
+  id: number;
+  name: string;
+  progress: number;
+}
 export type SettingsTabId = "appearance" | "alerts" | "plugins" | "mqtt" | "updates" | "api" | "advanced";
 
 interface PgStore {
@@ -103,6 +110,8 @@ interface PgStore {
   toasts: Toast[];
   detailId: string | null;
   statsMonitorId: string | null;
+  printId: string | null;
+  uploads: Upload[];
   historyData: Record<string, MonitorHistory | null>;
   snapshotCache: Record<string, string>;
   dialog: DialogKind;
@@ -144,6 +153,8 @@ interface PgStore {
   openSettings(tab?: SettingsTabId): void;
   openDetail(id: string | null): void;
   openStats(id: string | null): void;
+  openPrint(id: string | null): void;
+  uploadPrints(files: File[], printerIds: string[]): void;
   fetchSnapshot(monitorId: string, id: string): void;
   clearCreatedToken(): void;
   testPrinter(provider: string, config: Record<string, string>): void;
@@ -153,6 +164,7 @@ interface PgStore {
 
 let toastSeq = 0;
 let reqSeq = 0;
+let uploadSeq = 0;
 let resumed = false;
 
 function connectHub(onEvent: (event: any) => void, onDown: () => void): EngineLink {
@@ -484,23 +496,24 @@ export const useStore = create<PgStore>((set, get) => {
         clearPending(event.req_id);
         set((s) => ({ snapshotCache: { ...s.snapshotCache, [event.id]: `data:image/jpeg;base64,${event.jpeg}` } }));
         break;
-      case "device":
+      case "print_started": {
         clearPending(event.req_id);
+        const engine = get().engine;
+        const name = engine?.prints.find((p) => p.id === event.id)?.name ?? "print";
+        const printer = engine?.printers.find((p) => p.id === event.printer_id)?.name ?? "printer";
+        get().toast("info", `${name} sent to ${printer}`);
+        break;
+      }
+      case "device": {
+        clearPending(event.req_id);
+        const { event: _kind, printer_id, req_id: _req, ...device_state } = event;
         set((s) =>
           s.engine
-            ? {
-                engine: {
-                  ...s.engine,
-                  printers: s.engine.printers.map((p) =>
-                    p.id === event.printer_id
-                      ? { ...p, device_state: { status: event.status, progress: event.progress, job: event.job } }
-                      : p,
-                  ),
-                },
-              }
+            ? { engine: { ...s.engine, printers: s.engine.printers.map((p) => (p.id === printer_id ? { ...p, device_state } : p)) } }
             : s,
         );
         break;
+      }
       case "discovered":
         set({ discovered: event.sources, discovering: false });
         break;
@@ -594,6 +607,8 @@ export const useStore = create<PgStore>((set, get) => {
     toasts: [],
     detailId: null,
     statsMonitorId: null,
+    printId: null,
+    uploads: [],
     historyData: {},
     snapshotCache: {},
     dialog: null,
@@ -756,6 +771,25 @@ export const useStore = create<PgStore>((set, get) => {
       get().flushUpdates();
       set({ statsMonitorId });
       if (statsMonitorId) get().send({ cmd: "history.get", monitor_id: statsMonitorId });
+    },
+
+    openPrint(printId) {
+      set({ printId });
+    },
+
+    uploadPrints(files, printerIds) {
+      const engine = get().engine;
+      if (!engine) return;
+      for (const file of files) {
+        const id = ++uploadSeq;
+        const tags = acceptedTags(engine, printerIds, extOf(file.name));
+        set((s) => ({ uploads: [...s.uploads, { id, name: file.name, progress: 0 }] }));
+        uploadPrint(file, tags, (progress) =>
+          set((s) => ({ uploads: s.uploads.map((u) => (u.id === id ? { ...u, progress } : u)) })),
+        )
+          .catch((err: Error) => get().toast("error", `${file.name}: ${err.message}`))
+          .finally(() => set((s) => ({ uploads: s.uploads.filter((u) => u.id !== id) })));
+      }
     },
 
     fetchSnapshot(monitorId, id) {

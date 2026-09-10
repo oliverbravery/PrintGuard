@@ -9,8 +9,10 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urljoin
 
-from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
+from ..adapters import multipart_form
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 
+_UPLOAD_TIMEOUT_S = 180.0
 _STATUS_MAP = {
     "printing": DeviceStatus.PRINTING,
     "resuming": DeviceStatus.PRINTING,
@@ -30,6 +32,8 @@ class OctoPrintAdapter(IntegrationAdapter):
     label = "OctoPrint"
     docs_url = "https://docs.octoprint.org/en/master/api/"
     setup_url = "https://docs.octoprint.org/en/master/bundledplugins/appkeys.html"
+    formats = ("gcode", "gco", "g")
+    heater_control = True
     setup_hint = (
         "Copy an application key from OctoPrint under Settings > Application Keys. "
         "In local mode, also enable CORS under Settings > API."
@@ -52,15 +56,33 @@ class OctoPrintAdapter(IntegrationAdapter):
         return {"X-Api-Key": str(config.get("api_key", ""))}
 
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
-        """Reads /api/job and normalises OctoPrint's state text."""
-        status, body = await http("GET", f"{config['base_url'].rstrip('/')}/api/job", headers=self._headers(config))
+        """Reads /api/job for the state and /api/printer for the heaters.
+
+        The job endpoint answers whatever the printer is doing, while the
+        printer endpoint answers 409 until it is connected, so the heaters are
+        simply absent from a disconnected printer's state.
+        """
+        base = config["base_url"].rstrip("/")
+        headers = self._headers(config)
+        status, body = await http("GET", f"{base}/api/job", headers=headers)
         if status != 200 or not isinstance(body, dict):
             return DeviceState(DeviceStatus.OFFLINE)
         text = str(body.get("state", "")).lower()
         matched = next((s for key, s in _STATUS_MAP.items() if text.startswith(key)), DeviceStatus.UNKNOWN)
-        progress = float((body.get("progress") or {}).get("completion") or 0.0)
+        progress = body.get("progress") or {}
         job = ((body.get("job") or {}).get("file") or {}).get("name")
-        return DeviceState(matched, progress, job)
+        remaining = progress.get("printTimeLeft")
+        status, printer = await http("GET", f"{base}/api/printer?exclude=sd,state", headers=headers)
+        temperature = (printer.get("temperature") or {}) if status == 200 and isinstance(printer, dict) else {}
+        tool, bed = temperature.get("tool0") or {}, temperature.get("bed") or {}
+        return DeviceState(
+            matched,
+            float(progress.get("completion") or 0.0),
+            job,
+            remaining_s=int(remaining) if remaining is not None else None,
+            nozzle=Heater.reported(tool.get("actual"), tool.get("target")),
+            bed=Heater.reported(bed.get("actual"), bed.get("target")),
+        )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
         """Issues pause/resume/cancel through /api/job."""
@@ -77,6 +99,35 @@ class OctoPrintAdapter(IntegrationAdapter):
         )
         if status >= 400:
             raise RuntimeError(f"OctoPrint rejected {action.value}: HTTP {status}")
+
+    async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
+        """Sets the first tool's or the bed's target through /api/printer/tool or /api/printer/bed."""
+        path, payload = (
+            ("tool", {"command": "target", "targets": {"tool0": target}})
+            if heater == "nozzle"
+            else ("bed", {"command": "target", "target": target})
+        )
+        status, _ = await http(
+            "POST",
+            f"{config['base_url'].rstrip('/')}/api/printer/{path}",
+            headers=self._headers(config),
+            json=payload,
+        )
+        if status >= 400:
+            raise RuntimeError(f"OctoPrint rejected the {heater} target: HTTP {status}")
+
+    async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
+        """Uploads to local storage through /api/files/local, selected and printing."""
+        headers, body = multipart_form({"select": "true", "print": "true"}, "file", filename, data, "application/octet-stream")
+        status, _ = await http(
+            "POST",
+            f"{config['base_url'].rstrip('/')}/api/files/local",
+            headers={**self._headers(config), **headers},
+            data=body,
+            timeout=_UPLOAD_TIMEOUT_S,
+        )
+        if status >= 400:
+            raise RuntimeError(f"OctoPrint rejected {filename}: HTTP {status}")
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Reads the configured webcam stream from /api/settings.

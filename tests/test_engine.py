@@ -22,6 +22,7 @@ from printguard.engine import engine as engine_module
 from printguard.engine import logs, oauth, plugins, reports, vision, watchdog
 from printguard.engine.engine import EVENT_LOG_LEVELS, Engine
 from printguard.engine.integrations import INTEGRATIONS
+from printguard.engine.printers import PREHEAT_DEFAULTS
 
 OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
 
@@ -551,6 +552,46 @@ async def test_protocol_surfaces_errors_and_filters_settings() -> None:
         assert engine.settings["layout"] == layout, "layout settings survive a restart"
 
 
+async def test_printer_heat_sets_each_target_then_refreshes_the_state() -> None:
+    platform = FakePlatform()
+    platform.responses["http://op/api/printer?exclude=sd,state"] = (
+        200,
+        {"temperature": {"tool0": {"actual": 24.6, "target": 0.0}, "bed": {"actual": 23.1, "target": 0.0}}},
+    )
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "printer.heat", "id": printer_id, "nozzle": 215, "bed": 60, "req_id": 3})
+        posted = [(r["url"], r["json"]) for r in platform.http_requests if r["method"] == "POST"]
+        assert posted == [
+            ("http://op/api/printer/tool", {"command": "target", "targets": {"tool0": 215.0}}),
+            ("http://op/api/printer/bed", {"command": "target", "target": 60.0}),
+        ]
+        device = next(e for e in events if e.get("event") == "device")
+        assert device["nozzle"] == {"actual": 24.6, "target": 0.0} and device["bed"] == {"actual": 23.1, "target": 0.0}
+        assert engine.state_event()["printers"][0]["device_state"]["nozzle"] == {"actual": 24.6, "target": 0.0}
+
+        await engine.handle({"cmd": "printer.heat", "id": printer_id, "nozzle": 9000, "req_id": 4})
+        clamped = next(r for r in reversed(platform.http_requests) if r["method"] == "POST")
+        assert clamped["json"] == {"command": "target", "targets": {"tool0": 350.0}}, "a target is clamped to what a hotend can take"
+        await engine.handle({"cmd": "printer.heat", "id": printer_id, "req_id": 5})
+        assert any(e.get("event") == "error" and e.get("req_id") == 5 for e in events), "naming no heater is refused"
+
+
+async def test_preheat_presets_default_and_are_sanitised() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        assert engine.state_event()["settings"]["preheat"] == PREHEAT_DEFAULTS
+        await engine.handle(
+            {
+                "cmd": "settings.update",
+                "patch": {"preheat": [{"name": "  Nylon  6 ", "nozzle": 999, "bed": -5}, {"name": "", "nozzle": 200, "bed": 60}]},
+            }
+        )
+        assert engine.settings["preheat"] == [{"name": "Nylon 6", "nozzle": 350.0, "bed": 0.0}]
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        assert engine.settings["preheat"] == [{"name": "Nylon 6", "nozzle": 350.0, "bed": 0.0}], "presets survive a restart"
+
+
 async def test_provider_change_clears_stale_printer_state(monkeypatch) -> None:
     platform = FakePlatform()
     closed: list[dict | None] = []
@@ -1022,7 +1063,7 @@ async def test_plugin_code_reaches_only_the_tab_that_asked() -> None:
 async def test_plugin_installs_from_github_pinned_to_a_commit() -> None:
     platform = FakePlatform(infer_s=0.02)
     sha = "a" * 40
-    platform.files = {
+    platform.responses = {
         "https://api.github.com/repos/someone/pack/commits/main": (200, {"sha": sha}),
         f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/plugin.json": (200, MANIFEST),
         f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/plugin.js": (200, PLUGIN_JS),
@@ -1056,14 +1097,14 @@ async def install_from_github(engine: Engine, repo: str = "someone/pack") -> Non
 async def test_an_update_from_the_same_repository_keeps_what_the_user_gave_it() -> None:
     """The repository is the plugin's signature, so its own update carries on."""
     platform = FakePlatform(infer_s=0.02)
-    platform.files = github_files("a" * 40, SECRET_MANIFEST)
+    platform.responses = github_files("a" * 40, SECRET_MANIFEST)
     async with running_engine(platform, camera_fps=[]) as (engine, _):
         await install_from_github(engine)
         await engine.handle(
             {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
         )
         await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
-        platform.files = github_files("b" * 40, {**SECRET_MANIFEST, "version": "1.1.0"})
+        platform.responses = github_files("b" * 40, {**SECRET_MANIFEST, "version": "1.1.0"})
         await install_from_github(engine)
         updated = engine.plugins.get("vault")
 
@@ -1075,7 +1116,7 @@ async def test_an_update_from_the_same_repository_keeps_what_the_user_gave_it() 
 async def test_an_update_that_reaches_further_stands_the_plugin_down() -> None:
     """A wider manifest is a fresh question, the way a browser asks one again."""
     platform = FakePlatform(infer_s=0.02)
-    platform.files = github_files("a" * 40, SECRET_MANIFEST)
+    platform.responses = github_files("a" * 40, SECRET_MANIFEST)
     async with running_engine(platform, camera_fps=[]) as (engine, _):
         await install_from_github(engine)
         await engine.handle(
@@ -1083,7 +1124,7 @@ async def test_an_update_that_reaches_further_stands_the_plugin_down() -> None:
         )
         await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
         wider = {**SECRET_MANIFEST, "urls": [*SECRET_MANIFEST["urls"], "https://collector.example.com/*"]}
-        platform.files = github_files("b" * 40, wider)
+        platform.responses = github_files("b" * 40, wider)
         await install_from_github(engine)
         updated = engine.plugins.get("vault")
 
@@ -1095,14 +1136,14 @@ async def test_an_update_that_reaches_further_stands_the_plugin_down() -> None:
 async def test_a_bundle_from_somewhere_else_inherits_nothing_but_the_id() -> None:
     """An id is not an identity, so a stranger holding one starts with nothing."""
     platform = FakePlatform(infer_s=0.02)
-    platform.files = github_files("a" * 40, SECRET_MANIFEST)
+    platform.responses = github_files("a" * 40, SECRET_MANIFEST)
     async with running_engine(platform, camera_fps=[]) as (engine, _):
         await install_from_github(engine)
         await engine.handle(
             {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
         )
         await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
-        platform.files = github_files("c" * 40, SECRET_MANIFEST, repo="squatter/pack")
+        platform.responses = github_files("c" * 40, SECRET_MANIFEST, repo="squatter/pack")
         await install_from_github(engine, repo="squatter/pack")
         squatted = engine.plugins.get("vault")
 
@@ -1113,7 +1154,7 @@ async def test_a_bundle_from_somewhere_else_inherits_nothing_but_the_id() -> Non
 async def test_catalogue_verifies_only_the_exact_bytes_it_pinned() -> None:
     platform = FakePlatform(infer_s=0.02)
     digests = plugins.digests(plugins.sanitise_manifest(MANIFEST), {"plugin.js": PLUGIN_JS}, {})
-    platform.files = {plugins.CATALOGUE_URL: (200, {"plugins": [{"id": "demo", "name": "Demo", "digests": digests}]})}
+    platform.responses = {plugins.CATALOGUE_URL: (200, {"plugins": [{"id": "demo", "name": "Demo", "digests": digests}]})}
     async with running_engine(platform, camera_fps=[]) as (engine, _):
         assert (await install_demo(engine))["verified"] is True
         await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(code=PLUGIN_JS + "//")})
@@ -1216,7 +1257,7 @@ async def test_a_manifest_without_a_reason_for_a_permission_is_refused() -> None
 
 async def test_a_plugins_request_comes_back_tagged_as_it_named_it() -> None:
     platform = FakePlatform(infer_s=0.02)
-    platform.files["https://hooks.example.com/feed"] = (200, {"temp": 4})
+    platform.responses["https://hooks.example.com/feed"] = (200, {"temp": 4})
     async with running_engine(platform, camera_fps=[]) as (engine, events):
         await install_demo(engine)
         await engine.handle(
@@ -1369,7 +1410,7 @@ async def test_a_secret_the_manifest_never_declared_is_not_stored() -> None:
 
 async def test_a_sign_in_ends_with_tokens_the_plugin_can_use_but_never_see() -> None:
     platform = FakePlatform(infer_s=0.02)
-    platform.files["https://auth.example.com/token"] = (
+    platform.responses["https://auth.example.com/token"] = (
         200, {"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600},
     )
     async with running_engine(platform, camera_fps=[]) as (engine, events):
@@ -1437,7 +1478,7 @@ async def test_a_callback_nobody_asked_for_is_refused() -> None:
 
 async def test_an_expiring_access_token_is_renewed_before_the_request_goes_out() -> None:
     platform = FakePlatform(infer_s=0.02)
-    platform.files["https://auth.example.com/token"] = (
+    platform.responses["https://auth.example.com/token"] = (
         200, {"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 3600},
     )
     async with running_engine(platform, camera_fps=[]) as (engine, _):
@@ -1749,3 +1790,132 @@ async def test_plugins_survive_a_restart() -> None:
         assert restarted.plugins.get("demo") is None
     finally:
         await restarted.stop()
+
+
+async def _chunks(data: bytes):
+    yield data
+
+
+async def test_print_library_registers_tags_and_starts_on_an_idle_printer() -> None:
+    from test_gcode import PRUSA
+
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await platform.files.store("abcd1234.gcode", _chunks(PRUSA))
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "benchy.gcode", "printer_ids": [printer_id]})
+        state = engine.state_event()
+        [record] = state["prints"]
+        assert state["print_store"] is True
+        assert record["name"] == "benchy" and record["ext"] == "gcode" and record["size"] == len(PRUSA)
+        assert record["printer_ids"] == [printer_id]
+        assert record["meta"]["slicer"] == "PrusaSlicer 2.8.1" and record["meta"]["printer_model"] == "MK4"
+        assert record["thumbnail"] == "image/png" and platform.files.blobs["abcd1234.thumb"] == b"BIG"
+
+        platform.device_status = "Printing"
+        await engine.handle({"cmd": "print.start", "id": "abcd1234", "printer_id": printer_id, "req_id": 5})
+        refused = next(e for e in events if e["event"] == "error" and e.get("req_id") == 5)
+        assert "printing" in refused["message"], "a busy printer is never sent a file"
+        assert not any(url.endswith("/api/files/local") for _, url in platform.http_calls)
+
+        platform.device_status = "Operational"
+        await engine.handle({"cmd": "print.start", "id": "abcd1234", "printer_id": printer_id, "req_id": 6})
+        upload = next(r for r in platform.http_requests if r["url"].endswith("/api/files/local"))
+        assert upload["method"] == "POST" and upload["headers"]["X-Api-Key"] == "k"
+        assert b'name="print"\r\n\r\ntrue' in upload["data"] and b'filename="benchy.gcode"' in upload["data"]
+        assert PRUSA in upload["data"]
+        assert any(e["event"] == "print_started" and e["printer_id"] == printer_id and e.get("req_id") == 6 for e in events)
+
+
+async def test_a_drawn_preview_is_recorded_like_an_embedded_one() -> None:
+    from test_gcode import CURA
+
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _events):
+        await platform.files.store("abcd1234.gcode", _chunks(CURA))
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "part.gcode"})
+        assert engine.state_event()["prints"][0]["thumbnail"] is None, "Cura writes no preview into its gcode"
+
+        await platform.files.store("abcd1234.thumb", _chunks(b"DRAWN"))
+        await engine.handle({"cmd": "print.preview", "id": "abcd1234"})
+        assert engine.state_event()["prints"][0]["thumbnail"] == "image/png", "a drawn preview is served like any other"
+
+
+async def test_print_start_honours_tags_and_formats() -> None:
+    from test_gcode import PRUSA, sliced_3mf
+
+    platform = FakePlatform()
+    platform.device_status = "Operational"
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        first = await _register_printer(engine)
+        await engine.handle({"cmd": "printer.add", "printer": {"name": "Second", **OCTOPRINT}})
+        second = next(pid for pid in engine.printers.items if pid != first)
+        await platform.files.store("tagged01.gcode", _chunks(PRUSA))
+        await engine.handle({"cmd": "print.add", "id": "tagged01", "filename": "tagged.gcode", "printer_ids": [first]})
+        await engine.handle({"cmd": "print.start", "id": "tagged01", "printer_id": second, "req_id": 1})
+        assert any(e["event"] == "error" and e.get("req_id") == 1 and "not tagged for Second" in e["message"] for e in events)
+        assert not platform.http_requests or not any(r["url"].endswith("/api/files/local") for r in platform.http_requests)
+
+        await platform.files.store("bambu001.3mf", _chunks(sliced_3mf()))
+        await engine.handle({"cmd": "print.add", "id": "bambu001", "filename": "plate.3mf", "printer_ids": [first], "req_id": 2})
+        assert any(e["event"] == "error" and e.get("req_id") == 2 and "cannot print .3mf" in e["message"] for e in events)
+        assert "bambu001.3mf" not in platform.files.blobs, "a refused upload leaves nothing behind"
+        assert engine.prints.get("bambu001") is None
+
+        await platform.files.store("free0001.gcode", _chunks(PRUSA))
+        await engine.handle({"cmd": "print.add", "id": "free0001", "filename": "free.gcode"})
+        await engine.handle({"cmd": "print.update", "id": "free0001", "patch": {"printer_ids": [first, first, second]}})
+        assert engine.prints.get("free0001").printer_ids == [first, second]
+        await engine.handle({"cmd": "print.update", "id": "free0001", "patch": {"printer_ids": []}})
+        await engine.handle({"cmd": "print.start", "id": "free0001", "printer_id": second, "req_id": 3})
+        assert any(e["event"] == "print_started" and e.get("req_id") == 3 for e in events), "an untagged file goes to any printer that prints it"
+
+
+async def test_print_rename_remove_and_printer_removal_untag() -> None:
+    from test_gcode import PRUSA
+
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await platform.files.store("abcd1234.gcode", _chunks(PRUSA))
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "benchy.gcode", "printer_ids": [printer_id]})
+        await engine.handle({"cmd": "print.update", "id": "abcd1234", "patch": {"name": "  Benchy   v2 "}})
+        assert engine.prints.get("abcd1234").name == "Benchy v2"
+        await engine.handle({"cmd": "print.update", "id": "missing", "patch": {"name": "x"}, "req_id": 9})
+        assert any(e["event"] == "error" and e.get("req_id") == 9 for e in events)
+
+        await engine.handle({"cmd": "printer.remove", "id": printer_id})
+        assert engine.prints.get("abcd1234").printer_ids == []
+
+        await engine.handle({"cmd": "print.remove", "id": "abcd1234"})
+        assert engine.prints.get("abcd1234") is None
+        assert platform.files.blobs == {}, "the file and its preview go with the record"
+        assert engine.state_event()["prints"] == []
+
+
+async def test_prints_survive_a_restart() -> None:
+    from test_gcode import PRUSA
+
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        printer_id = await _register_printer(engine)
+        await platform.files.store("abcd1234.gcode", _chunks(PRUSA))
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "benchy.gcode", "name": "Boat", "printer_ids": [printer_id]})
+        before = engine.state_event()["prints"]
+
+    reborn = Engine(platform)
+    await reborn.start()
+    try:
+        assert reborn.state_event()["prints"] == before
+        assert reborn.prints.get("abcd1234").file_key == "abcd1234.gcode"
+    finally:
+        await reborn.stop()
+
+
+async def test_print_library_needs_a_store() -> None:
+    platform = FakePlatform()
+    platform.files = None
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        assert engine.state_event()["print_store"] is False
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "benchy.gcode", "req_id": 4})
+        assert any(e["event"] == "error" and e.get("req_id") == 4 and "hub" in e["message"] for e in events)

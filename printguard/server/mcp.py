@@ -32,8 +32,9 @@ from .api import ApiAuth, route_scope
 INSTRUCTIONS = (
     "Monitor and control 3D printers through PrintGuard. Read monitor, printer and "
     "camera status, fetch the current camera frame as an image to judge a print, "
-    "classify a print image you supply for defects, and pause, resume or cancel a "
-    "print through its printer service."
+    "classify a print image you supply for defects, pause, resume or cancel a "
+    "print through its printer service, and start a sliced file from the print "
+    "library on an idle printer it is tagged for."
 )
 
 
@@ -67,6 +68,8 @@ def build_mcp(
         route_maps=[
             RouteMap(methods="*", pattern=r".*/frame$", mcp_type=MCPType.EXCLUDE),
             RouteMap(methods="*", pattern=r".*/classify$", mcp_type=MCPType.EXCLUDE),
+            RouteMap(methods="*", pattern=r".*/file$", mcp_type=MCPType.EXCLUDE),
+            RouteMap(methods=["POST"], pattern=r".*/prints$", mcp_type=MCPType.EXCLUDE),
             RouteMap(methods="*", pattern=r".*", mcp_type=MCPType.TOOL),
         ],
         httpx_client_kwargs={"headers": {"Authorization": f"Bearer {internal_token}"}},

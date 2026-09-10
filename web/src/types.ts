@@ -43,10 +43,24 @@ export interface Camera {
   last_result: InferenceResult | null;
 }
 
+export interface Heater {
+  actual: number;
+  target: number;
+}
+
 export interface DeviceState {
   status: string;
   progress: number;
   job: string | null;
+  remaining_s: number | null;
+  nozzle: Heater | null;
+  bed: Heater | null;
+}
+
+export interface PreheatPreset {
+  name: string;
+  nozzle: number;
+  bed: number;
 }
 
 export interface Printer {
@@ -56,6 +70,26 @@ export interface Printer {
   config: Record<string, string>;
   device_state?: DeviceState | null;
   online: boolean;
+}
+
+export interface PrintMeta {
+  slicer?: string | null;
+  time_s?: number | null;
+  filament_g?: number | null;
+  filament_mm?: number | null;
+  printer_model?: string | null;
+}
+
+export interface PrintFile {
+  id: string;
+  name: string;
+  filename: string;
+  ext: string;
+  size: number;
+  printer_ids: string[];
+  uploaded: number;
+  meta: PrintMeta;
+  thumbnail: string | null;
 }
 
 export interface Alert {
@@ -144,6 +178,8 @@ export interface AdapterMeta {
   experimental?: boolean;
   setup_url?: string | null;
   setup_hint?: string | null;
+  formats?: string[];
+  heater_control?: boolean;
   schema: {
     properties: Record<string, SchemaProperty>;
     required?: string[];
@@ -332,6 +368,8 @@ export interface EngineState {
   update: UpdateInfo | null;
   cameras: Camera[];
   printers: Printer[];
+  prints: PrintFile[];
+  print_store: boolean;
   monitors: Monitor[];
   settings: {
     notifiers: Record<string, Record<string, string>>;
@@ -344,6 +382,7 @@ export interface EngineState {
     inference_runtime: "auto" | "litert" | "onnx";
     catalogue_url: string;
     fault_grace_s: number;
+    preheat: PreheatPreset[];
   };
   tokens: ApiToken[];
   stats: EngineStats;

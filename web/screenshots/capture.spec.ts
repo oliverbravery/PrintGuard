@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, type Browser, type Locator, type Page } from "@playwright/test";
-import type { Camera, EngineState, Monitor, Printer, ScorePoint } from "../src/types";
+import { deflateSync } from "node:zlib";
+import type { Camera, DeviceState, EngineState, Monitor, PrintFile, Printer, ScorePoint } from "../src/types";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const asset = (name: string) => resolve(here, "../../docs/assets", name);
@@ -20,9 +21,28 @@ const camera = (id: string, name: string, source: Camera["source"], inferring = 
   crop: null, rotation: 0, target_fps: 30, achieved_fps: 29.8, inferring, in_use: true, online: true, last_result: null,
 });
 
-const printer = (id: string, name: string, provider: string, status: string, progress: number, job: string): Printer => ({
-  id, name, provider, config: {}, online: true, device_state: { status, progress, job },
+const idle: DeviceState = { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: { actual: 24.3, target: 0 }, bed: { actual: 23.1, target: 0 } };
+const printer = (id: string, name: string, provider: string, status: string, progress: number, job: string, remaining_s: number, nozzle: number, bed: number): Printer => ({
+  id, name, provider, config: {}, online: true,
+  device_state: { status, progress, job, remaining_s, nozzle: { actual: nozzle - 0.4, target: nozzle }, bed: { actual: bed + 0.2, target: bed } },
 });
+
+const print = (id: string, name: string, ext: string, size: number, printer_ids: string[], meta: PrintFile["meta"], thumbnail = true): PrintFile => ({
+  id, name, filename: `${name}.${ext}`, ext, size, printer_ids, uploaded: Date.now() / 1000 - 3600 * (1 + printer_ids.length), meta,
+  thumbnail: thumbnail ? "image/png" : null,
+});
+
+const INTEGRATIONS = [
+  { id: "octoprint", label: "OctoPrint", docs_url: "", formats: ["gcode", "gco", "g"], heater_control: true, schema: { properties: {} } },
+  { id: "klipper", label: "Klipper (Moonraker)", docs_url: "", formats: ["gcode", "gco", "g"], heater_control: true, schema: { properties: {} } },
+  { id: "bambu", label: "Bambu Lab", docs_url: "", formats: ["3mf"], heater_control: true, schema: { properties: {} } },
+];
+
+const PREHEAT = [
+  { name: "PLA", nozzle: 210, bed: 60 },
+  { name: "PETG", nozzle: 240, bed: 85 },
+  { name: "ABS", nozzle: 250, bed: 100 },
+];
 
 const monitor = (id: string, name: string, camera_id: string, printer_id: string, alerting = false): Monitor => ({
   id, name, camera_id, printer_id, enabled: true, threshold: 0.6, sensitivity: 0.5, consecutive: 3,
@@ -46,16 +66,22 @@ function engine(): EngineState {
       camera("c3", "Bambu X1C", { kind: "bambu", host: "10.0.0.30" }),
     ],
     printers: [
-      printer("p1", "Prusa MK4", "octoprint", "printing", 47, "calibration_cubes.gcode"),
-      printer("p2", "Ender 3 V3", "klipper", "paused", 62, "wall_bracket.gcode"),
+      printer("p1", "Prusa MK4", "octoprint", "printing", 47, "calibration_cubes.gcode", 4380, 215, 60),
+      printer("p2", "Ender 3 V3", "klipper", "paused", 62, "wall_bracket.gcode", 1500, 240, 85),
     ],
+    prints: [
+      print("f1", "spiral_vase", "gcode", 4_812_339, ["p1"], { slicer: "PrusaSlicer 2.8.1", time_s: 6127, filament_g: 15.3, printer_model: "MK4S" }),
+      print("f2", "wall_bracket", "gcode", 2_104_880, ["p2"], { slicer: "OrcaSlicer 2.2.0", time_s: 3540, filament_g: 8.1, printer_model: "Creality Ender-3 V3" }),
+      print("f3", "cable_clip", "gcode", 611_002, [], { slicer: "Cura 5.7.0", time_s: 1260, filament_mm: 2100, printer_model: null }, false),
+    ],
+    print_store: true,
     monitors: [
       monitor("m1", "Prusa MK4", "c1", "p1"),
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120 },
-    tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: [], notifiers: [],
+    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT },
+    tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: INTEGRATIONS, notifiers: [],
     plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS, plugin_host: true,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },
   };
@@ -175,6 +201,7 @@ interface Scene {
   height: number;
   theme: "dark" | "light";
   detailId?: string;
+  printId?: string;
   customising?: boolean;
   settingsTab?: string;
   dialog?: string;
@@ -196,10 +223,16 @@ const live = (e: EngineState) => {
   ] as never;
 };
 
+const idlePrinters = (e: EngineState) => {
+  e.printers[1] = { ...e.printers[1], device_state: idle };
+};
+
 const SCENES: Scene[] = [
   { name: "dashboard", width: 1360, height: 620, theme: "dark" },
   { name: "dashboard-light", width: 1360, height: 620, theme: "light" },
-  { name: "printer-detail", width: 1360, height: 760, theme: "dark", detailId: "m1" },
+  { name: "printer-detail", width: 1360, height: 860, theme: "dark", detailId: "m1" },
+  { name: "prints", width: 1360, height: 860, theme: "dark", dialog: "prints", mutate: idlePrinters },
+  { name: "print-viewer", width: 1360, height: 860, theme: "dark", printId: "f1", mutate: idlePrinters },
   {
     name: "customise", width: 1360, height: 860, theme: "dark", customising: true,
     mutate: (e) => {
@@ -239,7 +272,7 @@ const stoodDown = (e: EngineState) => {
     { ...e.monitors[1], alert: null, watching: true },
     { ...e.monitors[2], name: "Ender 3 V3", printer_id: "p2", watching: false },
   ];
-  e.printers[1] = { ...e.printers[1], device_state: { status: "idle", progress: 0, job: null } };
+  e.printers[1] = { ...e.printers[1], device_state: idle };
   e.cameras[2] = { ...e.cameras[2], name: "Garage - Ender", inferring: false, target_fps: 0, achieved_fps: 0, in_use: false };
 };
 
@@ -295,6 +328,10 @@ const CROPS: Crop[] = [
     target: (page) => page.locator("dialog > .panel"),
   },
   {
+    id: "prints", ...DESK, height: 1000, dialog: "prints", pad: 0, mutate: idlePrinters,
+    target: (page) => page.locator("dialog > .panel"),
+  },
+  {
     id: "alerts", ...DESK, height: 1200, settingsTab: "alerts",
     target: (page) => page.locator("#settings-panel-alerts"),
     mutate: (e) => {
@@ -314,6 +351,73 @@ const CROPS: Crop[] = [
     },
   },
 ];
+
+function png(width: number, height: number, inside: (x: number, y: number) => boolean): Buffer {
+  const rows: Buffer[] = [];
+  for (let y = 0; y < height; y++) {
+    const row = Buffer.alloc(1 + width * 4);
+    for (let x = 0; x < width; x++) {
+      if (inside(x, y)) row.set([255, 77, 0, 255], 1 + x * 4);
+    }
+    rows.push(row);
+  }
+  const chunk = (kind: string, data: Buffer) => {
+    const head = Buffer.concat([Buffer.from(kind), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(head));
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    return Buffer.concat([length, head, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 6, 0, 0, 0], 8);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(Buffer.concat(rows))),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+function crc32(data: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const THUMBNAILS: Record<string, Buffer> = {
+  f1: png(220, 124, (x, y) => Math.abs(x - 110) < 34 + 16 * Math.sin(y / 18) && y > 10 && y < 114),
+  f2: png(220, 124, (x, y) => (y > 30 && y < 50 && x > 40 && x < 180) || (x > 40 && x < 62 && y > 30 && y < 100)),
+};
+
+function spiralVase(): string {
+  const lines = ["; generated by PrusaSlicer 2.8.1", "G28", "M83"];
+  let z = 0.2;
+  let e = 0;
+  for (let layer = 0; layer < 140; layer++) {
+    const r = 24 + 9 * Math.sin(layer / 14);
+    lines.push(";LAYER_CHANGE", `G1 Z${z.toFixed(2)} F600`);
+    for (let step = 0; step <= 360; step += 8) {
+      const a = (step * Math.PI) / 180;
+      const x = (110 + r * Math.cos(a)).toFixed(2);
+      const y = (110 + r * Math.sin(a)).toFixed(2);
+      if (step === 0) lines.push(`G0 X${x} Y${y} F6000`);
+      else {
+        e += 0.04;
+        lines.push(`G1 X${x} Y${y} E${e.toFixed(4)} F1200`);
+      }
+    }
+    z += 0.2;
+  }
+  return lines.join("\n");
+}
+
+const SPIRAL_VASE = spiralVase();
 
 function pluginSources(id: string): Record<string, string> {
   const dir = resolve(here, "../../plugins", id);
@@ -342,6 +446,14 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
     (window as unknown as { WebSocket: unknown }).WebSocket = UnconnectedSocket;
     Object.defineProperty(Document.prototype, "pictureInPictureEnabled", { get: () => true, configurable: true });
   });
+  await page.route("**/api/prints/*/thumbnail", async (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").at(-2)!;
+    if (THUMBNAILS[id]) await route.fulfill({ contentType: "image/png", body: THUMBNAILS[id] });
+    else await route.fulfill({ status: 404, body: "" });
+  });
+  await page.route("**/api/prints/*/gcode", async (route) => {
+    await route.fulfill({ contentType: "text/plain", body: SPIRAL_VASE });
+  });
   await page.route("https://raw.githubusercontent.com/**", async (route) => {
     const wanted = new URL(route.request().url()).pathname.split("/").slice(4).join("/");
     const local = resolve(here, "../..", wanted);
@@ -359,7 +471,7 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
       theme: scene.theme,
       state: {
         mode: "hub", phase: "ready", engine: built, history: { ...history, ...scene.history },
-        detailId: scene.detailId ?? null, customising: scene.customising ?? false,
+        detailId: scene.detailId ?? null, printId: scene.printId ?? null, customising: scene.customising ?? false,
         dialog: scene.dialog ?? (scene.settingsTab ? "settings" : null), settingsTab: scene.settingsTab ?? null,
         catalogue: scene.catalogue ?? null,
         ...(scene.plugins ? { link: null } : {}),
@@ -367,7 +479,8 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
     },
   );
   if (scene.plugins) await runPlugins(page, scene.plugins);
-  await page.waitForSelector(scene.settingsTab || scene.dialog ? "dialog" : built.monitors.length ? ".aspect-video" : "main");
+  await page.waitForSelector(scene.settingsTab || scene.dialog || scene.printId ? "dialog" : built.monitors.length ? ".aspect-video" : "main");
+  if (scene.printId) await page.waitForSelector("dialog.modal-sheet input[type=range]");
   await page.addStyleTag({ content: "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}" });
   await page.evaluate((frames) => {
     for (const el of document.querySelectorAll<HTMLElement>(".aspect-video")) {

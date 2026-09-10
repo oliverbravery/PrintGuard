@@ -11,6 +11,8 @@ how alerts are wired up.
 
 - [How the pieces fit](#how-the-pieces-fit)
 - [Register a printer](#register-a-printer)
+- [Sending prints](#sending-prints)
+- [Temperatures and preheat](#temperatures-and-preheat)
 - [Supported print services](#supported-print-services)
 - [Printer cameras](#printer-cameras)
 - [Adding cameras yourself](#adding-cameras-yourself)
@@ -41,12 +43,63 @@ Open the printer registry, choose the service, fill in the form and **Test** it 
 saving. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
 print or cancels it.
 
-Linked printers report job name, progress and state on every monitor that uses them, and they
-gate inference. A printer that positively reports "not printing" stands its monitors down, so
+Linked printers report job name, progress, temperatures and state on every monitor that uses
+them, and they gate inference. A printer that positively reports "not printing" stands its monitors down, so
 an idle printer costs nothing. Losing contact with a printer never stands monitoring down, and
 neither does a state the adapter cannot read, so a monitor left watching an apparently idle
 printer warns and says which state it is getting. See
 [failing safely](architecture.md#failing-safely).
+
+## Sending prints
+
+The print library holds sliced files on the hub. Open **Prints** in the header, drop files in or
+browse for them, and each keeps the preview, estimated time, filament and printer model its
+slicer wrote into it. Cura and a few others write no preview, so PrintGuard draws one from the
+toolpath instead. Open a file to orbit that toolpath in 3D, layer by layer.
+
+Tag a file with the printers it was sliced for and it can only start on one of those. A file
+with no tags can go to any printer whose service takes the format. Either way the printer has to
+report idle at the moment you press **Print**, so nothing lands on top of a running job.
+
+| Service | Takes | How it starts |
+|---|---|---|
+| OctoPrint | `.gcode`, `.gco`, `.g` | Uploaded to local storage, selected and printed |
+| Klipper via Moonraker | `.gcode`, `.gco`, `.g` | Uploaded to the gcodes root and printed |
+| Elegoo | `.gcode` | Centauri: uploaded to internal storage and started. Neptune and OrangeStorm: through Moonraker |
+| Prusa via PrusaLink | `.gcode`, `.bgcode` | Put onto the USB stick, or local storage on a Raspberry Pi, and printed after upload |
+| Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the SD card over FTPS, then the first plate is started over MQTT |
+
+A file is sent under its library name, so rename it first if the printer's own file list
+matters to you. Binary gcode has no 3D view and no drawn preview, since its toolpath is
+compressed, so it shows the preview PrusaSlicer embedded and nothing else.
+
+A Bambu print uses the settings sliced into the file, with bed levelling on, flow and vibration
+calibration off, and filament from the external spool or the first AMS slot. Starting a 3mf
+needs Developer Mode, the same switch the MQTT connection needs. A project exported without its
+gcode is refused at upload.
+
+Files live in the data directory under `prints/`, so they survive a restart and travel with the
+`/data` volume.
+
+## Temperatures and preheat
+
+A linked printer's nozzle and bed temperatures sit on its monitor's tile and in the monitor's
+panel, where a running print also gets a progress bar and the time left. The panel takes a
+target for either heater, applied on Enter, and a row of preheat presets that set both at once.
+**Edit** beside them changes the presets, which every printer shares, and **Off** turns every
+heater off.
+
+| Service | Reads temperatures | Sets targets |
+|---|---|---|
+| OctoPrint | Yes | Yes, through its tool and bed endpoints |
+| Klipper via Moonraker | Yes | Yes, with `SET_HEATER_TEMPERATURE` |
+| Elegoo | Yes | Yes, on both families |
+| Prusa via PrusaLink | Yes | No, PrusaLink has no endpoint for it |
+| Bambu Lab | Yes | Yes, as the `M104` and `M140` lines Bambu Studio sends |
+
+A target is capped at 350 °C for the nozzle and 150 °C for the bed, and the printer's own
+firmware applies its limits on top. Temperatures refresh with the printer's state, every five
+seconds.
 
 ## Supported print services
 

@@ -86,7 +86,27 @@ declare global {
     provider: string;
     online: boolean;
     /** Null until the service has been polled once. */
-    device_state: { status: string; progress: number; job: string | null } | null;
+    device_state: PluginDeviceState | null;
+  }
+
+  /** A heater's reading and target in °C. A target of 0 means it is off. */
+  interface PluginHeater {
+    actual: number;
+    target: number;
+  }
+
+  /** What a printer's service last reported. */
+  interface PluginDeviceState {
+    /** `printing`, `paused`, `idle`, `error`, `offline` or `unknown`. */
+    status: string;
+    /** Job completion, 0 to 100. */
+    progress: number;
+    job: string | null;
+    /** Seconds the service expects the job to take from now, or null where it gives no estimate. */
+    remaining_s: number | null;
+    /** Null where the printer has no such heater, or is not reporting it. */
+    nozzle: PluginHeater | null;
+    bed: PluginHeater | null;
   }
 
   /**
@@ -133,8 +153,8 @@ declare global {
     alert: { event: "alert"; monitor_id: string; score: number; action: string; ts: number };
     /** A watchdog condition, and again with `recovered` when it clears. */
     warning: { event: "warning"; monitor_id?: string; message: string; recovered: boolean };
-    /** A printer's status changed. */
-    device: { event: "device"; printer_id: string; status: string; progress: number; job: string | null };
+    /** A printer's status changed, carrying everything its `device_state` does. */
+    device: { event: "device"; printer_id: string } & PluginDeviceState;
     /** Anything that failed. */
     error: { event: "error"; message: string };
     /** The snapshot your permissions allow, once a second. */

@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import type { DeviceState, Monitor } from "../types";
 import { Feed } from "./Feed";
 import { PluginNodeView, usePluginSurface } from "./PluginNode";
+import { activeJob, HEATERS, heaterText, ProgressBar } from "./PrinterControls";
 import { RiskGauge } from "./RiskGauge";
 import { SortableItem, type SortableHandle } from "./Sortable";
 
@@ -23,6 +24,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
   const covered = dialog !== null || detailId !== null || statsMonitorId !== null;
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
+  const device = printer?.device_state;
   const score = history[monitor.id]?.at(-1)?.score ?? 0;
   const alerting = Boolean(monitor.alert);
   const pinned = section(engine?.settings.layout, "monitors").pinned.includes(monitor.id);
@@ -81,7 +83,9 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
           </>
         )}
       </div>
-      <Feed camera={camera} mode={engine?.mode ?? "local"} active={!covered} />
+      <Feed camera={camera} mode={engine?.mode ?? "local"} active={!covered}>
+        {activeJob(device) && <ProgressBar state={device} className="absolute inset-x-0 bottom-0 z-[3] h-[3px]" />}
+      </Feed>
       {alerting && (
         <div className="absolute inset-x-0 top-[calc(50%-14px)] z-[4] flex justify-center">
           <span className="display bg-bad text-on-accent text-xs font-bold tracking-[0.3em] px-4 py-1.5">
@@ -102,6 +106,17 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
             <div className="mono text-[0.8rem]">{camera ? `${camera.max_fps.toFixed(0)} fps` : "—"}</div>
             <div className="label">camera max</div>
           </div>
+          {HEATERS.map((name) => {
+            const heater = device?.[name];
+            return (
+              heater && (
+                <div key={name}>
+                  <div className={`mono text-[0.8rem] ${heater.target > 0 ? "text-accent" : ""}`}>{heaterText(heater)}</div>
+                  <div className="label">{name}</div>
+                </div>
+              )
+            );
+          })}
         </div>
       </div>
     </>

@@ -41,6 +41,7 @@ from .mcp import build_mcp_app
 from .mediamtx import EmbeddedMediaMTX
 from .mqtt import MqttBridge
 from .platform import ServerPlatform
+from .prints import gcode_response, receive_preview, receive_print, thumbnail_response
 from .publish import ChunkStream, remux
 
 logger = logging.getLogger(__name__)
@@ -61,21 +62,22 @@ class WebStaticFiles(StaticFiles):
         return response
 
 
-def origin_allowed(websocket: WebSocket, allowed: set[str]) -> bool:
-    """Rejects cross-site WebSocket handshakes the auth proxy cannot screen.
+def origin_allowed(connection: HTTPConnection, allowed: set[str]) -> bool:
+    """Rejects cross-site WebSocket handshakes and uploads the auth proxy cannot screen.
 
     Proxies in front of the hub authenticate the session cookie, which the
-    browser attaches to any socket a page opens, so a logged-in user's other
-    tabs could otherwise drive the engine and read its secrets. The browser
-    sets Origin and the forwarded host itself and forbids pages from forging
-    them, so a same-origin (or explicitly allow-listed) Origin is the gate.
+    browser attaches to any socket a page opens or form it posts, so a
+    logged-in user's other tabs could otherwise drive the engine and read its
+    secrets. The browser sets Origin and the forwarded host itself and forbids
+    pages from forging them, so a same-origin (or explicitly allow-listed)
+    Origin is the gate.
     """
-    origin = websocket.headers.get("origin")
+    origin = connection.headers.get("origin")
     if not origin:
         return True
     if origin.rstrip("/") in allowed:
         return True
-    host = websocket.headers.get("x-forwarded-host") or websocket.headers.get("host")
+    host = connection.headers.get("x-forwarded-host") or connection.headers.get("host")
     return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
 
 
@@ -238,6 +240,33 @@ def create_app() -> FastAPI:
         if name is None:
             return HTMLResponse(SIGN_IN_PAGE.substitute(message="nothing was waiting for that sign-in"), status_code=404)
         return HTMLResponse(SIGN_IN_PAGE.substitute(message=f"{html.escape(name)} is connected. You can close this tab."))
+
+    @app.post("/api/prints")
+    async def upload_print(request: Request, filename: str, name: str = "", printer_ids: str = "") -> dict[str, str]:
+        """Takes a sliced file from the dashboard into the print library."""
+        if not origin_allowed(request, allowed_origins):
+            raise HTTPException(403, "origin not allowed")
+        tags = [printer_id for printer_id in printer_ids.split(",") if printer_id]
+        record = await receive_print(app.state.engine, filename, name, tags, request.stream())
+        return {"id": record.id}
+
+    @app.get("/api/prints/{print_id}/gcode")
+    async def print_gcode(print_id: str) -> Response:
+        """Serves a print's text gcode for the viewer."""
+        return await gcode_response(app.state.engine, print_id)
+
+    @app.get("/api/prints/{print_id}/thumbnail")
+    def print_thumbnail(print_id: str) -> Response:
+        """Serves a print's preview image."""
+        return thumbnail_response(app.state.engine, print_id)
+
+    @app.put("/api/prints/{print_id}/thumbnail")
+    async def store_print_thumbnail(request: Request, print_id: str) -> dict[str, bool]:
+        """Keeps the preview the dashboard drew for a print whose slicer wrote none."""
+        if not origin_allowed(request, allowed_origins):
+            raise HTTPException(403, "origin not allowed")
+        await receive_preview(app.state.engine, print_id, request.stream())
+        return {"ok": True}
 
     @app.get("/api/health")
     def health(response: Response) -> dict[str, bool | str]:

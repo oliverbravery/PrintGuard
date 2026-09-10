@@ -190,3 +190,73 @@ async def test_a_gating_plugin_can_refuse_a_request_but_never_its_own_routes() -
     assert own.status_code == 200, "the gate locked out the very page that signs you in"
     assert other.status_code == 403, "another plugin's pages went out without the gate seeing them"
     assert health.status_code == 200, "readiness is never gated, so an uptime check still works"
+
+
+async def test_a_preview_drawn_by_the_dashboard_is_stored_same_origin(tmp_path) -> None:
+    from fakes import FakePlatform
+    from test_gcode import CURA, PNG
+
+    from printguard.engine.engine import Engine
+    from printguard.server.platform import DiskFileStore
+
+    platform = FakePlatform()
+    platform.files = DiskFileStore(tmp_path)
+    engine = Engine(platform)
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    png = {"Content-Type": "image/png", "origin": "http://test"}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            uploaded = await client.post(
+                "/api/prints?filename=part.gcode",
+                content=CURA,
+                headers={"Content-Type": "application/octet-stream", "origin": "http://test"},
+            )
+            print_id = uploaded.json()["id"]
+            assert engine.prints.get(print_id).thumbnail is None, "Cura writes no preview into its gcode"
+            assert (await client.get(f"/api/prints/{print_id}/thumbnail")).status_code == 404
+
+            foreign = await client.put(f"/api/prints/{print_id}/thumbnail", content=PNG, headers={**png, "origin": "https://evil.example"})
+            assert foreign.status_code == 403, "a cross-site page cannot write over a preview through the session cookie"
+            assert (await client.put("/api/prints/nope/thumbnail", content=PNG, headers=png)).status_code == 404
+            assert (await client.put(f"/api/prints/{print_id}/thumbnail", content=PNG, headers=png)).status_code == 200
+
+            image = await client.get(f"/api/prints/{print_id}/thumbnail")
+            assert image.status_code == 200 and image.content == PNG and image.headers["content-type"] == "image/png"
+            assert engine.state_event()["prints"][0]["thumbnail"] == "image/png"
+    finally:
+        await engine.stop()
+
+
+async def test_dashboard_upload_is_same_origin_and_feeds_the_viewer(tmp_path) -> None:
+    from fakes import FakePlatform
+    from test_gcode import PRUSA
+
+    from printguard.engine.engine import Engine
+    from printguard.server.platform import DiskFileStore
+
+    platform = FakePlatform()
+    platform.files = DiskFileStore(tmp_path)
+    engine = Engine(platform)
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    octet = {"Content-Type": "application/octet-stream"}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            foreign = await client.post("/api/prints?filename=benchy.gcode", content=PRUSA, headers={**octet, "origin": "https://evil.example"})
+            assert foreign.status_code == 403, "a cross-site page cannot fill the library through the session cookie"
+            uploaded = await client.post("/api/prints?filename=benchy.gcode&name=Boat", content=PRUSA, headers={**octet, "origin": "http://test"})
+            assert uploaded.status_code == 200, uploaded.text
+            print_id = uploaded.json()["id"]
+            assert engine.prints.get(print_id).name == "Boat"
+
+            text = await client.get(f"/api/prints/{print_id}/gcode")
+            assert text.status_code == 200 and text.content == PRUSA and text.headers["content-type"].startswith("text/plain")
+            image = await client.get(f"/api/prints/{print_id}/thumbnail")
+            assert image.status_code == 200 and image.content == b"BIG" and image.headers["content-type"] == "image/png"
+            assert "immutable" in image.headers["cache-control"]
+            assert (await client.get("/api/prints/nope/gcode")).status_code == 404
+    finally:
+        await engine.stop()

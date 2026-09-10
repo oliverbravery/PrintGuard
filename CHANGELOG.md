@@ -7,7 +7,27 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.4.1] - 2026-09-01
+## [2.4.2] - 2026-09-10
+
+### Added
+
+- A print library, behind **Prints** in the header of a hub. Drop sliced files in and they stay
+  on the hub with the preview, print time and filament the slicer wrote into them. Cura and a
+  few others write no preview, so PrintGuard draws one from the toolpath instead. Open a file
+  to orbit that toolpath in 3D, layer by layer. Tag a file with the printers it was sliced for
+  and it can only ever start on those, and a printer has to be idle before a file is sent to it.
+  OctoPrint, Klipper and Elegoo take gcode, PrusaLink also takes bgcode and Bambu Lab takes a
+  sliced 3mf. The REST API and MCP server can list, tag and start files too.
+  [docs/printers.md](docs/printers.md#sending-prints) has the details.
+- Nozzle and bed temperatures for a linked printer, on its monitor tile and in the monitor's
+  panel, with a progress bar and the time left while it prints. The panel takes a target for
+  either heater and has preheat presets you can edit in place, starting with PLA, PETG and ABS,
+  plus an Off that cools everything. PrusaLink reports temperatures but has no way to set them,
+  so a Prusa printer's heaters are read-only. The REST API and MCP server can set targets too,
+  and Home Assistant gets a temperature sensor per heater.
+  [docs/printers.md](docs/printers.md#temperatures-and-preheat) has the details.
+
+## [2.4.1] - 2026-09-09
 
 ### Added
 
@@ -115,7 +135,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   camera's full frame rate with nothing explaining why. A printer that starts reporting again
   is announced as recovered even if it comes back idle.
 
-## [2.3.12] - 2026-08-12
+## [2.3.12] - 2026-08-13
 
 ### Fixed
 
@@ -162,7 +182,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   leaves the bundled streaming server running behind it, holding port 8554 against the next
   hub you start.
 
-## [2.3.8] - 2026-07-24
+## [2.3.8] - 2026-08-02
 
 ### Added
 
@@ -218,7 +238,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   on that machine, failed with "address already in use" from an app that was no longer
   running. The streaming server now always stops with the hub, however the hub ends.
 
-## [2.3.7] - 2026-07-22
+## [2.3.7] - 2026-07-24
 
 ### Added
 
@@ -350,7 +370,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   sensitive data. The token is still shown once and only its hash is stored — nothing about your
   existing tokens changes.
 
-## [2.3.0] - 2026-07-03
+## [2.3.0] - 2026-07-10
 
 ### Added
 
@@ -510,7 +530,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   starts the page. Text, status colours and the light theme were tuned to meet **WCAG 2.2 AA**
   contrast, and all motion respects your system's reduced-motion setting.
 
-## [2.1.2] - 2026-06-20
+## [2.1.2] - 2026-06-22
 
 ### Fixed
 
@@ -547,7 +567,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   the live view and alert images (rotation, crop, brightness/contrast/sharpness) instead of
   returning the raw frame.
 
-## [2.1.0] - 2026-06-16
+## [2.1.0] - 2026-06-19
 
 ### Added
 
@@ -618,7 +638,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - `LICENSE.md` with the full GNU General Public License v2 text, matching the
   `GPL-2.0-only` declaration in `pyproject.toml`.
 
-## [2.0.0] - 2026-06-12
+## [2.0.0] - 2026-06-15
 
 A ground-up rewrite. One Python engine now runs everywhere — in your browser on Pyodide
 or on a server on CPython — with every runtime difference behind a single `Platform`
