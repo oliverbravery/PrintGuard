@@ -123,15 +123,6 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
               onChange={(v) => updateMonitor(monitor.id, { threshold: v })}
             />
             <Slider
-              label="Sensitivity"
-              value={monitor.sensitivity}
-              min={0.2}
-              max={5}
-              step={0.1}
-              hint="How decisively the model scores each frame. Raise if real defects read too low; lower if clean prints get flagged."
-              onChange={(v) => updateMonitor(monitor.id, { sensitivity: v })}
-            />
-            <Slider
               label="Consecutive detections to alert"
               value={monitor.consecutive}
               min={1}
