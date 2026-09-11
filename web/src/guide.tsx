@@ -139,7 +139,8 @@ export const GUIDE: GuideSection[] = [
       <>
         A camera is any video source PrintGuard can read, so a USB or CSI device, an RTSP, MJPEG or
         WebRTC (WHEP) stream URL, or a camera published from this device. Printers that expose a
-        webcam register theirs automatically.
+        webcam register theirs automatically. The model only watches a square of each view, shown
+        in the camera's crop editor, so crop it tightly around the print.
       </>
     ),
     action: { label: "Open cameras", dialog: "cameras" },
