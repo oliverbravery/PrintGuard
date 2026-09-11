@@ -27,6 +27,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   and Home Assistant gets a temperature sensor per heater.
   [docs/printers.md](docs/printers.md#temperatures-and-preheat) has the details.
 
+### Changed
+
+- Camera crops are square, since the model only ever watches a square of the view and ignored
+  the sides of anything wider. The crop editor shows the watched square before you set a crop.
+
 ### Removed
 
 - The sensitivity setting, which only ever moved the same line as the alert threshold. The
