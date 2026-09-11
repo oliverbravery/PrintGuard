@@ -4,6 +4,7 @@ multipart encoding, printer sanitisation and the vision score maths."""
 from __future__ import annotations
 
 import json as jsonlib
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,7 +15,7 @@ from printguard.engine import vision
 from printguard.engine.cameras import webrtc_endpoint, whep_endpoint
 from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
 from printguard.engine.integrations.elegoo import ElegooAdapter
-from printguard.engine.monitors import monitor_watching, sanitise_monitor
+from printguard.engine.monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor
 from printguard.engine.notifiers import NOTIFIERS
 from printguard.engine.adapters import multipart_form
 from printguard.engine.printers import sanitise_printer
@@ -875,7 +876,6 @@ def test_sanitise_monitor_clamps_and_defaults() -> None:
         {
             "name": "   ",
             "threshold": 9,
-            "sensitivity": 0,
             "consecutive": 99,
             "cooldown_s": 10_000,
             "on_defect": "explode",
@@ -883,10 +883,14 @@ def test_sanitise_monitor_clamps_and_defaults() -> None:
     )
     assert record["name"] == "Monitor"
     assert record["threshold"] == 1.0
-    assert record["sensitivity"] == 0.2
     assert record["consecutive"] == 30
     assert record["cooldown_s"] == 600
     assert record["on_defect"] == "none"
+
+
+def test_persisted_monitor_keeps_only_configuration() -> None:
+    record = {**sanitise_monitor("m1", {}), "alert": {"score": 0.9}, "watching": True, "sensitivity": 3.0}
+    assert set(persisted_monitor(record)) == {"id", *MONITOR_DEFAULTS}, "runtime and retired fields must not be saved"
 
 
 def test_sanitise_printer_validates_provider() -> None:
@@ -925,13 +929,21 @@ def test_monitor_watching_fails_towards_watching() -> None:
     assert not monitor_watching(linked, printers), "disabled monitors are never watched"
 
 
-def test_defect_score_scales_with_sensitivity() -> None:
-    failing = {"distances": {"success": 4.0, "failure": 2.0}}
-    assert vision.defect_score(failing, 0.5) < vision.defect_score(failing, 1.0) < vision.defect_score(failing, 2.0)
-    assert vision.defect_score(failing, 1.0) == 0.75
-    healthy = {"distances": {"success": 2.0, "failure": 6.0}}
-    assert vision.defect_score(healthy, 1.0) == 0.0
-    assert vision.defect_score({"distances": {}}, 1.0) == 0.5, "missing distances must sit on the boundary"
+def test_defect_score_is_the_prototype_softmax() -> None:
+    failing = vision.defect_score({"distances": {"success": 1.5, "failure": 0.5}})
+    assert failing == pytest.approx(1 / (1 + np.exp(-2.0)))
+    assert vision.defect_score({"distances": {"success": 0.5, "failure": 1.5}}) == pytest.approx(1 - failing)
+    assert vision.defect_score({"distances": {"success": 1.0, "failure": 1.0}}) == 0.5
+    assert vision.defect_score({"distances": {}}) == 0.5, "missing distances must sit on the boundary"
+
+
+def test_default_threshold_is_reachable_with_the_shipped_prototypes() -> None:
+    assets = vision.assets_from_dicts(
+        jsonlib.loads(Path("models/metadata.json").read_text()),
+        jsonlib.loads(Path("models/prototypes.json").read_text())["prototypes"],
+    )
+    on_failure = vision.defect_score(vision.classify(assets.prototypes["failure"], assets))
+    assert on_failure > sanitise_monitor("m1", {})["threshold"], "a frame on the failure prototype must be able to alert"
 
 
 def test_classify_rejects_non_finite_embeddings() -> None:

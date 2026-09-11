@@ -17,7 +17,6 @@ MONITOR_DEFAULTS: dict[str, Any] = {
     "printer_id": "",
     "enabled": True,
     "threshold": 0.75,
-    "sensitivity": 1.0,
     "consecutive": 3,
     "notify": False,
     "on_defect": "none",
@@ -26,7 +25,7 @@ MONITOR_DEFAULTS: dict[str, Any] = {
 
 STANDBY_STATUSES = ("idle", "paused", "error")
 
-_CLAMPS = {"threshold": (0.05, 1.0), "sensitivity": (0.2, 5.0), "consecutive": (1, 30), "cooldown_s": (0, 600)}
+_CLAMPS = {"threshold": (0.05, 1.0), "consecutive": (1, 30), "cooldown_s": (0, 600)}
 
 
 def monitor_watching(monitor: dict[str, Any], printers: "PrinterRegistry") -> bool:
@@ -65,7 +64,6 @@ def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any
     record = {**(base or MONITOR_DEFAULTS), **patch, "id": monitor_id}
     record["name"] = str(record["name"]).strip() or "Monitor"
     record["threshold"] = _clamp("threshold", float(record["threshold"]))
-    record["sensitivity"] = _clamp("sensitivity", float(record["sensitivity"]))
     record["consecutive"] = int(_clamp("consecutive", int(record["consecutive"])))
     record["cooldown_s"] = int(_clamp("cooldown_s", int(record["cooldown_s"])))
     record["enabled"] = bool(record["enabled"])
@@ -76,5 +74,5 @@ def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any
 
 
 def persisted_monitor(record: dict[str, Any]) -> dict[str, Any]:
-    """Strips runtime-only fields before persistence."""
-    return {k: v for k, v in record.items() if k not in ("alert", "watching")}
+    """Keeps only a monitor's configuration, dropping runtime and retired fields."""
+    return {k: record[k] for k in ("id", *MONITOR_DEFAULTS)}
