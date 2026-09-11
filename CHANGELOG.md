@@ -27,6 +27,23 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   and Home Assistant gets a temperature sensor per heater.
   [docs/printers.md](docs/printers.md#temperatures-and-preheat) has the details.
 
+### Changed
+
+- Camera crops are square, since the model only ever watches a square of the view and ignored
+  the sides of anything wider. The crop editor shows the watched square before you set a crop.
+
+### Removed
+
+- The sensitivity setting, which only ever moved the same line as the alert threshold. The
+  REST API and MCP server's classify calls no longer take one.
+
+### Fixed
+
+- A monitor left on its default settings could never raise an alert, since its score topped
+  out at 0.68 under the 0.75 threshold. The score is now the model's own confidence that the
+  print is failing, and existing thresholds carry over. If you raised sensitivity to make
+  alerts fire, check the threshold after updating.
+
 ## [2.4.1] - 2026-09-09
 
 ### Added

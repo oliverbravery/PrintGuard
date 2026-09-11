@@ -139,7 +139,8 @@ export const GUIDE: GuideSection[] = [
       <>
         A camera is any video source PrintGuard can read, so a USB or CSI device, an RTSP, MJPEG or
         WebRTC (WHEP) stream URL, or a camera published from this device. Printers that expose a
-        webcam register theirs automatically.
+        webcam register theirs automatically. The model only watches a square of each view, shown
+        in the camera's crop editor, so crop it tightly around the print.
       </>
     ),
     action: { label: "Open cameras", dialog: "cameras" },
@@ -197,10 +198,10 @@ export const GUIDE: GuideSection[] = [
     shot: "tuning",
     body: (
       <>
-        Every frame is scored against failure prototypes. <strong>Alert threshold</strong> sets how
-        high that score must reach, <strong>sensitivity</strong> widens or narrows the margin, and a
-        defect must hold for a number of <strong>consecutive detections</strong> before PrintGuard
-        acts. Tune it all per monitor from its detail panel.
+        Every frame is scored with the model's confidence that the print is failing.{" "}
+        <strong>Alert threshold</strong> sets how high that score must reach, and a defect must hold
+        for a number of <strong>consecutive detections</strong> before PrintGuard acts. Tune both per
+        monitor from its detail panel.
       </>
     ),
   },

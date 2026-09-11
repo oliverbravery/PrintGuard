@@ -57,8 +57,9 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Too many false alerts | Sensitivity or threshold too aggressive for your camera and lighting | Raise the threshold or lower sensitivity on that monitor, and raise the consecutive-frame count so brief blips are ridden out |
+| Too many false alerts | The threshold is too low for your camera and lighting | Raise the threshold on that monitor, and raise the consecutive-frame count so brief blips are ridden out |
 | Failures caught too late | The opposite | Lower the threshold or the frame count. Watch the risk history on the monitor's detail page to pick a value |
+| Real failures barely move the score | The print is small in the frame, or off to one side of the square the model watches | Crop the camera to a square the print fills, see [framing the print](printers.md#framing-the-print) |
 | No notifications arrive | The channel is off for that monitor, or the channel itself is failing | Send a test alert from **Settings**. Delivery failures raise an `error` event rather than passing silently |
 | A stream of camera offline and back notifications | The feed keeps dropping out. Before 2.4.0 every reconnection announced itself, and the monitor's cooldown only covers defect alerts | Update to 2.4.0, where one unstable episode is one warning. The drop-outs themselves are worth chasing, so check the camera's own connection and, for RTSP or WHEP, that MediaMTX holds the pull |
 | A wireless camera still notifies when it drops out for a few seconds | The fault grace period is shorter than the camera takes to reconnect | Raise **Fault grace period** in the Alerts tab in Settings. It goes up to fifteen minutes, and the dashboard still shows the drop-out as it happens |

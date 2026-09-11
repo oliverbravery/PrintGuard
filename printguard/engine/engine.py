@@ -381,7 +381,7 @@ class Engine:
         )
         return await self.platform.encode_jpeg(rgb)
 
-    async def classify(self, data: bytes, sensitivity: float = 1.0) -> dict[str, Any]:
+    async def classify(self, data: bytes) -> dict[str, Any]:
         """Classifies a supplied frame, returning the model's verdict and defect score.
 
         Decodes the image on the platform and runs the same inference the scheduler
@@ -392,7 +392,7 @@ class Engine:
         if rgb is None:
             raise RuntimeError("could not decode image")
         result = await self.platform.infer(rgb)
-        return {**result, "defect_score": vision.defect_score(result, sensitivity)}
+        return {**result, "defect_score": vision.defect_score(result)}
 
     def _save(self) -> None:
         self.platform.save_state(
@@ -506,10 +506,10 @@ class Engine:
         self.emit({"event": "error", "message": message})
 
     async def _on_result(self, camera: Camera, frame: Frame, result: dict[str, Any]) -> None:
+        score = vision.defect_score(result)
         for monitor in self.monitors.values():
             if monitor["camera_id"] != camera.id or not monitor_watching(monitor, self.printers):
                 continue
-            score = vision.defect_score(result, monitor["sensitivity"])
             ts = time.time()
             point = {"score": round(score, 4), "ts": ts}
             monitor_id = monitor["id"]
