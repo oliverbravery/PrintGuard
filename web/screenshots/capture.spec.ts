@@ -45,7 +45,7 @@ const PREHEAT = [
 ];
 
 const monitor = (id: string, name: string, camera_id: string, printer_id: string, alerting = false): Monitor => ({
-  id, name, camera_id, printer_id, enabled: true, threshold: 0.6, sensitivity: 0.5, consecutive: 3,
+  id, name, camera_id, printer_id, enabled: true, threshold: 0.6, consecutive: 3,
   notify: true, on_defect: "pause", cooldown_s: 90, watching: true,
   alert: alerting ? { score: 0.86, action: "pause", ts: NOW } : null,
 });

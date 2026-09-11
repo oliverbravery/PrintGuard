@@ -105,7 +105,6 @@ export interface Monitor {
   printer_id: string;
   enabled: boolean;
   threshold: number;
-  sensitivity: number;
   consecutive: number;
   notify: boolean;
   on_defect: "none" | "pause" | "cancel";

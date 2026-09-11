@@ -73,7 +73,7 @@ Nothing is installed and no frame leaves your device. When you are ready to run 
 - Only watches while a linked printer is actually printing.
 - Warns you when a camera drops, a feed freezes or a printer stops answering.
 - Shares one model across as many cameras as your hardware can sustain.
-- Tunes per monitor: sensitivity, threshold, how long a defect must hold, and the cooldown.
+- Tunes per monitor: the alert threshold, how long a defect must hold and the cooldown.
 
 ## Quick start
 
@@ -264,8 +264,9 @@ the API and the sandbox details.
 The detector is a ShuffleNetV2 encoder classified by nearest prototype, trained for few-shot
 FDM fault detection in
 [Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection), which
-has an accompanying technical paper. The sensitivity and threshold sliders map straight onto
-the prototype distances, so you can tune for your camera and lighting without retraining.
+has an accompanying technical paper. Each frame scores the model's own confidence that the
+print is failing, so you can tune the alert threshold for your camera and lighting without
+retraining.
 
 ## Documentation
 

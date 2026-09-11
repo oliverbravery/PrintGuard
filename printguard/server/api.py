@@ -94,7 +94,6 @@ class MonitorFields(BaseModel):
     printer_id: str | None = None
     enabled: bool | None = None
     threshold: float | None = None
-    sensitivity: float | None = None
     consecutive: int | None = None
     notify: bool | None = None
     on_defect: Literal["none", "pause", "cancel"] | None = None
@@ -213,7 +212,6 @@ class MonitorOut(_ReadModel):
     printer_id: str | None = None
     enabled: bool | None = None
     threshold: float | None = None
-    sensitivity: float | None = None
     consecutive: int | None = None
     notify: bool | None = None
     on_defect: Literal["none", "pause", "cancel"] | None = None
@@ -489,11 +487,10 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
     @api.post("/classify", operation_id="classify_frame", tags=["read"])
     async def classify_frame(
         image: Annotated[bytes, Body(media_type="image/jpeg")],
-        sensitivity: float = 1.0,
         engine: Engine = Depends(get_engine),
     ) -> dict[str, Any]:
         """Classifies a supplied JPEG frame - the model's verdict without a registered camera."""
-        return await engine.classify(image, sensitivity)
+        return await engine.classify(image)
 
     @api.post("/cameras", operation_id="add_camera", tags=["manage"], response_model=list[CameraOut])
     async def add_camera(body: CameraCreate, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
