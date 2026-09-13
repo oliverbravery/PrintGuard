@@ -85,6 +85,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 |---|---|---|
 | An Intel GPU is not used | The standard image leaves the Intel GPU runtime out, the render device was not passed in, or the GPU predates Tiger Lake | Use the `latest-intel` tag and pass `--device /dev/dri`. **compute** reads `intel gpu` when the GPU is in use, and the log lists what the providers offered at start. [Intel GPU](hardware.md#intel-gpu) |
 | An NVIDIA GPU is not used | Missing Container Toolkit, the container started without the NVIDIA runtime, or the wrong tag | The log names the provider it could not load, then falls back to the CPU. [NVIDIA GPU](hardware.md#nvidia-gpu) |
+| **compute** names a CPU in the Windows desktop app | Windows ML needs the Windows App Runtime 2.x. Versions before 2.4.2 stopped at a prompt to install it instead of starting | Run the x64 installer from [Windows App SDK downloads](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads), then restart PrintGuard |
 | **compute** names a CPU on a machine with an accelerator | No provider was handed the accelerator, so the model stayed on the processor | [Execution providers by platform](hardware.md#execution-providers-by-platform) |
 | Throughput differs from what you expected | Automatic mode picks whichever runtime benchmarks faster on the host | The choice is logged at start. Pin one in the Advanced tab in Settings |
 

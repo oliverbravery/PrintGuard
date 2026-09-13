@@ -189,10 +189,14 @@ class OnnxInference:
     def _register_windows_providers(self) -> None:
         if sys.getwindowsversion().build < 26100:
             return
-        from winui3.microsoft.windows.applicationmodel.dynamicdependency.bootstrap import InitializeOptions, initialize
+        from winui3.microsoft.windows.applicationmodel.dynamicdependency.bootstrap import initialize
         import winui3.microsoft.windows.ai.machinelearning as winml
 
-        self._resources.enter_context(initialize(options=InitializeOptions.ON_NO_MATCH_SHOW_UI))
+        try:
+            self._resources.enter_context(initialize())
+        except OSError as error:
+            logger.warning("Windows ML is unavailable without the Windows App Runtime 2.x: %s", error)
+            return
         providers = [
             provider
             for provider in winml.ExecutionProviderCatalog.get_default().find_all_providers()

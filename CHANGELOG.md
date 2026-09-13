@@ -34,6 +34,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   mid-print is still watched and still warns you.
 - The Progress reports plugin only sends a report while its monitor is watching, so nothing
   arrives while the printer is idle or paused.
+- The Windows desktop app starts on Windows 11 24H2 and newer without the Windows App Runtime
+  installed, where it used to stop at a prompt to install it. Detection runs on the CPU until
+  you install it.
 
 ## [2.4.1] - 2026-09-09
 
