@@ -24,6 +24,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | Dashboard loads but the header shows "Reconnecting" | The engine WebSocket cannot connect, usually a proxy that does not forward WebSockets, or a rewritten `Origin` | Check the proxy forwards upgrade headers, then see [origin checking](deployment.md#origin-checking) |
 | First launch of the desktop app is blocked | The builds are unsigned | On macOS, open Privacy & Security in System Settings and click **Open Anyway**. On Windows, choose **More info** and then **Run anyway** |
 | The desktop app opens an empty white window | Its server did not start. 2.3.7 and 2.3.8 on macOS always hit this, because Core ML could not load the model from a data directory whose path contains a space | Update to 2.3.9 or later, where the window reports what failed and shows the end of the log ([logs](#getting-logs-and-diagnostics)) |
+| The Windows desktop app closes straight away without a window | Without a GPU driver, as in most virtual machines, Windows offers its Basic Render Driver as a GPU and versions before 2.4.2 crashed running the model on it | Update to 2.4.2 or later, or install the GPU driver |
 | Container restarts repeatedly | Usually an unwritable `/data` volume | Check the volume mount and its permissions, then read `docker logs printguard` |
 
 ## Cameras and video

@@ -37,6 +37,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - The Windows desktop app starts on Windows 11 24H2 and newer without the Windows App Runtime
   installed, where it used to stop at a prompt to install it. Detection runs on the CPU until
   you install it.
+- The Windows desktop app starts on a PC without a GPU driver, such as a virtual machine, where
+  it used to close straight away.
 
 ## [2.4.1] - 2026-09-09
 

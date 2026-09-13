@@ -72,13 +72,17 @@ async def test_runtimes_agree_on_classification() -> None:
     assert drift < min(result["margin"] for result in classifications) / 2
 
 
-def _ep_device(ep_name: str, vendor: str, device_type: str, ep_metadata: dict[str, str]) -> SimpleNamespace:
+def _ep_device(
+    ep_name: str, vendor: str, device_type: str, ep_metadata: dict[str, str], vendor_id: int = 0, device_id: int = 0
+) -> SimpleNamespace:
     """Builds a stand-in for one device an ONNX Runtime provider offers."""
     return SimpleNamespace(
         ep_name=ep_name,
         ep_vendor=vendor,
         ep_metadata=ep_metadata,
-        device=SimpleNamespace(type=SimpleNamespace(name=device_type), metadata={}),
+        device=SimpleNamespace(
+            type=SimpleNamespace(name=device_type), metadata={}, vendor_id=vendor_id, device_id=device_id
+        ),
     )
 
 
@@ -98,6 +102,20 @@ def test_the_accelerator_a_provider_offers_wins_and_is_the_one_named() -> None:
     ]
 
     assert [_device_label(device) for device in _execution_devices(devices)] == ["Intel GPU", "Intel CPU"]
+
+
+def test_windows_software_adapter_is_never_handed_to_directml() -> None:
+    """A Windows PC without a GPU driver must start on the CPU.
+
+    Windows offers its Basic Render Driver as a GPU when no driver is installed, and
+    DirectML ends the process when a session is created on it.
+    """
+    devices = [
+        _ep_device("CPUExecutionProvider", "Microsoft", "CPU", {}),
+        _ep_device("DmlExecutionProvider", "Microsoft", "GPU", {}, vendor_id=0x1414, device_id=0x8C),
+    ]
+
+    assert _execution_devices(devices) == []
 
 
 def test_provider_library_that_cannot_load_leaves_the_cpu(tmp_path: Path) -> None:
