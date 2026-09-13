@@ -6,11 +6,13 @@ import asyncio
 import fcntl
 import json
 import struct
+import sys
 import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import av
 import numpy as np
 import pytest
 
@@ -22,7 +24,13 @@ from printguard.server.inference import (
     _measure_concurrency,
     _register_library,
 )
-from printguard.server.platform import V4L2_CAP_DEVICE_CAPS, V4L2_CAP_VIDEO_CAPTURE, ServerPlatform, _v4l2_card
+from printguard.server.platform import (
+    V4L2_CAP_DEVICE_CAPS,
+    V4L2_CAP_VIDEO_CAPTURE,
+    ServerPlatform,
+    _v4l2_card,
+    _video_devices,
+)
 
 V4L2_CAP_META_CAPTURE = 0x00800000
 V4L2_CAPABILITY_FILLED = "16s32s32sIII12x"
@@ -116,6 +124,22 @@ def test_windows_software_adapter_is_never_handed_to_directml() -> None:
     ]
 
     assert _execution_devices(devices) == []
+
+
+def test_windows_device_listing_ends_without_failing_the_hub(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hub on Windows must start whether or not a camera is plugged in.
+
+    DirectShow ends every device listing with FFmpeg's immediate exit, which PyAV
+    raises as an error of its own rather than an ``OSError``.
+    """
+
+    def list_devices(*_args: object, **_kwargs: object) -> None:
+        raise av.error.ExitError(1414092869, "Immediate exit requested")
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(av, "open", list_devices)
+
+    assert _video_devices() == []
 
 
 def test_provider_library_that_cannot_load_leaves_the_cpu(tmp_path: Path) -> None:

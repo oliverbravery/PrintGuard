@@ -25,6 +25,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | First launch of the desktop app is blocked | The builds are unsigned | On macOS, open Privacy & Security in System Settings and click **Open Anyway**. On Windows, choose **More info** and then **Run anyway** |
 | The desktop app opens an empty white window | Its server did not start. 2.3.7 and 2.3.8 on macOS always hit this, because Core ML could not load the model from a data directory whose path contains a space | Update to 2.3.9 or later, where the window reports what failed and shows the end of the log ([logs](#getting-logs-and-diagnostics)) |
 | The Windows desktop app closes straight away without a window | Without a GPU driver, as in most virtual machines, Windows offers its Basic Render Driver as a GPU and versions before 2.4.2 crashed running the model on it | Update to 2.4.2 or later, or install the GPU driver |
+| The Windows desktop app shows "PrintGuard could not start" and the log ends in `Immediate exit requested: 'video=dummy'` | 2.4.1 treated the end of its camera listing as a failure | Update to 2.4.2 or later |
 | Container restarts repeatedly | Usually an unwritable `/data` volume | Check the volume mount and its permissions, then read `docker logs printguard` |
 
 ## Cameras and video

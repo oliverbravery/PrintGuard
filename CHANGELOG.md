@@ -39,6 +39,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   you install it.
 - The Windows desktop app starts on a PC without a GPU driver, such as a virtual machine, where
   it used to close straight away.
+- The Windows desktop app's server starts, where 2.4.1 showed "PrintGuard could not start" after
+  looking for cameras plugged into the PC.
 
 ## [2.4.1] - 2026-09-09
 
