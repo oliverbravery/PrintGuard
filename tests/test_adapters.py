@@ -900,7 +900,7 @@ def test_sanitise_printer_validates_provider() -> None:
         sanitise_printer("p1", {"provider": "nope"})
 
 
-def test_monitor_watching_fails_towards_watching() -> None:
+def test_monitor_watching_follows_the_last_reported_status() -> None:
     printers = PrinterRegistry()
     unlinked = sanitise_monitor("m1", {})
     assert monitor_watching(unlinked, printers), "no printer linked means always watched"
@@ -909,18 +909,23 @@ def test_monitor_watching_fails_towards_watching() -> None:
     printers.add(printer)
     linked = sanitise_monitor("m1", {"printer_id": "p1"})
     assert monitor_watching(linked, printers), "no state polled yet means watched"
-    for status, watched in {
-        "printing": True,
-        "offline": True,
-        "unknown": True,
-        "idle": False,
-        "paused": False,
-        "error": False,
-    }.items():
-        printer.device_state = {"status": status, "progress": 0.0, "job": None}
+    printer.observe({"status": "unknown", "progress": 0.0, "job": None})
+    assert monitor_watching(linked, printers), "nothing readable yet means watched"
+    for status, watched in (
+        ("printing", True),
+        ("offline", True),
+        ("unknown", True),
+        ("idle", False),
+        ("offline", False),
+        ("unknown", False),
+        ("printing", True),
+        ("paused", False),
+        ("error", False),
+    ):
+        printer.observe({"status": status, "progress": 0.0, "job": None})
         assert monitor_watching(linked, printers) is watched, f"{status} should be watched={watched}"
 
-    printer.device_state = {"status": "printing", "progress": 0.0, "job": None}
+    printer.observe({"status": "printing", "progress": 0.0, "job": None})
     linked["enabled"] = False
     assert not monitor_watching(linked, printers), "disabled monitors are never watched"
 

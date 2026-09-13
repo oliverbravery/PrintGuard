@@ -183,6 +183,47 @@ async def test_standby_gating() -> None:
     assert resumed > 0, "inference did not resume when printing started"
 
 
+async def test_lost_contact_keeps_the_last_reported_status(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.05)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    platform = FakePlatform(infer_s=0.02)
+    platform.device_status = "Operational"
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "settings.update", "patch": {"fault_grace_s": 0.1}})
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await asyncio.sleep(0.5)
+        platform.device_status = "Offline"
+        await asyncio.sleep(0.5)
+        printer_warnings = lambda: [e for e in events if e.get("event") == "warning" and "Cannot tell whether the printer" in e["message"]]
+        assert not engine.state_event()["monitors"][0]["watching"], "a printer switched off after a print must stay in standby"
+        assert not engine.cameras.values()[0].in_use, "a printer switched off after a print must not wake the camera"
+        assert not printer_warnings(), "a switched-off idle printer must not warn"
+
+        platform.device_status = "Printing"
+        await asyncio.sleep(0.5)
+        platform.device_status = "Offline"
+        await asyncio.sleep(0.5)
+        assert engine.state_event()["monitors"][0]["watching"], "contact lost mid-print must keep watching"
+        assert printer_warnings(), "contact lost mid-print must warn"
+
+
+async def test_a_printer_command_regates_without_waiting_for_the_poll(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        camera = engine.cameras.values()[0]
+        assert camera.in_use, "a printer not yet read should be watched"
+        platform.device_status = "Paused"
+        await engine.handle({"cmd": "printer.action", "id": printer_id, "action": "pause"})
+        assert not camera.in_use, "pausing from PrintGuard must stand the camera down straight away"
+
+
 async def test_zip_install_keeps_its_page_and_serves_it_on_request() -> None:
     platform = FakePlatform()
     engine = Engine(platform)

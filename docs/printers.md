@@ -44,11 +44,11 @@ saving. Then bind it to a monitor and choose whether a sustained defect alerts y
 print or cancels it.
 
 Linked printers report job name, progress, temperatures and state on every monitor that uses
-them, and they gate inference. A printer that positively reports "not printing" stands its monitors down, so
-an idle printer costs nothing. Losing contact with a printer never stands monitoring down, and
-neither does a state the adapter cannot read, so a monitor left watching an apparently idle
-printer warns and says which state it is getting. See
-[failing safely](architecture.md#failing-safely).
+them, and they gate inference. Monitoring runs while a printer reports it is printing and stands
+down when it reports idle, paused or an error, so an idle printer costs nothing. Losing contact
+or a state the adapter cannot read keeps whatever the printer last reported, meaning a printer
+switched off after a print stays in standby while one that drops off mid-print keeps being
+watched and warns you. See [failing safely](architecture.md#failing-safely).
 
 ## Sending prints
 

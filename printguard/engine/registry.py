@@ -165,6 +165,8 @@ class Printer:
         provider: Integration adapter id (octoprint, klipper, elegoo, prusa, bambu, …).
         config: Connection values matching the adapter's schema.
         device_state: Last normalised state polled from the service, or None.
+        reported_status: The last status the service could actually report,
+            kept through an outage, or None before the first.
     """
 
     id: str
@@ -172,11 +174,27 @@ class Printer:
     provider: str
     config: dict[str, Any]
     device_state: dict[str, Any] | None = None
+    reported_status: str | None = None
 
     @property
     def online(self) -> bool:
         """Whether the service last reported a reachable state."""
         return bool(self.device_state) and self.device_state["status"] not in ("offline", "unknown")
+
+    def observe(self, state: dict[str, Any]) -> bool:
+        """Records a state just read from the service.
+
+        Args:
+            state: The normalised state, offline when the service was unreachable.
+
+        Returns:
+            Whether it differs from the state before it.
+        """
+        changed = state != self.device_state
+        self.device_state = state
+        if self.online:
+            self.reported_status = state["status"]
+        return changed
 
     def public(self) -> dict[str, Any]:
         """Serialises the printer with its live state for the state event."""

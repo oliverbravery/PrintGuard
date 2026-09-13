@@ -92,11 +92,7 @@ class Watchdog:
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def poll_devices(self) -> None:
-        """Periodically refreshes registered printer states.
-
-        A state change re-syncs which cameras are scheduled, so inference
-        stops while a printer is idle or paused and resumes when it prints.
-        """
+        """Periodically refreshes registered printer states."""
         while True:
             changed = False
             for printer in self._engine.printers.values():
@@ -108,16 +104,23 @@ class Watchdog:
                     snapshot = state.public()
                 except Exception:
                     snapshot = DeviceState(DeviceStatus.OFFLINE).public()
-                if printer.device_state != snapshot:
-                    printer.device_state = snapshot
+                if printer.observe(snapshot):
                     changed = True
                     self._engine.emit({"event": "device", "printer_id": printer.id, **snapshot})
             if changed:
-                self._engine.cameras.sync_in_use(self._engine.monitors, self._engine.printers)
-                for monitor in self._engine.monitors.values():
-                    if not monitor_watching(monitor, self._engine.printers):
-                        self._streaks.pop(monitor["id"], None)
+                self.follow_printers()
             await asyncio.sleep(DEVICE_POLL_S)
+
+    def follow_printers(self) -> None:
+        """Re-syncs which cameras are scheduled after a printer's state changed.
+
+        Inference stops while a printer is idle or paused and resumes when it
+        prints, and a monitor that stands down drops its defect streak.
+        """
+        self._engine.cameras.sync_in_use(self._engine.monitors, self._engine.printers)
+        for monitor in self._engine.monitors.values():
+            if not monitor_watching(monitor, self._engine.printers):
+                self._streaks.pop(monitor["id"], None)
 
     async def watch_health(self) -> None:
         """Warns when a watched camera drops out or a printer stops reporting.
@@ -134,21 +137,21 @@ class Watchdog:
         stalled - frozen feeds must not pass for monitoring. One that keeps
         dropping and returning clears the grace period every time yet is only
         watching part of the print, so the share of the last COVERAGE_WINDOW_S
-        it delivered frames for is warned on separately. Printer health is
-        checked for every enabled monitor, since a printer that reports
-        nothing usable is the reason its monitor is watching in the first
-        place.
+        it delivered frames for is warned on separately. A printer that
+        reports nothing usable only counts while its monitor is watching,
+        since one switched off after a print leaves its monitor in standby.
         """
         while True:
             now = time.monotonic()
             grace = self._engine.settings["fault_grace_s"]
             for monitor in list(self._engine.monitors.values()):
                 mid = monitor["id"]
+                watching = monitor_watching(monitor, self._engine.printers)
                 printer = self._engine.printers.get(monitor["printer_id"]) if monitor.get("printer_id") else None
                 if monitor.get("enabled") and printer is not None:
                     await self._edge(
                         f"device:{mid}",
-                        printer.online,
+                        printer.online or not watching,
                         now,
                         grace,
                         monitor,

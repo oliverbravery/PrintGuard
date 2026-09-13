@@ -317,12 +317,15 @@ A monitor's watching state gates inference
 | Linked printer reports | Watched? | Why |
 |---|---|---|
 | No printer linked | Yes | Nothing to gate on |
+| No state yet | Yes | Cannot tell, so watch |
 | `printing` | Yes | The job needs eyes |
-| No state yet, or `unknown` | Yes | Cannot tell, so watch |
-| `offline`, unreachable | Yes | Losing the signal must not stop monitoring |
 | `idle`, `paused`, `error` | No, standby | Positively not printing |
+| `offline`, `unknown`, unreachable | Whatever it last reported | Contact lost mid-print keeps watching, and a printer switched off after a print stays in standby |
 
-Only a positive "not printing" stands inference down. The watchdog loop then keeps the
+Only a positive "not printing" stands inference down, and only a positive "printing" wakes
+it again ([`Printer.observe`](../printguard/engine/registry.py) keeps the last status the
+service could report). A command sent from PrintGuard, such as a pause or starting a print
+from the library, re-reads the printer and re-gates straight away. The watchdog loop then keeps the
 pipeline honest. A condition has to hold for the grace period before it is announced, so a
 brief outage passes unremarked, and it is then repeated every thirty minutes for as long as
 it lasts. Recovery is announced once health has held.
@@ -331,7 +334,7 @@ it lasts. Recovery is announced once health has held.
 stateDiagram-v2
     direction LR
     [*] --> Watching
-    Standby --> Watching: printing, or contact lost
+    Standby --> Watching: positively printing
     Watching --> Standby: positively not printing
     Watching --> Faulting: fault
     Faulting --> Watching: recovered inside the grace period
@@ -349,9 +352,9 @@ The four watchdog conditions are a watched camera going offline, a watched camer
 online but producing no fresh frames, since a frozen RTSP feed must not pass for monitoring,
 a watched camera that delivered frames for under 90% of the last ten minutes, and a linked
 printer whose state cannot be read, whether it is unreachable or reporting something the
-adapter does not recognise. The last one is why the monitor is watching, and it means a
-defect could not pause the print, so it is checked for every enabled monitor rather than
-only for watched ones.
+adapter does not recognise. The last one only counts while the monitor is watching, where it
+means a defect could not pause the print. A printer switched off after a print leaves its
+monitor in standby and warns about nothing.
 
 The grace period is `settings.fault_grace_s`, two minutes by default, and it is clamped to
 between thirty seconds and fifteen minutes so it can be lengthened for a camera that drops

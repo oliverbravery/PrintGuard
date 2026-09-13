@@ -697,6 +697,7 @@ class Engine:
             await INTEGRATIONS[existing.provider].close(existing.config)
         if record["provider"] != existing.provider:
             existing.device_state = None
+            existing.reported_status = None
             self.prints.untag(existing.id)
             for camera in [c for c in self.cameras.values() if c.printer_id == existing.id]:
                 await self._drop_camera(camera.id)
@@ -742,9 +743,10 @@ class Engine:
         await self._refresh_device(printer, adapter)
 
     async def _refresh_device(self, printer: Printer, adapter: IntegrationAdapter) -> None:
-        """Re-reads a printer's state after a command changed it, and announces it."""
-        printer.device_state = (await adapter.fetch_state(self.platform.http, printer.config)).public()
+        """Re-reads a printer's state after a command changed it, announces it and re-gates its monitors."""
+        printer.observe((await adapter.fetch_state(self.platform.http, printer.config)).public())
         self.emit({"event": "device", "printer_id": printer.id, **printer.device_state})
+        self.watchdog.follow_printers()
 
     async def _cmd_printer_test(self, message: dict[str, Any]) -> None:
         adapter = INTEGRATIONS.get(message.get("provider") or "")

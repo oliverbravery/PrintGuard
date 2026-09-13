@@ -27,6 +27,14 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   and Home Assistant gets a temperature sensor per heater.
   [docs/printers.md](docs/printers.md#temperatures-and-preheat) has the details.
 
+### Fixed
+
+- A printer switched off or unreachable after a print leaves its monitor in standby, where
+  inference used to start again and run until the printer came back. A printer that drops off
+  mid-print is still watched and still warns you.
+- The Progress reports plugin only sends a report while its monitor is watching, so nothing
+  arrives while the printer is idle or paused.
+
 ## [2.4.1] - 2026-09-09
 
 ### Added

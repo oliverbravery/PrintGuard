@@ -32,18 +32,17 @@ _CLAMPS = {"threshold": (0.05, 1.0), "sensitivity": (0.2, 5.0), "consecutive": (
 def monitor_watching(monitor: dict[str, Any], printers: "PrinterRegistry") -> bool:
     """Whether monitoring should run for a monitor right now.
 
-    A monitor is watched unless its linked printer positively reports a
-    non-printing state. With no printer linked, no state polled yet, or an
-    unreachable printer the monitor stays watched - failing towards watching
-    is the safe direction.
+    A monitor is watched unless its linked printer last positively reported a
+    non-printing state. An unreachable printer or a state the adapter cannot
+    read keeps that last answer, so contact lost mid-print keeps watching
+    while a printer switched off after a print stays in standby. With no
+    printer linked or nothing read yet the monitor is watched - failing
+    towards watching is the safe direction.
     """
     if not monitor.get("enabled"):
         return False
     printer = printers.get(monitor.get("printer_id") or "")
-    if printer is None:
-        return True
-    state = printer.device_state
-    return not state or state["status"] not in STANDBY_STATUSES
+    return printer is None or printer.reported_status not in STANDBY_STATUSES
 
 
 def _clamp(key: str, value: float) -> float:
