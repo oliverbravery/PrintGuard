@@ -54,7 +54,8 @@ node renderer.
 fed by a fake MJPEG server, one showing a healthy print and one a failing print, binds a
 monitor to each and expects only the failing one to raise an alert. The **launch** check runs
 it on pull requests into `main` in parallel for the container, the macOS app and the Windows
-app, which it drives inside the app's own window. To run it against a fresh hub:
+app, which it drives inside the app's own window through `PRINTGUARD_DEBUG_PORT`. To run it
+against a fresh hub:
 
 ```bash
 cd web && PRINTGUARD_URL=http://localhost:8000 npx playwright test --project=launch

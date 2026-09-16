@@ -129,7 +129,7 @@ jobs:
         shell: pwsh
         env:
           LOG_FILE: ${{ runner.temp }}\printguard.log
-          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: --remote-debugging-port=9222
+          PRINTGUARD_DEBUG_PORT: "9222"
         run: |
           Expand-Archive dist\PrintGuard-windows-x64.zip -DestinationPath $env:RUNNER_TEMP
           Start-Process "$env:RUNNER_TEMP\PrintGuard\PrintGuard.exe" -WorkingDirectory "$env:RUNNER_TEMP\PrintGuard"
