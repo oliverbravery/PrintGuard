@@ -106,7 +106,9 @@ essentials a change must respect:
   (`FakePlatform`); `tests/test_adapters.py` pins each adapter's exact request shapes;
   `tests/test_plugin_runtime.py` runs real JavaScript in the shipped QuickJS build to hold the
   hub's plugin sandbox to what it promises, and `web/tests/sandbox.spec.ts` does the same for
-  the browser sandbox through Playwright (`npm run test:sandbox`, chromium and webkit). New
+  the browser sandbox through Playwright (`npm run test:sandbox`, chromium and webkit).
+  `web/launch/launch.spec.ts` drives a running build from camera to alert, and CI runs it on
+  the container and both desktop apps before a release merges. New
   scheduler/monitor/watchdog/protocol behaviour extends the former; a new adapter is tested
   in the latter. Tests reach the engine through `engine.handle()`/`engine.request()`, not by
   poking internals.
@@ -149,10 +151,11 @@ indexes the set, so a new page goes in that table and in the README's Documentat
 Merging to `main` ships a release, so every PR carries its own metadata: a version bump and
 a matching top section in [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com)
 form), which is published **verbatim** as the GitHub release notes - write it for someone
-deciding whether to pull the new image, not about the implementation. Three required checks
-must pass: **tests**, the production **image** build, and **version** (bumped past the last
-release with a matching changelog section, dated the day it merges into `main` in London
-time). Docker is the only supported distribution.
+deciding whether to pull the new image, not about the implementation. Four required checks
+must pass: **tests**, the production **image** build, **launch** (on pull requests into
+`main`, the container and both desktop apps start and catch a failing print) and **version**
+(bumped past the last release with a matching changelog section, dated the day it merges into
+`main` in London time). Docker is the only supported distribution.
 
 Link every issue a PR resolves with a closing keyword (`Fixes #123`). The issue lifecycle
 hangs off that link: the merge reopens the issue rather than closing it, marks it
