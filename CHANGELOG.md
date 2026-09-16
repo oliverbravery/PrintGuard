@@ -26,6 +26,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   so a Prusa printer's heaters are read-only. The REST API and MCP server can set targets too,
   and Home Assistant gets a temperature sensor per heater.
   [docs/printers.md](docs/printers.md#temperatures-and-preheat) has the details.
+- The container reports its own health, so `docker ps` shows when the hub is ready and
+  `docker compose up --wait` waits for it.
 
 ### Fixed
 
