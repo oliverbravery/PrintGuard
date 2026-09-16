@@ -82,5 +82,6 @@ test("a failing print is caught end to end", async ({ page, baseURL, cameraUrl }
   await expect(tile(page, "Failing print").getByText("DEFECT DETECTED")).toBeVisible({ timeout: 90_000 });
   await expect(tile(page, "Healthy print").getByText("DEFECT DETECTED")).toBeHidden();
   await expect.poll(async () => (await risk(page, "Failing print")) - (await risk(page, "Healthy print"))).toBeGreaterThan(0);
+  await page.screenshot({ path: test.info().outputPath("dashboard.png") });
   expect(crashes).toEqual([]);
 });
