@@ -78,6 +78,8 @@ export interface PrintMeta {
   filament_g?: number | null;
   filament_mm?: number | null;
   printer_model?: string | null;
+  nozzle?: number | null;
+  bed?: number | null;
 }
 
 export interface PrintFile {

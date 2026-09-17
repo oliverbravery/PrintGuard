@@ -107,7 +107,7 @@ at `/api/v1/docs`.
 | `POST` | `/classify` | Classify a supplied frame, body `image/jpeg`. No registered camera needed |
 | `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
 | `GET` | `/prints/{id}` | One print file |
-| `GET` | `/prints/{id}/file` | Download a print file as it was uploaded |
+| `GET` | `/prints/{id}/file` | Download a print file as the library keeps it |
 | `GET` | `/events` | Recent alerts, warnings, device changes and errors |
 
 </details>
@@ -140,7 +140,7 @@ at `/api/v1/docs`.
 | `DELETE` | `/cameras/{id}` | Remove a camera |
 | `POST` | `/cameras/discover` | List attachable, unregistered sources |
 | `POST` | `/cameras/refresh-printers` | Register cameras newly exposed by registered printers |
-| `POST` | `/prints?filename=` | Upload a sliced file as the raw request body. `name` and a comma-separated `printer_ids` are optional |
+| `POST` | `/prints?filename=` | Upload a sliced file as the raw request body. `name`, a comma-separated `printer_ids` and first layer `nozzle` and `bed` temperatures are optional |
 | `PATCH` | `/prints/{id}` | Rename a print file or change the printers it is tagged for |
 | `DELETE` | `/prints/{id}` | Remove a print file |
 | `PATCH` | `/settings` | Update settings, for example notifiers |

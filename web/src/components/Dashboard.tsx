@@ -21,6 +21,7 @@ import { SettingsDialog } from "./SettingsDialog";
 import { rectSortingStrategy, Sortable } from "./Sortable";
 import { StatsPage } from "./StatsPage";
 import { UpdateDialog } from "./UpdateDialog";
+import { UploadSheet } from "./UploadSheet";
 
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
@@ -65,7 +66,7 @@ function Toasts() {
 }
 
 export function Dashboard() {
-  const { engine, dialog, detailId, statsMonitorId, printId, customising, mutateLayout, background } = useStore();
+  const { engine, dialog, detailId, statsMonitorId, printId, staged, customising, mutateLayout, background } = useStore();
   const monitors = engine?.monitors ?? [];
   const { visible } = applyLayout(tiles(engine), section(engine?.settings.layout, "monitors"));
   const detail = monitors.find((m) => m.id === detailId);
@@ -122,6 +123,7 @@ export function Dashboard() {
       {detail && <DetailPanel monitor={detail} />}
       {stats && <StatsPage monitor={stats} />}
       {print && <PrintViewer print={print} />}
+      {staged.length > 0 && <UploadSheet />}
       <Toasts />
       <MobileActionBar />
     </div>

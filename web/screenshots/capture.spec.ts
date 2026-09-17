@@ -27,9 +27,9 @@ const printer = (id: string, name: string, provider: string, status: string, pro
   device_state: { status, progress, job, remaining_s, nozzle: { actual: nozzle - 0.4, target: nozzle }, bed: { actual: bed + 0.2, target: bed } },
 });
 
-const print = (id: string, name: string, ext: string, size: number, printer_ids: string[], meta: PrintFile["meta"], thumbnail = true): PrintFile => ({
+const print = (id: string, name: string, ext: string, size: number, printer_ids: string[], meta: PrintFile["meta"]): PrintFile => ({
   id, name, filename: `${name}.${ext}`, ext, size, printer_ids, uploaded: Date.now() / 1000 - 3600 * (1 + printer_ids.length), meta,
-  thumbnail: thumbnail ? "image/png" : null,
+  thumbnail: "image/png",
 });
 
 const INTEGRATIONS = [
@@ -70,9 +70,9 @@ function engine(): EngineState {
       printer("p2", "Ender 3 V3", "klipper", "paused", 62, "wall_bracket.gcode", 1500, 240, 85),
     ],
     prints: [
-      print("f1", "spiral_vase", "gcode", 4_812_339, ["p1"], { slicer: "PrusaSlicer 2.8.1", time_s: 6127, filament_g: 15.3, printer_model: "MK4S" }),
-      print("f2", "wall_bracket", "gcode", 2_104_880, ["p2"], { slicer: "OrcaSlicer 2.2.0", time_s: 3540, filament_g: 8.1, printer_model: "Creality Ender-3 V3" }),
-      print("f3", "cable_clip", "gcode", 611_002, [], { slicer: "Cura 5.7.0", time_s: 1260, filament_mm: 2100, printer_model: null }, false),
+      print("f1", "spiral_vase", "gcode", 4_812_339, ["p1"], { slicer: "PrusaSlicer 2.8.1", time_s: 6127, filament_g: 15.3, printer_model: "MK4S", nozzle: 215, bed: 60 }),
+      print("f2", "wall_bracket", "gcode", 2_104_880, ["p2"], { slicer: "OrcaSlicer 2.2.0", time_s: 3540, filament_g: 8.1, printer_model: "Creality Ender-3 V3", nozzle: 220, bed: 55 }),
+      print("f3", "cable_clip", "gcode", 611_002, [], { slicer: "Cura 5.7.0", time_s: 1260, filament_mm: 2100, printer_model: null, nozzle: 200, bed: 60 }),
     ],
     print_store: true,
     monitors: [
@@ -393,6 +393,7 @@ function crc32(data: Buffer): number {
 const THUMBNAILS: Record<string, Buffer> = {
   f1: png(220, 124, (x, y) => Math.abs(x - 110) < 34 + 16 * Math.sin(y / 18) && y > 10 && y < 114),
   f2: png(220, 124, (x, y) => (y > 30 && y < 50 && x > 40 && x < 180) || (x > 40 && x < 62 && y > 30 && y < 100)),
+  f3: png(220, 124, (x, y) => Math.abs(Math.hypot(x - 110, y - 62) - 40) < 9 && !(x > 130 && Math.abs(y - 62) < 14)),
 };
 
 function spiralVase(): string {

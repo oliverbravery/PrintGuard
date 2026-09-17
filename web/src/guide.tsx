@@ -170,8 +170,8 @@ export const GUIDE: GuideSection[] = [
     hubOnly: true,
     body: (
       <>
-        Drop sliced files onto the hub and keep them there, with the preview, print time and filament the slicer
-        wrote into each. Tag a file with the printers it was sliced for and it can only ever start on those. Send it
+        Drop sliced files onto the hub to preview their toolpath, name them and correct their temperatures before
+        they're uploaded. Each keeps the preview, print time and filament the slicer wrote into it. Tag a file with the printers it was sliced for and it can only ever start on those. Send it
         to an idle printer from the library or from the 3D viewer, which lets you orbit the toolpath layer by layer.
       </>
     ),

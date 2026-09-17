@@ -1,39 +1,11 @@
-import { useEffect, useRef, useState, type DragEvent } from "react";
-import { ACCEPT, ago, formatBytes, printerAccepts, summary } from "../prints";
+import { useRef, useState, type DragEvent } from "react";
+import { ACCEPT, ago, formatBytes, summary } from "../prints";
 import { useStore } from "../store";
-import { drawMissingPreviews } from "../toolpath";
-import type { PrintFile, Printer } from "../types";
+import type { PrintFile } from "../types";
 import { Dialog } from "./Dialog";
 import { NameField } from "./NameField";
+import { PrinterTags } from "./PrinterTags";
 import { SendToPrinter } from "./SendToPrinter";
-
-function PrinterTags({ selected, ext, onToggle }: { selected: string[]; ext?: string; onToggle: (id: string) => void }) {
-  const engine = useStore((s) => s.engine);
-  const printers = engine?.printers ?? [];
-  if (!engine || !printers.length) return <p className="mono text-[0.68rem] text-text-2">register a printer to tag files for it</p>;
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {printers.map((printer: Printer) => {
-        const accepts = ext === undefined || printerAccepts(engine, printer, ext);
-        const on = selected.includes(printer.id);
-        return (
-          <button
-            key={printer.id}
-            type="button"
-            className={`chip cursor-pointer hover:opacity-80 ${on ? "chip-accent" : ""} ${accepts ? "" : "opacity-40"}`}
-            aria-pressed={on}
-            disabled={!accepts}
-            title={accepts ? `${on ? "Untag" : "Tag"} for ${printer.name}` : `${printer.name} cannot print .${ext} files`}
-            onClick={() => onToggle(printer.id)}
-          >
-            {on ? "✓ " : ""}
-            {printer.name}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 function Thumbnail({ print }: { print: PrintFile }) {
   return (
@@ -88,11 +60,11 @@ function PrintRow({ print }: { print: PrintFile }) {
   );
 }
 
-function DropZone({ tags }: { tags: string[] }) {
-  const uploadPrints = useStore((s) => s.uploadPrints);
+function DropZone() {
+  const stagePrints = useStore((s) => s.stagePrints);
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
-  const take = (files: FileList | null) => files && uploadPrints(Array.from(files), tags);
+  const take = (files: FileList | null) => files && stagePrints(Array.from(files));
   const onDrop = (event: DragEvent) => {
     event.preventDefault();
     setOver(false);
@@ -108,7 +80,17 @@ function DropZone({ tags }: { tags: string[] }) {
       onDragLeave={() => setOver(false)}
       onDrop={onDrop}
     >
-      <input ref={input} type="file" accept={ACCEPT} multiple className="sr-only" onChange={(e) => take(e.target.files)} />
+      <input
+        ref={input}
+        type="file"
+        accept={ACCEPT}
+        multiple
+        className="sr-only"
+        onChange={(e) => {
+          take(e.target.files);
+          e.target.value = "";
+        }}
+      />
       <p className="text-sm text-text-0">
         Drop sliced files here, or{" "}
         <button type="button" className="text-accent underline hover:opacity-80" onClick={() => input.current?.click()}>
@@ -123,21 +105,15 @@ function DropZone({ tags }: { tags: string[] }) {
 export function PrintsDialog() {
   const { engine, openDialog, uploads } = useStore();
   const [filter, setFilter] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
   const close = () => openDialog(null);
   const printers = engine?.printers ?? [];
   const library = engine?.prints ?? [];
   const prints = library.filter((p) => !filter || p.printer_ids.includes(filter)).sort((a, b) => b.uploaded - a.uploaded);
-  useEffect(() => drawMissingPreviews(library), [library]);
   return (
     <Dialog title="Print library" size="wide" fixed onClose={close}>
       <div className="flex h-full min-h-0 flex-col gap-4">
         <div className="space-y-2.5">
-          <DropZone tags={tags} />
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="label">Tag uploads for</span>
-            <PrinterTags selected={tags} onToggle={(id) => setTags((t) => (t.includes(id) ? t.filter((p) => p !== id) : [...t, id]))} />
-          </div>
+          <DropZone />
           {uploads.map((upload) => (
             <div
               key={upload.id}

@@ -52,10 +52,17 @@ watched and warns you. See [failing safely](architecture.md#failing-safely).
 
 ## Sending prints
 
-The print library holds sliced files on the hub. Open **Prints** in the header, drop files in or
-browse for them, and each keeps the preview, estimated time, filament and printer model its
-slicer wrote into it. Cura and a few others write no preview, so PrintGuard draws one from the
-toolpath instead. Open a file to orbit that toolpath in 3D, layer by layer.
+The print library holds sliced files on the hub. Open **Prints** in the header and drop files in
+or browse for them. Each one opens in a panel that draws its toolpath on your device before
+anything is uploaded, where you can name it, tag it and correct its first layer nozzle and bed
+temperatures. Every other print temperature the slicer set moves by the same amount, while the
+temperatures a start gcode probes or wipes at stay put. Binary gcode keeps the temperatures it
+was sliced with.
+
+Each file keeps the preview, estimated time, filament and printer model its slicer wrote into it.
+Cura and a few others write no preview, so your browser draws one and adds it to the gcode as
+it's uploaded. A file uploaded through the REST API without a preview shows its format
+instead. Open a file to orbit its toolpath in 3D, layer by layer.
 
 Tag a file with the printers it was sliced for and it can only start on one of those. A file
 with no tags can go to any printer whose service takes the format. Either way the printer has to

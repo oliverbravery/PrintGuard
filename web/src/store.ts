@@ -9,7 +9,8 @@ import { play, playFile } from "./sound";
 import { resumePublishers } from "./stream";
 import { applyTheme, measureCover } from "./theme";
 import { openExternally } from "./urls";
-import { acceptedTags, extOf, uploadPrint } from "./prints";
+import { extOf, FORMATS, sendPrint, type PrintDraft } from "./prints";
+import { withPreview } from "./toolpath";
 import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
@@ -89,6 +90,11 @@ export interface Upload {
   name: string;
   progress: number;
 }
+
+export interface StagedPrint {
+  id: number;
+  file: File;
+}
 export type SettingsTabId = "appearance" | "alerts" | "plugins" | "mqtt" | "updates" | "api" | "advanced";
 
 interface PgStore {
@@ -112,6 +118,7 @@ interface PgStore {
   statsMonitorId: string | null;
   printId: string | null;
   uploads: Upload[];
+  staged: StagedPrint[];
   historyData: Record<string, MonitorHistory | null>;
   snapshotCache: Record<string, string>;
   dialog: DialogKind;
@@ -154,7 +161,9 @@ interface PgStore {
   openDetail(id: string | null): void;
   openStats(id: string | null): void;
   openPrint(id: string | null): void;
-  uploadPrints(files: File[], printerIds: string[]): void;
+  stagePrints(files: File[]): void;
+  unstage(id: number): void;
+  uploadPrint(draft: PrintDraft): void;
   fetchSnapshot(monitorId: string, id: string): void;
   clearCreatedToken(): void;
   testPrinter(provider: string, config: Record<string, string>): void;
@@ -609,6 +618,7 @@ export const useStore = create<PgStore>((set, get) => {
     statsMonitorId: null,
     printId: null,
     uploads: [],
+    staged: [],
     historyData: {},
     snapshotCache: {},
     dialog: null,
@@ -777,19 +787,28 @@ export const useStore = create<PgStore>((set, get) => {
       set({ printId });
     },
 
-    uploadPrints(files, printerIds) {
-      const engine = get().engine;
-      if (!engine) return;
+    stagePrints(files) {
+      const staged: StagedPrint[] = [];
       for (const file of files) {
-        const id = ++uploadSeq;
-        const tags = acceptedTags(engine, printerIds, extOf(file.name));
-        set((s) => ({ uploads: [...s.uploads, { id, name: file.name, progress: 0 }] }));
-        uploadPrint(file, tags, (progress) =>
-          set((s) => ({ uploads: s.uploads.map((u) => (u.id === id ? { ...u, progress } : u)) })),
-        )
-          .catch((err: Error) => get().toast("error", `${file.name}: ${err.message}`))
-          .finally(() => set((s) => ({ uploads: s.uploads.filter((u) => u.id !== id) })));
+        if (FORMATS.includes(extOf(file.name))) staged.push({ id: ++uploadSeq, file });
+        else get().toast("error", `${file.name} is not a sliced file`);
       }
+      set((s) => ({ staged: [...s.staged, ...staged] }));
+    },
+
+    unstage(id) {
+      set((s) => ({ staged: s.staged.filter((p) => p.id !== id) }));
+    },
+
+    uploadPrint(draft) {
+      const id = ++uploadSeq;
+      set((s) => ({ uploads: [...s.uploads, { id, name: draft.name || draft.file.name, progress: 0 }] }));
+      (draft.drawPreview ? withPreview(draft.file) : Promise.resolve(draft.file))
+        .then((body) =>
+          sendPrint(draft, body, (progress) => set((s) => ({ uploads: s.uploads.map((u) => (u.id === id ? { ...u, progress } : u)) }))),
+        )
+        .catch((err: Error) => get().toast("error", `${draft.file.name}: ${err.message}`))
+        .finally(() => set((s) => ({ uploads: s.uploads.filter((u) => u.id !== id) })));
     },
 
     fetchSnapshot(monitorId, id) {

@@ -190,9 +190,10 @@ for you.
 | **Cameras** | Printer webcams, USB cameras plugged into the hub, RTSP, RTMP, HTTP/MJPEG, WHEP, anything pushed to the bundled MediaMTX, and the browser's own camera |
 | **Alerts** | ntfy, Pushover, Telegram, Discord, and native notifications in the desktop app |
 
-Drop sliced files into the print library and they stay on the hub, with the preview, print time
-and filament the slicer wrote into them, or a preview drawn from the toolpath where it wrote none. Tag a file with the printers it was sliced for, then
-start it on one that is idle, from the library or from the 3D viewer. OctoPrint, Klipper and
+Drop sliced files into the print library to preview their toolpath, name them and correct their
+temperatures before they're uploaded. They stay on the hub with the preview, print time and
+filament the slicer wrote into them. Tag a file with the printers it was sliced for, then start it
+on one that is idle, from the library or from the 3D viewer. OctoPrint, Klipper and
 Elegoo take gcode, PrusaLink also takes bgcode and Bambu Lab takes a sliced 3mf.
 
 Connecting over Docker or HTTPS has a gotcha or two, as does linking an Elegoo, Prusa or Bambu

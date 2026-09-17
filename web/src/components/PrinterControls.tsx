@@ -4,8 +4,8 @@ import { useStore } from "../store";
 import type { DeviceState, Heater, PreheatPreset, Printer } from "../types";
 
 export const HEATERS = ["nozzle", "bed"] as const;
-type HeaterName = (typeof HEATERS)[number];
-const HEATER_MAX: Record<HeaterName, number> = { nozzle: 350, bed: 150 };
+export type HeaterName = (typeof HEATERS)[number];
+export const HEATER_MAX: Record<HeaterName, number> = { nozzle: 350, bed: 150 };
 
 export function activeJob(state: DeviceState | null | undefined): state is DeviceState {
   return state?.status === "printing" || state?.status === "paused";

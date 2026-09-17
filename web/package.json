@@ -18,6 +18,7 @@
     "acorn": "^8.18.0",
     "acorn-walk": "^8.3.5",
     "dompurify": "^3.4.14",
+    "fflate": "^0.8.3",
     "gcode-preview": "^2.18.0",
     "hls.js": "^1.6.16",
     "marked": "^18.0.5",

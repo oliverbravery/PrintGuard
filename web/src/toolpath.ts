@@ -1,10 +1,12 @@
 import type { GCodePreviewOptions, WebGLPreview } from "gcode-preview";
-import { log } from "./log";
-import type { PrintFile } from "./types";
 
 const PREVIEW_PX = 256;
 const PREVIEW_SCALE = 2;
 const PREVIEW_INK = 0x9a;
+const PREVIEW_LINE = 78;
+const HEADER_BYTES = 64 * 1024;
+const COMMENT = 0x3b;
+const NEWLINE = 0x0a;
 
 export async function drawToolpath(canvas: HTMLCanvasElement, gcode: string, options: GCodePreviewOptions): Promise<WebGLPreview> {
   const [{ init }, { Box3, Vector3 }] = await Promise.all([import("gcode-preview"), import("three")]);
@@ -58,25 +60,35 @@ function tint(source: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("the canvas gave no image"))), "image/png"));
 }
 
-const drawn = new Set<string>();
-let pending: Promise<unknown> = Promise.resolve();
-
-export function drawMissingPreviews(prints: PrintFile[]): void {
-  for (const print of prints) {
-    if (print.thumbnail || drawn.has(print.id)) continue;
-    drawn.add(print.id);
-    pending = pending.then(() => storePreview(print)).catch((err: Error) => log("warn", `could not draw a preview for ${print.name}:`, err.message));
-  }
+export async function withPreview(file: File): Promise<Blob> {
+  const encoded = await base64(await renderPreview(await file.text()));
+  const block = [
+    `; thumbnail begin ${PREVIEW_PX}x${PREVIEW_PX} ${encoded.length}`,
+    ...encoded.match(new RegExp(`.{1,${PREVIEW_LINE}}`, "g"))!.map((line) => `; ${line}`),
+    "; thumbnail end",
+    ";",
+    "",
+  ].join("\n");
+  const at = await afterHeader(file);
+  return new Blob([file.slice(0, at), block, file.slice(at)]);
 }
 
-async function storePreview(print: PrintFile): Promise<void> {
-  const gcode = await fetch(`api/prints/${print.id}/gcode`);
-  if (gcode.status === 404) return;
-  if (!gcode.ok) throw new Error(`HTTP ${gcode.status}`);
-  const stored = await fetch(`api/prints/${print.id}/thumbnail`, {
-    method: "PUT",
-    headers: { "Content-Type": "image/png" },
-    body: await renderPreview(await gcode.text()),
+async function afterHeader(file: File): Promise<number> {
+  const head = new Uint8Array(await file.slice(0, HEADER_BYTES).arrayBuffer());
+  let at = 0;
+  while (head[at] === COMMENT) {
+    const end = head.indexOf(NEWLINE, at);
+    if (end < 0) break;
+    at = end + 1;
+  }
+  return at;
+}
+
+function base64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
   });
-  if (!stored.ok) throw new Error(`HTTP ${stored.status}`);
 }
