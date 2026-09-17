@@ -7,7 +7,7 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.4.2] - 2026-09-10
+## [2.5.0] - 2026-09-17
 
 ### Added
 
@@ -31,6 +31,16 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - The container reports its own health, so `docker ps` shows when the hub is ready and
   `docker compose up --wait` waits for it.
 
+### Changed
+
+- Camera crops are square, since the model only ever watches a square of the view and ignored
+  the sides of anything wider. The crop editor shows the watched square before you set a crop.
+
+### Removed
+
+- The sensitivity setting, which only ever moved the same line as the alert threshold. The
+  REST API and MCP server's classify calls no longer take one.
+
 ### Fixed
 
 - A printer switched off or unreachable after a print leaves its monitor in standby, where
@@ -45,18 +55,6 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   it used to close straight away.
 - The Windows desktop app's server starts, where 2.4.1 showed "PrintGuard could not start" after
   looking for cameras plugged into the PC.
-
-### Changed
-
-- Camera crops are square, since the model only ever watches a square of the view and ignored
-  the sides of anything wider. The crop editor shows the watched square before you set a crop.
-
-### Removed
-
-- The sensitivity setting, which only ever moved the same line as the alert threshold. The
-  REST API and MCP server's classify calls no longer take one.
-
-### Fixed
 
 - A monitor left on its default settings could never raise an alert, since its score topped
   out at 0.68 under the 0.75 threshold. The score is now the model's own confidence that the
