@@ -653,6 +653,16 @@ dialog.modal::backdrop {
   }
 }
 
+.modal-center > .panel {
+  border-radius: 10px 10px 0 0;
+}
+
+@media (min-width: 640px) {
+  .modal-center > .panel {
+    border-radius: 6px;
+  }
+}
+
 .modal-sheet {
   align-items: stretch;
   justify-content: flex-end;
