@@ -3,24 +3,27 @@
 Every slicer writes its estimates, the printer it sliced for and a preview
 image into the file it produces: as comment lines in text gcode, as blocks in
 Prusa's binary gcode, and as files inside a sliced Bambu Studio or Orca 3mf.
-This pulls those out so the library can show a print without rendering it.
+This pulls those out so the library can show a print without rendering it, and
+moves the temperatures a file prints at when the slicer got them wrong.
 Nothing here touches a platform.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import re
 import struct
 import zipfile
 import zlib
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 HEAD_BYTES = 4 * 1024 * 1024
 TAIL_BYTES = 512 * 1024
 PLATE_GCODE = re.compile(r"^Metadata/plate_(\d+)\.gcode$")
+PLATE_GCODE_NAME = "Metadata/plate_{plate}.gcode"
 PLATE_IMAGE = "Metadata/plate_{plate}.png"
 BGCODE_MAGIC = b"GCDE"
 IMAGE_TYPES = {"png": "image/png", "jpg": "image/jpeg"}
@@ -43,6 +46,24 @@ _GRAMS_KEYS = ("total filament weight [g]", "total filament used [g]", "filament
 _LENGTH_KEYS = ("total filament length [mm]", "filament used [mm]", "Filament used")
 _PRINTER_KEYS = ("printer_model", "TARGET_MACHINE.NAME")
 _SLICER_KEYS = ("Producer",)
+_TEMPERATURE_KEYS = {
+    "nozzle": ("first_layer_temperature", "nozzle_temperature_initial_layer", "temperature", "nozzle_temperature"),
+    "bed": ("first_layer_bed_temperature", "bed_temperature"),
+}
+_DEGREES = rb"\d+(?:\.\d+)?"
+_SETPOINT = {
+    "nozzle": re.compile(rb"(\nM10[49]\b[^;\n]*?[ \t]S)(" + _DEGREES + rb")"),
+    "bed": re.compile(rb"(\nM1[49]0\b[^;\n]*?[ \t]S)(" + _DEGREES + rb")"),
+}
+_MACRO = re.compile(rb"^[A-Za-z_]{2}[A-Za-z0-9_]*[ \t][^;\n]*", re.M)
+_MACRO_PARAM = {
+    "nozzle": re.compile(rb"(?<=[ \t])((?:EXTRUDER|HOTEND|NOZZLE)(?:_TEMP(?:ERATURE)?)?=)(" + _DEGREES + rb")", re.I),
+    "bed": re.compile(rb"(?<=[ \t])(BED(?:_TEMP(?:ERATURE)?)?=)(" + _DEGREES + rb")", re.I),
+}
+_CONFIG = {
+    heater: re.compile(rb"(\n; (?:" + b"|".join(key.encode() for key in keys) + rb") = )(" + _DEGREES + rb"(?:," + _DEGREES + rb")*)")
+    for heater, keys in _TEMPERATURE_KEYS.items()
+}
 
 
 @dataclass
@@ -51,8 +72,10 @@ class Sliced:
 
     Attributes:
         meta: The slicer, the estimated time in seconds, the filament in grams
-            and in millimetres, and the printer model it was sliced for, each
-            None where the file does not say.
+            and in millimetres, the printer model it was sliced for and the
+            first layer's nozzle and bed temperatures, each None where the file
+            does not say. Binary gcode never reports a temperature, since its
+            temperatures cannot be moved.
         thumbnail: The largest preview image the file carries, or None.
         thumbnail_type: The image's media type.
     """
@@ -88,6 +111,41 @@ def inspect(data: bytes, ext: str) -> Sliced:
     return _text(data)
 
 
+def retemper(data: bytes, ext: str, targets: dict[str, float]) -> bytes:
+    """Moves a sliced file's print temperatures so its first layer heats to each target.
+
+    Every set-point at one of the slicer's print temperatures moves by the same
+    amount, so a hotter first layer stays hotter, while the temperatures a
+    start gcode probes or wipes at stay where they are. A file whose slicer
+    lists no print temperatures has every non-zero set-point moved.
+
+    Args:
+        data: The whole file.
+        ext: Its format.
+        targets: First-layer temperature in degrees Celsius per heater.
+
+    Returns:
+        The file with its temperatures moved.
+
+    Raises:
+        ValueError: If the file is binary gcode, never heats a heater named, or
+            a target is not above zero.
+    """
+    if ext == "bgcode":
+        raise ValueError("binary gcode's temperatures can't be changed, export it as text gcode instead")
+    if ext == "3mf":
+        return _replace_plate(data, lambda plate: retemper(plate, "gcode", targets))
+    found = _scan(data)[0]
+    for heater, target in targets.items():
+        first, listed = _temperature(data, found, heater)
+        if first is None:
+            raise ValueError(f"this file never heats the {heater}")
+        if target <= 0:
+            raise ValueError(f"a print needs its {heater} above 0°C")
+        data = _shift(data, heater, listed, target - first)
+    return data
+
+
 def plate_gcode(data: bytes) -> tuple[int, bytes]:
     """Finds the first sliced plate inside a Bambu Studio or Orca 3mf.
 
@@ -109,17 +167,47 @@ def plate_gcode(data: bytes) -> tuple[int, bytes]:
         raise ValueError("this 3mf is not a zip archive") from exc
 
 
+def _replace_plate(data: bytes, rewrite: Callable[[bytes], bytes]) -> bytes:
+    """Rewrites a 3mf's first sliced plate and the checksum Bambu Studio keeps beside it."""
+    plate, gcode = plate_gcode(data)
+    name = PLATE_GCODE_NAME.format(plate=plate)
+    gcode = rewrite(gcode)
+    output = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(data)) as source, zipfile.ZipFile(output, "w") as target:
+        for member in source.infolist():
+            if member.filename == name:
+                body = gcode
+            elif member.filename == f"{name}.md5":
+                body = hashlib.md5(gcode).hexdigest().upper().encode()
+            else:
+                body = source.read(member)
+            target.writestr(member, body)
+    return output.getvalue()
+
+
 def _member(data: bytes, name: str) -> bytes | None:
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         return archive.read(name) if name in archive.namelist() else None
 
 
 def _text(data: bytes) -> Sliced:
+    """Reads the comment lines of text gcode, and the temperatures it heats to."""
+    found, slicer, thumbnails = _scan(data)
+    temperatures = {heater: _temperature(data, found, heater)[0] for heater in _TEMPERATURE_KEYS}
+    return _sliced(found, slicer, thumbnails, temperatures)
+
+
+def _scan(data: bytes) -> tuple[dict[str, str], str | None, list[tuple[int, str, bytes]]]:
     """Reads the comment lines of text gcode.
 
     Previews and header estimates sit at the top of the file and PrusaSlicer
     writes its estimates and config at the bottom, so only the head and tail
     are scanned and a large file costs nothing extra.
+
+    Returns:
+        Every ``key = value`` or ``key: value`` a comment carries, first one
+        winning, the slicer named on a header line, and each preview as its
+        pixel area, media type and image.
     """
     if len(data) > HEAD_BYTES + TAIL_BYTES:
         data = data[:HEAD_BYTES] + b"\n" + data[-TAIL_BYTES:]
@@ -153,7 +241,50 @@ def _text(data: bytes) -> Sliced:
             key, separator, value = segment.partition("=") if "=" in segment else segment.partition(":")
             if separator:
                 found.setdefault(key.strip(), value.strip())
-    return _sliced(found, slicer, thumbnails)
+    return found, slicer, thumbnails
+
+
+def _temperature(data: bytes, found: dict[str, str], heater: str) -> tuple[float | None, set[float] | None]:
+    """A heater's first-layer temperature and the print temperatures the slicer lists for it.
+
+    Args:
+        data: The whole text gcode.
+        found: What its comments carry.
+        heater: One of the keys of ``_TEMPERATURE_KEYS``.
+
+    Returns:
+        The first-layer temperature, or None when the file never heats the
+        heater, and the print temperatures the slicer's config lists, or None
+        when it lists none, which falls back to the first non-zero set-point.
+    """
+    listed = [float(value) for key in _TEMPERATURE_KEYS[heater] for value in _NUMBER.findall(found.get(key, "")) if float(value)]
+    if listed:
+        return listed[0], set(listed)
+    return next((value for value in _setpoints(data[:HEAD_BYTES], heater) if value), None), None
+
+
+def _setpoints(data: bytes, heater: str) -> Iterator[float]:
+    """Every temperature text gcode sets a heater to, in file order.
+
+    A set-point is an ``M104``/``M109`` or ``M140``/``M190`` with an ``S``
+    value, or a Klipper macro called with ``EXTRUDER=``, ``HOTEND=``,
+    ``NOZZLE=`` or ``BED=``, optionally suffixed ``_TEMP``.
+    """
+    commands = [(match.start(), match[2]) for match in _SETPOINT[heater].finditer(b"\n" + data)]
+    macros = [(line.start() + param.start(), param[2]) for line in _MACRO.finditer(data) for param in _MACRO_PARAM[heater].finditer(line[0])]
+    return (float(value) for _, value in sorted(commands + macros))
+
+
+def _shift(data: bytes, heater: str, listed: set[float] | None, delta: float) -> bytes:
+    """Moves a heater's print temperatures by ``delta``, in its set-points and its config comments."""
+
+    def moved(value: bytes) -> bytes:
+        degrees = float(value)
+        return b"%g" % max(0.0, degrees + delta) if degrees and (listed is None or degrees in listed) else value
+
+    data = _SETPOINT[heater].sub(lambda match: match[1] + moved(match[2]), b"\n" + data)[1:]
+    data = _MACRO.sub(lambda line: _MACRO_PARAM[heater].sub(lambda param: param[1] + moved(param[2]), line[0]), data)
+    return _CONFIG[heater].sub(lambda match: match[1] + b",".join(moved(value) for value in match[2].split(b",")), data)
 
 
 def _binary(data: bytes) -> Sliced:
@@ -194,16 +325,20 @@ def _binary(data: bytes) -> Sliced:
                 key, separator, value = line.partition("=")
                 if separator:
                     found.setdefault(key.strip(), value.strip())
-    return _sliced(found, None, thumbnails)
+    return _sliced(found, None, thumbnails, {})
 
 
-def _sliced(found: dict[str, str], slicer: str | None, thumbnails: list[tuple[int, str, bytes]]) -> Sliced:
+def _sliced(
+    found: dict[str, str], slicer: str | None, thumbnails: list[tuple[int, str, bytes]], temperatures: dict[str, float | None]
+) -> Sliced:
     meta = {
         "slicer": slicer or _first(found, _SLICER_KEYS, str),
         "time_s": _first(found, _TIME_KEYS, _seconds),
         "filament_g": _first(found, _GRAMS_KEYS, _grams),
         "filament_mm": _first(found, _LENGTH_KEYS, _millimetres),
         "printer_model": _first(found, _PRINTER_KEYS, lambda value: value.strip('"')),
+        "nozzle": temperatures.get("nozzle"),
+        "bed": temperatures.get("bed"),
     }
     if not thumbnails:
         return Sliced(meta)

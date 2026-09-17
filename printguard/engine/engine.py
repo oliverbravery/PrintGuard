@@ -24,7 +24,7 @@ from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import FileStore, Frame, Platform
 from .printers import PREHEAT_DEFAULTS, sanitise_presets, sanitise_printer, sanitise_targets
-from .prints import PREVIEW_TYPE, accepts, extension, printer_filename, sanitise_name, sanitise_printers
+from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers
 from .registry import (
     Camera,
     CameraRegistry,
@@ -119,7 +119,6 @@ class Engine:
             "printer.cameras.refresh": self._cmd_refresh_printer_cameras,
             "print.add": self._cmd_print_add,
             "print.update": self._cmd_print_update,
-            "print.preview": self._cmd_print_preview,
             "print.remove": self._cmd_print_remove,
             "print.start": self._cmd_print_start,
             "monitor.add": self._cmd_monitor_add,
@@ -737,8 +736,11 @@ class Engine:
         printer = self.printers.get(message["id"])
         if not printer:
             raise KeyError(f"no printer {message['id']}")
+        targets = sanitise_targets(message)
+        if not targets:
+            raise ValueError("a heat command names a nozzle or bed target")
         adapter = INTEGRATIONS[printer.provider]
-        for heater, target in sanitise_targets(message).items():
+        for heater, target in targets.items():
             await adapter.heat(self.platform.http, printer.config, heater, target)
         await self._refresh_device(printer, adapter)
 
@@ -774,6 +776,7 @@ class Engine:
 
         The bytes are far too large for the protocol, so whoever took the upload
         stored them under the id it minted and only the record travels here. A
+        ``nozzle`` or ``bed`` target rewrites the stored file to heat to it. A
         file that turns out not to be printable is removed again, so nothing
         the library does not list is left behind.
         """
@@ -793,6 +796,10 @@ class Engine:
         )
         try:
             data = await files.read(record.file_key)
+            targets = sanitise_targets(message)
+            if targets:
+                data = await asyncio.to_thread(gcode.retemper, data, ext, targets)
+                await files.store(record.file_key, _chunks(data))
             sliced = await asyncio.to_thread(gcode.inspect, data, ext)
             record.size = len(data)
             record.name = sanitise_name(message.get("name"), filename.rsplit(".", 1)[0])
@@ -816,21 +823,6 @@ class Engine:
             record.name = sanitise_name(patch["name"], record.name)
         if "printer_ids" in patch:
             record.printer_ids = sanitise_printers(patch["printer_ids"], record.ext, self.printers)
-
-    async def _cmd_print_preview(self, message: dict[str, Any]) -> None:
-        """Records the preview image the platform's store already holds.
-
-        A file whose slicer wrote no preview is drawn from its toolpath by
-        whoever can render one, and stored under the key an embedded preview
-        would have used, so nothing downstream can tell the two apart.
-
-        Raises:
-            KeyError: If there is no such file in the library.
-        """
-        record = self.prints.get(message["id"])
-        if not record:
-            raise KeyError(f"no print {message['id']}")
-        record.thumbnail = PREVIEW_TYPE
 
     async def _cmd_print_remove(self, message: dict[str, Any]) -> None:
         record = self.prints.remove(message["id"])

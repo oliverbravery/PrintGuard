@@ -57,14 +57,8 @@ def sanitise_targets(fields: dict[str, Any]) -> dict[str, float]:
 
     Returns:
         Heater name to target in degrees Celsius, for the heaters named.
-
-    Raises:
-        ValueError: If no heater is named.
     """
-    targets = {heater: _target(heater, fields[heater]) for heater in HEATERS if fields.get(heater) is not None}
-    if not targets:
-        raise ValueError("a heat command names a nozzle or bed target")
-    return targets
+    return {heater: _target(heater, fields[heater]) for heater in HEATERS if fields.get(heater) is not None}
 
 
 def sanitise_presets(raw: Any) -> list[dict[str, Any]]:

@@ -7,11 +7,13 @@ routes and the versioned REST API so an upload is handled one way.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, Field
 
 from ..engine import gcode
 from ..engine.engine import Engine
@@ -20,9 +22,19 @@ from ..engine.registry import PrintFile
 from .platform import DiskFileStore
 
 MAX_PRINT_BYTES = 512 * 1024 * 1024
-MAX_PREVIEW_BYTES = 2 * 1024 * 1024
+MAX_SAMPLE_BYTES = gcode.HEAD_BYTES + gcode.TAIL_BYTES + 1
 ADD_TIMEOUT_S = 120.0
 THUMBNAIL_CACHE_CONTROL = "private, max-age=31536000, immutable"
+
+
+class PrintUpload(BaseModel):
+    """How an uploaded file enters the library, given as query parameters beside its raw body."""
+
+    filename: str = Field(description="The file's name, whose extension decides its format.")
+    name: str = Field("", description="Display name, the filename's stem when empty.")
+    printer_ids: str = Field("", description="Comma-separated printers to tag it for.")
+    nozzle: float | None = Field(None, description="First-layer nozzle temperature to rewrite the file to, in °C.")
+    bed: float | None = Field(None, description="First-layer bed temperature to rewrite the file to, in °C.")
 
 
 def store_of(engine: Engine) -> DiskFileStore:
@@ -44,15 +56,12 @@ def record_of(engine: Engine, print_id: str) -> PrintFile:
     return record
 
 
-async def receive_print(engine: Engine, filename: str, name: str, printer_ids: list[str], body: AsyncIterator[bytes]) -> PrintFile:
+async def receive_print(engine: Engine, upload: PrintUpload, body: AsyncIterator[bytes]) -> PrintFile:
     """Streams an upload into the store and registers it with the engine.
 
     Args:
         engine: The hub's engine.
-        filename: The name the file was uploaded as, whose extension decides
-            its format.
-        name: Display name, or empty for the filename's stem.
-        printer_ids: Printers to tag it for.
+        upload: What the file is called, who it is for and what it heats to.
         body: The bytes as they arrive.
 
     Returns:
@@ -62,7 +71,7 @@ async def receive_print(engine: Engine, filename: str, name: str, printer_ids: l
         HTTPException: 400 for a file the library does not take or the engine
             refuses, 413 for one over the size limit.
     """
-    filename = filename.rsplit("/", 1)[-1]
+    filename = upload.filename.rsplit("/", 1)[-1]
     try:
         ext = extension(filename)
     except ValueError as exc:
@@ -71,7 +80,15 @@ async def receive_print(engine: Engine, filename: str, name: str, printer_ids: l
     await store_of(engine).store(f"{print_id}.{ext}", _capped(body, MAX_PRINT_BYTES))
     try:
         await engine.request(
-            {"cmd": "print.add", "id": print_id, "filename": filename, "name": name, "printer_ids": printer_ids},
+            {
+                "cmd": "print.add",
+                "id": print_id,
+                "filename": filename,
+                "name": upload.name,
+                "printer_ids": [printer_id for printer_id in upload.printer_ids.split(",") if printer_id],
+                "nozzle": upload.nozzle,
+                "bed": upload.bed,
+            },
             timeout=ADD_TIMEOUT_S,
         )
     except RuntimeError as exc:
@@ -79,21 +96,31 @@ async def receive_print(engine: Engine, filename: str, name: str, printer_ids: l
     return record_of(engine, print_id)
 
 
-async def receive_preview(engine: Engine, print_id: str, body: AsyncIterator[bytes]) -> None:
-    """Keeps a preview drawn from a file's toolpath, for one the slicer wrote none into.
+async def inspect_sample(ext: str, body: AsyncIterator[bytes]) -> dict[str, Any]:
+    """Reads what a file says about itself from the head and tail the library reads.
+
+    The dashboard sends only those before a file is uploaded, so the upload
+    panel can show the slicer's estimates and temperatures while the file is
+    still on the user's device.
 
     Args:
-        engine: The hub's engine.
-        print_id: The library file the preview belongs to.
-        body: The PNG as it arrives.
+        ext: The file's format, or ``gcode`` for a 3mf's plate.
+        body: The file's first ``gcode.HEAD_BYTES``, a newline and its last
+            ``gcode.TAIL_BYTES``, or the whole file when it is smaller.
+
+    Returns:
+        The file's ``meta`` and whether it carries a ``thumbnail``.
 
     Raises:
-        HTTPException: 404 for a file the library does not hold, 413 for a
-            preview over the size limit.
+        HTTPException: 400 for a format the library does not take or a sample
+            it cannot read, 413 for one larger than the library reads.
     """
-    record = record_of(engine, print_id)
-    await store_of(engine).store(record.thumbnail_key, _capped(body, MAX_PREVIEW_BYTES))
-    await engine.request({"cmd": "print.preview", "id": print_id})
+    try:
+        extension(f"sample.{ext}")
+        sliced = await asyncio.to_thread(gcode.inspect, b"".join([chunk async for chunk in _capped(body, MAX_SAMPLE_BYTES)]), ext)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"meta": sliced.meta, "thumbnail": sliced.thumbnail is not None}
 
 
 async def _capped(body: AsyncIterator[bytes], limit: int) -> AsyncIterator[bytes]:
@@ -106,7 +133,7 @@ async def _capped(body: AsyncIterator[bytes], limit: int) -> AsyncIterator[bytes
 
 
 def file_response(engine: Engine, print_id: str) -> Response:
-    """The stored file as it was uploaded, for downloading."""
+    """The stored file, for downloading."""
     record = record_of(engine, print_id)
     return FileResponse(store_of(engine).path(record.file_key), media_type="application/octet-stream", filename=record.filename)
 

@@ -13,7 +13,7 @@ import logging
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -21,7 +21,7 @@ from ..engine.engine import Engine
 from ..engine.integrations import INTEGRATIONS
 from ..engine.notifiers import NOTIFIERS
 from ..engine.tokens import SCOPE_ORDER, expand_scope, hash_secret
-from .prints import file_response, receive_print
+from .prints import PrintUpload, file_response, receive_print
 
 logger = logging.getLogger(__name__)
 
@@ -422,24 +422,21 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         response_class=Response,
     )
     async def get_print_file(print_id: str, engine: Engine = Depends(get_engine)) -> Response:
-        """Downloads a print file as it was uploaded."""
+        """Downloads a print file as the library keeps it."""
         return file_response(engine, print_id)
 
     @api.post("/prints", operation_id="add_print", tags=["manage"], openapi_extra=UPLOAD_BODY)
     async def add_print(
         request: Request,
-        filename: str,
-        name: str = "",
-        printer_ids: str = "",
+        upload: Annotated[PrintUpload, Query()],
         engine: Engine = Depends(get_engine),
     ) -> dict[str, Any]:
         """Uploads a sliced file, sent as the raw body, into the print library.
 
-        ``filename`` names it and decides its format, ``name`` is the display
-        name and ``printer_ids`` a comma-separated list of printers to tag it for.
+        ``nozzle`` and ``bed`` rewrite the file so its first layer heats to them,
+        moving its other print temperatures by the same amount.
         """
-        tags = [printer_id for printer_id in printer_ids.split(",") if printer_id]
-        record = await receive_print(engine, filename, name, tags, request.stream())
+        record = await receive_print(engine, upload, request.stream())
         return record.public()
 
     @api.patch("/prints/{print_id}", operation_id="update_print", tags=["manage"])

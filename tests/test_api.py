@@ -403,7 +403,7 @@ async def test_rejected_command_is_400() -> None:
 
 
 async def test_print_library_over_rest(tmp_path) -> None:
-    from test_gcode import PRUSA
+    from test_gcode import PRUSA, PRUSA_HEATED
 
     from printguard.server.platform import DiskFileStore
 
@@ -440,6 +440,10 @@ async def test_print_library_over_rest(tmp_path) -> None:
         assert renamed.json()["name"] == "Boat v2" and renamed.json()["printer_ids"] == []
         assert (await client.delete(f"/prints/{record['id']}", headers=manage)).json() == []
         assert not list(tmp_path.iterdir()), "removing the record removes the file and its preview"
+
+        heated = await client.post("/prints?filename=part.gcode&nozzle=230&bed=70", content=PRUSA_HEATED, headers=octet)
+        assert heated.status_code == 200, heated.text
+        assert heated.json()["meta"]["nozzle"] == 230.0 and heated.json()["meta"]["bed"] == 70.0
 
 
 async def test_print_upload_is_capped(tmp_path, monkeypatch) -> None:
