@@ -1,5 +1,5 @@
+import { Bug } from "lucide-react";
 import type { ReactNode } from "react";
-import { BugIcon } from "./components/BugIcon";
 import type { DialogKind } from "./store";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
@@ -299,7 +299,7 @@ export const GUIDE: GuideSection[] = [
     title: "Something broken?",
     body: (
       <>
-        Report a bug from the <BugIcon className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" /> chip in the header,
+        Report a bug from the <Bug className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" aria-hidden /> chip in the header,
         anonymously, no account needed. A diagnostics bundle goes with it, with every credential stripped and no
         camera frames. Download the same bundle from that dialog to read it or send it somewhere else yourself.
       </>

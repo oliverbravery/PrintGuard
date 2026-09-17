@@ -9,9 +9,11 @@ import { DetailPanel } from "./DetailPanel";
 import { GettingStarted } from "./GettingStarted";
 import { GuideDialog } from "./GuideDialog";
 import { IntroDialog } from "./IntroDialog";
-import { Header, MobileActionBar } from "./Header";
+import { Header } from "./Header";
 import { MonitorDialog } from "./MonitorDialog";
 import { MonitorTile } from "./MonitorTile";
+import { MoreSheet } from "./MoreSheet";
+import { AppNav } from "./Nav";
 import { PluginPanel } from "./PluginPanel";
 import { PrintersDialog } from "./PrintersDialog";
 import { PrintsDialog } from "./PrintsDialog";
@@ -48,7 +50,7 @@ function Toasts() {
       ref={ref}
       popover="manual"
       aria-label="Notifications"
-      className="fixed inset-auto right-4 bottom-4 z-50 m-0 w-fit max-w-sm space-y-2 border-0 bg-transparent p-0 max-md:left-4 max-md:bottom-[calc(4.75rem+env(safe-area-inset-bottom))]"
+      className="fixed inset-auto right-4 bottom-4 z-50 m-0 w-fit max-w-sm space-y-2 border-0 bg-transparent p-0 max-sm:left-4 max-sm:bottom-[calc(5rem+env(safe-area-inset-bottom))]"
     >
       {toasts.map((toast) => (
         <div
@@ -74,7 +76,7 @@ export function Dashboard() {
   const print = engine?.prints.find((p) => p.id === printId);
   return (
     <div
-      className="min-h-screen"
+      className="app min-h-screen"
       data-painted={background ? "" : undefined}
       style={background ? ({ "--painted-image": `url("${background.image}")` } as React.CSSProperties) : undefined}
     >
@@ -87,7 +89,7 @@ export function Dashboard() {
       <main
         id="main"
         tabIndex={-1}
-        className="mx-auto max-w-[1500px] px-4 sm:px-6 py-5 max-md:pb-[calc(5rem+env(safe-area-inset-bottom))]"
+        className="mx-auto max-w-[1500px] px-4 py-5 sm:px-6"
       >
         {monitors.length === 0 ? (
           <GettingStarted />
@@ -120,12 +122,13 @@ export function Dashboard() {
       {dialog === "intro" && <IntroDialog />}
       {dialog === "report" && <ReportDialog />}
       {dialog === "demo" && <DemoDialog />}
+      {dialog === "more" && <MoreSheet />}
       {detail && <DetailPanel monitor={detail} />}
       {stats && <StatsPage monitor={stats} />}
       {print && <PrintViewer print={print} />}
       {staged.length > 0 && <UploadSheet />}
       <Toasts />
-      <MobileActionBar />
+      <AppNav />
     </div>
   );
 }

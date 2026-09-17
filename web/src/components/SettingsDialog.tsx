@@ -1,24 +1,17 @@
 import { useEffect, useState } from "react";
 import { type SettingsTabId, useStore } from "../store";
-import { applyTheme, beginPreview, endPreview, GLASS, GLASS_DEFAULT, PALETTES } from "../theme";
+import { applyTheme, beginPreview, endPreview, GLASS_DEFAULT, PALETTES } from "../theme";
 import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
 import { Dialog } from "./Dialog";
 import { PluginsTab } from "./PluginsTab";
 import { SettingsFooter } from "./SettingsFooter";
 import { SaveStatus } from "./SaveStatus";
 import { SchemaForm } from "./SchemaForm";
+import { SchemePicker } from "./SchemePicker";
 import { TestRow } from "./TestRow";
-import { GlassSliders } from "./GlassTuner";
 import { Slider } from "./Slider";
 import { ThemeEditor } from "./ThemeEditor";
 import { Toggle } from "./Toggle";
-
-const SCHEMES: { id: string; name: string; glyph: string }[] = [
-  { id: "system", name: "System", glyph: "◐" },
-  { id: "light", name: "Light", glyph: "☀" },
-  { id: "dark", name: "Dark", glyph: "☾" },
-  { id: "glass", name: "Glass", glyph: "◈" },
-];
 
 function Swatch({ colors }: { colors: CustomTheme["colors"] }) {
   return (
@@ -171,22 +164,7 @@ export function SettingsDialog() {
           ) : (
             <div className="space-y-4">
               <span className="label block">Theme</span>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {SCHEMES.map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => selectTheme(opt.id)}
-                    className={`flex flex-col items-center gap-1 rounded border px-2 py-3 transition-colors cursor-pointer ${
-                      theme === opt.id ? "border-accent bg-accent/5 text-text-0" : "border-line-0 text-text-1 hover:border-line-1"
-                    }`}
-                  >
-                    <span className="text-base leading-none">{opt.glyph}</span>
-                    <span className="text-xs">{opt.name}</span>
-                  </button>
-                ))}
-              </div>
-
-              {theme === GLASS && <GlassSliders />}
+              <SchemePicker />
 
               <div className="flex items-center justify-between">
                 <span className="label block">Custom themes</span>
