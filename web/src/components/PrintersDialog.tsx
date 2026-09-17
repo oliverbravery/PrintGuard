@@ -59,23 +59,25 @@ function PrinterRow({ printer }: { printer: Printer }) {
 
   return (
     <div className="panel overflow-hidden">
-      <div className="flex items-center gap-3 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
         <span className={`led ${printer.online ? "led-on" : "led-off"}`} />
-        <div className="flex-1 min-w-0 leading-tight">
+        <div className="min-w-0 grow basis-40 leading-tight">
           <div className="text-sm font-medium truncate">{printer.name}</div>
           <div className="mono text-[0.62rem] text-text-2 truncate">{providerLabel(integrations, printer.provider)}</div>
         </div>
-        <DeviceChip state={printer.device_state ?? undefined} />
-        <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
-          {open ? "Hide" : "Edit"}
-        </button>
-        <button
-          className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
-          disabled={isPending("printer.remove")}
-          onClick={() => send({ cmd: "printer.remove", id: printer.id })}
-        >
-          {isPending("printer.remove") ? "Removing…" : "Remove"}
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <DeviceChip state={printer.device_state ?? undefined} />
+          <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
+            {open ? "Hide" : "Edit"}
+          </button>
+          <button
+            className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
+            disabled={isPending("printer.remove")}
+            onClick={() => send({ cmd: "printer.remove", id: printer.id })}
+          >
+            {isPending("printer.remove") ? "Removing…" : "Remove"}
+          </button>
+        </div>
       </div>
       {open && meta && (
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">

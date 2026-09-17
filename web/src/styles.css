@@ -555,6 +555,19 @@ select.field {
 input[type="range"] {
   appearance: none;
   width: 100%;
+  height: 1.5rem;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-line-1);
+}
+
+input[type="range"]::-moz-range-track {
   height: 3px;
   border-radius: 2px;
   background: var(--color-line-1);
@@ -564,10 +577,10 @@ input[type="range"]::-webkit-slider-thumb {
   appearance: none;
   width: 14px;
   height: 14px;
+  margin-top: -5.5px;
   border-radius: 2px;
   background: var(--color-accent);
   border: none;
-  cursor: pointer;
 }
 
 input[type="range"]::-moz-range-thumb {
@@ -576,7 +589,6 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 2px;
   background: var(--color-accent);
   border: none;
-  cursor: pointer;
 }
 
 .corner {
@@ -891,6 +903,28 @@ video {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+@media (pointer: coarse) {
+  .btn {
+    min-height: 2.5rem;
+  }
+
+  .field {
+    font-size: 1rem;
+  }
+
+  button.chip,
+  .toggle {
+    position: relative;
+  }
+
+  button.chip::before,
+  .toggle::before {
+    content: "";
+    position: absolute;
+    inset: -0.6rem -0.25rem;
   }
 }
 

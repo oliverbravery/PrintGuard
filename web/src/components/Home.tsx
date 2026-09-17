@@ -141,7 +141,7 @@ export function Home() {
           <div className="flex-1" />
           <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#features" onClick={scrollToId("features")}>FEATURES</a>
           <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#install" onClick={scrollToId("install")}>INSTALL</a>
-          <a className="mono text-[0.66rem] text-text-2 transition-colors hover:text-accent" href={REPO_URL} target="_blank" rel="noreferrer">GITHUB ↗</a>
+          <a className="mono hidden whitespace-nowrap text-[0.66rem] text-text-2 transition-colors hover:text-accent min-[400px]:inline" href={REPO_URL} target="_blank" rel="noreferrer">GITHUB ↗</a>
           <button className="btn btn-primary" onClick={launch}>Live demo</button>
         </div>
       </nav>

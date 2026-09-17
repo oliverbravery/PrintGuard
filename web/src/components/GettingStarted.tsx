@@ -94,7 +94,7 @@ export function GettingStarted() {
 
   return (
     <div className="reveal grid place-items-center py-16 sm:py-20">
-      <div className="panel relative w-full max-w-xl p-7 sm:p-9">
+      <div className="panel relative w-full min-w-0 max-w-xl p-7 sm:p-9">
         <span className="corner corner-tl !border-text-2" />
         <span className="corner corner-tr !border-text-2" />
         <span className="corner corner-bl !border-text-2" />
