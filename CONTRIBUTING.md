@@ -50,6 +50,17 @@ The browser half of the plugin sandbox is only meaningful in a real engine, so
 if you touch anything under `web/public/plugin-sandbox.html`, `web/src/plugins.ts` or the
 node renderer.
 
+`web/launch/launch.spec.ts` checks a build the way a user meets it. It registers two cameras
+fed by a fake MJPEG server, one showing a healthy print and one a failing print, binds a
+monitor to each and expects only the failing one to raise an alert. The **launch** check runs
+it on pull requests into `main` in parallel for the container, the macOS app and the Windows
+app, which it drives inside the app's own window through `PRINTGUARD_DEBUG_PORT`. To run it
+against a fresh hub:
+
+```bash
+cd web && PRINTGUARD_URL=http://localhost:8000 npx playwright test --project=launch
+```
+
 ## Documentation is part of the change
 
 A change is not finished while a doc still describes the old behaviour. Treat the docs like
@@ -217,12 +228,13 @@ time. The check on a pull request into `main` compares it with today, and the re
 refuses a section dated any other day than its merge commit, so a release that waits a day
 needs its date moved on before it merges.
 
-A pull request can only merge once three required checks pass:
+A pull request can only merge once four required checks pass:
 
 | Check | Enforces |
 |---|---|
 | **tests** | The engine simulation suite |
 | **image** | Every production image variant builds, so a change that breaks an image can never reach `main` |
+| **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |
 | **version** | The version is bumped past the last release and has a matching `CHANGELOG.md` section dated the day it merges into `main`, London time, so every merge ships as a unique, documented, immutable version. Re-publishing an existing tag is refused |
 
 On merge, the [release workflow](.github/workflows/release.yml):

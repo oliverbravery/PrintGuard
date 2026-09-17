@@ -190,8 +190,11 @@ The hub checks GitHub releases once a day and the header's version chip turns in
 badge. Open it to read the changelog for any release, then update:
 
 ```bash
-docker compose pull && docker compose up -d
+docker compose pull && docker compose up -d --wait
 ```
+
+The image checks `/api/health` every 30 seconds, so `--wait` returns once the new hub is ready
+and `docker ps` shows it as healthy.
 
 PrintGuard never updates its own container, and deliberately never asks for the Docker
 socket. A process with that socket has root-equivalent control of the host, which is not a

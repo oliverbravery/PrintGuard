@@ -26,6 +26,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   so a Prusa printer's heaters are read-only. The REST API and MCP server can set targets too,
   and Home Assistant gets a temperature sensor per heater.
   [docs/printers.md](docs/printers.md#temperatures-and-preheat) has the details.
+- The container reports its own health, so `docker ps` shows when the hub is ready and
+  `docker compose up --wait` waits for it.
 
 ### Fixed
 
@@ -34,6 +36,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   mid-print is still watched and still warns you.
 - The Progress reports plugin only sends a report while its monitor is watching, so nothing
   arrives while the printer is idle or paused.
+- The Windows desktop app starts on Windows 11 24H2 and newer without the Windows App Runtime
+  installed, where it used to stop at a prompt to install it. Detection runs on the CPU until
+  you install it.
+- The Windows desktop app starts on a PC without a GPU driver, such as a virtual machine, where
+  it used to close straight away.
+- The Windows desktop app's server starts, where 2.4.1 showed "PrintGuard could not start" after
+  looking for cameras plugged into the PC.
 
 ## [2.4.1] - 2026-09-09
 

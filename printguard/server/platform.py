@@ -162,7 +162,7 @@ def _video_devices() -> list[tuple[str, str]]:
         with av.logging.Capture(local=True) as logs:
             try:
                 av.open(spec, format=container_format, options={"list_devices": "true"})
-            except OSError:
+            except av.error.FFmpegError:
                 pass
     finally:
         av.logging.set_level(previous)
