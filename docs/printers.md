@@ -216,6 +216,12 @@ Set `PRINTGUARD_CAMERAS=off` to leave them unregistered and add them by hand fro
 machine** instead. The desktop app works that way already, since a computer's own webcam is
 rarely the one you want watched.
 
+## Framing the print
+
+The model only watches a square of each camera's view. Until you crop a camera that square is
+the middle of the frame, so on a wide camera the sides of the bed go unwatched. Open the camera
+in the registry and crop it to a square the print fills.
+
 ## Notifications
 
 Alert channels live in **Settings**. Enable a channel, fill in the form and send a test

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "react-image-crop/dist/ReactCrop.css";
 
 @theme {
   --color-ink-0: #0b0c0a;
@@ -796,4 +797,15 @@ video {
 
 :root[data-theme="light"] .shot .shot-light {
   display: block;
+}
+
+.ReactCrop {
+  --rc-drag-handle-bg-colour: var(--color-accent);
+  --rc-border-color: var(--color-ink-0);
+  --rc-focus-color: var(--color-accent);
+}
+
+.ReactCrop--no-animate .ReactCrop__crop-selection {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -1px;
 }

@@ -44,6 +44,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - The Windows desktop app's server starts, where 2.4.1 showed "PrintGuard could not start" after
   looking for cameras plugged into the PC.
 
+### Changed
+
+- Camera crops are square, since the model only ever watches a square of the view and ignored
+  the sides of anything wider. The crop editor shows the watched square before you set a crop.
+
 ### Removed
 
 - The sensitivity setting, which only ever moved the same line as the alert threshold. The

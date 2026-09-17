@@ -8,6 +8,7 @@ interface Step {
   why: string;
   done: boolean;
   dialog: DialogKind;
+  focusCameraId?: string;
   optional?: boolean;
 }
 
@@ -34,7 +35,7 @@ function StepRow({ step, primary }: { step: Step; primary: boolean }) {
       ) : (
         <button
           className={`btn shrink-0 ${primary ? "btn-primary" : ""}`}
-          onClick={() => openDialog(step.dialog)}
+          onClick={() => openDialog(step.dialog, step.focusCameraId)}
         >
           Open
         </button>
@@ -57,6 +58,15 @@ export function GettingStarted() {
     },
     {
       n: 2,
+      title: "Frame the print",
+      why: "The model watches a square, so crop it to the print.",
+      done: engine.cameras.some((c) => c.crop),
+      dialog: "cameras",
+      focusCameraId: engine.cameras[0]?.id,
+      optional: true,
+    },
+    {
+      n: 3,
       title: "Connect a printer",
       why: "Lets PrintGuard pause or cancel on a defect.",
       done: engine.printers.length > 0,
@@ -64,7 +74,7 @@ export function GettingStarted() {
       optional: true,
     },
     {
-      n: 3,
+      n: 4,
       title: "Set up alerts",
       why: "Get a snapshot on your phone when a defect holds.",
       done: Object.keys(engine.settings.notifiers).length > 0,
@@ -72,7 +82,7 @@ export function GettingStarted() {
       optional: true,
     },
     {
-      n: 4,
+      n: 5,
       title: "Add a monitor",
       why: "Bind a camera and start watching.",
       done: engine.monitors.length > 0,

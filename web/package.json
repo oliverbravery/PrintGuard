@@ -24,6 +24,7 @@
     "parse5": "^8.0.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-image-crop": "^11.1.2",
     "tailwindcss": "^4.3.0",
     "three": "^0.185.0",
     "zustand": "^5.0.13"
