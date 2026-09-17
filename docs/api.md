@@ -104,7 +104,7 @@ at `/api/v1/docs`.
 | `GET` | `/cameras` | List cameras with rate, health and latest score |
 | `GET` | `/cameras/{id}` | One camera |
 | `GET` | `/cameras/{id}/frame` | Freshest frame as `image/jpeg` |
-| `POST` | `/classify` | Classify a supplied frame, body `image/jpeg`, `?sensitivity=`. No registered camera needed |
+| `POST` | `/classify` | Classify a supplied frame, body `image/jpeg`. No registered camera needed |
 | `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
 | `GET` | `/prints/{id}` | One print file |
 | `GET` | `/prints/{id}/file` | Download a print file as it was uploaded |
@@ -166,7 +166,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 # Classify a supplied frame, no registered camera needed
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: image/jpeg" \
   --data-binary @frame.jpg https://host/api/v1/classify
-# gives {"prediction":"success","distances":{...},"margin":1.16,"defect_score":0.35}
+# gives {"prediction":"success","distances":{...},"margin":1.16,"defect_score":0.08}
 
 # Upload a sliced file tagged for one printer, then start it there
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/octet-stream" \
@@ -240,8 +240,8 @@ regardless of its service:
 
 ## Reading detection state
 
-Two facts are easy to miss. A camera carries a per-frame classification, and the smoothed 0-1
-defect score belongs to a monitor rather than a camera, so the camera object has no numeric
+Two facts are easy to miss. A camera carries a per-frame classification, and the 0-1 defect
+score is reported per monitor rather than per camera, so the camera object has no numeric
 score field.
 
 The camera object, from `GET /cameras` and `GET /cameras/{id}`:
@@ -275,7 +275,6 @@ The monitor object, from `GET /monitors` and `GET /monitors/{id}`:
   "id": "mon_…",
   "camera_id": "cam_1a2b",
   "printer_id": "prn_…" | "",
-  "sensitivity": 1.0,          // scales how far the distance margin moves the score off 0.5
   "threshold": 0.6,            // defect score at/above which a frame counts as a failure
   "watching": true,            // whether it is actively inferring right now
   "result": {                  // latest per-monitor score, or null before the first inference
@@ -289,9 +288,9 @@ The monitor object, from `GET /monitors` and `GET /monitors/{id}`:
 
 ### Prediction against defect score
 
-The 0-1 defect score, where `0.5` is the decision boundary and higher is more defective,
-applies a monitor's `sensitivity` to the frame's distance margin, so it is per-monitor rather
-than per-camera. It appears in:
+The 0-1 defect score is the model's probability that a frame shows a failing print, the
+softmax over negative squared prototype distances the network was trained with, so `0.5` is
+the decision boundary. It appears in:
 
 - `result` events on the WebSocket:
   `{ "event": "result", "monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts" }`,
@@ -302,5 +301,5 @@ than per-camera. It appears in:
 - the MQTT **Defect score** sensor, published as 0-100.
 
 To poll one camera's current verdict, read `GET /cameras/{id}` and take
-`last_result.prediction`. For the smoothed score or a threshold-applied verdict, read the
-monitor or the `result` events.
+`last_result.prediction`. For the score or a threshold-applied verdict, read the monitor or
+the `result` events.

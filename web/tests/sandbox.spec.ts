@@ -152,7 +152,7 @@ plugin.render((ctx) => {
 `;
 
 const MONITOR = {
-  id: "m1", name: "Bench", camera_id: "c1", printer_id: "", enabled: true, threshold: 0.6, sensitivity: 1,
+  id: "m1", name: "Bench", camera_id: "c1", printer_id: "", enabled: true, threshold: 0.6,
   consecutive: 3, notify: true, on_defect: "pause", cooldown_s: 30, alert: null, watching: true, result: null,
 };
 

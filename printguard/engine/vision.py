@@ -15,7 +15,6 @@ import numpy as np
 INPUT_SIZE = 224
 RESIZE_SHORTEST = 256
 GREYSCALE_WEIGHTS = np.asarray([0.2989, 0.5870, 0.1140], dtype=np.float32)
-MARGIN_HALF_SPAN = 4.0
 
 
 @dataclass(frozen=True)
@@ -202,22 +201,20 @@ def transform(
     return adjust(rgb, brightness, contrast, sharpness)
 
 
-def defect_score(result: dict[str, Any], sensitivity: float = 1.0) -> float:
-    """Maps a classification result onto a 0-1 defect score.
+def defect_score(result: dict[str, Any]) -> float:
+    """Returns the model's probability that a frame shows a failing print.
 
-    A score of 0.5 sits on the decision boundary; higher means the frame
-    looks more like a failing print. Sensitivity scales how aggressively
-    the prototype distance margin moves the score away from 0.5.
+    This is the softmax over negative squared prototype distances the
+    Prototypical Network was trained with, so 0.5 sits on the decision
+    boundary and the score reads as the model's own confidence.
 
     Args:
         result: Output of classify().
-        sensitivity: Multiplier applied to the distance margin.
 
     Returns:
-        Defect score clamped to [0, 1].
+        Failure probability in [0, 1], or 0.5 when the frame could not be classified.
     """
     distances = result.get("distances") or {}
     if "success" not in distances or "failure" not in distances:
         return 0.5
-    signed_margin = distances["success"] - distances["failure"]
-    return max(0.0, min(1.0, 0.5 + (sensitivity * signed_margin) / (2 * MARGIN_HALF_SPAN)))
+    return 0.5 * (1.0 + math.tanh((distances["success"] ** 2 - distances["failure"] ** 2) / 2))

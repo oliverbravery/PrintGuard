@@ -44,6 +44,18 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - The Windows desktop app's server starts, where 2.4.1 showed "PrintGuard could not start" after
   looking for cameras plugged into the PC.
 
+### Removed
+
+- The sensitivity setting, which only ever moved the same line as the alert threshold. The
+  REST API and MCP server's classify calls no longer take one.
+
+### Fixed
+
+- A monitor left on its default settings could never raise an alert, since its score topped
+  out at 0.68 under the 0.75 threshold. The score is now the model's own confidence that the
+  print is failing, and existing thresholds carry over. If you raised sensitivity to make
+  alerts fire, check the threshold after updating.
+
 ## [2.4.1] - 2026-09-09
 
 ### Added

@@ -85,7 +85,7 @@ def build_mcp(
         return Image(data=jpeg, format="jpeg")
 
     @mcp.tool(name="classify_frame", tags={"read"})
-    async def classify_frame(image_base64: str, sensitivity: float = 1.0) -> dict:
+    async def classify_frame(image_base64: str) -> dict:
         """Classifies a supplied print image for defects - no registered camera needed.
 
         Pass a base64-encoded JPEG or PNG frame (one shared in the conversation or
@@ -94,7 +94,7 @@ def build_mcp(
         itself. Use it to judge a still the model never captured directly.
         """
         try:
-            return await get_engine().classify(base64.b64decode(image_base64), sensitivity)
+            return await get_engine().classify(base64.b64decode(image_base64))
         except (ValueError, RuntimeError) as exc:
             raise ToolError(f"could not classify image: {exc}")
 

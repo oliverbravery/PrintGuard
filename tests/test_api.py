@@ -73,7 +73,7 @@ async def test_classify_scores_a_supplied_frame() -> None:
     engine = Engine(FakePlatform())
     await engine.start()
     try:
-        result = await engine.classify(b"\xff\xd8jpeg", sensitivity=1.0)
+        result = await engine.classify(b"\xff\xd8jpeg")
         assert result["prediction"] == "success"
         assert 0.0 <= result["defect_score"] <= 1.0
         with pytest.raises(RuntimeError):
