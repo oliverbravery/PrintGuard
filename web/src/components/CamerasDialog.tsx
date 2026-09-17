@@ -9,6 +9,7 @@ import { Dialog } from "./Dialog";
 import { NameField } from "./NameField";
 import { SaveStatus } from "./SaveStatus";
 import { Slider } from "./Slider";
+import { type Tab, TabPanel, Tabs } from "./Tabs";
 
 function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
@@ -331,25 +332,18 @@ export function CamerasDialog() {
   };
   const focusIsPrinter = cameras.some((c) => c.id === focusCameraId && c.printer_id);
   const [tab, setTab] = useState<"cameras" | "printers">(focusIsPrinter ? "printers" : "cameras");
-  const tabs: Array<["cameras" | "printers", string]> = [
-    ["cameras", "Cameras"],
-    ["printers", "Printer cameras"],
+  const tabs: Tab<"cameras" | "printers">[] = [
+    { id: "cameras", label: "Cameras" },
+    { id: "printers", label: "Printer cameras" },
   ];
   return (
-    <Dialog title="Camera registry" onClose={close}>
-      <div className="flex gap-1.5 mb-4">
-        {tabs.map(([key, label]) => (
-          <button
-            key={key}
-            className={`btn !py-1.5 !px-3 !text-[0.66rem] ${tab === key ? "!border-accent !text-accent" : ""}`}
-            onClick={() => setTab(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+    <Dialog
+      title="Camera registry"
+      onClose={close}
+      toolbar={<Tabs prefix="cameras" label="Camera registry sections" tabs={tabs} value={tab} onChange={setTab} />}
+    >
       {tab === "cameras" ? (
-        <>
+        <TabPanel prefix="cameras" id="cameras">
           <CameraList cameras={cameras.filter((c) => !c.printer_id)} focusId={previewCameraId} />
           <div className="label mb-3">Register new</div>
           {isLocal ? (
@@ -357,9 +351,11 @@ export function CamerasDialog() {
           ) : (
             <HubAdd onDone={() => {}} onDeviceAdd={registerDevice} />
           )}
-        </>
+        </TabPanel>
       ) : (
-        <PrinterCameras />
+        <TabPanel prefix="cameras" id="printers">
+          <PrinterCameras />
+        </TabPanel>
       )}
     </Dialog>
   );

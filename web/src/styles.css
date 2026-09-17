@@ -379,6 +379,28 @@ body {
   }
 }
 
+.scroll-x {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.scroll-x::-webkit-scrollbar {
+  display: none;
+}
+
+.scroll-x[data-overflow="end"] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+}
+
+.scroll-x[data-overflow="start"] {
+  mask-image: linear-gradient(to right, transparent, #000 2.5rem);
+}
+
+.scroll-x[data-overflow="both"] {
+  mask-image: linear-gradient(to right, transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent);
+}
+
 .tuner-anchor {
   anchor-name: --theme-chip;
 }

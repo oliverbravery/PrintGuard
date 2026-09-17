@@ -10,6 +10,7 @@ import { SchemaForm } from "./SchemaForm";
 import { SchemePicker } from "./SchemePicker";
 import { TestRow } from "./TestRow";
 import { Slider } from "./Slider";
+import { TabPanel, Tabs } from "./Tabs";
 import { ThemeEditor } from "./ThemeEditor";
 import { Toggle } from "./Toggle";
 
@@ -106,53 +107,17 @@ export function SettingsDialog() {
       : []),
   ];
 
-  const onTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const delta = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-    const i = tabs.findIndex((t) => t.id === tab);
-    let next = i;
-    if (delta) next = (i + delta + tabs.length) % tabs.length;
-    else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = tabs.length - 1;
-    else return;
-    event.preventDefault();
-    setTab(tabs[next].id);
-    document.getElementById(`settings-tab-${tabs[next].id}`)?.focus();
-  };
-
   return (
     <SettingsFooter>
       {(footer) => (
-    <Dialog title="Settings" onClose={close}>
+    <Dialog
+      title="Settings"
+      onClose={close}
+      toolbar={tabs.length > 1 && <Tabs prefix="settings" label="Settings sections" tabs={tabs} value={tab} onChange={setTab} />}
+    >
       <div className="space-y-5">
-        {tabs.length > 1 && (
-          <div
-            role="tablist"
-            aria-label="Settings sections"
-            onKeyDown={onTabKeyDown}
-            className="flex gap-1 border-b border-line-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                id={`settings-tab-${t.id}`}
-                type="button"
-                role="tab"
-                aria-selected={tab === t.id}
-                aria-controls={`settings-panel-${t.id}`}
-                tabIndex={tab === t.id ? 0 : -1}
-                onClick={() => setTab(t.id)}
-                className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-xs transition-colors cursor-pointer ${
-                  tab === t.id ? "border-accent text-text-0" : "border-transparent text-text-2 hover:text-text-1"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        )}
-
         {tab === "appearance" && (
-          <div role="tabpanel" id="settings-panel-appearance" aria-labelledby="settings-tab-appearance" tabIndex={0}>
+          <TabPanel prefix="settings" id="appearance">
             {editing ? (
             <ThemeEditor
               value={editing}
@@ -199,11 +164,11 @@ export function SettingsDialog() {
               </div>
             </div>
             )}
-          </div>
+          </TabPanel>
         )}
 
         {tab === "alerts" && (
-          <div role="tabpanel" id="settings-panel-alerts" aria-labelledby="settings-tab-alerts" tabIndex={0} className="space-y-4">
+          <TabPanel prefix="settings" id="alerts" className="space-y-4">
             <span className="label block">When to alert</span>
             <Slider
               label="Fault grace period (seconds)"
@@ -267,17 +232,17 @@ export function SettingsDialog() {
             <span className="text-[0.7rem] text-text-2 block">
               Channels hold credentials, so they apply on Save rather than automatically.
             </span>
-          </div>
+          </TabPanel>
         )}
 
         {tab === "plugins" && (
-          <div role="tabpanel" id="settings-panel-plugins" aria-labelledby="settings-tab-plugins" tabIndex={0}>
+          <TabPanel prefix="settings" id="plugins">
             <PluginsTab />
-          </div>
+          </TabPanel>
         )}
 
         {tab === "mqtt" && (
-          <div role="tabpanel" id="settings-panel-mqtt" aria-labelledby="settings-tab-mqtt" tabIndex={0} className="space-y-3">
+          <TabPanel prefix="settings" id="mqtt" className="space-y-3">
             <span className="label block">Home Assistant (MQTT)</span>
             <Toggle label="Publish to an MQTT broker" on={!!mqtt.enabled} onChange={(on) => setMqttField("enabled", on)} />
             {mqtt.enabled && (
@@ -344,11 +309,11 @@ export function SettingsDialog() {
             <span className="text-[0.7rem] text-text-2 block">
               Broker settings open a live connection, so they apply on Save rather than automatically.
             </span>
-          </div>
+          </TabPanel>
         )}
 
         {tab === "updates" && (
-          <div role="tabpanel" id="settings-panel-updates" aria-labelledby="settings-tab-updates" tabIndex={0} className="space-y-3">
+          <TabPanel prefix="settings" id="updates" className="space-y-3">
             <span className="label block">Software updates</span>
             <Toggle
               label="Automatically check for updates"
@@ -378,11 +343,11 @@ export function SettingsDialog() {
             <div className="flex justify-end">
               <SaveStatus />
             </div>
-          </div>
+          </TabPanel>
         )}
 
         {tab === "api" && (
-          <div role="tabpanel" id="settings-panel-api" aria-labelledby="settings-tab-api" tabIndex={0} className="space-y-3">
+          <TabPanel prefix="settings" id="api" className="space-y-3">
             <div>
               <span className="label block">API &amp; MCP access</span>
               <span className="text-[0.7rem] text-text-2 block mt-1">
@@ -459,17 +424,11 @@ export function SettingsDialog() {
                 </button>
               </div>
             </div>
-          </div>
+          </TabPanel>
         )}
 
         {tab === "advanced" && (
-          <div
-            role="tabpanel"
-            id="settings-panel-advanced"
-            aria-labelledby="settings-tab-advanced"
-            tabIndex={0}
-            className="space-y-3"
-          >
+          <TabPanel prefix="settings" id="advanced" className="space-y-3">
             <label className="label block" htmlFor="inference-runtime">
               Model runtime
             </label>
@@ -494,7 +453,7 @@ export function SettingsDialog() {
             <div className="flex justify-end">
               <SaveStatus />
             </div>
-          </div>
+          </TabPanel>
         )}
 
         <div className="hairline flex items-center justify-between gap-3 pt-4">

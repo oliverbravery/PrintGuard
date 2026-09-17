@@ -1,5 +1,7 @@
+import { useRef } from "react";
 import { cardButton } from "../a11y";
 import { applyLayout, section, toggleHidden, withOrder } from "../layout";
+import { useScrollEdges } from "../scroll";
 import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
 import { SectionHead } from "./SectionHead";
@@ -96,6 +98,8 @@ export function CameraRail() {
   const { engine, openDialog, customising, mutateLayout } = useStore();
   const cameras = engine?.cameras ?? [];
   const { visible } = applyLayout(cameras, section(engine?.settings.layout, "cameras"));
+  const rail = useRef<HTMLDivElement>(null);
+  useScrollEdges(rail, visible.length);
   return (
     <section className="mx-auto max-w-[1500px] px-4 sm:px-6 pt-5">
       <SectionHead title="CAMERA REGISTRY">
@@ -112,7 +116,7 @@ export function CameraRail() {
           disabled={!customising}
           onReorder={(ids) => mutateLayout("cameras", (s) => withOrder(s, ids))}
         >
-          <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div ref={rail} className="scroll-x flex snap-x snap-mandatory gap-3 pb-1.5">
             {visible.map((camera) => (
               <CameraCard key={camera.id} camera={camera} />
             ))}
