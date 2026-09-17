@@ -65,7 +65,7 @@ export function UpdateDialog() {
               {date && <span className="label shrink-0">{date}</span>}
             </div>
             <div
-              className="changelog max-h-[40vh] overflow-y-auto pr-1"
+              className="changelog max-h-[40dvh] overflow-y-auto pr-1"
               dangerouslySetInnerHTML={{ __html: renderMarkdown(release.notes || "_No release notes._") }}
             />
             <a

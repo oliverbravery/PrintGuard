@@ -21,6 +21,7 @@
     "fflate": "^0.8.3",
     "gcode-preview": "^2.18.0",
     "hls.js": "^1.6.16",
+    "lucide-react": "^1.47.0",
     "marked": "^18.0.5",
     "parse5": "^8.0.1",
     "react": "^19.2.0",

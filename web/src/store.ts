@@ -83,7 +83,7 @@ export interface Toast {
   text: string;
 }
 
-export type DialogKind = "cameras" | "printers" | "prints" | "monitor" | "settings" | "update" | "guide" | "intro" | "report" | "demo" | null;
+export type DialogKind = "cameras" | "printers" | "prints" | "monitor" | "settings" | "update" | "guide" | "intro" | "report" | "demo" | "more" | null;
 
 export interface Upload {
   id: number;

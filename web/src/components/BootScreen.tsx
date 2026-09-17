@@ -4,7 +4,7 @@ import { Wordmark } from "./Header";
 export function BootScreen() {
   const { phase, bootMsg, leaveMode } = useStore();
   return (
-    <div className="min-h-screen grid place-items-center">
+    <div className="min-h-dvh grid place-items-center">
       <div className="text-center">
         <Wordmark size="text-5xl" />
         <div className={`mono text-xs mt-6 ${phase === "error" ? "text-bad" : "text-text-1 boot-cursor"}`}>

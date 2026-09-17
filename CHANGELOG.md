@@ -35,6 +35,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 - Camera crops are square, since the model only ever watches a square of the view and ignored
   the sides of anything wider. The crop editor shows the watched square before you set a crop.
+- The dashboard fits phones and tablets, folding ones included. Phones get a bottom bar with
+  icons and a more menu in the header, while tablets and landscape phones get a side rail.
+  Buttons, fields and switches are sized for a thumb, and tabs that run off the edge of a
+  dialog fade there so you know to scroll. A long dialog no longer sits under Safari's toolbar
+  on an iPhone.
 
 ### Removed
 

@@ -29,15 +29,15 @@ function PrintRow({ print }: { print: PrintFile }) {
   };
   return (
     <div className="panel space-y-2.5 px-3 py-2.5">
-      <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <button type="button" className="cursor-pointer" aria-label={`View ${print.name}`} onClick={() => openPrint(print.id)}>
           <Thumbnail print={print} />
         </button>
-        <div className="min-w-0 flex-1 leading-tight">
+        <div className="min-w-0 grow basis-40 leading-tight">
           <div className="truncate text-sm font-medium">{print.name}</div>
           <div className="mono mt-0.5 text-[0.62rem] text-text-2">{[...summary(print), formatBytes(print.size), ago(print.uploaded)].join(" · ")}</div>
         </div>
-        <div className="flex shrink-0 gap-1.5">
+        <div className="ml-auto flex shrink-0 gap-1.5">
           <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => openPrint(print.id)}>
             View
           </button>

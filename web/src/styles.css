@@ -147,7 +147,7 @@ body {
 :root[data-glass] .panel,
 :root[data-glass] .tile,
 :root[data-glass] header,
-:root[data-glass] .action-bar,
+:root[data-glass] .app-nav,
 :root[data-glass] .plate {
   background: var(--painted-surface) !important;
   backdrop-filter: var(--painted-glass);
@@ -235,6 +235,10 @@ body {
   cursor: pointer;
   transition: border-color 120ms, background 120ms, color 120ms, transform 80ms;
   user-select: none;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn:hover {
@@ -284,6 +288,118 @@ body {
 .chip-warn { color: var(--color-warn); border-color: color-mix(in srgb, var(--color-warn) 45%, transparent); }
 .chip-bad { color: var(--color-bad); border-color: color-mix(in srgb, var(--color-bad) 45%, transparent); }
 .chip-accent { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 50%, transparent); }
+
+.app-nav {
+  position: fixed;
+  z-index: 30;
+  display: grid;
+  background: color-mix(in srgb, var(--color-ink-0) 94%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.nav-item {
+  display: grid;
+  justify-items: center;
+  gap: 0.2rem;
+  padding: 0.3rem 0.25rem;
+  border-radius: 6px;
+  font-family: var(--font-display);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-text-1);
+  cursor: pointer;
+  user-select: none;
+}
+
+.nav-icon {
+  display: grid;
+  place-items: center;
+  width: 3.25rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  transition: background 120ms, color 120ms;
+}
+
+.nav-item:hover {
+  color: var(--color-text-0);
+}
+
+.nav-item:hover .nav-icon {
+  background: var(--color-ink-3);
+}
+
+.nav-item[data-primary] {
+  color: var(--color-accent);
+}
+
+.nav-item[data-primary] .nav-icon {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.nav-item[data-primary]:hover .nav-icon {
+  background: color-mix(in srgb, var(--color-accent) 88%, white);
+}
+
+@media (width < 40rem) {
+  .app-nav {
+    inset: auto 0 0 0;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    border-top: 1px solid var(--color-line-0);
+    padding: 0.35rem max(0.5rem, env(safe-area-inset-right)) calc(0.35rem + env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
+  }
+
+  .app {
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (40rem <= width < 64rem) {
+  .app-nav {
+    inset: 0 auto 0 0;
+    width: calc(4.75rem + env(safe-area-inset-left));
+    align-content: start;
+    gap: 0.5rem;
+    padding: 0.85rem 0.25rem 0 calc(0.25rem + env(safe-area-inset-left));
+    border-right: 1px solid var(--color-line-0);
+  }
+
+  .app {
+    padding-left: calc(4.75rem + env(safe-area-inset-left));
+  }
+}
+
+@media (width >= 64rem) {
+  .app-nav {
+    display: none;
+  }
+}
+
+.scroll-x {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.scroll-x::-webkit-scrollbar {
+  display: none;
+}
+
+.scroll-x[data-overflow="end"] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+}
+
+.scroll-x[data-overflow="start"] {
+  mask-image: linear-gradient(to right, transparent, #000 2.5rem);
+}
+
+.scroll-x[data-overflow="both"] {
+  mask-image: linear-gradient(to right, transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent);
+}
 
 .tuner-anchor {
   anchor-name: --theme-chip;
@@ -439,6 +555,19 @@ select.field {
 input[type="range"] {
   appearance: none;
   width: 100%;
+  height: 1.5rem;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-line-1);
+}
+
+input[type="range"]::-moz-range-track {
   height: 3px;
   border-radius: 2px;
   background: var(--color-line-1);
@@ -448,10 +577,10 @@ input[type="range"]::-webkit-slider-thumb {
   appearance: none;
   width: 14px;
   height: 14px;
+  margin-top: -5.5px;
   border-radius: 2px;
   background: var(--color-accent);
   border: none;
-  cursor: pointer;
 }
 
 input[type="range"]::-moz-range-thumb {
@@ -460,7 +589,6 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 2px;
   background: var(--color-accent);
   border: none;
-  cursor: pointer;
 }
 
 .corner {
@@ -556,6 +684,16 @@ dialog.modal::backdrop {
   .modal-center {
     align-items: center;
     padding: 1.5rem;
+  }
+}
+
+.modal-center > .panel {
+  border-radius: 10px 10px 0 0;
+}
+
+@media (min-width: 640px) {
+  .modal-center > .panel {
+    border-radius: 6px;
   }
 }
 
@@ -765,6 +903,28 @@ video {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+@media (pointer: coarse) {
+  .btn {
+    min-height: 2.5rem;
+  }
+
+  .field {
+    font-size: 1rem;
+  }
+
+  button.chip,
+  .toggle {
+    position: relative;
+  }
+
+  button.chip::before,
+  .toggle::before {
+    content: "";
+    position: absolute;
+    inset: -0.6rem -0.25rem;
   }
 }
 

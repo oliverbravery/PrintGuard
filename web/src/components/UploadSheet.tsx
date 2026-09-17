@@ -1,7 +1,7 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { acceptedTags, extOf, formatBytes, inspectPrint, isText, toolpathOf, type Inspection, type Temperatures } from "../prints";
 import { useStore, type StagedPrint } from "../store";
-import { Modal } from "./Dialog";
+import { Sheet } from "./Dialog";
 import { HEATER_MAX, HEATERS, type HeaterName } from "./PrinterControls";
 import { PrinterTags } from "./PrinterTags";
 import { PrintStats } from "./PrintStats";
@@ -33,20 +33,14 @@ function TemperatureField({ heater, value, heats, onChange }: { heater: HeaterNa
 
 function StagedPrintForm({
   staged,
-  queued,
-  titleId,
   tags,
   onToggleTag,
   onDone,
-  onClose,
 }: {
   staged: StagedPrint;
-  queued: number;
-  titleId: string;
   tags: string[];
   onToggleTag: (id: string) => void;
   onDone: () => void;
-  onClose: () => void;
 }) {
   const { engine, uploadPrint } = useStore();
   const { file } = staged;
@@ -96,17 +90,6 @@ function StagedPrintForm({
 
   return (
     <>
-      <div className="sticky top-0 z-10 flex items-center gap-2.5 border-b border-line-0 bg-ink-1/95 px-5 py-3.5 backdrop-blur-sm">
-        <h2 id={titleId} className="display flex-1 truncate text-lg font-semibold">
-          Upload {file.name}
-        </h2>
-        {queued > 0 && <span className="chip">{queued} more</span>}
-        <span className="chip">{formatBytes(file.size)}</span>
-        <button type="button" className="cursor-pointer text-2xl leading-none text-text-2 hover:text-accent" onClick={onClose} aria-label="Cancel uploads">
-          ×
-        </button>
-      </div>
-
       <Toolpath label={file.name} load={() => toolpath.then((path) => path && path.text())} />
 
       <div className="flex-1 space-y-4 px-5 py-4">
@@ -155,24 +138,29 @@ function StagedPrintForm({
 
 export function UploadSheet() {
   const { staged, unstage } = useStore();
-  const titleId = useId();
   const [tags, setTags] = useState<string[]>([]);
   const [current] = staged;
   const close = () => staged.forEach((p) => unstage(p.id));
   return (
-    <Modal onClose={close} variant="sheet" labelledBy={titleId}>
-      <aside className="slide-in flex h-full w-full flex-col overflow-y-auto border-l border-line-0 bg-ink-1 sm:w-[680px]">
-        <StagedPrintForm
-          key={current.id}
-          staged={current}
-          queued={staged.length - 1}
-          titleId={titleId}
-          tags={tags}
-          onToggleTag={(id) => setTags((t) => (t.includes(id) ? t.filter((p) => p !== id) : [...t, id]))}
-          onDone={() => unstage(current.id)}
-          onClose={close}
-        />
-      </aside>
-    </Modal>
+    <Sheet
+      title={`Upload ${current.file.name}`}
+      onClose={close}
+      closeLabel="Cancel uploads"
+      width="sm:w-[680px]"
+      meta={
+        <>
+          {staged.length > 1 && <span className="chip">{staged.length - 1} more</span>}
+          <span className="chip">{formatBytes(current.file.size)}</span>
+        </>
+      }
+    >
+      <StagedPrintForm
+        key={current.id}
+        staged={current}
+        tags={tags}
+        onToggleTag={(id) => setTags((t) => (t.includes(id) ? t.filter((p) => p !== id) : [...t, id]))}
+        onDone={() => unstage(current.id)}
+      />
+    </Sheet>
   );
 }
