@@ -1,8 +1,8 @@
 # Contributing
 
-Read [docs/architecture.md](docs/architecture.md) first. PrintGuard runs in two modes, local
-in the browser and hub on a server, and the engine is shared code running on CPython and
-Pyodide. All mode differences live behind the `Platform` contract.
+Read [docs/architecture.md](docs/architecture.md) first. One engine owns every decision, the
+hub server runs it, and everything that touches hardware, the network or disk lives behind the
+`Platform` contract.
 
 - [Development setup](#development-setup)
 - [Documentation is part of the change](#documentation-is-part-of-the-change)
@@ -19,6 +19,7 @@ Pyodide. All mode differences live behind the `Platform` contract.
 uv sync                              # Python engine + hub server
 uv run printguard                    # hub on :8000 (MediaMTX is bundled into the image; for video in dev, brew install mediamtx and set MEDIAMTX_BINARY=$(which mediamtx))
 cd web && npm install && npm run dev # UI with hot reload on :5173, proxied to :8000
+cd web && npm run site               # the GitHub Pages landing page in web/site, with hot reload
 ```
 
 To work on the desktop app, run the tray build in dev or produce a local installer:
@@ -115,8 +116,9 @@ theme the reader is on. Point a guide entry at one with `shot: "<id>"` in `web/s
 ## Adding a printer integration
 
 Integrations talk to print servers, such as OctoPrint or Moonraker, to read state and pause
-or cancel jobs. One adapter runs in both modes because it only speaks through the platform's
-HTTP function.
+or cancel jobs. An adapter speaks through the platform's HTTP function, which is what lets
+`tests/test_adapters.py` pin every request it makes. A service with no HTTP API, such as Bambu
+Lab over MQTT, uses its own client library.
 
 1. Create `printguard/engine/integrations/<service>.py` subclassing
    [`IntegrationAdapter`](printguard/engine/integrations/base.py):
@@ -142,7 +144,7 @@ HTTP function.
 
 The configuration form, connection test, device polling, inference gating, defect actions,
 temperature controls and the print library all follow from the adapter. No other change is
-needed in either mode.
+needed.
 
 ## Adding a notification provider
 
@@ -153,8 +155,6 @@ Notifiers deliver defect snapshots and watchdog warnings.
    - implement `send(http, config, title, body, image)`. Attach the JPEG `image` when the
      service supports uploads, where `multipart_form()` in the same module builds the body,
      and raise `RuntimeError` with the service's error detail on rejection.
-   - set `browser_ok = False` if the service sends no CORS headers, which offers it in hub
-     mode only. Check from a browser console before assuming.
    - JSON-schema config and `docs_url`, exactly as for integrations.
 2. Register an instance in
    [`notifiers/__init__.py`](printguard/engine/notifiers/__init__.py).
@@ -187,8 +187,9 @@ with the ones it does, and declares the network hosts you would expect.
 
 ## Ground rules
 
-- Never fork on mode. If shared code needs something runtime-specific, extend the `Platform`
-  protocol on both sides with identical signatures.
+- Keep the engine free of I/O. It never imports from `server/`, and a feature that needs a
+  runtime service gets it through the `Platform` protocol, implemented in `server/platform.py`
+  and in the test fake.
 - Fail loudly. Anything on the alert path that can fail must emit an `error` or `warning`
   event, so no bare `except: pass` where a user would want to know.
 - Keep it minimal. Prefer consolidating existing code over adding parallel variants, and leave

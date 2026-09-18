@@ -8,10 +8,10 @@
 [![GitHub stars](https://img.shields.io/github/stars/oliverbravery/PrintGuard?style=flat&color=ff4d00)](https://github.com/oliverbravery/PrintGuard/stargazers)
 [![Licence](https://img.shields.io/badge/licence-GPL--2.0-2ea44f)](LICENSE.md)
 [![Container](https://img.shields.io/badge/ghcr.io-oliverbravery%2Fprintguard-2496ed?logo=docker&logoColor=white)](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
-[![Live demo](https://img.shields.io/badge/demo-try_it_in_your_browser-ff4d00)](https://oliverbravery.github.io/PrintGuard/)
+[![Website](https://img.shields.io/badge/website-oliverbravery.github.io-ff4d00)](https://oliverbravery.github.io/PrintGuard/)
 [![Sponsor](https://img.shields.io/github/sponsors/oliverbravery?style=flat&color=ff4d00&label=sponsors)](https://github.com/sponsors/oliverbravery)
 
-[Live demo](https://oliverbravery.github.io/PrintGuard/) · [Quick start](#quick-start) · [Documentation](docs/README.md) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](CONTRIBUTING.md) · [Sponsor](#sponsor)
+[Website](https://oliverbravery.github.io/PrintGuard/) · [Quick start](#quick-start) · [Documentation](docs/README.md) · [Troubleshooting](docs/troubleshooting.md) · [Contributing](CONTRIBUTING.md) · [Sponsor](#sponsor)
 
 </div>
 
@@ -36,12 +36,10 @@ open model, over the same four unseen test sets:
 
 ## Contents
 
-- [Try it now, nothing to install](#try-it-now-nothing-to-install)
 - [What you get](#what-you-get)
 - [Quick start](#quick-start)
   - [Desktop app for macOS and Windows](#desktop-app-for-macos-and-windows)
   - [Docker for an always-on server or NAS](#docker-for-an-always-on-server-or-nas)
-- [Local mode and hub mode](#local-mode-and-hub-mode)
 - [Themes and layout](#themes-and-layout)
 - [Printers, cameras and alerts](#printers-cameras-and-alerts)
 - [Hardware acceleration](#hardware-acceleration)
@@ -54,13 +52,6 @@ open model, over the same four unseen test sets:
 - [Contributing](#contributing)
 - [Sponsor](#sponsor)
 - [Licence](#licence)
-
-## Try it now, nothing to install
-
-**[oliverbravery.github.io/PrintGuard](https://oliverbravery.github.io/PrintGuard/)** runs the
-whole engine in your browser. Point your webcam at a print and watch it score each frame live.
-Nothing is installed and no frame leaves your device. When you are ready to run it for real,
-[jump to Quick start](#quick-start).
 
 ## What you get
 
@@ -76,6 +67,10 @@ Nothing is installed and no frame leaves your device. When you are ready to run 
 - Tunes per monitor: the alert threshold, how long a defect must hold and the cooldown.
 
 ## Quick start
+
+PrintGuard runs as a hub, a small server on a machine you own that keeps watching with every
+browser closed. The desktop app and the Docker image are the same hub, so pick whichever suits
+the machine next to your printer.
 
 ### Desktop app for macOS and Windows
 
@@ -125,24 +120,6 @@ RTMP push. Most setups pull from a URL or use a printer's own camera and need ne
 A USB webcam plugged into the machine reaches the container only if you pass it in, and
 registers itself once you have.
 [docs/printers.md](docs/printers.md#cameras-plugged-into-the-hub) has the line to add.
-
-## Local mode and hub mode
-
-The same detection engine runs in two places. Try it in the browser, then self-host it when you
-are ready.
-
-| | Local mode | Hub mode |
-|---|---|---|
-| Engine runs | In your browser, on Pyodide | On the server, on CPython |
-| Model runs | [LiteRT.js in WASM](https://developers.google.com/edge/litert) | [LiteRT](https://github.com/google-ai-edge/LiteRT) or [ONNX Runtime](https://onnxruntime.ai/) |
-| Frames leave the device | Never | Only to your own server |
-| Survives closing the tab | No | Yes |
-| Cameras | This device's webcams | Any stream, plus printer webcams and cameras plugged into the hub |
-| Printers | OctoPrint and Klipper | All of them |
-| Print library | No | Upload sliced files, view them in 3D and send them to a printer |
-
-The desktop app is hub mode without the setup, the same persistent engine as the container in a
-native window on your own computer.
 
 ## Themes and layout
 
@@ -201,8 +178,9 @@ printer. The full walk-through is in **[docs/printers.md](docs/printers.md)**.
 
 ## Hardware acceleration
 
-Hub and desktop mode carry both LiteRT and ONNX models and benchmark them on your machine at
-start, keeping whichever is faster. ONNX Runtime then uses the best provider available: Core
+PrintGuard carries both [LiteRT](https://github.com/google-ai-edge/LiteRT) and
+[ONNX Runtime](https://onnxruntime.ai/) models and benchmarks them on your machine at start,
+keeping whichever is faster. ONNX Runtime then uses the best provider available: Core
 ML on macOS, Windows ML on Windows 11 24H2 or newer, OpenVINO on Intel, TensorRT on NVIDIA.
 Two extra image tags exist for GPUs:
 
@@ -279,7 +257,7 @@ retraining.
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Symptom-first fixes, and how to pull logs and diagnostics |
 | [docs/api.md](docs/api.md) | REST API and MCP server, scoped tokens, every endpoint and tool |
 | [docs/plugins.md](docs/plugins.md) | Installing plugins, what they can reach, and writing your own |
-| [docs/architecture.md](docs/architecture.md) | One engine on two runtimes, the platform contract, the scheduler, the fail-safe design |
+| [docs/architecture.md](docs/architecture.md) | The engine and its protocol, the platform contract, the scheduler, the fail-safe design |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in every release |
 
 ## Contributing
