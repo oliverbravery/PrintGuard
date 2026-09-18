@@ -178,19 +178,15 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Bundle engine source and model for the static demo
-        run: |
-          python3 printguard/pysrc.py web/public/pysrc.zip
-          cp -r models web/public/models
-      - name: Build the web app
+      - name: Build the site
         working-directory: web
         run: |
           npm ci
-          npm run build
+          npm run site:build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web/dist
+          path: web/dist-site
       - id: deployment
         uses: actions/deploy-pages@v4
 
