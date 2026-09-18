@@ -21,7 +21,7 @@ export interface HostHandlers {
 }
 
 export function projectState(engine: EngineState, granted: string[], permissions: Permission[]): Record<string, unknown> {
-  const view: Record<string, unknown> = { mode: engine.mode, version: engine.version };
+  const view: Record<string, unknown> = { version: engine.version };
   for (const name of granted) {
     const fields = permissions.find((p) => p.id === name)?.fields;
     for (const [collection, keys] of Object.entries(fields ?? {})) {
@@ -113,7 +113,6 @@ export class PluginHost {
 
   constructor(
     private record: PluginRecord,
-    private file: string,
     private code: string,
     private assets: Record<string, string>,
     private handlers: HostHandlers,
@@ -204,7 +203,7 @@ export class PluginHost {
 
   private fail(reason: string): void {
     if (this.dead) return;
-    log("warn", `plugin ${this.id} (${this.file}) stopped: ${reason}`);
+    log("warn", `plugin ${this.id} stopped: ${reason}`);
     this.handlers.onFailure(this.id, reason);
     this.close();
   }

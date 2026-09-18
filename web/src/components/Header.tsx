@@ -3,14 +3,7 @@ import { useStore } from "../store";
 import { applyTheme, GLASS, nextScheme } from "../theme";
 import { GLASS_TUNER, GlassTuner } from "./GlassTuner";
 import { HeaderActions } from "./Nav";
-
-export function Wordmark({ size = "text-xl" }: { size?: string }) {
-  return (
-    <span className={`display font-bold ${size} leading-none select-none`}>
-      PRINT<span className="text-accent">/</span>GUARD
-    </span>
-  );
-}
+import { Wordmark } from "./Wordmark";
 
 function Readout({
   label,
@@ -148,21 +141,12 @@ function MoreChip() {
 }
 
 export function Header() {
-  const { engine, mode, openDialog, openSettings } = useStore();
+  const { engine, openSettings } = useStore();
   const stats = engine?.stats;
   return (
     <header className="sticky top-0 z-30 border-b border-line-0 bg-ink-0/90 backdrop-blur-sm">
       <div className="mx-auto flex max-w-[1500px] items-center gap-x-3 px-4 py-3 sm:px-6">
         <Wordmark />
-        {mode === "local" && (
-          <button
-            className="chip chip-accent cursor-pointer hover:opacity-80"
-            title="What the live demo can and cannot do"
-            onClick={() => openDialog("demo")}
-          >
-            local ▾
-          </button>
-        )}
         <div className="hidden sm:contents">
           <VersionChip />
           <ThemeToggle />
@@ -177,7 +161,7 @@ export function Header() {
               label="compute"
               value={stats.inference_device.toLowerCase()}
               className="hidden xl:block"
-              onClick={mode === "hub" ? () => openSettings("advanced") : undefined}
+              onClick={() => openSettings("advanced")}
             />
             <Readout label="capacity" value={`${stats.capacity_fps.toFixed(1)} fps`} />
             <Readout label="latency" value={`${stats.infer_ms.toFixed(0)} ms`} />

@@ -14,7 +14,6 @@ export interface GuideSection {
   shot?: string;
   visual?: ReactNode;
   action?: { label: string; dialog: DialogKind };
-  hubOnly?: boolean;
 }
 
 const WATCH_STATES: { led: string; when: string; then: string }[] = [
@@ -118,19 +117,6 @@ export const GUIDE: GuideSection[] = [
     ),
   },
   {
-    id: "modes",
-    led: "led-on",
-    title: "Local vs Hub mode",
-    body: (
-      <>
-        <strong>Local</strong> runs the whole engine in this browser tab and uses this device's
-        cameras, with nothing to install. <strong>Hub</strong> runs on your own hardware, watches RTSP and
-        published streams, and keeps monitoring with every tab closed. Switch any time from the mode
-        chip in the header.
-      </>
-    ),
-  },
-  {
     id: "cameras",
     led: "led-on",
     title: "Cameras",
@@ -167,7 +153,6 @@ export const GUIDE: GuideSection[] = [
     led: "led-on",
     title: "Print library",
     shot: "prints",
-    hubOnly: true,
     body: (
       <>
         Drop sliced files onto the hub to preview their toolpath, name them and correct their temperatures before
@@ -251,10 +236,9 @@ export const GUIDE: GuideSection[] = [
     id: "integrate",
     led: "led-infer",
     title: "Automate & integrate",
-    hubOnly: true,
     body: (
       <>
-        On the hub, drive PrintGuard from a <strong>REST API</strong> or an <strong>MCP</strong>{" "}
+        Drive PrintGuard from a <strong>REST API</strong> or an <strong>MCP</strong>{" "}
         server with scoped tokens (read ⊂ control ⊂ manage), and surface every monitor in{" "}
         <strong>Home Assistant</strong> over MQTT.{" "}
         <a className={link} href={docs("api.md")} target="_blank" rel="noreferrer">
@@ -288,8 +272,8 @@ export const GUIDE: GuideSection[] = [
     title: "Your frames stay yours",
     body: (
       <>
-        Inference runs entirely on your hardware, in this browser in local mode or on your hub. No
-        frames, snapshots or scores are ever sent to a third party.
+        Inference runs entirely on your own hardware. No frames, snapshots or scores are ever sent
+        to a third party.
       </>
     ),
   },

@@ -5,12 +5,10 @@ import type { Camera } from "../types";
 
 export function Feed({
   camera,
-  mode,
   active = true,
   children,
 }: {
   camera: Camera | undefined;
-  mode: string;
   active?: boolean;
   children?: ReactNode;
 }) {
@@ -24,7 +22,7 @@ export function Feed({
   const rotation = camera?.rotation ?? 0;
   const useCanvas = sharpness > 0 || crop !== null || brightness !== 1 || contrast !== 1 || rotation !== 0;
 
-  useVideoStream(videoRef, camera, mode, active);
+  useVideoStream(videoRef, camera, active);
 
   useEffect(() => {
     const video = videoRef.current;

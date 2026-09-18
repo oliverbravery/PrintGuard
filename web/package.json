@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "site": "vite site",
+    "site:build": "tsc -b && vite build site",
     "typecheck": "tsc --noEmit",
     "screenshots": "playwright test --project=screenshots",
     "test:sandbox": "playwright test --project=sandbox --project=sandbox-webkit",

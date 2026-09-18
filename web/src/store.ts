@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { currentLayout } from "./layout";
-import { bootLocal } from "./local";
 import { log } from "./log";
 import type { Finding } from "./lint";
 import { PluginPanelHost } from "./panel";
@@ -11,7 +10,7 @@ import { applyTheme, measureCover } from "./theme";
 import { openExternally } from "./urls";
 import { extOf, FORMATS, sendPrint, type PrintDraft } from "./prints";
 import { withPreview } from "./toolpath";
-import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Mode, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
+import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
 const MAX_BACKGROUND_CHARS = 3 * 1024 * 1024;
@@ -60,22 +59,7 @@ function saveBase64(filename: string, base64: string, type: string) {
   URL.revokeObjectURL(url);
 }
 
-function modeFromUrl(): Mode | null {
-  const hash = location.hash.slice(1);
-  return hash === "local" || hash === "hub" ? hash : null;
-}
-
-const DEMO_SEEN_KEY = "pg.demo.seen";
 const INTRO_SEEN_KEY = "pg.intro.seen";
-
-function introDue(): boolean {
-  return !localStorage.getItem(INTRO_SEEN_KEY);
-}
-
-function firstRunDialog(mode: Mode | null): DialogKind {
-  if (mode === "local" && !localStorage.getItem(DEMO_SEEN_KEY)) return "demo";
-  return introDue() ? "intro" : null;
-}
 
 export interface Toast {
   id: number;
@@ -83,7 +67,7 @@ export interface Toast {
   text: string;
 }
 
-export type DialogKind = "cameras" | "printers" | "prints" | "monitor" | "settings" | "update" | "guide" | "intro" | "report" | "demo" | "more" | null;
+export type DialogKind = "cameras" | "printers" | "prints" | "monitor" | "settings" | "update" | "guide" | "intro" | "report" | "more" | null;
 
 export interface Upload {
   id: number;
@@ -98,8 +82,7 @@ export interface StagedPrint {
 export type SettingsTabId = "appearance" | "alerts" | "plugins" | "mqtt" | "updates" | "api" | "advanced";
 
 interface PgStore {
-  mode: Mode | null;
-  phase: "pick" | "booting" | "ready" | "error";
+  phase: "booting" | "ready";
   bootMsg: string;
   link: EngineLink | null;
   engine: EngineState | null;
@@ -146,8 +129,6 @@ interface PgStore {
   setCustomising(on: boolean): void;
   mutateLayout(key: keyof Layout, fn: (section: LayoutSection) => LayoutSection): void;
   resetLayout(): void;
-  chooseMode(mode: Mode): void;
-  leaveMode(): void;
   send(cmd: Record<string, unknown>): number;
   isPending(cmd: string): boolean;
   updateCamera(id: string, patch: Record<string, unknown>): void;
@@ -156,7 +137,6 @@ interface PgStore {
   flushUpdates(): void;
   discover(): void;
   openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
-  dismissDemo(): void;
   openSettings(tab?: SettingsTabId): void;
   openDetail(id: string | null): void;
   openStats(id: string | null): void;
@@ -250,9 +230,6 @@ export const useStore = create<PgStore>((set, get) => {
 
   const panels = new Map<string, PluginPanelHost>();
 
-  const runnableFiles = (plugin: PluginRecord, engine: EngineState): string[] =>
-    plugin.files.filter((file) => file === "plugin.js" || (file === "worker.js" && !engine.plugin_host));
-
   const pluginState = (plugin: PluginRecord) => {
     const engine = get().engine;
     return engine ? projectState(engine, plugin.granted, engine.plugin_permissions) : {};
@@ -309,25 +286,23 @@ export const useStore = create<PgStore>((set, get) => {
       sendSilent({ cmd: "plugin.update", id, patch: { config } });
     },
     onFailure: (id: string, failure: string) => {
-      dropHosts((key) => key.startsWith(`${id}:`));
+      dropHosts((hosted) => hosted === id);
       set((s) => ({ pluginFailures: { ...s.pluginFailures, [id]: failure } }));
       get().toast("error", `Plugin ${id} stopped: ${failure}`);
     },
   };
 
-  const dropHosts = (matches: (key: string) => boolean) => {
-    for (const [key, host] of hosts) {
-      if (!matches(key)) continue;
+  const dropHosts = (matches: (id: string) => boolean) => {
+    for (const [id, host] of hosts) {
+      if (!matches(id)) continue;
       host.close();
-      hosts.delete(key);
+      hosts.delete(id);
     }
   };
 
   const syncPlugins = (engine: EngineState) => {
-    const wanted = new Set(
-      engine.plugins.filter((p) => p.enabled).flatMap((p) => runnableFiles(p, engine).map((file) => `${p.id}:${file}`)),
-    );
-    dropHosts((key) => !wanted.has(key));
+    const wanted = new Set(engine.plugins.filter((p) => p.enabled && p.files.includes("plugin.js")).map((p) => p.id));
+    dropHosts((id) => !wanted.has(id));
     if (get().background && !engine.plugins.some((p) => p.id === get().background?.id && p.enabled)) showBackground(null);
     for (const [id, panel] of panels) {
       if (engine.plugins.some((p) => p.id === id && p.enabled)) continue;
@@ -341,7 +316,7 @@ export const useStore = create<PgStore>((set, get) => {
     }
     const missing = new Set(
       [
-        ...[...wanted].filter((key) => !hosts.has(key)).map((key) => key.split(":")[0]),
+        ...[...wanted].filter((id) => !hosts.has(id)),
         ...engine.plugins.filter((p) => p.enabled && p.files.includes("panel.html") && !get().pluginPanels[p.id]).map((p) => p.id),
       ].filter((id) => !get().pluginFailures[id]),
     );
@@ -349,8 +324,8 @@ export const useStore = create<PgStore>((set, get) => {
       if ([...codeRequests.values()].includes(id)) continue;
       codeRequests.set(sendSilent({ cmd: "plugin.code", id }), id);
     }
-    for (const [key, host] of hosts) {
-      const plugin = engine.plugins.find((p) => p.id === key.split(":")[0]);
+    for (const [id, host] of hosts) {
+      const plugin = engine.plugins.find((p) => p.id === id);
       if (!plugin) continue;
       const landed = JSON.stringify(plugin.config);
       if (writingConfigs.get(plugin.id) === landed) writingConfigs.delete(plugin.id);
@@ -370,9 +345,7 @@ export const useStore = create<PgStore>((set, get) => {
     if (!engine || !plugin) return;
     const seen = projectEvent(event, engine.plugin_events, plugin.granted, engine.plugin_permissions, engine.plugin_event_permissions);
     if (!seen) return;
-    for (const [key, host] of hosts) {
-      if (key.startsWith(`${id}:`)) void host.event(seen, pluginState(plugin), pluginTargets(plugin));
-    }
+    void hosts.get(id)?.event(seen, pluginState(plugin), pluginTargets(plugin));
     panels.get(id)?.event(seen);
   };
 
@@ -411,11 +384,9 @@ export const useStore = create<PgStore>((set, get) => {
     if (sources["panel.html"]) {
       set((s) => ({ pluginPanels: { ...s.pluginPanels, [id]: { html: sources["panel.html"], assets: blobs } } }));
     }
-    for (const file of runnableFiles(plugin, engine)) {
-      const key = `${id}:${file}`;
-      if (hosts.has(key) || !sources[file]) continue;
-      const host = new PluginHost(plugin, file, sources[file], text, handlers);
-      hosts.set(key, host);
+    if (!hosts.has(id) && sources["plugin.js"]) {
+      const host = new PluginHost(plugin, sources["plugin.js"], text, handlers);
+      hosts.set(id, host);
       void host.update(pluginState(plugin), pluginTargets(plugin));
     }
   };
@@ -435,8 +406,7 @@ export const useStore = create<PgStore>((set, get) => {
           optimistic = Object.fromEntries(Object.entries(optimistic).filter(([, e]) => e.reqId !== event.req_id));
         }
         const cleared = had && Object.keys(optimistic).length === 0;
-        const arriving = get().phase !== "ready";
-        const firstRun = arriving ? firstRunDialog(get().mode) : null;
+        const firstRun = get().phase !== "ready" && !localStorage.getItem(INTRO_SEEN_KEY);
         const engine = Object.keys(optimistic).length ? applyOptimistic(server, optimistic) : server;
         let history = get().history;
         for (const monitor of server.monitors) {
@@ -449,9 +419,9 @@ export const useStore = create<PgStore>((set, get) => {
           optimistic,
           phase: "ready",
           ...(cleared ? { savedAt: Date.now() } : {}),
-          ...(firstRun ? { dialog: firstRun } : {}),
+          ...(firstRun ? { dialog: "intro" as const } : {}),
         });
-        if (!resumed && get().mode === "hub") {
+        if (!resumed) {
           resumed = true;
           void resumePublishers(server.cameras, (reason) => get().toast("error", `publishing stopped: ${reason}`));
         }
@@ -568,40 +538,10 @@ export const useStore = create<PgStore>((set, get) => {
 
   (window as any).__pgEvent = onEvent;
 
-  const boot = async (mode: Mode) => {
-    log("info", `boot: ${mode} mode`);
-    set({ mode, phase: "booting", bootMsg: mode === "hub" ? "Connecting to hub" : "Preparing local engine" });
-    try {
-      if (mode === "hub") {
-        const link = connectHub(onEvent, () => set({ bootMsg: "Reconnecting" }));
-        set({ link });
-      } else {
-        const link = await bootLocal(onEvent, (bootMsg) => {
-          log("info", `local boot: ${bootMsg}`);
-          set({ bootMsg });
-        });
-        set({ link });
-      }
-    } catch (err) {
-      log("error", "boot failed:", err);
-      set({ phase: "error", bootMsg: String(err) });
-    }
-  };
-
-  const stored = modeFromUrl();
-  queueMicrotask(async () => {
-    if (stored) return void boot(stored);
-    const hubReady = await fetch("api/health").then((r) => r.ok).catch(() => false);
-    if (hubReady) boot("hub");
-    else set({ phase: "pick" });
-  });
-  window.addEventListener("hashchange", () => location.reload());
-
   return {
-    mode: stored,
     phase: "booting",
-    bootMsg: "",
-    link: null,
+    bootMsg: "Connecting to hub",
+    link: connectHub(onEvent, () => set({ bootMsg: "Reconnecting" })),
     engine: null,
     history: {},
     discovered: null,
@@ -640,7 +580,7 @@ export const useStore = create<PgStore>((set, get) => {
 
     pluginAct(id, action, arg) {
       const plugin = get().engine?.plugins.find((p) => p.id === id);
-      const host = hosts.get(`${id}:plugin.js`);
+      const host = hosts.get(id);
       if (plugin && host) void host.act(action, arg, pluginState(plugin), pluginTargets(plugin));
     },
 
@@ -692,16 +632,6 @@ export const useStore = create<PgStore>((set, get) => {
       get().send({ cmd: "settings.update", patch: { layout: {} } });
     },
 
-    chooseMode(mode) {
-      history.pushState(null, "", `#${mode}`);
-      void boot(mode);
-    },
-
-    leaveMode() {
-      get().flushUpdates();
-      location.assign(location.pathname);
-    },
-
     send(cmd) {
       const req_id = ++reqSeq;
       const cmdType = cmd.cmd as string;
@@ -751,11 +681,6 @@ export const useStore = create<PgStore>((set, get) => {
         createdToken: null,
         settingsTab: null,
       });
-    },
-
-    dismissDemo() {
-      localStorage.setItem(DEMO_SEEN_KEY, "1");
-      get().openDialog(introDue() ? "intro" : null);
     },
 
     openSettings(settingsTab = "alerts") {

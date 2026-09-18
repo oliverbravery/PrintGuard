@@ -10,19 +10,6 @@ function providerLabel(integrations: AdapterMeta[], id: string): string {
   return integrations.find((i) => i.id === id)?.label ?? id;
 }
 
-function mixedContent(mode: string | null | undefined, config: Record<string, string>): boolean {
-  return mode === "local" && location.protocol === "https:" && Object.values(config).some((v) => v.startsWith("http://"));
-}
-
-function MixedContentNote() {
-  return (
-    <p className="text-xs leading-snug text-warn break-words">
-      PrintGuard is served over HTTPS, so the browser blocks this http:// address as mixed content in local mode. Switch to hub
-      mode, or use an https:// printer URL.
-    </p>
-  );
-}
-
 function PrinterTest({ provider, config }: { provider: string; config: Record<string, string> }) {
   const { printerTest, testing, testPrinter } = useStore();
   return (
@@ -43,7 +30,7 @@ function PrinterTest({ provider, config }: { provider: string; config: Record<st
 }
 
 function PrinterRow({ printer }: { printer: Printer }) {
-  const { engine, send, isPending, mode } = useStore();
+  const { engine, send, isPending } = useStore();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(printer.name);
   const [config, setConfig] = useState<Record<string, string>>(printer.config ?? {});
@@ -83,7 +70,6 @@ function PrinterRow({ printer }: { printer: Printer }) {
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
           <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
-          {mixedContent(mode, config) && <MixedContentNote />}
           <PrinterTest provider={printer.provider} config={config} />
           <button
             className="btn btn-primary w-full !py-1.5"
@@ -99,8 +85,8 @@ function PrinterRow({ printer }: { printer: Printer }) {
 }
 
 function RegisterPrinter() {
-  const { engine, send, isPending, mode } = useStore();
-  const integrations = (engine?.integrations ?? []).filter((i) => mode === "hub" || i.browser_ok);
+  const { engine, send, isPending } = useStore();
+  const integrations = engine?.integrations ?? [];
   const [provider, setProvider] = useState("");
   const [name, setName] = useState("");
   const [config, setConfig] = useState<Record<string, string>>({});
@@ -128,7 +114,6 @@ function RegisterPrinter() {
         <>
           <input className="field" placeholder={`Name (e.g. ${meta.label} Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
-          {mixedContent(mode, config) && <MixedContentNote />}
           <PrinterTest provider={provider} config={config} />
           <button
             className="btn btn-primary w-full"

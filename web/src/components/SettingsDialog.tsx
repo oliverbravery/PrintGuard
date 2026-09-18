@@ -29,7 +29,6 @@ export function SettingsDialog() {
     engine,
     send,
     openDialog,
-    leaveMode,
     isPending,
     notifyTest,
     testingNotifier,
@@ -89,22 +88,16 @@ export function SettingsDialog() {
   }, [editing]);
 
   const desktopApp = "pywebview" in window;
-  const channels = (engine?.notifiers ?? []).filter(
-    (n) => (engine?.mode === "hub" || n.browser_ok) && (!n.desktop_only || desktopApp),
-  );
+  const channels = (engine?.notifiers ?? []).filter((n) => !n.desktop_only || desktopApp);
 
   const tabs: { id: SettingsTabId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
     { id: "alerts", label: "Alerts" },
     { id: "plugins", label: "Plugins" },
-    ...(engine?.mode === "hub"
-      ? ([
-          { id: "mqtt", label: "Home Assistant" },
-          { id: "updates", label: "Updates" },
-          { id: "api", label: "API" },
-          { id: "advanced", label: "Advanced" },
-        ] as const)
-      : []),
+    { id: "mqtt", label: "Home Assistant" },
+    { id: "updates", label: "Updates" },
+    { id: "api", label: "API" },
+    { id: "advanced", label: "Advanced" },
   ];
 
   return (
@@ -113,7 +106,7 @@ export function SettingsDialog() {
     <Dialog
       title="Settings"
       onClose={close}
-      toolbar={tabs.length > 1 && <Tabs prefix="settings" label="Settings sections" tabs={tabs} value={tab} onChange={setTab} />}
+      toolbar={<Tabs prefix="settings" label="Settings sections" tabs={tabs} value={tab} onChange={setTab} />}
     >
       <div className="space-y-5">
         {tab === "appearance" && (
@@ -456,17 +449,11 @@ export function SettingsDialog() {
           </TabPanel>
         )}
 
-        <div className="hairline flex items-center justify-between gap-3 pt-4">
-          <span className="mono min-w-0 flex-1 truncate text-[0.65rem] text-text-2">{footer}</span>
-          <span className="text-xs text-text-1">
-            Mode: <span className="mono text-accent">{engine?.mode}</span>
-          </span>
-          {engine?.mode === "local" && (
-            <button className="btn" onClick={leaveMode}>
-              Back to start
-            </button>
-          )}
-        </div>
+        {footer && (
+          <div className="hairline pt-4">
+            <span className="mono block truncate text-[0.65rem] text-text-2">{footer}</span>
+          </div>
+        )}
       </div>
     </Dialog>
       )}

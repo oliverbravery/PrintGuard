@@ -47,7 +47,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
       lead={<span aria-hidden className={`led ${monitor.alert ? "led-bad" : monitor.watching && camera?.online ? "led-on" : "led-off"}`} />}
       meta={<DeviceChip state={printer?.device_state ?? undefined} />}
     >
-      <Feed camera={camera} mode={engine?.mode ?? "local"} />
+      <Feed camera={camera} />
 
       <Section title="Live risk">
         <div className="flex items-center gap-4">

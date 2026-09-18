@@ -1,4 +1,4 @@
-import { ArrowUpCircle, Bug, CircleHelp, FlaskConical, LayoutGrid, type LucideIcon } from "lucide-react";
+import { ArrowUpCircle, Bug, CircleHelp, LayoutGrid, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
@@ -27,7 +27,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 export function MoreSheet() {
-  const { engine, mode, openDialog, customising, setCustomising } = useStore();
+  const { engine, openDialog, customising, setCustomising } = useStore();
   const stats = engine?.stats;
   const update = engine?.update;
   return (
@@ -63,7 +63,6 @@ export function MoreSheet() {
               onClick={() => openDialog("update")}
             />
           )}
-          {mode === "local" && <Row icon={FlaskConical} label="About the live demo" onClick={() => openDialog("demo")} />}
         </div>
       </div>
     </Dialog>

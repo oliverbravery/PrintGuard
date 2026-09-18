@@ -83,7 +83,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
           </>
         )}
       </div>
-      <Feed camera={camera} mode={engine?.mode ?? "local"} active={!covered}>
+      <Feed camera={camera} active={!covered}>
         {activeJob(device) && <ProgressBar state={device} className="absolute inset-x-0 bottom-0 z-[3] h-[3px]" />}
       </Feed>
       {alerting && (
