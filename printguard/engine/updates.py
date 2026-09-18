@@ -10,6 +10,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from packaging.version import InvalidVersion, Version
+
 from .adapters import HttpFn
 
 RELEASES_URL = "https://api.github.com/repos/{repo}/releases"
@@ -37,8 +39,6 @@ async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None
     Raises:
         RuntimeError: If GitHub does not return a releases list.
     """
-    from packaging.version import InvalidVersion, Version
-
     status, body = await http("GET", RELEASES_URL.format(repo=repo), headers=HEADERS, timeout=TIMEOUT_S)
     if status != 200 or not isinstance(body, list):
         raise RuntimeError(f"GitHub returned {status}")
