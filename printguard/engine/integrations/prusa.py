@@ -3,9 +3,7 @@
 PrusaLink runs on the printer itself (MK4, MK4S, MK3.9, MK3.5, MINI, XL, CORE
 One) or on a Raspberry Pi attached to an MK3/MK2.5. Its ``/api/v1`` API
 authenticates with HTTP Digest - username ``maker`` and the PrusaLink password
-shown on the printer. 
-The client needs httpx, which the browser sandbox lacks, so it runs in hub mode only
-(``browser_ok`` is False); the printer also sends no CORS headers.
+shown on the printer.
 
 PrusaConnect is deliberately not used: it routes through Prusa's cloud, whereas
 PrintGuard keeps everything on hardware the user owns, and it exposes no
@@ -51,7 +49,6 @@ class PrusaAdapter(IntegrationAdapter):
         "Enable PrusaLink on the printer (Settings > Network > PrusaLink) and use the password "
         "shown there. The username is always 'maker'."
     )
-    browser_ok = False
     experimental = False
     formats = ("gcode", "bgcode")
     schema = {

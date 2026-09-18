@@ -1,10 +1,9 @@
 """Contract for alert notifiers.
 
 A notifier adapter delivers defect alerts through a push service via the
-platform's HTTP function, so the same adapter runs in the browser (local
-mode) and on the server (hub mode). Contributors add a service by
-subclassing NotifierAdapter in a new module and registering an instance
-in printguard.engine.notifiers.NOTIFIERS.
+platform's HTTP function. Contributors add a service by subclassing
+NotifierAdapter in a new module and registering an instance in
+printguard.engine.notifiers.NOTIFIERS.
 """
 
 from __future__ import annotations

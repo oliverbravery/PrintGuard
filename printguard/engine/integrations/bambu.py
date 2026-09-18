@@ -2,8 +2,6 @@
 
 Bambu Lab printers expose no local HTTP control surface: state and control
 travel over MQTT/TLS on port 8883, authenticated with the LAN access code.
-That needs a raw TLS socket, which the browser sandbox forbids, so this
-adapter runs in hub mode only (browser_ok is False).
 
 The user must enable LAN Only Mode and then Developer Mode on the printer
 (Settings > Network) - Developer Mode is what opens the MQTT channel on
@@ -86,7 +84,6 @@ class BambuAdapter(IntegrationAdapter):
         "On the printer, enable LAN Only Mode then Developer Mode (Settings > Network) to open the MQTT "
         "channel. The access code is shown there; the serial number is under Settings > Device."
     )
-    browser_ok = False
     experimental = False
     formats = ("3mf",)
     heater_control = True

@@ -2,9 +2,9 @@
 
 Elegoo's official Link SDK supports Centauri Carbon 1 and 2, Neptune 4
 Pro/Plus/Max, OrangeStorm Giga and other Moonraker printers through one
-local-LAN surface. Centauri models use raw WebSocket or MQTT connections,
-so this adapter is hub-only; Moonraker models reuse PrintGuard's Klipper
-adapter instead of duplicating its HTTP implementation.
+local-LAN surface. Centauri models use raw WebSocket or MQTT connections
+through pycentauri; Moonraker models reuse PrintGuard's Klipper adapter
+instead of duplicating its HTTP implementation.
 
 Official SDK and model list: https://github.com/ELEGOO-3D/elegoo-link
 Centauri Python client: https://github.com/bjan/pycentauri
@@ -43,7 +43,6 @@ class ElegooAdapter(IntegrationAdapter):
         "Centauri Carbon 2 needs LAN Only Mode and its screen access code. "
         "Neptune 4 and OrangeStorm printers use their stock Moonraker service."
     )
-    browser_ok = False
     experimental = False
     formats = ("gcode",)
     heater_control = True

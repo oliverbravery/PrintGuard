@@ -38,7 +38,7 @@ class PrintUpload(BaseModel):
 
 
 def store_of(engine: Engine) -> DiskFileStore:
-    """The hub's file store, which every hub has."""
+    """The hub's file store, as the disk store it is rather than the protocol."""
     files = engine.platform.files
     assert isinstance(files, DiskFileStore)
     return files

@@ -217,7 +217,6 @@ async def test_native_delivers_text_without_snapshot(monkeypatch) -> None:
 
 
 def test_native_runs_in_the_desktop_app_only() -> None:
-    assert NOTIFIERS["native"].browser_ok is False
     assert NOTIFIERS["native"].desktop_only is True
 
 
@@ -577,11 +576,6 @@ async def test_bambu_without_a_camera_exposes_nothing(monkeypatch) -> None:
     assert await INTEGRATIONS["bambu"].cameras(None, BAMBU_CONFIG) == []
 
 
-def test_bambu_runs_in_hub_mode_only() -> None:
-    assert INTEGRATIONS["bambu"].browser_ok is False
-    assert INTEGRATIONS["octoprint"].browser_ok is True
-
-
 ELEGOO_CENTAURI_CONFIG = {"family": "centauri", "host": "192.168.1.90", "access_code": "Ab3dEf"}
 ELEGOO_MOONRAKER_CONFIG = {"family": "moonraker", "host": "192.168.1.91", "api_key": "secret"}
 
@@ -768,9 +762,8 @@ async def test_elegoo_moonraker_reuses_klipper_protocol() -> None:
     assert http.last["json"] == {"script": "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=60"}
 
 
-def test_elegoo_runs_in_hub_mode_only() -> None:
+def test_elegoo_offers_both_families_and_hides_their_credentials() -> None:
     adapter = INTEGRATIONS["elegoo"]
-    assert adapter.browser_ok is False
     assert adapter.schema["properties"]["family"]["enum"] == ["centauri", "moonraker"]
     assert adapter.secret_keys() == {"access_code", "api_key"}
 
@@ -864,10 +857,6 @@ async def test_prusa_send_without_active_job_raises(monkeypatch) -> None:
     monkeypatch.setattr(INTEGRATIONS["prusa"], "_job", _prusa_job(None))
     with pytest.raises(RuntimeError, match="no active job"):
         await INTEGRATIONS["prusa"].send(None, PRUSA_CONFIG, DeviceAction.PAUSE)
-
-
-def test_prusa_runs_in_hub_mode_only() -> None:
-    assert INTEGRATIONS["prusa"].browser_ok is False
 
 
 def test_sanitise_monitor_clamps_and_defaults() -> None:

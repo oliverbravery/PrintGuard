@@ -1,4 +1,4 @@
-"""Model Context Protocol server for agents (hub mode only).
+"""Model Context Protocol server for agents.
 
 The tool set is derived from the REST API with FastMCP.from_fastapi, so agents
 and developers share one definition that always tracks the engine protocol. The

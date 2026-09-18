@@ -1,7 +1,7 @@
 """PrintGuard - real-time 3D print failure detection.
 
-One engine, two platforms: the same inference loop, camera and printer
-registries and monitors run on CPython (hub mode) and Pyodide (local mode).
+The engine holds the inference loop, the camera and printer registries and
+the monitors. The server runs it as a self-hosted hub.
 
 The version lives in pyproject.toml alone (`uv version --bump …`).
 """

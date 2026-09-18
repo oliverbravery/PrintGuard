@@ -2,8 +2,6 @@
 
 API reference: https://core.telegram.org/bots/api
 Creating a bot with BotFather: https://core.telegram.org/bots/tutorial
-
-api.telegram.org sends no CORS headers, so this adapter is hub-only.
 """
 
 from __future__ import annotations
@@ -24,7 +22,6 @@ class TelegramNotifier(NotifierAdapter):
         "Create a bot with @BotFather to get its token, then message the bot and read your "
         "chat ID from @userinfobot."
     )
-    browser_ok = False
     schema = {
         "type": "object",
         "properties": {

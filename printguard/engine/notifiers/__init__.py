@@ -3,7 +3,7 @@
 To add a service: create a module in this package with a NotifierAdapter
 subclass and register an instance below. The settings form, test button
 and alert delivery follow from the adapter alone - no other code changes
-are required in either mode.
+are required.
 """
 
 from __future__ import annotations

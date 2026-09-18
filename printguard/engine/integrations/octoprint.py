@@ -34,10 +34,7 @@ class OctoPrintAdapter(IntegrationAdapter):
     setup_url = "https://docs.octoprint.org/en/master/bundledplugins/appkeys.html"
     formats = ("gcode", "gco", "g")
     heater_control = True
-    setup_hint = (
-        "Copy an application key from OctoPrint under Settings > Application Keys. "
-        "In local mode, also enable CORS under Settings > API."
-    )
+    setup_hint = "Copy an application key from OctoPrint under Settings > Application Keys."
     schema = {
         "type": "object",
         "properties": {

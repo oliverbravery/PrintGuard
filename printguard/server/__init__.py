@@ -1,1 +1,1 @@
-"""CPython-only platform for hub mode inference, capture and serving."""
+"""The hub: inference, capture, serving and the transports over the engine."""

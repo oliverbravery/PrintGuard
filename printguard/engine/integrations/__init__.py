@@ -3,7 +3,7 @@
 To add a service: create a module in this package with an
 IntegrationAdapter subclass and register an instance below. The
 configuration form, device polling and defect actions follow from the
-adapter alone - no other code changes are required in either mode.
+adapter alone - no other code changes are required.
 """
 
 from __future__ import annotations

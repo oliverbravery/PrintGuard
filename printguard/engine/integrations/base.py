@@ -1,10 +1,10 @@
 """Contract for printer service integrations.
 
-An integration adapter is shared code: it talks to the printer service
-through the platform's HTTP function, so the same adapter runs in the
-browser (local mode) and on the server (hub mode). Contributors add a
-service by subclassing IntegrationAdapter in a new module and registering
-an instance in printguard.engine.integrations.INTEGRATIONS.
+An integration adapter talks to the printer service through the platform's
+HTTP function, or through the service's own client library where it has no
+HTTP API. Contributors add a service by subclassing IntegrationAdapter in a
+new module and registering an instance in
+printguard.engine.integrations.INTEGRATIONS.
 """
 
 from __future__ import annotations

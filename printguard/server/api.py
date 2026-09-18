@@ -1,4 +1,4 @@
-"""Versioned REST surface over the engine protocol (hub mode only).
+"""Versioned REST surface over the engine protocol.
 
 Every route delegates to the same engine command/event protocol the UI speaks,
 so the REST API, the MCP tools derived from it and the dashboard can never

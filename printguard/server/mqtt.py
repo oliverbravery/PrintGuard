@@ -1,4 +1,4 @@
-"""Home Assistant MQTT bridge (hub mode only).
+"""Home Assistant MQTT bridge.
 
 A thin layer over the engine's event sink and ``request()``
 surface that owns no monitoring logic of its own. It reconciles one Home
@@ -10,7 +10,6 @@ controllable device in Home Assistant without the engine knowing MQTT exists.
 
 Connection settings live in engine settings under ``mqtt`` and are edited from
 the dashboard like notifier channels; the bridge reconnects when they change.
-A raw MQTT socket is forbidden in the browser sandbox, so this is hub-only.
 
 The protocol shapes are pure functions tested in ``tests/test_mqtt.py``; this
 module wraps them in an ``aiomqtt`` session that reconnects on failure and on a
