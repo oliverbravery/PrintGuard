@@ -2,8 +2,6 @@
 
 Bambu Lab printers expose no local HTTP control surface: state and control
 travel over MQTT/TLS on port 8883, authenticated with the LAN access code.
-That needs a raw TLS socket, which the browser sandbox forbids, so this
-adapter runs in hub mode only (browser_ok is False).
 
 The user must enable LAN Only Mode and then Developer Mode on the printer
 (Settings > Network) - Developer Mode is what opens the MQTT channel on
@@ -25,10 +23,16 @@ https://github.com/acse-ci223/bambulabs_api/blob/main/bambulabs_api/mqtt_client.
 from __future__ import annotations
 
 import asyncio
+import ftplib
+import hashlib
 import io
 import json
+import socket
+import ssl
 import threading
 from typing import Any
+
+import paho.mqtt.client as mqtt
 
 from ..gcode import plate_gcode
 from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
@@ -86,7 +90,6 @@ class BambuAdapter(IntegrationAdapter):
         "On the printer, enable LAN Only Mode then Developer Mode (Settings > Network) to open the MQTT "
         "channel. The access code is shown there; the serial number is under Settings > Device."
     )
-    browser_ok = False
     experimental = False
     formats = ("3mf",)
     heater_control = True
@@ -184,10 +187,6 @@ class BambuAdapter(IntegrationAdapter):
         return []
 
     def _rtsps_fingerprint(self, host: str) -> str | None:
-        import hashlib
-        import socket
-        import ssl
-
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.check_hostname = False
@@ -201,8 +200,6 @@ class BambuAdapter(IntegrationAdapter):
         return hashlib.sha256(der).hexdigest().upper() if der else None
 
     def _port_open(self, host: str, port: int) -> bool:
-        import socket
-
         try:
             with socket.create_connection((host, port), timeout=_CONNECT_TIMEOUT_S):
                 return True
@@ -210,8 +207,6 @@ class BambuAdapter(IntegrationAdapter):
             return False
 
     def _tls_context(self):
-        import ssl
-
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.check_hostname = False
@@ -219,9 +214,6 @@ class BambuAdapter(IntegrationAdapter):
         return context
 
     def _upload(self, config: dict[str, Any], filename: str, data: bytes) -> None:
-        import ftplib
-        import ssl
-
         context = self._tls_context()
 
         class ImplicitFtps(ftplib.FTP_TLS):
@@ -257,8 +249,6 @@ class BambuAdapter(IntegrationAdapter):
             ftps.close()
 
     def _client(self, config: dict[str, Any]):
-        import paho.mqtt.client as mqtt
-
         context = self._tls_context()
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv311)
         client.connect_timeout = _CONNECT_TIMEOUT_S

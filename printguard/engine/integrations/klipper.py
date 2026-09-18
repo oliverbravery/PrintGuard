@@ -1,7 +1,7 @@
 """Klipper integration via the Moonraker API.
 
 API reference: https://moonraker.readthedocs.io/en/latest/external_api/introduction/
-Authorization and CORS (trusted_clients, cors_domains): https://moonraker.readthedocs.io/en/latest/configuration/#authorization
+Authorization (trusted_clients, API keys): https://moonraker.readthedocs.io/en/latest/configuration/#authorization
 """
 
 from __future__ import annotations
@@ -35,8 +35,8 @@ class KlipperAdapter(IntegrationAdapter):
     formats = ("gcode", "gco", "g")
     heater_control = True
     setup_hint = (
-        "On a trusted LAN Moonraker needs no key. In local mode, add PrintGuard's origin "
-        "to cors_domains in the [authorization] section of moonraker.conf."
+        "On a trusted LAN Moonraker needs no key. Otherwise add the hub's address to "
+        "trusted_clients in the [authorization] section of moonraker.conf, or enter an API key."
     )
     schema = {
         "type": "object",

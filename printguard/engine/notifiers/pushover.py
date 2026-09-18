@@ -3,10 +3,6 @@
 API reference: https://pushover.net/api
 Creating an application token: https://pushover.net/apps/build
 
-CORS on api.pushover.net is per endpoint. The messages endpoint sends the
-headers, so this adapter runs in both modes, and it is the only endpoint the
-adapter calls: users/validate.json and sounds.json send none.
-
 Emergency (2) is absent from the priorities. It needs retry and expire
 parameters and an acknowledgement receipt to stop it re-alerting, and
 PrintGuard has nowhere to hold one.

@@ -72,8 +72,8 @@ authentication is your tailnet identity.
    then run `tailscale up` on each.
 2. Open `http://<hub-machine-name>:8000` from any device on the tailnet. Invite others from
    the Tailscale admin console if they should have access.
-3. Browsers only grant camera access on secure pages, so local mode and **This device**
-   publishing from phones both need HTTPS:
+3. Browsers only grant camera access on secure pages, so publishing a phone's camera from
+   **This browser** needs HTTPS:
 
    ```bash
    sudo tailscale serve --bg --https=443 8000

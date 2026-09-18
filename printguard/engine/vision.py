@@ -1,7 +1,6 @@
 """Pure-numpy preprocessing, prototype classification and defect scoring.
 
-Every function here runs identically on CPython and Pyodide; the model
-invocation itself is the platform's responsibility.
+The model invocation itself is the platform's responsibility.
 """
 
 from __future__ import annotations

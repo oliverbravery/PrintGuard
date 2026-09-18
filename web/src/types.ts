@@ -1,5 +1,3 @@
-export type Mode = "local" | "hub";
-
 export interface Crop {
   x: number;
   y: number;
@@ -174,7 +172,6 @@ export interface AdapterMeta {
   id: string;
   label: string;
   docs_url: string;
-  browser_ok?: boolean;
   desktop_only?: boolean;
   experimental?: boolean;
   setup_url?: string | null;
@@ -242,7 +239,6 @@ export interface Permission {
   label: string;
   description: string;
   risky?: boolean;
-  hub_only?: boolean;
   urls?: boolean;
   channels?: boolean;
   commands?: string[];
@@ -363,14 +359,12 @@ export interface UpdateInfo {
 }
 
 export interface EngineState {
-  mode: string;
   host: string;
   version: string;
   update: UpdateInfo | null;
   cameras: Camera[];
   printers: Printer[];
   prints: PrintFile[];
-  print_store: boolean;
   monitors: Monitor[];
   settings: {
     notifiers: Record<string, Record<string, string>>;
@@ -396,7 +390,6 @@ export interface EngineState {
   plugin_oauth_callback: string;
   plugin_platforms: Record<string, string>;
   plugin_assets: Record<string, string>;
-  plugin_host: boolean;
 }
 
 export interface ScorePoint {

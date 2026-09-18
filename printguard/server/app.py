@@ -1,9 +1,4 @@
-"""FastAPI application serving the UI, model assets and the engine socket.
-
-The same image serves both modes - hub mode runs the engine here, while
-local mode only needs the static UI, the model files and the Python
-source archive that Pyodide unpacks in the browser.
-"""
+"""FastAPI application serving the UI, the engine socket and the programmatic surfaces."""
 
 from __future__ import annotations
 
@@ -34,7 +29,6 @@ import printguard
 
 from ..engine import logs, oauth
 from ..engine.engine import Engine
-from ..pysrc import build_pysrc
 from .api import ApiAuth, build_api_app
 from .events import ConflatedEventQueue
 from .mcp import build_mcp_app
@@ -170,7 +164,6 @@ def create_app() -> FastAPI:
             logger.info("hub shutting down")
 
     app = FastAPI(title="PrintGuard", lifespan=lifespan)
-    pysrc = build_pysrc()
     gate_cache: dict[tuple[str, ...], float] = {}
 
     async def gate_allows(request: Request) -> bool:
@@ -271,11 +264,6 @@ def create_app() -> FastAPI:
         """Reports hub readiness and the running version."""
         response.headers["Cache-Control"] = "no-store"
         return {"ok": True, "version": app.state.engine.platform.version}
-
-    @app.get("/pysrc.zip")
-    def pysrc_zip() -> Response:
-        """Serves the engine source archive consumed by local mode."""
-        return Response(pysrc, media_type="application/zip", headers={"Cache-Control": "no-store"})
 
     @app.websocket("/api/ws")
     async def engine_socket(websocket: WebSocket) -> None:
@@ -380,7 +368,6 @@ def create_app() -> FastAPI:
 
     app.mount("/api/v1", api_app)
     app.mount("/mcp", mcp_app)
-    app.mount("/models", StaticFiles(directory=model_dir), name="models")
     if static_dir.is_dir():
         app.mount("/", WebStaticFiles(directory=static_dir, html=True), name="ui")
     return app

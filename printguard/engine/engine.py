@@ -2,8 +2,7 @@
 
 Owns the camera, printer and print file registries, the monitors, the
 scheduler and the watchdog, and exposes a JSON command/event protocol. The UI speaks this protocol
-over a WebSocket in hub mode and over an in-page bridge in local mode; the engine
-cannot tell the difference.
+over a WebSocket, and the REST API, MCP server and MQTT bridge speak it in process.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, IntegrationAdapter, integrations_meta
 from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
-from .platform import FileStore, Frame, Platform
+from .platform import Frame, Platform
 from .printers import PREHEAT_DEFAULTS, sanitise_presets, sanitise_printer, sanitise_targets
 from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers
 from .registry import (
@@ -209,13 +208,12 @@ class Engine:
             asyncio.ensure_future(self.watchdog.poll_devices()),
             asyncio.ensure_future(self.watchdog.watch_health()),
             asyncio.ensure_future(self._ticker()),
+            asyncio.ensure_future(self._update_loop()),
         ]
-        if self.platform.update_repo:
-            self._tasks.append(asyncio.ensure_future(self._update_loop()))
         logger.info(
-            "engine started: v%s %s, %d cameras, %d printers, %d monitors, %d prints restored",
+            "engine started: v%s on %s, %d cameras, %d printers, %d monitors, %d prints restored",
             self.platform.version,
-            self.platform.mode,
+            self.platform.host,
             len(self.cameras.items),
             len(self.printers.items),
             len(self.monitors),
@@ -278,14 +276,12 @@ class Engine:
         """Builds the full state snapshot event."""
         return {
             "event": "state",
-            "mode": self.platform.mode,
             "host": self.platform.host,
             "version": self.platform.version,
             "update": self.update,
             "cameras": [c.public() for c in self.cameras.values()],
             "printers": [p.public() for p in self.printers.values()],
             "prints": [p.public() for p in self.prints.values()],
-            "print_store": self.platform.files is not None,
             "monitors": [
                 {
                     **monitor,
@@ -306,7 +302,6 @@ class Engine:
             "plugin_oauth_callback": oauth.CALLBACK_PATH,
             "plugin_platforms": plugins.PLATFORMS,
             "plugin_assets": plugins.ASSET_TYPES,
-            "plugin_host": self.platform.plugin_runtime is not None,
         }
 
     def recent_events(self) -> list[dict[str, Any]]:
@@ -493,8 +488,6 @@ class Engine:
         of the snapshot, and the UI only needs it while the update dialog is
         open.
         """
-        if not self.platform.update_repo:
-            raise RuntimeError("update checks are not available in this mode")
         status = await updates.fetch_updates(
             self.platform.http, self.platform.update_repo, self.platform.version, self.platform.update_asset
         )
@@ -761,16 +754,6 @@ class Engine:
         except Exception as exc:
             self.emit({"event": "printer_test", "ok": False, "status": None, "error": str(exc), "req_id": message.get("req_id")})
 
-    def _files(self) -> FileStore:
-        """The platform's file store.
-
-        Raises:
-            RuntimeError: Where the platform has none, which is local mode.
-        """
-        if self.platform.files is None:
-            raise RuntimeError("print files are kept on a hub, not in the browser")
-        return self.platform.files
-
     async def _cmd_print_add(self, message: dict[str, Any]) -> None:
         """Registers a sliced file the platform's store already holds.
 
@@ -780,7 +763,7 @@ class Engine:
         file that turns out not to be printable is removed again, so nothing
         the library does not list is left behind.
         """
-        files = self._files()
+        files = self.platform.files
         filename = str(message.get("filename") or "")
         ext = extension(filename)
         print_id = str(message["id"])
@@ -827,7 +810,7 @@ class Engine:
     async def _cmd_print_remove(self, message: dict[str, Any]) -> None:
         record = self.prints.remove(message["id"])
         if record:
-            files = self._files()
+            files = self.platform.files
             await files.remove(record.file_key)
             await files.remove(record.thumbnail_key)
 
@@ -858,7 +841,7 @@ class Engine:
         state = await adapter.fetch_state(self.platform.http, printer.config)
         if state.status is not DeviceStatus.IDLE:
             raise RuntimeError(f"{printer.name} is {state.status.value}, so {record.name} was not sent")
-        data = await self._files().read(record.file_key)
+        data = await self.platform.files.read(record.file_key)
         await adapter.print_file(self.platform.http, printer.config, printer_filename(record.name, record.ext), data)
         logger.info("print '%s' started on printer '%s'", record.name, printer.name)
         await self._refresh_device(printer, adapter)
@@ -948,7 +931,7 @@ class Engine:
         self.emit({"event": "releases", "releases": self.releases, "req_id": message.get("req_id")})
 
     async def _cmd_update_releases(self, message: dict[str, Any]) -> None:
-        if self.update is None and self.platform.update_repo:
+        if self.update is None:
             await self._check_updates()
         self.emit({"event": "releases", "releases": self.releases, "req_id": message.get("req_id")})
 

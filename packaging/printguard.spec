@@ -32,9 +32,6 @@ datas = [
     (str(ROOT / "mediamtx.yml"), "."),
     (str(ROOT / "web" / "dist"), "static"),
     (str(icon_png), "."),
-    (str(ROOT / "printguard" / "__init__.py"), "printguard"),
-    (str(ROOT / "printguard" / "engine"), "printguard/engine"),
-    (str(ROOT / "printguard" / "browser"), "printguard/browser"),
     (str(ROOT / "printguard" / "server" / "runtime"), "printguard/server/runtime"),
 ]
 datas += copy_metadata("printguard") + copy_metadata("fastmcp", recursive=True)

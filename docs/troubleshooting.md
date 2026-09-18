@@ -26,6 +26,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | The desktop app opens an empty white window | Its server did not start. 2.3.7 and 2.3.8 on macOS always hit this, because Core ML could not load the model from a data directory whose path contains a space | Update to 2.3.9 or later, where the window reports what failed and shows the end of the log ([logs](#getting-logs-and-diagnostics)) |
 | The Windows desktop app closes straight away without a window | Without a GPU driver, as in most virtual machines, Windows offers its Basic Render Driver as a GPU and versions before 2.5.0 crashed running the model on it | Update to 2.5.0 or later, or install the GPU driver |
 | The Windows desktop app shows "PrintGuard could not start" and the log ends in `Immediate exit requested: 'video=dummy'` | 2.4.1 treated the end of its camera listing as a failure | Update to 2.5.0 or later |
+| The website has no live demo, or a `#local` bookmark opens the landing page | Local mode, which ran PrintGuard in a browser tab, was removed in 2.5.0 | Install the desktop app or the Docker image from the [quick start](../README.md#quick-start) |
 | Container restarts repeatedly | Usually an unwritable `/data` volume | Check the volume mount and its permissions, then read `docker logs printguard` |
 
 ## Cameras and video
@@ -47,9 +48,6 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | Symptom | Cause | Fix |
 |---|---|---|
 | Test fails with *all connection attempts failed* | The hub is in a container, so `localhost` is the container | Use `http://host.docker.internal:5000`, and make the service listen on `0.0.0.0` on Linux hosts. [Details](printers.md#networking-caveats) |
-| Test fails with *access control checks* | Local mode only, where the print service sends no CORS headers | Enable CORS in OctoPrint or add `cors_domains` to `moonraker.conf`, or use hub mode |
-| Test fails with *not allowed to request resource* over HTTPS | The browser blocks an `http://` printer from an HTTPS page as mixed content | Use hub mode, where the server makes the request, or serve the printer over HTTPS |
-| Bambu, Elegoo or Prusa is missing from the list | Those services need a raw socket, an access code exchange or HTTP Digest, none of which a browser can do | Use hub mode. [Supported print services](printers.md#supported-print-services) |
 | Printer shows `offline` but is printing | The hub cannot reach the service | Monitoring keeps running by design. Fix reachability, then the state clears itself |
 | Pause or cancel did nothing | The service rejected the action | The failure is in the alert, the dashboard error feed and the notification. Check the service's own logs |
 | **Print** is greyed out in the library | The printer is not idle, or the file is tagged for other printers | Wait for the job to finish or cancel it, and tag this printer from the file's row. [Sending prints](printers.md#sending-prints) |
@@ -67,7 +65,6 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | A wireless camera still notifies when it drops out for a few seconds | The fault grace period is shorter than the camera takes to reconnect | Raise **Fault grace period** in the Alerts tab in Settings. It goes up to fifteen minutes, and the dashboard still shows the drop-out as it happens |
 | A warning that the camera dropped out for a share of the last ten minutes | It reconnects quickly enough to clear the grace period every time, so the print is only being watched part of the time | Chase the connection rather than the notification. This one fires once for the whole unstable episode |
 | Pushover alerts arrive during quiet hours | Priority defaults to High, which bypasses them, and it covers every notice including warnings and recoveries | Set it to Normal in the Alerts tab in Settings. [Notifications](printers.md#notifications) |
-| Telegram is not offered | Telegram's API sends no CORS headers | Hub mode only. [Notifications](printers.md#notifications) |
 | Home Assistant shows nothing | The broker settings are wrong, or discovery is disabled in Home Assistant | Check the Home Assistant tab in Settings and the broker's own log |
 
 ## Plugins

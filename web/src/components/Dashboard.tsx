@@ -4,7 +4,6 @@ import { useStore } from "../store";
 import { CameraRail } from "./CameraRail";
 import { CamerasDialog } from "./CamerasDialog";
 import { CustomiseBar } from "./CustomiseBar";
-import { DemoDialog } from "./DemoDialog";
 import { DetailPanel } from "./DetailPanel";
 import { GettingStarted } from "./GettingStarted";
 import { GuideDialog } from "./GuideDialog";
@@ -121,7 +120,6 @@ export function Dashboard() {
       {dialog === "guide" && <GuideDialog />}
       {dialog === "intro" && <IntroDialog />}
       {dialog === "report" && <ReportDialog />}
-      {dialog === "demo" && <DemoDialog />}
       {dialog === "more" && <MoreSheet />}
       {detail && <DetailPanel monitor={detail} />}
       {stats && <StatsPage monitor={stats} />}

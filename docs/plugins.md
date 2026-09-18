@@ -66,13 +66,11 @@ from anywhere else, a zip included, starts from scratch.
 A plugin gets the state its permissions allow and hands back what to draw and a list of things
 to do. PrintGuard does them, checking each against your permissions first.
 
-| Half | Runs in | On a hub | In local mode |
-|---|---|---|---|
-| `plugin.js` | An iframe with an opaque origin and `default-src 'none'` | ✅ | ✅ |
-| `panel.html` | The same, with your own markup, styles and scripts allowed | ✅ | ✅ |
-| `worker.js` | [QuickJS](https://github.com/quickjs-ng/quickjs) compiled to WebAssembly, under wasmtime | ✅ | The browser sandbox, headless |
-
-Only a hub can serve a plugin's routes or let one gate requests. Local mode has no server.
+| Half | Runs in |
+|---|---|
+| `plugin.js` | An iframe in the dashboard, with an opaque origin and `default-src 'none'` |
+| `panel.html` | The same, with your own markup, styles and scripts allowed |
+| `worker.js` | [QuickJS](https://github.com/quickjs-ng/quickjs) compiled to WebAssembly on the hub, under wasmtime |
 
 | Attack | What stops it |
 |---|---|
@@ -89,31 +87,31 @@ off, add `PRINTGUARD_PLUGINS=off` to its environment, then remove the plugin.
 
 ## Permissions
 
-| Permission | Lets the plugin | Hub only |
-|---|---|---|
-| `state:read` | Read monitor names, scores and alerts, and camera and printer status | |
-| `camera:view` | Put a live feed in its own panel | |
-| `sound` | Sound a short alert through the speakers | |
-| `monitor:control` | Enable, disable and retune any monitor | |
-| `printer:control` | Pause, resume and cancel prints | |
-| `notify` | Raise a message in the dashboard | |
-| `alert:send` | Send through your own ntfy, Pushover, Telegram or Discord | |
-| `net` | Reach the addresses its manifest lists | |
-| `net:local` | Reach addresses on this machine and the network around it | |
-| `monitor:manage` | Add monitors and delete them | |
-| `camera:control` | Retune any camera's brightness, crop, rotation and frame rate | |
-| `camera:manage` | Register cameras and delete them | |
-| `camera:frames` | Take a still of any camera and read the picture itself | |
-| `history:read` | Read a monitor's score history and past alerts | |
-| `printer:manage` | Connect and delete printers, setting their credentials | |
-| `settings` | Change alert channels, theme and the rest of Settings | |
-| `tokens` | Mint and revoke API tokens | |
-| `oauth` | Sign you in to a service and use the result | |
-| `link:provide` | Answer other plugins on the channels it offers | |
-| `link:consume` | Ask the plugins and channels it names, and hear them | |
-| `background` | Put a picture behind the dashboard and make the panels see-through | |
-| `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers | ✅ |
-| `gate` | See and refuse every other request to the hub | ✅ |
+| Permission | Lets the plugin |
+|---|---|
+| `state:read` | Read monitor names, scores and alerts, and camera and printer status |
+| `camera:view` | Put a live feed in its own panel |
+| `sound` | Sound a short alert through the speakers |
+| `monitor:control` | Enable, disable and retune any monitor |
+| `printer:control` | Pause, resume and cancel prints |
+| `notify` | Raise a message in the dashboard |
+| `alert:send` | Send through your own ntfy, Pushover, Telegram or Discord |
+| `net` | Reach the addresses its manifest lists |
+| `net:local` | Reach addresses on this machine and the network around it |
+| `monitor:manage` | Add monitors and delete them |
+| `camera:control` | Retune any camera's brightness, crop, rotation and frame rate |
+| `camera:manage` | Register cameras and delete them |
+| `camera:frames` | Take a still of any camera and read the picture itself |
+| `history:read` | Read a monitor's score history and past alerts |
+| `printer:manage` | Connect and delete printers, setting their credentials |
+| `settings` | Change alert channels, theme and the rest of Settings |
+| `tokens` | Mint and revoke API tokens |
+| `oauth` | Sign you in to a service and use the result |
+| `link:provide` | Answer other plugins on the channels it offers |
+| `link:consume` | Ask the plugins and channels it names, and hear them |
+| `background` | Put a picture behind the dashboard and make the panels see-through |
+| `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers |
+| `gate` | See and refuse every other request to the hub |
 
 Every permission a manifest asks for needs a line in `reasons` saying why, in the plugin
 author's own words, and one without a reason will not install. That line sits under
@@ -172,8 +170,6 @@ give the provider and links `register_url`.
 
 That URI is the hub's address with `/oauth/callback` on the end, written as `127.0.0.1` since
 providers stopped accepting `localhost`.
-
-Sign-in is hub only.
 
 ## Writing a plugin
 
@@ -249,7 +245,6 @@ catalogue by the one you are on, so anything that would not work is out of the w
 | `docker` | The self-hosted hub, on any image |
 | `docker-nvidia`, `docker-intel` | Only that image, for a plugin that needs the GPU it brings |
 | `macos`, `windows` | The desktop app |
-| `browser` | Local mode |
 
 Naming `docker` covers the images built from it, so declare a variant only when a plainer
 image would not do.

@@ -1,4 +1,4 @@
-"""Desktop app that runs hub mode behind a tray icon on macOS and Windows.
+"""Desktop app that runs the hub behind a tray icon on macOS and Windows.
 
 Packaged with PyInstaller, this is the install-free, no-terminal way to run a hub
 on a personal computer. The hub server and a system-tray icon live in this

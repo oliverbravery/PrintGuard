@@ -3,9 +3,9 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 PrintGuard watches 3D-printer cameras with an on-device vision model, pauses the printer
-on a sustained defect, and pushes a snapshot alert. It runs as a self-hosted **hub**
-(Docker/CPython) and as an install-free **local** mode (the same engine in the browser on
-Pyodide). No frames leave hardware the user owns.
+on a sustained defect, and pushes a snapshot alert. It runs as a self-hosted **hub**, either
+the Docker image or the macOS and Windows desktop app, and that is the only way to run it. No
+frames leave hardware the user owns.
 
 ## Commands
 
@@ -18,7 +18,7 @@ uv run pytest                             # engine simulation + adapter contract
 uv run pytest tests/test_engine.py::test_fair_allocation_and_dedup   # a single test (asyncio_mode=auto)
 cd web && npm run typecheck               # strict TypeScript over the UI (no test runner on the web side)
 cd web && npm run build                   # production UI build
-python printguard/pysrc.py web/public/pysrc.zip   # rebuild the Pyodide source archive for the static demo
+cd web && npm run site                    # the GitHub Pages landing page (web/site), hot-reload
 ```
 
 There is no separate Python lint step in the project's required checks - `uv run pytest`
@@ -29,22 +29,21 @@ and `npm run typecheck` are the gates (see CONTRIBUTING.md "Release cycle").
 Read [docs/architecture.md](docs/architecture.md) for the full picture and diagrams; the
 essentials a change must respect:
 
-- **One engine, two platforms.** Everything in `printguard/engine/` is shared code that
-  runs unchanged on CPython (`printguard/server/`) and Pyodide (`printguard/browser/`).
-  The *only* things allowed to differ between modes live behind the `Platform` protocol in
-  [`engine/platform.py`](printguard/engine/platform.py). **Never branch on `platform.mode`.**
-  When shared code needs a runtime-specific service, add it to the `Platform` protocol with
-  one implementation per side; when a mode merely *lacks* a capability, express that as
-  platform **data** (e.g. `update_repo` is `None` in the browser, notifier `browser_ok`),
-  not a mode check.
+- **The engine decides, the platform does.** Everything in `printguard/engine/` is logic
+  with no I/O of its own. Inference, capture, HTTP, sockets, JPEG coding and storage live
+  behind the `Platform` protocol in [`engine/platform.py`](printguard/engine/platform.py),
+  implemented for the hub in `server/platform.py` and in memory by `tests/fakes.py`. **The
+  engine never imports from `server/`.** When engine code needs a runtime service, add it to
+  the `Platform` protocol and implement it on the hub and in the fake. There is no local or
+  browser mode any more (removed in 2.5.0), so never add a mode, a `browser_ok`-style flag or
+  an optional capability for a runtime that does not exist.
 
 - **The engine owns one JSON command/event protocol.**
   [`engine/engine.py`](printguard/engine/engine.py) dispatches commands through its
   `_handlers` map and broadcasts events to subscribed transport "sinks". `state_event()`
   is the full snapshot the UI renders; any new engine-owned data the UI needs is added
-  there. The UI is **presentation-only** - it never holds logic the engine should own. The
-  transport is a WebSocket in hub mode and an in-page Pyodide bridge in local mode, and the
-  engine cannot tell which.
+  there. The UI is **presentation-only** - it never holds logic the engine should own, and
+  it reaches the engine over one WebSocket (`/api/ws`).
 
 - **Resources vs monitors.** A **camera** (video source) and a **printer** (control-service
   connection) are registered resources, created/deleted only in their registry. A
@@ -55,34 +54,39 @@ essentials a change must respect:
 - **Adapters are the extension points.** Printer integrations
   ([`engine/integrations/`](printguard/engine/integrations/)) and alert notifiers
   ([`engine/notifiers/`](printguard/engine/notifiers/)) subclass the contracts in
-  [`engine/adapters.py`](printguard/engine/adapters.py), talk to the outside world *only*
-  through `platform.http`, and are registered in their package `__init__.py`. Adding one
-  needs no other change in either mode - the config form, connection test, polling and
-  actions all follow from the adapter. CONTRIBUTING.md has the step-by-step.
+  [`engine/adapters.py`](printguard/engine/adapters.py), reach HTTP services through
+  `platform.http` so the tests can pin every request, and are registered in their package
+  `__init__.py`. Adding one needs no other change - the config form, connection test, polling
+  and actions all follow from the adapter. CONTRIBUTING.md has the step-by-step.
 
 - **Plugins are third-party code, and none of it runs in the engine.**
   [`engine/plugins.py`](printguard/engine/plugins.py) only sources and hash-pins it; execution
-  is a sandbox on each side (an opaque-origin iframe in the browser, QuickJS in WebAssembly on
-  the hub, via `platform.plugin_runtime`). A plugin returns a view and a list of effects and
+  is a sandbox on each side (an opaque-origin iframe in the dashboard for `plugin.js` and
+  `panel.html`, QuickJS in WebAssembly on the hub for `worker.js`, via
+  `platform.plugin_runtime`). A plugin returns a view and a list of effects and
   performs nothing itself, and each side checks every effect against the granted permissions
   before acting: the engine cannot tell a plugin's command from the dashboard's. `PERMISSIONS`
   in that module is the single policy both sides apply.
 
-- **Programmatic surface is hub-only.** The REST API (`server/api.py`, `/api/v1`) and MCP
+- **The programmatic surface adds no logic.** The REST API (`server/api.py`, `/api/v1`) and MCP
   server (`server/mcp.py`, `/mcp`) are thin transports over `engine.request()`, scoped by
   cumulative `read ⊂ control ⊂ manage` tokens. The Home Assistant MQTT bridge
   (`server/mqtt.py`) is a third such transport: it consumes engine events via `add_sink` and
   routes inbound commands through `engine.request()`, publishing one Home Assistant device
   per monitor via MQTT discovery (config in `settings.mqtt`, gated by broker access). None
-  add logic, so they cannot drift from the dashboard. Local mode never mounts them.
+  add logic, so they cannot drift from the dashboard.
 
 - **Fail safe, fail loud.** A monitor's `watching` state gates inference; only a *positive*
   "not printing" stands it down (losing the signal keeps watching). Nothing on the alert
   path swallows errors - failed printer actions, notifier failures and dropped feeds emit
   `error`/`warning` events. See `engine/watchdog.py`.
 
-- **State** persists through `platform.load_state()`/`save_state()` (a JSON file on the
-  hub, `localStorage` in the browser).
+- **State** persists through `platform.load_state()`/`save_state()`, a JSON file in the
+  hub's data directory.
+
+- **The website is not the dashboard.** `web/site/` is the GitHub Pages landing page, a second
+  Vite root sharing `web/src/styles.css`. The hub never serves it and it never imports the
+  store, which opens the engine socket on import.
 
 ## Conventions
 
@@ -130,7 +134,7 @@ change made wrong or redundant. Never leave a doc describing something that no l
 
 | Changed | Update |
 |---|---|
-| Install steps, ports, image tags, headline features | `README.md` |
+| Install steps, ports, image tags, headline features | `README.md`, and the landing page in `web/site/Home.tsx` |
 | Engine protocol, events, `Platform` contract, scheduler, logging, repo layout | `docs/architecture.md` |
 | A printer integration, camera source, notifier, or their setup | `docs/printers.md` |
 | Model runtimes, execution providers, image variants, GPU setup | `docs/hardware.md` |

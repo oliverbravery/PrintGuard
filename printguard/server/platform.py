@@ -1,4 +1,4 @@
-"""Server implementation of the platform contract for hub mode."""
+"""The hub's implementation of the platform contract."""
 
 from __future__ import annotations
 
@@ -548,9 +548,8 @@ class DiskFileStore:
 
 
 class ServerPlatform:
-    """Hub mode platform, with hardware inference and frames via MediaMTX."""
+    """The hub's platform, with hardware inference and frames via MediaMTX."""
 
-    mode = "hub"
     update_repo = "oliverbravery/PrintGuard"
 
     def __init__(
@@ -664,7 +663,7 @@ class ServerPlatform:
             target = partial(open_bambu_jpeg_stream, source["host"], source["access_code"])
             publish_url = self.mediamtx.rtsp_url(camera_id)
         else:
-            raise ValueError(f"hub mode cannot open source kind {source['kind']!r}")
+            raise ValueError(f"cannot open source kind {source['kind']!r}")
         av_source = AVSource(target, publish_url, container_format, open_options)
         self._sources[camera_id] = av_source
         try:

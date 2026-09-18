@@ -2,9 +2,9 @@
 
 Elegoo's official Link SDK supports Centauri Carbon 1 and 2, Neptune 4
 Pro/Plus/Max, OrangeStorm Giga and other Moonraker printers through one
-local-LAN surface. Centauri models use raw WebSocket or MQTT connections,
-so this adapter is hub-only; Moonraker models reuse PrintGuard's Klipper
-adapter instead of duplicating its HTTP implementation.
+local-LAN surface. Centauri models use raw WebSocket or MQTT connections
+through pycentauri; Moonraker models reuse PrintGuard's Klipper adapter
+instead of duplicating its HTTP implementation.
 
 Official SDK and model list: https://github.com/ELEGOO-3D/elegoo-link
 Centauri Python client: https://github.com/bjan/pycentauri
@@ -13,9 +13,12 @@ Centauri Python client: https://github.com/bjan/pycentauri
 from __future__ import annotations
 
 import asyncio
+import socket
 import tempfile
 from pathlib import Path
 from typing import Any
+
+import pycentauri
 
 from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 from .klipper import KlipperAdapter
@@ -43,7 +46,6 @@ class ElegooAdapter(IntegrationAdapter):
         "Centauri Carbon 2 needs LAN Only Mode and its screen access code. "
         "Neptune 4 and OrangeStorm printers use their stock Moonraker service."
     )
-    browser_ok = False
     experimental = False
     formats = ("gcode",)
     heater_control = True
@@ -178,8 +180,6 @@ class ElegooAdapter(IntegrationAdapter):
             self._connection_locks.clear()
 
     async def _connect_centauri(self, config: dict[str, Any]) -> Any:
-        from pycentauri import connect_auto
-
         key = self._connection_key(config)
         printer = self._connections.get(key)
         if printer is not None and not printer._closed:
@@ -189,7 +189,7 @@ class ElegooAdapter(IntegrationAdapter):
             if printer is not None and not printer._closed:
                 return printer
             mainboard_id = self._mainboard_ids.get(key[0]) or await self._discover_mainboard_id(key[0])
-            printer = await connect_auto(
+            printer = await pycentauri.connect_auto(
                 key[0],
                 access_code=key[1] or None,
                 enable_control=True,
@@ -199,14 +199,10 @@ class ElegooAdapter(IntegrationAdapter):
             return printer
 
     async def _discover_mainboard_id(self, host: str) -> str | None:
-        import socket
-
-        from pycentauri import discover
-
         resolved = await asyncio.get_running_loop().getaddrinfo(host, None, family=socket.AF_INET)
         addresses = {entry[4][0] for entry in resolved}
         addresses.add(host)
-        printers = await discover(timeout=1.0, retries=2)
+        printers = await pycentauri.discover(timeout=1.0, retries=2)
         return next((printer.mainboard_id for printer in printers if printer.host in addresses and printer.mainboard_id), None)
 
     def _connection_key(self, config: dict[str, Any]) -> tuple[str, str]:

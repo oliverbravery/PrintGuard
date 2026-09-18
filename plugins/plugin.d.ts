@@ -115,8 +115,6 @@ declare global {
    * settings and API tokens are in no permission.
    */
   interface PluginState {
-    /** `hub` for the self-hosted server, `local` for the browser. */
-    mode: "hub" | "local";
     /** The PrintGuard version running. */
     version: string;
     monitors?: PluginMonitor[];

@@ -89,10 +89,6 @@ interpreter lock, and a container may be under a CPU quota. Measuring covers all
 the result is the `workers` term the scheduler divides by latency to get
 [capacity](architecture.md#scheduling-inference).
 
-Local mode is different. The browser runs
-[LiteRT.js](https://developers.google.com/edge/litert) in WebAssembly, which is the only
-option a browser tab has.
-
 ## Execution providers by platform
 
 ONNX Runtime selects the fastest provider it can use. What is available depends on the

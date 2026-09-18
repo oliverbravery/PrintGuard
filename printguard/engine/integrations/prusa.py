@@ -3,9 +3,7 @@
 PrusaLink runs on the printer itself (MK4, MK4S, MK3.9, MK3.5, MINI, XL, CORE
 One) or on a Raspberry Pi attached to an MK3/MK2.5. Its ``/api/v1`` API
 authenticates with HTTP Digest - username ``maker`` and the PrusaLink password
-shown on the printer. 
-The client needs httpx, which the browser sandbox lacks, so it runs in hub mode only
-(``browser_ok`` is False); the printer also sends no CORS headers.
+shown on the printer.
 
 PrusaConnect is deliberately not used: it routes through Prusa's cloud, whereas
 PrintGuard keeps everything on hardware the user owns, and it exposes no
@@ -23,6 +21,10 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
+
+import httpx
+from pyprusalink import PrusaLink
+from pyprusalink.client import DigestAuthWorkaround
 
 from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 
@@ -51,7 +53,6 @@ class PrusaAdapter(IntegrationAdapter):
         "Enable PrusaLink on the printer (Settings > Network > PrusaLink) and use the password "
         "shown there. The username is always 'maker'."
     )
-    browser_ok = False
     experimental = False
     formats = ("gcode", "bgcode")
     schema = {
@@ -127,9 +128,6 @@ class PrusaAdapter(IntegrationAdapter):
         return available if available.endswith("/") else f"{available}/"
 
     async def _upload(self, config: dict[str, Any], path: str, headers: dict[str, str], data: bytes) -> None:
-        import httpx
-        from pyprusalink.client import DigestAuthWorkaround
-
         auth = DigestAuthWorkaround(username=_USERNAME, password=str(config.get("password", "")))
         async with httpx.AsyncClient(timeout=_UPLOAD_TIMEOUT_S) as client:
             response = await client.put(f"{str(config['base_url']).rstrip('/')}{path}", content=data, headers=headers, auth=auth)
@@ -158,8 +156,5 @@ class PrusaAdapter(IntegrationAdapter):
 
     @asynccontextmanager
     async def _link(self, config: dict[str, Any]) -> AsyncIterator[Any]:
-        import httpx
-        from pyprusalink import PrusaLink
-
         async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
             yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _USERNAME, str(config.get("password", "")))

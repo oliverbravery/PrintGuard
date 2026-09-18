@@ -75,12 +75,11 @@ class FakeFileStore:
 class FakePlatform:
     """In-memory platform with deterministic latency and HTTP."""
 
-    mode = "test"
     host = "docker"
     workers = 1
     inference_device = "test"
     version = "2.1.0"
-    update_repo: str | None = None
+    update_repo = "o/r"
     update_asset: str | None = None
     plugin_runtime = None
 
@@ -103,7 +102,7 @@ class FakePlatform:
         self.devices: list[dict[str, Any]] = []
         self.state: dict[str, Any] = {}
         self.inference_runtime = "auto"
-        self.files: FakeFileStore | None = FakeFileStore()
+        self.files = FakeFileStore()
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Records the selected inference runtime."""

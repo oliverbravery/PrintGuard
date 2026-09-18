@@ -56,10 +56,11 @@ class Camera:
 
     Attributes:
         id: Stable identifier used across the protocol and as the MediaMTX
-            path name in hub mode.
+            path name.
         name: Display name.
-        source: Access details - {"kind": "device", "device_id": ...} in
-            local mode, {"kind": "url" | "path", ...} in hub mode.
+        source: Access details - {"kind": "device", "device_id": ...} for a
+            camera plugged into the hub, {"kind": "url", "url": ...} for a
+            stream, {"kind": "path", "path": ...} for one a browser publishes.
         printer_id: Owning printer when the camera was exposed by a printer
             integration, else None. Such cameras are managed by their printer:
             they cannot be removed on their own and are dropped with it.

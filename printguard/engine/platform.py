@@ -1,7 +1,8 @@
-"""The complete contract between the shared engine and a runtime platform.
+"""The complete contract between the engine and the runtime it runs on.
 
-Hub mode and local mode differ only in the implementations of these
-protocols; everything that consumes them is shared code.
+The engine holds the logic and nothing that touches hardware, the network or
+disk. Those services live behind these protocols, implemented by the hub in
+``printguard.server`` and in memory by the tests.
 """
 
 from __future__ import annotations
@@ -56,9 +57,9 @@ class FrameSource(Protocol):
 class FileStore(Protocol):
     """Where uploaded print files and their previews live.
 
-    Only the hub has one. A sliced file is far too large for the state the
-    engine persists as JSON, so the bytes are kept here under a key the engine
-    chooses and the state carries only the record describing them.
+    A sliced file is far too large for the state the engine persists as JSON,
+    so the bytes are kept here under a key the engine chooses and the state
+    carries only the record describing them.
     """
 
     async def store(self, key: str, chunks: AsyncIterable[bytes]) -> int:
@@ -87,12 +88,7 @@ class FileStore(Protocol):
 
 
 class PluginRuntime(Protocol):
-    """Sandbox that runs the background half of installed plugins.
-
-    Only the hub has one. In local mode the browser runs the same source in
-    the same sandbox the UI half uses, so ``Platform.plugin_runtime`` is None
-    there and the engine simply has nothing to drive.
-    """
+    """Sandbox that runs the background half of installed plugins."""
 
     def attach(self, request: Callable[..., Awaitable[Any]], failed: Callable[[str, str], None]) -> None:
         """Gives the runtime the engine's command channel and failure report."""
@@ -126,7 +122,6 @@ class PluginRuntime(Protocol):
 class Platform(Protocol):
     """Runtime services the engine needs but cannot implement portably."""
 
-    mode: str
     host: str
     """Which deployment this is, one of ``plugins.PLATFORMS``. A plugin declares
     the ones it runs on, and the store offers what matches."""
@@ -134,21 +129,19 @@ class Platform(Protocol):
     workers: int
     inference_device: str
     version: str
-    update_repo: str | None
-    """GitHub ``owner/name`` to check for updates, or None to never call out
-    (local mode is always the latest deployed build)."""
+    update_repo: str
+    """GitHub ``owner/name`` whose releases are checked for updates."""
 
     update_asset: str | None
     """Release asset filename this deployment updates with (the desktop app's
     installer), or None when the deployment updates outside the app."""
 
     plugin_runtime: PluginRuntime | None
-    """Sandbox for the background half of plugins, or None where the runtime
-    lives outside the engine (the browser runs it in its own sandbox)."""
+    """Sandbox for the background half of plugins, or None when plugins are
+    switched off at boot."""
 
-    files: FileStore | None
-    """Where uploaded print files are kept, or None where nothing can be
-    uploaded (the browser has no server to keep them on)."""
+    files: FileStore
+    """Where uploaded print files are kept."""
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Applies platform-owned settings before inference starts."""

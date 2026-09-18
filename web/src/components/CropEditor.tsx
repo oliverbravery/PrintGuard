@@ -22,13 +22,11 @@ function fromPercent(crop: PercentCrop): Crop {
 
 export function CropEditor({
   camera,
-  mode,
   crop,
   rotation,
   onChange,
 }: {
   camera: Camera;
-  mode: string;
   crop: Crop | null;
   rotation: number;
   onChange: (crop: Crop | null) => void;
@@ -47,7 +45,7 @@ export function CropEditor({
   const frameAspect = dims ? (swap ? dims.h / dims.w : dims.w / dims.h) : 16 / 9;
   const watched = toPercent(watchedSquare(crop, frameAspect));
 
-  useVideoStream(videoRef, camera, mode);
+  useVideoStream(videoRef, camera);
 
   useEffect(() => {
     if (!needsCanvas) return;

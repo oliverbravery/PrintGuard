@@ -299,10 +299,6 @@
           {
             "const": "windows",
             "description": "Windows"
-          },
-          {
-            "const": "browser",
-            "description": "Browser"
           }
         ]
       }

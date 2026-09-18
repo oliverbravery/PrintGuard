@@ -44,6 +44,11 @@ async def running_engine(platform: FakePlatform, camera_fps: list[float]):
         await engine.stop()
 
 
+def _pushes(platform: FakePlatform) -> list[tuple[str, str]]:
+    """The notifications that reached the ntfy channel the outage tests configure."""
+    return [call for call in platform.http_calls if call[1] == "http://ntfy/topic"]
+
+
 async def _register_printer(engine: Engine) -> str:
     """Registers an OctoPrint printer and returns its id."""
     await engine.handle({"cmd": "printer.add", "printer": {"name": "P", **OCTOPRINT}})
@@ -442,7 +447,7 @@ async def test_brief_outage_reattaches_without_notifying(monkeypatch) -> None:
 
         assert camera.frame_source is not dropped_source and camera.online, "a dropped camera waited on the grace period to recover"
         assert not [e for e in events if e.get("event") == "warning"], "an outage inside the grace period warned"
-        assert not platform.http_calls, "an outage inside the grace period pushed a notification"
+        assert not _pushes(platform), "an outage inside the grace period pushed a notification"
 
 
 async def test_sustained_outage_keeps_reminding(monkeypatch) -> None:
@@ -468,7 +473,7 @@ async def test_sustained_outage_keeps_reminding(monkeypatch) -> None:
 
         warnings = [e for e in events if e.get("event") == "warning" and "is offline" in e["message"]]
         assert len(warnings) >= 3, f"an outage nobody answered was announced {len(warnings)} times"
-        assert len(platform.http_calls) == len(warnings), "reminders were not pushed to the notifiers"
+        assert len(_pushes(platform)) == len(warnings), "reminders were not pushed to the notifiers"
 
 
 async def test_camera_that_keeps_dropping_warns_about_the_feed(monkeypatch) -> None:
@@ -500,7 +505,7 @@ async def test_camera_that_keeps_dropping_warns_about_the_feed(monkeypatch) -> N
         assert not [e for e in events if e.get("event") == "warning" and "is offline" in e["message"]], (
             "no single drop was long enough to be announced as an outage"
         )
-        assert len(platform.http_calls) == 1, f"an unreliable feed pushed {len(platform.http_calls)} notifications"
+        assert len(_pushes(platform)) == 1, f"an unreliable feed pushed {len(_pushes(platform))} notifications"
 
         await asyncio.sleep(0.4)
         recoveries = [e for e in events if e.get("event") == "warning" and e["recovered"]]
@@ -547,11 +552,11 @@ async def test_flapping_camera_warns_once_per_outage(monkeypatch) -> None:
 
         assert len(warnings(False)) == 1, f"a reconnecting camera warned {len(warnings(False))} times about one episode"
         assert not warnings(True), "recovery was announced while the camera was still flapping"
-        assert len(platform.http_calls) == 1, f"flapping pushed {len(platform.http_calls)} notifications"
+        assert len(_pushes(platform)) == 1, f"flapping pushed {len(_pushes(platform))} notifications"
 
         await hold_source(True, 0.5)
         assert len(warnings(True)) == 1, "sustained recovery was never announced"
-        assert len(platform.http_calls) == 2, "recovery should push exactly once"
+        assert len(_pushes(platform)) == 2, "recovery should push exactly once"
 
         await hold_source(False, 0.15)
         await hold_source(True, 0.3)
@@ -1845,9 +1850,7 @@ async def test_print_library_registers_tags_and_starts_on_an_idle_printer() -> N
         printer_id = await _register_printer(engine)
         await platform.files.store("abcd1234.gcode", _chunks(PRUSA))
         await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "benchy.gcode", "printer_ids": [printer_id]})
-        state = engine.state_event()
-        [record] = state["prints"]
-        assert state["print_store"] is True
+        [record] = engine.state_event()["prints"]
         assert record["name"] == "benchy" and record["ext"] == "gcode" and record["size"] == len(PRUSA)
         assert record["printer_ids"] == [printer_id]
         assert record["meta"]["slicer"] == "PrusaSlicer 2.8.1" and record["meta"]["printer_model"] == "MK4"
@@ -1957,10 +1960,3 @@ async def test_prints_survive_a_restart() -> None:
         await reborn.stop()
 
 
-async def test_print_library_needs_a_store() -> None:
-    platform = FakePlatform()
-    platform.files = None
-    async with running_engine(platform, camera_fps=[]) as (engine, events):
-        assert engine.state_event()["print_store"] is False
-        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "benchy.gcode", "req_id": 4})
-        assert any(e["event"] == "error" and e.get("req_id") == 4 and "hub" in e["message"] for e in events)

@@ -40,8 +40,6 @@ flowchart LR
 | Health probe | `/api/health` | None |
 | Home Assistant | Your MQTT broker | Broker credentials |
 
-All of them are hub only. Local mode has no server to host them.
-
 ## Health and version
 
 `GET /api/health` is the unauthenticated readiness endpoint for uptime checks and update

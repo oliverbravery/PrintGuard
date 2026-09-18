@@ -2,15 +2,15 @@
 
 The project publishes every CHANGELOG.md section verbatim as its GitHub
 release notes, so the releases list yields both the version comparison and
-the changelog to show in one request. Hub mode runs this against
-``platform.update_repo``; local mode is always the latest GitHub Pages build
-and leaves ``update_repo`` unset, so it never calls out.
+the changelog to show in one request.
 """
 
 from __future__ import annotations
 
 import time
 from typing import Any
+
+from packaging.version import InvalidVersion, Version
 
 from .adapters import HttpFn
 
@@ -39,8 +39,6 @@ async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None
     Raises:
         RuntimeError: If GitHub does not return a releases list.
     """
-    from packaging.version import InvalidVersion, Version
-
     status, body = await http("GET", RELEASES_URL.format(repo=repo), headers=HEADERS, timeout=TIMEOUT_S)
     if status != 200 or not isinstance(body, list):
         raise RuntimeError(f"GitHub returned {status}")

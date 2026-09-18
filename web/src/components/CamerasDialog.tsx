@@ -106,7 +106,6 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           </div>
           <CropEditor
             camera={camera}
-            mode={engine?.mode ?? "local"}
             crop={camera.crop ?? null}
             rotation={camera.rotation ?? 0}
             onChange={(crop) => updateCamera(camera.id, { crop })}
@@ -206,12 +205,12 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
   );
 }
 
-type HubTab = "url" | "machine" | "browser";
+type AddTab = "url" | "machine" | "browser";
 
-function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (name: string, source: CameraSource) => void }) {
+function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: CameraSource) => void }) {
   const { send, toast, isPending } = useStore();
   const desktopApp = "pywebview" in window;
-  const [tab, setTab] = useState<HubTab>("url");
+  const [tab, setTab] = useState<AddTab>("url");
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -238,7 +237,6 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
       }
       await new Promise((r) => setTimeout(r, 800));
       send({ cmd: "camera.add", name: name || "Published camera", source: { kind: "path", path } });
-      onDone();
     } catch (err) {
       toast("error", `publish failed: ${err}`);
     } finally {
@@ -246,10 +244,10 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
     }
   };
 
-  const tabs: Array<[HubTab, string]> = [
+  const tabs: Array<[AddTab, string]> = [
     ["url", "Stream URL"],
     ["machine", "This machine"],
-    ...(desktopApp ? [] : ([["browser", "This browser"]] as Array<[HubTab, string]>)),
+    ...(desktopApp ? [] : ([["browser", "This browser"]] as Array<[AddTab, string]>)),
   ];
   return (
     <div>
@@ -278,7 +276,6 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
             disabled={!url.trim() || isPending("camera.add")}
             onClick={() => {
               send({ cmd: "camera.add", name: name || "Stream", source: { kind: "url", url: url.trim() } });
-              onDone();
             }}
           >
             {isPending("camera.add") ? "Registering…" : "Register stream"}
@@ -324,7 +321,6 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
 export function CamerasDialog() {
   const { engine, send, openDialog, focusCameraId } = useStore();
   const close = () => openDialog(null);
-  const isLocal = engine?.mode === "local";
   const cameras = engine?.cameras ?? [];
   const [previewDeviceId, setPreviewDeviceId] = useState<string | null>(null);
   const previewCameraId = cameras.find((camera) => camera.source.device_id === previewDeviceId)?.id;
@@ -348,11 +344,7 @@ export function CamerasDialog() {
         <TabPanel prefix="cameras" id="cameras">
           <CameraList cameras={cameras.filter((c) => !c.printer_id)} focusId={previewCameraId} />
           <div className="label mb-3">Register new</div>
-          {isLocal ? (
-            <DevicePicker onAdd={registerDevice} />
-          ) : (
-            <HubAdd onDone={() => {}} onDeviceAdd={registerDevice} />
-          )}
+          <AddCamera onDeviceAdd={registerDevice} />
         </TabPanel>
       ) : (
         <TabPanel prefix="cameras" id="printers">

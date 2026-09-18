@@ -4,11 +4,8 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   base: "./",
+  publicDir: false,
   plugins: [react(), tailwindcss()],
-  server: {
-    proxy: {
-      "/api": { target: "http://localhost:8000", ws: true },
-      "/hls": "http://localhost:8000",
-    },
-  },
+  build: { outDir: "../dist-site", emptyOutDir: true },
+  server: { fs: { allow: ["../.."] } },
 });

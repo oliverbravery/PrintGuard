@@ -7,11 +7,11 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.5.0] - 2026-09-17
+## [2.5.0] - 2026-09-18
 
 ### Added
 
-- A print library, behind **Prints** in the header of a hub. Drop sliced files in and each
+- A print library, behind **Prints** in the header. Drop sliced files in and each
   opens in a panel that draws its toolpath on your device before it's uploaded, where you can
   name it and correct its nozzle and bed temperatures. Files stay on the hub with the preview,
   print time and filament the slicer wrote into them. Cura and a few others write no preview, so
@@ -43,6 +43,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Removed
 
+- Local mode, which ran the engine in a browser tab with nothing installed. Few people used it
+  and it made everything else harder to build, so PrintGuard runs only as a hub, in Docker or as
+  the macOS and Windows app. [The website](https://oliverbravery.github.io/PrintGuard/) has the
+  downloads where the live demo was. The state the REST API, MCP server and plugins read has no
+  `mode` field any more.
 - The sensitivity setting, which only ever moved the same line as the alert threshold. The
   REST API and MCP server's classify calls no longer take one.
 
