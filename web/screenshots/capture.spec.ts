@@ -58,7 +58,6 @@ const history: Record<string, ScorePoint[]> = {
 
 function engine(): EngineState {
   return {
-    mode: "hub",
     host: "docker", version: VERSION, update: null,
     cameras: [
       camera("c1", "Workshop · Prusa", { kind: "rtsp", url: "rtsp://10.0.0.21:8554/prusa" }, true),
@@ -74,7 +73,6 @@ function engine(): EngineState {
       print("f2", "wall_bracket", "gcode", 2_104_880, ["p2"], { slicer: "OrcaSlicer 2.2.0", time_s: 3540, filament_g: 8.1, printer_model: "Creality Ender-3 V3", nozzle: 220, bed: 55 }),
       print("f3", "cable_clip", "gcode", 611_002, [], { slicer: "Cura 5.7.0", time_s: 1260, filament_mm: 2100, printer_model: null, nozzle: 200, bed: 60 }),
     ],
-    print_store: true,
     monitors: [
       monitor("m1", "Prusa MK4", "c1", "p1"),
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
@@ -82,14 +80,14 @@ function engine(): EngineState {
     ],
     settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: INTEGRATIONS, notifiers: [],
-    plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS, plugin_host: true,
+    plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },
   };
 }
 
 const PLATFORMS = {
   docker: "Docker", "docker-nvidia": "NVIDIA image", "docker-intel": "Intel image",
-  macos: "macOS", windows: "Windows", browser: "Browser",
+  macos: "macOS", windows: "Windows",
 };
 
 const PERMISSIONS = [
@@ -471,7 +469,7 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
     {
       theme: scene.theme,
       state: {
-        mode: "hub", phase: "ready", engine: built, history: { ...history, ...scene.history },
+        phase: "ready", engine: built, history: { ...history, ...scene.history },
         detailId: scene.detailId ?? null, printId: scene.printId ?? null, customising: scene.customising ?? false,
         dialog: scene.dialog ?? (scene.settingsTab ? "settings" : null), settingsTab: scene.settingsTab ?? null,
         catalogue: scene.catalogue ?? null,
