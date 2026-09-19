@@ -60,11 +60,7 @@ def test_worker_handles_an_event_and_keeps_its_own_data(runtime: WasmPluginRunti
 
 
 def test_a_worker_asks_for_the_effects_it_has_no_way_of_performing(runtime: WasmPluginRuntime) -> None:
-    """The hub has no speakers and no screen, so a worker asks for both here.
-
-    The same worker.js runs in the browser sandbox in local mode, so anything
-    missing from this ``ctx`` would work in one mode and throw in the other.
-    """
+    """The hub has no speakers and no screen, so a worker asks and the dashboard performs."""
     output = call(
         runtime,
         "plugin.on('alert', (event, ctx) => { ctx.sound([{ hz: 880, ms: 100 }]); ctx.background('data:image/png;base64,x'); });",
@@ -111,10 +107,10 @@ def test_worker_sees_only_the_state_it_was_granted(runtime: WasmPluginRuntime) -
     output = call(
         runtime,
         "plugin.on('alert', (event, ctx) => { ctx.store.keys = Object.keys(ctx.state).sort(); });",
-        {"state": {"monitors": [{"id": "m"}], "mode": "hub"}},
+        {"state": {"monitors": [{"id": "m"}], "version": "2.5.0"}},
     )
 
-    assert output["store"]["keys"] == ["mode", "monitors"]
+    assert output["store"]["keys"] == ["monitors", "version"]
 
 
 async def test_effects_a_plugin_was_not_granted_are_refused(runtime: WasmPluginRuntime) -> None:

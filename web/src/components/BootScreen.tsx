@@ -1,20 +1,13 @@
 import { useStore } from "../store";
-import { Wordmark } from "./Header";
+import { Wordmark } from "./Wordmark";
 
 export function BootScreen() {
-  const { phase, bootMsg, leaveMode } = useStore();
+  const bootMsg = useStore((s) => s.bootMsg);
   return (
-    <div className="min-h-screen grid place-items-center">
+    <div className="min-h-dvh grid place-items-center">
       <div className="text-center">
         <Wordmark size="text-5xl" />
-        <div className={`mono text-xs mt-6 ${phase === "error" ? "text-bad" : "text-text-1 boot-cursor"}`}>
-          {phase === "error" ? `boot failed, ${bootMsg}` : bootMsg || "initialising"}
-        </div>
-        {phase === "error" && (
-          <button className="btn mt-6" onClick={leaveMode}>
-            Back to mode select
-          </button>
-        )}
+        <div className="mono text-xs mt-6 text-text-1 boot-cursor">{bootMsg}</div>
       </div>
     </div>
   );

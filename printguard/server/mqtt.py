@@ -1,4 +1,4 @@
-"""Home Assistant MQTT bridge (hub mode only).
+"""Home Assistant MQTT bridge.
 
 A thin layer over the engine's event sink and ``request()``
 surface that owns no monitoring logic of its own. It reconciles one Home
@@ -10,7 +10,6 @@ controllable device in Home Assistant without the engine knowing MQTT exists.
 
 Connection settings live in engine settings under ``mqtt`` and are edited from
 the dashboard like notifier channels; the bridge reconnects when they change.
-A raw MQTT socket is forbidden in the browser sandbox, so this is hub-only.
 
 The protocol shapes are pure functions tested in ``tests/test_mqtt.py``; this
 module wraps them in an ``aiomqtt`` session that reconnects on failure and on a
@@ -31,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import aiomqtt
 
+from ..engine.integrations import HEATERS
 from .events import ConflatedEventQueue
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 RECONNECT_DELAY_S = 5.0
 KEEPALIVE_S = 30
 STATE_DEADBAND = 5.0
-CONTINUOUS_FIELDS = ("score", "progress")
+CONTINUOUS_FIELDS = ("score", "progress", "nozzle_temp", "bed_temp")
 MANUFACTURER = "PrintGuard"
 MODEL = "Print monitor"
 SUPPORT_URL = "https://github.com/oliverbravery/PrintGuard"
@@ -120,6 +120,9 @@ def monitor_state(monitor: dict[str, Any], printer: dict[str, Any] | None) -> di
         payload["printer_status"] = device.get("status", "unknown")
         payload["progress"] = round(float(device.get("progress") or 0.0), 1)
         payload["job"] = device.get("job")
+        for heater in HEATERS:
+            if device.get(heater):
+                payload[f"{heater}_temp"] = round(float(device[heater]["actual"]), 1)
     return payload
 
 
@@ -147,7 +150,8 @@ def discovery_config(monitor: dict[str, Any], printer: dict[str, Any] | None, ve
 
     One device per monitor, its components sharing a single state topic and
     templating their own field out of it. Printer controls and sensors appear
-    only when the monitor is bound to a printer.
+    only when the monitor is bound to a printer, and a heater's temperature
+    sensor only once the printer has reported that heater.
     """
     monitor_id = monitor["id"]
 
@@ -220,6 +224,17 @@ def discovery_config(monitor: dict[str, Any], printer: dict[str, Any] | None, ve
             "resume": {"p": "button", "unique_id": unique("resume"), "name": "Resume", "command_topic": action_topic, "payload_press": "resume", "icon": "mdi:play"},
             "cancel": {"p": "button", "unique_id": unique("cancel"), "name": "Cancel", "command_topic": action_topic, "payload_press": "cancel", "icon": "mdi:stop"},
         }
+        for heater in HEATERS:
+            if (printer.get("device_state") or {}).get(heater):
+                components[heater] = {
+                    "p": "sensor",
+                    "unique_id": unique(heater),
+                    "name": heater.capitalize(),
+                    "device_class": "temperature",
+                    "unit_of_measurement": "°C",
+                    "state_class": "measurement",
+                    "value_template": f"{{{{ value_json.{heater}_temp }}}}",
+                }
     return {
         "device": {"identifiers": [f"printguard_{monitor_id}"], "name": monitor.get("name") or "Monitor", "manufacturer": MANUFACTURER, "model": MODEL, "sw_version": version},
         "origin": {"name": "PrintGuard", "sw_version": version, "support_url": SUPPORT_URL},

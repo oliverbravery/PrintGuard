@@ -1,5 +1,3 @@
-export type Mode = "local" | "hub";
-
 export interface Crop {
   x: number;
   y: number;
@@ -43,10 +41,24 @@ export interface Camera {
   last_result: InferenceResult | null;
 }
 
+export interface Heater {
+  actual: number;
+  target: number;
+}
+
 export interface DeviceState {
   status: string;
   progress: number;
   job: string | null;
+  remaining_s: number | null;
+  nozzle: Heater | null;
+  bed: Heater | null;
+}
+
+export interface PreheatPreset {
+  name: string;
+  nozzle: number;
+  bed: number;
 }
 
 export interface Printer {
@@ -56,6 +68,28 @@ export interface Printer {
   config: Record<string, string>;
   device_state?: DeviceState | null;
   online: boolean;
+}
+
+export interface PrintMeta {
+  slicer?: string | null;
+  time_s?: number | null;
+  filament_g?: number | null;
+  filament_mm?: number | null;
+  printer_model?: string | null;
+  nozzle?: number | null;
+  bed?: number | null;
+}
+
+export interface PrintFile {
+  id: string;
+  name: string;
+  filename: string;
+  ext: string;
+  size: number;
+  printer_ids: string[];
+  uploaded: number;
+  meta: PrintMeta;
+  thumbnail: string | null;
 }
 
 export interface Alert {
@@ -71,7 +105,6 @@ export interface Monitor {
   printer_id: string;
   enabled: boolean;
   threshold: number;
-  sensitivity: number;
   consecutive: number;
   notify: boolean;
   on_defect: "none" | "pause" | "cancel";
@@ -139,11 +172,12 @@ export interface AdapterMeta {
   id: string;
   label: string;
   docs_url: string;
-  browser_ok?: boolean;
   desktop_only?: boolean;
   experimental?: boolean;
   setup_url?: string | null;
   setup_hint?: string | null;
+  formats?: string[];
+  heater_control?: boolean;
   schema: {
     properties: Record<string, SchemaProperty>;
     required?: string[];
@@ -205,7 +239,6 @@ export interface Permission {
   label: string;
   description: string;
   risky?: boolean;
-  hub_only?: boolean;
   urls?: boolean;
   channels?: boolean;
   commands?: string[];
@@ -326,12 +359,12 @@ export interface UpdateInfo {
 }
 
 export interface EngineState {
-  mode: string;
   host: string;
   version: string;
   update: UpdateInfo | null;
   cameras: Camera[];
   printers: Printer[];
+  prints: PrintFile[];
   monitors: Monitor[];
   settings: {
     notifiers: Record<string, Record<string, string>>;
@@ -344,6 +377,7 @@ export interface EngineState {
     inference_runtime: "auto" | "litert" | "onnx";
     catalogue_url: string;
     fault_grace_s: number;
+    preheat: PreheatPreset[];
   };
   tokens: ApiToken[];
   stats: EngineStats;
@@ -356,7 +390,6 @@ export interface EngineState {
   plugin_oauth_callback: string;
   plugin_platforms: Record<string, string>;
   plugin_assets: Record<string, string>;
-  plugin_host: boolean;
 }
 
 export interface ScorePoint {

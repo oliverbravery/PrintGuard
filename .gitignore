@@ -7,12 +7,10 @@ __pycache__/
 data/
 node_modules/
 web/dist/
+web/dist-site/
 *.tsbuildinfo
 /build/
 /dist/
-web/public/models/
-web/public/pysrc.zip
-web/.pages-sim/
 web/test-results/
 web/playwright-report/
 plugins/*.zip

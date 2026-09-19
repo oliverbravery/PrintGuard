@@ -9,6 +9,7 @@ import { Dialog } from "./Dialog";
 import { NameField } from "./NameField";
 import { SaveStatus } from "./SaveStatus";
 import { Slider } from "./Slider";
+import { type Tab, TabPanel, Tabs } from "./Tabs";
 
 function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
@@ -30,35 +31,37 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
 
   return (
     <div ref={ref} className="panel overflow-hidden">
-      <div className="flex items-center gap-3 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
         <span className={`led ${camera.online ? "led-on" : "led-off"}`} title={camera.online ? "online" : camera.standby ? "standby" : "offline"} />
-        <div className="flex-1 min-w-0 leading-tight">
+        <div className="min-w-0 grow basis-40 leading-tight">
           <div className="text-sm font-medium truncate">{camera.name}</div>
           <div className="mono text-[0.62rem] text-text-2 truncate">{sourceLabel(camera.source)}</div>
         </div>
-        <span className="mono text-[0.68rem] text-text-1">{camera.max_fps.toFixed(0)} fps</span>
-        {camera.source.path && published.has(camera.source.path) && (
-          <span className="chip chip-accent">publishing</span>
-        )}
-        {owner && <span className="chip" title="Managed by its printer integration, remove the printer to remove this camera">via {owner.name}</span>}
-        {camera.declared && (
-          <span className="chip" title="Passed in by the deployment, remove its devices entry to remove this camera">passed in</span>
-        )}
-        <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
-          {open ? "Hide" : "Edit"}
-        </button>
-        {!managed && (
-          <button
-            className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
-            disabled={isPending("camera.remove")}
-            onClick={() => {
-              if (camera.source.path) stopPublishing(camera.source.path);
-              send({ cmd: "camera.remove", id: camera.id });
-            }}
-          >
-            {isPending("camera.remove") ? "Removing…" : "Remove"}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <span className="mono text-[0.68rem] text-text-1">{camera.max_fps.toFixed(0)} fps</span>
+          {camera.source.path && published.has(camera.source.path) && (
+            <span className="chip chip-accent">publishing</span>
+          )}
+          {owner && <span className="chip" title="Managed by its printer integration, remove the printer to remove this camera">via {owner.name}</span>}
+          {camera.declared && (
+            <span className="chip" title="Passed in by the deployment, remove its devices entry to remove this camera">passed in</span>
+          )}
+          <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
+            {open ? "Hide" : "Edit"}
           </button>
-        )}
+          {!managed && (
+            <button
+              className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
+              disabled={isPending("camera.remove")}
+              onClick={() => {
+                if (camera.source.path) stopPublishing(camera.source.path);
+                send({ cmd: "camera.remove", id: camera.id });
+              }}
+            >
+              {isPending("camera.remove") ? "Removing…" : "Remove"}
+            </button>
+          )}
+        </div>
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
@@ -103,7 +106,6 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           </div>
           <CropEditor
             camera={camera}
-            mode={engine?.mode ?? "local"}
             crop={camera.crop ?? null}
             rotation={camera.rotation ?? 0}
             onChange={(crop) => updateCamera(camera.id, { crop })}
@@ -203,12 +205,12 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
   );
 }
 
-type HubTab = "url" | "machine" | "browser";
+type AddTab = "url" | "machine" | "browser";
 
-function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (name: string, source: CameraSource) => void }) {
+function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: CameraSource) => void }) {
   const { send, toast, isPending } = useStore();
   const desktopApp = "pywebview" in window;
-  const [tab, setTab] = useState<HubTab>("url");
+  const [tab, setTab] = useState<AddTab>("url");
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -235,7 +237,6 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
       }
       await new Promise((r) => setTimeout(r, 800));
       send({ cmd: "camera.add", name: name || "Published camera", source: { kind: "path", path } });
-      onDone();
     } catch (err) {
       toast("error", `publish failed: ${err}`);
     } finally {
@@ -243,14 +244,14 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
     }
   };
 
-  const tabs: Array<[HubTab, string]> = [
+  const tabs: Array<[AddTab, string]> = [
     ["url", "Stream URL"],
     ["machine", "This machine"],
-    ...(desktopApp ? [] : ([["browser", "This browser"]] as Array<[HubTab, string]>)),
+    ...(desktopApp ? [] : ([["browser", "This browser"]] as Array<[AddTab, string]>)),
   ];
   return (
     <div>
-      <div className="flex gap-1.5 mb-4">
+      <div className="mb-4 flex flex-wrap gap-1.5">
         {tabs.map(([key, label]) => (
           <button
             key={key}
@@ -275,7 +276,6 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
             disabled={!url.trim() || isPending("camera.add")}
             onClick={() => {
               send({ cmd: "camera.add", name: name || "Stream", source: { kind: "url", url: url.trim() } });
-              onDone();
             }}
           >
             {isPending("camera.add") ? "Registering…" : "Register stream"}
@@ -321,7 +321,6 @@ function HubAdd({ onDone, onDeviceAdd }: { onDone: () => void; onDeviceAdd: (nam
 export function CamerasDialog() {
   const { engine, send, openDialog, focusCameraId } = useStore();
   const close = () => openDialog(null);
-  const isLocal = engine?.mode === "local";
   const cameras = engine?.cameras ?? [];
   const [previewDeviceId, setPreviewDeviceId] = useState<string | null>(null);
   const previewCameraId = cameras.find((camera) => camera.source.device_id === previewDeviceId)?.id;
@@ -331,35 +330,26 @@ export function CamerasDialog() {
   };
   const focusIsPrinter = cameras.some((c) => c.id === focusCameraId && c.printer_id);
   const [tab, setTab] = useState<"cameras" | "printers">(focusIsPrinter ? "printers" : "cameras");
-  const tabs: Array<["cameras" | "printers", string]> = [
-    ["cameras", "Cameras"],
-    ["printers", "Printer cameras"],
+  const tabs: Tab<"cameras" | "printers">[] = [
+    { id: "cameras", label: "Cameras" },
+    { id: "printers", label: "Printer cameras" },
   ];
   return (
-    <Dialog title="Camera registry" onClose={close}>
-      <div className="flex gap-1.5 mb-4">
-        {tabs.map(([key, label]) => (
-          <button
-            key={key}
-            className={`btn !py-1.5 !px-3 !text-[0.66rem] ${tab === key ? "!border-accent !text-accent" : ""}`}
-            onClick={() => setTab(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+    <Dialog
+      title="Camera registry"
+      onClose={close}
+      toolbar={<Tabs prefix="cameras" label="Camera registry sections" tabs={tabs} value={tab} onChange={setTab} />}
+    >
       {tab === "cameras" ? (
-        <>
+        <TabPanel prefix="cameras" id="cameras">
           <CameraList cameras={cameras.filter((c) => !c.printer_id)} focusId={previewCameraId} />
           <div className="label mb-3">Register new</div>
-          {isLocal ? (
-            <DevicePicker onAdd={registerDevice} />
-          ) : (
-            <HubAdd onDone={() => {}} onDeviceAdd={registerDevice} />
-          )}
-        </>
+          <AddCamera onDeviceAdd={registerDevice} />
+        </TabPanel>
       ) : (
-        <PrinterCameras />
+        <TabPanel prefix="cameras" id="printers">
+          <PrinterCameras />
+        </TabPanel>
       )}
     </Dialog>
   );

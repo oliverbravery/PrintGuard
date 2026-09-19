@@ -82,10 +82,8 @@ def public_source(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def deployment(platform: Platform) -> str:
-    """Names how this instance is deployed, as desktop app, docker hub or local."""
-    if platform.update_asset:
-        return "desktop"
-    return "local" if platform.mode == "local" else "docker"
+    """Names how this instance is deployed, as desktop app or docker hub."""
+    return "desktop" if platform.update_asset else "docker"
 
 
 def collect_secrets(engine: "Engine") -> set[str]:
@@ -142,7 +140,6 @@ def diagnostics(engine: "Engine") -> dict[str, Any]:
         settings["mqtt"] = redact(settings["mqtt"], {"password"})
     return {
         "version": engine.platform.version,
-        "mode": engine.platform.mode,
         "deployment": deployment(engine.platform),
         "os": host_os(),
         "python": sys.version,
@@ -181,7 +178,7 @@ def feedback_event(message: str, email: str | None, client: dict[str, Any], diag
         "level": "info",
         "release": f"printguard@{diag['version']}",
         "environment": diag["deployment"],
-        "tags": {"mode": diag["mode"], "os": diag["os"]},
+        "tags": {"os": diag["os"]},
         "contexts": contexts,
     }
 

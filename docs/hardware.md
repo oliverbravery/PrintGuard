@@ -89,10 +89,6 @@ interpreter lock, and a container may be under a CPU quota. Measuring covers all
 the result is the `workers` term the scheduler divides by latency to get
 [capacity](architecture.md#scheduling-inference).
 
-Local mode is different. The browser runs
-[LiteRT.js](https://developers.google.com/edge/litert) in WebAssembly, which is the only
-option a browser tab has.
-
 ## Execution providers by platform
 
 ONNX Runtime selects the fastest provider it can use. What is available depends on the
@@ -101,7 +97,7 @@ platform:
 | Platform | Provider | Notes |
 |---|---|---|
 | macOS, desktop app | Core ML | Uses CPU, GPU and the Neural Engine |
-| Windows 11 24H2 or newer, desktop app | Windows ML | Installs the certified Intel, NVIDIA, AMD or Qualcomm provider on first launch |
+| Windows 11 24H2 or newer, desktop app | Windows ML | Installs the certified Intel, NVIDIA, AMD or Qualcomm provider on first launch. Needs the [Windows App Runtime](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads) 2.x and stays on the CPU without it |
 | Older Windows, desktop app | Optimised CPU | No provider install |
 | Linux `amd64`, standard image | OpenVINO | Intel CPU path out of the box, and the GPU needs `latest-intel` and `/dev/dri` |
 | Linux `amd64`, `latest-nvidia` | TensorRT RTX | Needs the NVIDIA Container Toolkit on the host |

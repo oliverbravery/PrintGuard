@@ -1,20 +1,14 @@
+import { Bug, Ellipsis } from "lucide-react";
 import { useStore } from "../store";
 import { applyTheme, GLASS, nextScheme } from "../theme";
-import { BugIcon } from "./BugIcon";
 import { GLASS_TUNER, GlassTuner } from "./GlassTuner";
-
-export function Wordmark({ size = "text-xl" }: { size?: string }) {
-  return (
-    <span className={`display font-bold ${size} leading-none select-none`}>
-      PRINT<span className="text-accent">/</span>GUARD
-    </span>
-  );
-}
+import { HeaderActions } from "./Nav";
+import { Wordmark } from "./Wordmark";
 
 function Readout({
   label,
   value,
-  className = "hidden md:block",
+  className = "",
   onClick,
 }: {
   label: string;
@@ -24,7 +18,7 @@ function Readout({
 }) {
   const content = (
     <>
-      <span className="mono block text-[0.78rem] text-text-0">{value}</span>
+      <span className="mono block whitespace-nowrap text-[0.78rem] text-text-0">{value}</span>
       <span className="label block">{label}</span>
     </>
   );
@@ -39,33 +33,6 @@ function Readout({
     </button>
   ) : (
     <div className={`text-right leading-tight ${className}`}>{content}</div>
-  );
-}
-
-export function HeaderActions({ className }: { className?: string }) {
-  const openDialog = useStore((s) => s.openDialog);
-  return (
-    <nav className={className}>
-      <button className="btn max-md:w-full max-md:py-2.5" onClick={() => openDialog("cameras")}>
-        Cameras
-      </button>
-      <button className="btn max-md:w-full max-md:py-2.5" onClick={() => openDialog("printers")}>
-        Printers
-      </button>
-      <button className="btn btn-primary max-md:w-full max-md:py-2.5" onClick={() => openDialog("monitor")}>
-        + Monitor
-      </button>
-      <button className="btn max-md:w-full max-md:py-2.5" onClick={() => openDialog("settings")} aria-label="Settings">
-        <span className="md:hidden">Settings</span>
-        <span className="hidden md:inline">⚙</span>
-      </button>
-    </nav>
-  );
-}
-
-export function MobileActionBar() {
-  return (
-    <HeaderActions className="action-bar fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 gap-2 border-t border-line-0 bg-ink-0/95 px-4 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden" />
   );
 }
 
@@ -153,46 +120,55 @@ function ReportChip() {
       aria-label="Report a bug"
       onClick={() => openDialog("report")}
     >
-      <BugIcon />
+      <Bug className="h-[1.15em] w-[1.15em]" aria-hidden />
+    </button>
+  );
+}
+
+function MoreChip() {
+  const openDialog = useStore((s) => s.openDialog);
+  const available = useStore((s) => s.engine?.update?.available ?? false);
+  return (
+    <button
+      className={`chip inline-flex cursor-pointer items-center hover:opacity-80 sm:hidden ${available ? "chip-accent" : ""}`}
+      title="More"
+      aria-label={available ? "More, update available" : "More"}
+      onClick={() => openDialog("more")}
+    >
+      <Ellipsis className="h-[1.15em] w-[1.15em]" aria-hidden />
     </button>
   );
 }
 
 export function Header() {
-  const { engine, mode, openDialog, openSettings } = useStore();
+  const { engine, openSettings } = useStore();
   const stats = engine?.stats;
   return (
     <header className="sticky top-0 z-30 border-b border-line-0 bg-ink-0/90 backdrop-blur-sm">
-      <div className="mx-auto flex max-w-[1500px] items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-6">
+      <div className="mx-auto flex max-w-[1500px] items-center gap-x-3 px-4 py-3 sm:px-6">
         <Wordmark />
-        {mode === "local" && (
-          <button
-            className="chip chip-accent cursor-pointer hover:opacity-80"
-            title="What the live demo can and cannot do"
-            onClick={() => openDialog("demo")}
-          >
-            local ▾
-          </button>
-        )}
-        <VersionChip />
-        <ThemeToggle />
-        <CustomiseToggle />
-        <GuideChip />
-        <ReportChip />
+        <div className="hidden sm:contents">
+          <VersionChip />
+          <ThemeToggle />
+          <CustomiseToggle />
+          <GuideChip />
+          <ReportChip />
+        </div>
         <div className="flex-1" />
         {stats && (
-          <div className="flex items-center gap-5 md:mr-2">
+          <div className="hidden items-center gap-5 sm:flex lg:mr-2">
             <Readout
               label="compute"
               value={stats.inference_device.toLowerCase()}
-              className="hidden lg:block"
-              onClick={mode === "hub" ? () => openSettings("advanced") : undefined}
+              className="hidden xl:block"
+              onClick={() => openSettings("advanced")}
             />
-            <Readout label="capacity" value={`${stats.capacity_fps.toFixed(1)} fps`} className="hidden min-[400px]:block" />
+            <Readout label="capacity" value={`${stats.capacity_fps.toFixed(1)} fps`} />
             <Readout label="latency" value={`${stats.infer_ms.toFixed(0)} ms`} />
           </div>
         )}
-        <HeaderActions className="hidden md:flex md:items-center md:gap-2 lg:gap-3" />
+        <HeaderActions />
+        <MoreChip />
       </div>
     </header>
   );

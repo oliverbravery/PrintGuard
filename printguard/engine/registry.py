@@ -1,6 +1,6 @@
-"""Resource registries - cameras, integrated printers, API tokens and installed
-plugins - each an id-keyed collection of records carrying identity, access
-details and any live runtime state."""
+"""Resource registries - cameras, integrated printers, print files, API tokens
+and installed plugins - each an id-keyed collection of records carrying
+identity, access details and any live runtime state."""
 
 from __future__ import annotations
 
@@ -56,10 +56,11 @@ class Camera:
 
     Attributes:
         id: Stable identifier used across the protocol and as the MediaMTX
-            path name in hub mode.
+            path name.
         name: Display name.
-        source: Access details - {"kind": "device", "device_id": ...} in
-            local mode, {"kind": "url" | "path", ...} in hub mode.
+        source: Access details - {"kind": "device", "device_id": ...} for a
+            camera plugged into the hub, {"kind": "url", "url": ...} for a
+            stream, {"kind": "path", "path": ...} for one a browser publishes.
         printer_id: Owning printer when the camera was exposed by a printer
             integration, else None. Such cameras are managed by their printer:
             they cannot be removed on their own and are dropped with it.
@@ -165,6 +166,8 @@ class Printer:
         provider: Integration adapter id (octoprint, klipper, elegoo, prusa, bambu, …).
         config: Connection values matching the adapter's schema.
         device_state: Last normalised state polled from the service, or None.
+        reported_status: The last status the service could actually report,
+            kept through an outage, or None before the first.
     """
 
     id: str
@@ -172,11 +175,27 @@ class Printer:
     provider: str
     config: dict[str, Any]
     device_state: dict[str, Any] | None = None
+    reported_status: str | None = None
 
     @property
     def online(self) -> bool:
         """Whether the service last reported a reachable state."""
         return bool(self.device_state) and self.device_state["status"] not in ("offline", "unknown")
+
+    def observe(self, state: dict[str, Any]) -> bool:
+        """Records a state just read from the service.
+
+        Args:
+            state: The normalised state, offline when the service was unreachable.
+
+        Returns:
+            Whether it differs from the state before it.
+        """
+        changed = state != self.device_state
+        self.device_state = state
+        if self.online:
+            self.reported_status = state["status"]
+        return changed
 
     def public(self) -> dict[str, Any]:
         """Serialises the printer with its live state for the state event."""
@@ -192,6 +211,64 @@ class Printer:
     def persisted(self) -> dict[str, Any]:
         """Serialises only what is needed to restore the printer on boot."""
         return {"id": self.id, "name": self.name, "provider": self.provider, "config": self.config}
+
+
+@dataclass
+class PrintFile:
+    """A sliced file in the print library, ready to send to a printer.
+
+    Attributes:
+        id: Stable identifier, which also names the stored bytes.
+        name: Display name, and the name the printer is given for the job.
+        filename: The name it was uploaded as.
+        ext: Its format, which decides which services can print it.
+        size: Bytes.
+        printer_ids: Printers it was sliced for. Empty means any that prints
+            the format.
+        uploaded: Unix timestamp of the upload.
+        meta: What the slicer wrote into it: slicer, time_s, filament_g,
+            filament_mm and printer_model, each None where it did not say.
+        thumbnail: Media type of the stored preview image, or None when the
+            file carries none.
+    """
+
+    id: str
+    name: str
+    filename: str
+    ext: str
+    size: int
+    printer_ids: list[str]
+    uploaded: float
+    meta: dict[str, Any]
+    thumbnail: str | None = None
+
+    @property
+    def file_key(self) -> str:
+        """The file store key its bytes live under."""
+        return f"{self.id}.{self.ext}"
+
+    @property
+    def thumbnail_key(self) -> str:
+        """The file store key its preview image lives under."""
+        return f"{self.id}.thumb"
+
+    def public(self) -> dict[str, Any]:
+        """Serialises the record for the state event."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "filename": self.filename,
+            "ext": self.ext,
+            "size": self.size,
+            "printer_ids": list(self.printer_ids),
+            "uploaded": self.uploaded,
+            "meta": self.meta,
+            "thumbnail": self.thumbnail,
+        }
+
+    def persisted(self) -> dict[str, Any]:
+        """Serialises the record to restore it on boot, which is all of it."""
+        return self.public()
 
 
 @dataclass
@@ -348,6 +425,16 @@ class CameraRegistry(Registry[Camera]):
 
 class PrinterRegistry(Registry[Printer]):
     """Holds all registered integrated printers keyed by id."""
+
+
+class PrintRegistry(Registry[PrintFile]):
+    """Holds every sliced file in the library keyed by id."""
+
+    def untag(self, printer_id: str) -> None:
+        """Drops a printer from every file it was tagged for."""
+        for record in self.values():
+            if printer_id in record.printer_ids:
+                record.printer_ids.remove(printer_id)
 
 
 class TokenRegistry(Registry[Token]):

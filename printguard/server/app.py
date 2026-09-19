@@ -1,9 +1,4 @@
-"""FastAPI application serving the UI, model assets and the engine socket.
-
-The same image serves both modes - hub mode runs the engine here, while
-local mode only needs the static UI, the model files and the Python
-source archive that Pyodide unpacks in the browser.
-"""
+"""FastAPI application serving the UI, the engine socket and the programmatic surfaces."""
 
 from __future__ import annotations
 
@@ -18,12 +13,12 @@ import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from string import Template
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -34,13 +29,13 @@ import printguard
 
 from ..engine import logs, oauth
 from ..engine.engine import Engine
-from ..pysrc import build_pysrc
 from .api import ApiAuth, build_api_app
 from .events import ConflatedEventQueue
 from .mcp import build_mcp_app
 from .mediamtx import EmbeddedMediaMTX
 from .mqtt import MqttBridge
 from .platform import ServerPlatform
+from .prints import PrintUpload, gcode_response, inspect_sample, receive_print, thumbnail_response
 from .publish import ChunkStream, remux
 
 logger = logging.getLogger(__name__)
@@ -61,21 +56,22 @@ class WebStaticFiles(StaticFiles):
         return response
 
 
-def origin_allowed(websocket: WebSocket, allowed: set[str]) -> bool:
-    """Rejects cross-site WebSocket handshakes the auth proxy cannot screen.
+def origin_allowed(connection: HTTPConnection, allowed: set[str]) -> bool:
+    """Rejects cross-site WebSocket handshakes and uploads the auth proxy cannot screen.
 
     Proxies in front of the hub authenticate the session cookie, which the
-    browser attaches to any socket a page opens, so a logged-in user's other
-    tabs could otherwise drive the engine and read its secrets. The browser
-    sets Origin and the forwarded host itself and forbids pages from forging
-    them, so a same-origin (or explicitly allow-listed) Origin is the gate.
+    browser attaches to any socket a page opens or form it posts, so a
+    logged-in user's other tabs could otherwise drive the engine and read its
+    secrets. The browser sets Origin and the forwarded host itself and forbids
+    pages from forging them, so a same-origin (or explicitly allow-listed)
+    Origin is the gate.
     """
-    origin = websocket.headers.get("origin")
+    origin = connection.headers.get("origin")
     if not origin:
         return True
     if origin.rstrip("/") in allowed:
         return True
-    host = websocket.headers.get("x-forwarded-host") or websocket.headers.get("host")
+    host = connection.headers.get("x-forwarded-host") or connection.headers.get("host")
     return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
 
 
@@ -168,7 +164,6 @@ def create_app() -> FastAPI:
             logger.info("hub shutting down")
 
     app = FastAPI(title="PrintGuard", lifespan=lifespan)
-    pysrc = build_pysrc()
     gate_cache: dict[tuple[str, ...], float] = {}
 
     async def gate_allows(request: Request) -> bool:
@@ -239,16 +234,36 @@ def create_app() -> FastAPI:
             return HTMLResponse(SIGN_IN_PAGE.substitute(message="nothing was waiting for that sign-in"), status_code=404)
         return HTMLResponse(SIGN_IN_PAGE.substitute(message=f"{html.escape(name)} is connected. You can close this tab."))
 
+    @app.post("/api/prints")
+    async def upload_print(request: Request, upload: Annotated[PrintUpload, Query()]) -> dict[str, str]:
+        """Takes a sliced file from the dashboard into the print library."""
+        if not origin_allowed(request, allowed_origins):
+            raise HTTPException(403, "origin not allowed")
+        record = await receive_print(app.state.engine, upload, request.stream())
+        return {"id": record.id}
+
+    @app.post("/api/prints/inspect")
+    async def inspect_print(request: Request, ext: str) -> dict[str, Any]:
+        """Reads a file the dashboard is about to upload from its head and tail."""
+        if not origin_allowed(request, allowed_origins):
+            raise HTTPException(403, "origin not allowed")
+        return await inspect_sample(ext, request.stream())
+
+    @app.get("/api/prints/{print_id}/gcode")
+    async def print_gcode(print_id: str) -> Response:
+        """Serves a print's text gcode for the viewer."""
+        return await gcode_response(app.state.engine, print_id)
+
+    @app.get("/api/prints/{print_id}/thumbnail")
+    def print_thumbnail(print_id: str) -> Response:
+        """Serves a print's preview image."""
+        return thumbnail_response(app.state.engine, print_id)
+
     @app.get("/api/health")
     def health(response: Response) -> dict[str, bool | str]:
         """Reports hub readiness and the running version."""
         response.headers["Cache-Control"] = "no-store"
         return {"ok": True, "version": app.state.engine.platform.version}
-
-    @app.get("/pysrc.zip")
-    def pysrc_zip() -> Response:
-        """Serves the engine source archive consumed by local mode."""
-        return Response(pysrc, media_type="application/zip", headers={"Cache-Control": "no-store"})
 
     @app.websocket("/api/ws")
     async def engine_socket(websocket: WebSocket) -> None:
@@ -353,7 +368,6 @@ def create_app() -> FastAPI:
 
     app.mount("/api/v1", api_app)
     app.mount("/mcp", mcp_app)
-    app.mount("/models", StaticFiles(directory=model_dir), name="models")
     if static_dir.is_dir():
         app.mount("/", WebStaticFiles(directory=static_dir, html=True), name="ui")
     return app

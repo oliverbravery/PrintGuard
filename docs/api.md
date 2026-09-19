@@ -40,8 +40,6 @@ flowchart LR
 | Health probe | `/api/health` | None |
 | Home Assistant | Your MQTT broker | Broker credentials |
 
-All of them are hub only. Local mode has no server to host them.
-
 ## Health and version
 
 `GET /api/health` is the unauthenticated readiness endpoint for uptime checks and update
@@ -63,9 +61,9 @@ Scopes are cumulative:
 
 | Scope | Grants |
 |---|---|
-| `read` | Status of monitors, printers and cameras, the current camera frame, recent events |
-| `control` | Everything in `read`, plus pause, resume and cancel |
-| `manage` | Everything in `control`, plus adding, editing and removing cameras, printers and monitors, changing settings, testing services and discovering cameras |
+| `read` | Status of monitors, printers and cameras, the current camera frame, recent events, the print library |
+| `control` | Everything in `read`, plus pause, resume and cancel, setting a heater target, and starting a file from the print library |
+| `manage` | Everything in `control`, plus adding, editing and removing cameras, printers, monitors and print files, changing settings, testing services and discovering cameras |
 
 Issue tokens from the API & MCP access tab in Settings. Name a token, choose its scope and
 press **Generate**. The secret, a `pg_…` string, is only shown once:
@@ -104,7 +102,10 @@ at `/api/v1/docs`.
 | `GET` | `/cameras` | List cameras with rate, health and latest score |
 | `GET` | `/cameras/{id}` | One camera |
 | `GET` | `/cameras/{id}/frame` | Freshest frame as `image/jpeg` |
-| `POST` | `/classify` | Classify a supplied frame, body `image/jpeg`, `?sensitivity=`. No registered camera needed |
+| `POST` | `/classify` | Classify a supplied frame, body `image/jpeg`. No registered camera needed |
+| `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
+| `GET` | `/prints/{id}` | One print file |
+| `GET` | `/prints/{id}/file` | Download a print file as the library keeps it |
 | `GET` | `/events` | Recent alerts, warnings, device changes and errors |
 
 </details>
@@ -115,6 +116,8 @@ at `/api/v1/docs`.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/printers/{id}/action` | `{"action": "pause" \| "resume" \| "cancel"}` |
+| `POST` | `/printers/{id}/heat` | `{"nozzle", "bed"}` in °C, either optional, 0 turning a heater off. Refused by a service that cannot set targets |
+| `POST` | `/prints/{id}/start` | `{"printer_id"}`, sends the file to that printer and starts it. Refused unless the printer is idle, prints the format and is one the file is tagged for |
 
 </details>
 
@@ -135,6 +138,9 @@ at `/api/v1/docs`.
 | `DELETE` | `/cameras/{id}` | Remove a camera |
 | `POST` | `/cameras/discover` | List attachable, unregistered sources |
 | `POST` | `/cameras/refresh-printers` | Register cameras newly exposed by registered printers |
+| `POST` | `/prints?filename=` | Upload a sliced file as the raw request body. `name`, a comma-separated `printer_ids` and first layer `nozzle` and `bed` temperatures are optional |
+| `PATCH` | `/prints/{id}` | Rename a print file or change the printers it is tagged for |
+| `DELETE` | `/prints/{id}` | Remove a print file |
 | `PATCH` | `/settings` | Update settings, for example notifiers |
 | `POST` | `/notifiers/test` | `{"provider", "config"}`, sends a test alert |
 
@@ -151,10 +157,20 @@ curl -H "Authorization: Bearer $TOKEN" https://host/api/v1/cameras/$CAM/frame -o
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"action":"pause"}' https://host/api/v1/printers/$PRINTER/action
 
+# Preheat for PLA
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"nozzle":210,"bed":60}' https://host/api/v1/printers/$PRINTER/heat
+
 # Classify a supplied frame, no registered camera needed
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: image/jpeg" \
   --data-binary @frame.jpg https://host/api/v1/classify
-# gives {"prediction":"success","distances":{...},"margin":1.16,"defect_score":0.35}
+# gives {"prediction":"success","distances":{...},"margin":1.16,"defect_score":0.08}
+
+# Upload a sliced file tagged for one printer, then start it there
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/octet-stream" \
+  --data-binary @benchy.gcode "https://host/api/v1/prints?filename=benchy.gcode&printer_ids=$PRINTER"
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"printer_id\":\"$PRINTER\"}" https://host/api/v1/prints/$PRINT/start
 ```
 
 ## MCP server
@@ -165,10 +181,12 @@ filtered to the scopes its token holds.
 
 | Scope | Tools |
 |---|---|
-| `read` | `get_state`, `list_monitors`, `get_monitor`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `recent_events` |
+| `read` | `get_state`, `list_monitors`, `get_monitor`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `list_prints`, `get_print`, `recent_events` |
 | `read` | `get_camera_frame`, which returns the frame as image content an agent can look at |
-| `control` | `control_printer` |
-| `manage` | `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_settings`, `test_notifier` |
+| `control` | `control_printer`, `heat_printer`, `start_print` |
+| `manage` | `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_print`, `remove_print`, `update_settings`, `test_notifier` |
+
+Uploading and downloading a print file carry a binary body, so they are REST only.
 
 Point a client at the endpoint with the token as a bearer header:
 
@@ -198,6 +216,11 @@ collection. A monitor binds one camera and optionally one printer by `camera_id`
 `printer_id`, and carries the thresholds and defect-response policy. Removing a resource
 clears it from any monitor that referenced it.
 
+A print file is a third resource. It carries the printers it is tagged for as `printer_ids`,
+and removing a printer drops it from every file's tags. Its `meta` holds the slicer, `time_s`,
+`filament_g`, `filament_mm` and `printer_model` read from the file, each `null` where the file
+did not say, and `thumbnail` is the media type of its preview or `null`.
+
 > [!NOTE]
 > Credentials are redacted from this surface. Any printer or notifier config field its
 > adapter marks secret, such as API keys, access codes and bot tokens, is stripped from
@@ -210,13 +233,13 @@ regardless of its service:
 | | Values |
 |---|---|
 | **Status** | `printing`, `paused`, `idle`, `error`, `offline`, `unknown` |
-| **State** | `{ "status", "progress" 0-100, "job" }`, reported on printers as `device_state` |
-| **Actions** | `pause`, `resume`, `cancel` |
+| **State** | `{ "status", "progress" 0-100, "job", "remaining_s", "nozzle", "bed" }`, reported on printers as `device_state`. A heater is `{ "actual", "target" }` in °C, or `null` where the printer has none, and `remaining_s` is `null` where the service gives no estimate |
+| **Actions** | `pause`, `resume`, `cancel`, and a heater target through `/heat` |
 
 ## Reading detection state
 
-Two facts are easy to miss. A camera carries a per-frame classification, and the smoothed 0-1
-defect score belongs to a monitor rather than a camera, so the camera object has no numeric
+Two facts are easy to miss. A camera carries a per-frame classification, and the 0-1 defect
+score is reported per monitor rather than per camera, so the camera object has no numeric
 score field.
 
 The camera object, from `GET /cameras` and `GET /cameras/{id}`:
@@ -250,7 +273,6 @@ The monitor object, from `GET /monitors` and `GET /monitors/{id}`:
   "id": "mon_…",
   "camera_id": "cam_1a2b",
   "printer_id": "prn_…" | "",
-  "sensitivity": 1.0,          // scales how far the distance margin moves the score off 0.5
   "threshold": 0.6,            // defect score at/above which a frame counts as a failure
   "watching": true,            // whether it is actively inferring right now
   "result": {                  // latest per-monitor score, or null before the first inference
@@ -264,9 +286,9 @@ The monitor object, from `GET /monitors` and `GET /monitors/{id}`:
 
 ### Prediction against defect score
 
-The 0-1 defect score, where `0.5` is the decision boundary and higher is more defective,
-applies a monitor's `sensitivity` to the frame's distance margin, so it is per-monitor rather
-than per-camera. It appears in:
+The 0-1 defect score is the model's probability that a frame shows a failing print, the
+softmax over negative squared prototype distances the network was trained with, so `0.5` is
+the decision boundary. It appears in:
 
 - `result` events on the WebSocket:
   `{ "event": "result", "monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts" }`,
@@ -277,5 +299,5 @@ than per-camera. It appears in:
 - the MQTT **Defect score** sensor, published as 0-100.
 
 To poll one camera's current verdict, read `GET /cameras/{id}` and take
-`last_result.prediction`. For the smoothed score or a threshold-applied verdict, read the
-monitor or the `result` events.
+`last_result.prediction`. For the score or a threshold-applied verdict, read the monitor or
+the `result` events.

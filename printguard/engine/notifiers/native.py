@@ -6,8 +6,8 @@ a toast on Windows - via desktop-notifier, which speaks each platform's native
 API (UNUserNotificationCenter, WinRT). It reaches no external service, so it
 needs no configuration; because that native call exists only in the packaged
 desktop app, the adapter is desktop-only and is never offered by the headless
-container or in the browser. The import is lazy for the same reason: the library
-ships only in the desktop build.
+container. The import is lazy for the same reason: the library ships only in
+the desktop build.
 
 desktop-notifier: https://github.com/samschott/desktop-notifier
 """
@@ -30,7 +30,6 @@ class NativeNotifier(NotifierAdapter):
     id = "native"
     label = "Desktop notification"
     docs_url = "https://github.com/samschott/desktop-notifier"
-    browser_ok = False
     desktop_only = True
     experimental = False
     setup_hint = (

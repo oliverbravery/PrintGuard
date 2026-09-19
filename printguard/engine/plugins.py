@@ -2,8 +2,8 @@
 
 Nothing runs here. This module fetches a plugin's source, validates the
 manifest, hashes what it got and checks that hash against the catalogue.
-Execution is a sandbox on each side, an opaque-origin iframe in the browser and
-QuickJS in WebAssembly on the hub.
+Execution is a sandbox on each side, an opaque-origin iframe in the dashboard
+and QuickJS in WebAssembly on the hub.
 
 Permissions are data. Both sandboxes enforce them at their own edge, since by
 the time a command reaches the engine it looks like one the dashboard sent.
@@ -120,7 +120,7 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
         "label": "Change your settings",
         "description": "Change anything in Settings. It can set credentials, not read them.",
         "commands": ["settings.update", "notify.test"],
-        "fields": {"notifiers": ["id", "label", "schema", "docs_url", "setup_url", "setup_hint", "browser_ok"]},
+        "fields": {"notifiers": ["id", "label", "schema", "docs_url", "setup_url", "setup_hint"]},
         "risky": True,
     },
     "tokens": {
@@ -181,12 +181,10 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
     "routes": {
         "label": "Serve its own pages",
         "description": "Serve pages under /plugins/<id>/, reading your session cookie.",
-        "hub_only": True,
     },
     "gate": {
         "label": "Authorise every request",
         "description": "Approve or refuse every request to the hub. It can lock you out.",
-        "hub_only": True,
         "risky": True,
     },
 }
@@ -236,7 +234,6 @@ PLATFORMS: dict[str, str] = {
     "docker-intel": "Intel image",
     "macos": "macOS",
     "windows": "Windows",
-    "browser": "Browser",
 }
 """Where PrintGuard runs, as a plugin declares it and a deployment reports it.
 
@@ -255,7 +252,7 @@ EVENTS: dict[str, list[str]] = {
     "result": ["monitor_id", "camera_id", "score", "prediction", "margin", "ms", "ts"],
     "alert": ["monitor_id", "score", "action", "ts"],
     "warning": ["monitor_id", "message", "recovered"],
-    "device": ["printer_id", "status", "progress", "job"],
+    "device": ["printer_id", "status", "progress", "job", "remaining_s", "nozzle", "bed"],
     "error": ["message"],
     "state": [],
 }
@@ -423,7 +420,7 @@ def project_state(state: dict[str, Any], granted: list[str]) -> dict[str, Any]:
     snapshot later is invisible until it is listed. The UI applies the same
     table, read from ``permissions_meta()``.
     """
-    view: dict[str, Any] = {"mode": state.get("mode"), "version": state.get("version")}
+    view: dict[str, Any] = {"version": state.get("version")}
     for name in granted:
         for collection, fields in PERMISSIONS.get(name, {}).get("fields", {}).items():
             view[collection] = [{k: item[k] for k in fields if k in item} for item in state.get(collection, [])]
@@ -503,8 +500,8 @@ def text_assets(assets: dict[str, str]) -> dict[str, str]:
 def canonical(value: Any) -> bytes:
     """Encodes a manifest the one way both ends agree to hash it.
 
-    The platform's HTTP function returns parsed JSON in both modes, never the
-    bytes it came from, so a manifest is pinned by the hash of this form.
+    The platform's HTTP function returns parsed JSON, never the bytes it came
+    from, so a manifest is pinned by the hash of this form.
     """
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 

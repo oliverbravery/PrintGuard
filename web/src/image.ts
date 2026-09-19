@@ -1,24 +1,15 @@
 import { useEffect } from "react";
-import { bridge } from "./local";
 import { hlsUrl, playHls } from "./stream";
 import type { Camera } from "./types";
 
 export function useVideoStream(
   videoRef: React.RefObject<HTMLVideoElement | null>,
   camera: Camera | undefined,
-  mode: string,
   active = true,
 ): void {
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !camera || !active) return;
-    if (mode === "local") {
-      video.srcObject = bridge.getStream(camera.id);
-      void video.play().catch(() => {});
-      return () => {
-        video.srcObject = null;
-      };
-    }
     const path = camera.source.kind === "path" ? camera.source.path! : camera.id;
     let stop: (() => void) | undefined;
     const onVisibility = () => {
@@ -32,7 +23,7 @@ export function useVideoStream(
       document.removeEventListener("visibilitychange", onVisibility);
       stop?.();
     };
-  }, [videoRef, camera?.id, camera?.online, mode, active]);
+  }, [videoRef, camera?.id, camera?.online, active]);
 }
 
 export function adjust(data: ImageData, brightness: number, contrast: number, sharpness: number): void {

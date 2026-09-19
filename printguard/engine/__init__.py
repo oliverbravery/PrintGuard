@@ -1,1 +1,1 @@
-"""Platform-independent core that runs unchanged on CPython and Pyodide."""
+"""The application core, reaching its runtime only through the platform contract."""

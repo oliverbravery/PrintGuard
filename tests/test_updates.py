@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from fakes import FakePlatform
 
 from printguard.engine.engine import Engine
@@ -29,7 +28,6 @@ def _release(
 def _engine(version: str = "2.1.0", releases: list[dict] | None = None) -> tuple[Engine, FakePlatform]:
     platform = FakePlatform()
     platform.version = version
-    platform.update_repo = "o/r"
     platform.releases = releases or []
     return Engine(platform), platform
 
@@ -71,12 +69,6 @@ async def test_history_is_served_on_demand_not_in_every_snapshot() -> None:
     assert len(platform.http_calls) == calls, "a second request must serve what was already fetched"
 
 
-async def test_history_is_empty_where_updates_do_not_apply() -> None:
-    engine = Engine(FakePlatform())  # update_repo defaults to None (local mode)
-    events = await engine.request({"cmd": "update.releases"})
-    assert next(e for e in events if e["event"] == "releases")["releases"] == []
-
-
 async def test_up_to_date_reports_no_update() -> None:
     engine, _ = _engine(version="2.3.0", releases=[_release("v2.2.0"), _release("v2.3.0")])
     update = await _check(engine)
@@ -100,12 +92,6 @@ async def test_no_asset_means_no_download() -> None:
     engine, _ = _engine(version="2.1.0", releases=[_release("v2.3.0", assets=["PrintGuard-macos-arm64.dmg"])])
     update = await _check(engine)
     assert update["download"] is None
-
-
-async def test_check_errors_when_repo_unset() -> None:
-    engine = Engine(FakePlatform())  # update_repo defaults to None (local mode)
-    with pytest.raises(RuntimeError, match="not available"):
-        await engine.request({"cmd": "update.check"})
 
 
 async def test_version_and_default_setting_in_state() -> None:

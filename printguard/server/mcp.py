@@ -1,4 +1,4 @@
-"""Model Context Protocol server for agents (hub mode only).
+"""Model Context Protocol server for agents.
 
 The tool set is derived from the REST API with FastMCP.from_fastapi, so agents
 and developers share one definition that always tracks the engine protocol. The
@@ -32,8 +32,9 @@ from .api import ApiAuth, route_scope
 INSTRUCTIONS = (
     "Monitor and control 3D printers through PrintGuard. Read monitor, printer and "
     "camera status, fetch the current camera frame as an image to judge a print, "
-    "classify a print image you supply for defects, and pause, resume or cancel a "
-    "print through its printer service."
+    "classify a print image you supply for defects, pause, resume or cancel a "
+    "print through its printer service, and start a sliced file from the print "
+    "library on an idle printer it is tagged for."
 )
 
 
@@ -67,6 +68,8 @@ def build_mcp(
         route_maps=[
             RouteMap(methods="*", pattern=r".*/frame$", mcp_type=MCPType.EXCLUDE),
             RouteMap(methods="*", pattern=r".*/classify$", mcp_type=MCPType.EXCLUDE),
+            RouteMap(methods="*", pattern=r".*/file$", mcp_type=MCPType.EXCLUDE),
+            RouteMap(methods=["POST"], pattern=r".*/prints$", mcp_type=MCPType.EXCLUDE),
             RouteMap(methods="*", pattern=r".*", mcp_type=MCPType.TOOL),
         ],
         httpx_client_kwargs={"headers": {"Authorization": f"Bearer {internal_token}"}},
@@ -82,7 +85,7 @@ def build_mcp(
         return Image(data=jpeg, format="jpeg")
 
     @mcp.tool(name="classify_frame", tags={"read"})
-    async def classify_frame(image_base64: str, sensitivity: float = 1.0) -> dict:
+    async def classify_frame(image_base64: str) -> dict:
         """Classifies a supplied print image for defects - no registered camera needed.
 
         Pass a base64-encoded JPEG or PNG frame (one shared in the conversation or
@@ -91,7 +94,7 @@ def build_mcp(
         itself. Use it to judge a still the model never captured directly.
         """
         try:
-            return await get_engine().classify(base64.b64decode(image_base64), sensitivity)
+            return await get_engine().classify(base64.b64decode(image_base64))
         except (ValueError, RuntimeError) as exc:
             raise ToolError(f"could not classify image: {exc}")
 

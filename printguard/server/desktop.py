@@ -1,4 +1,4 @@
-"""Desktop app that runs hub mode behind a tray icon on macOS and Windows.
+"""Desktop app that runs the hub behind a tray icon on macOS and Windows.
 
 Packaged with PyInstaller, this is the install-free, no-terminal way to run a hub
 on a personal computer. The hub server and a system-tray icon live in this
@@ -164,10 +164,15 @@ def _run_webview(**contents: Any) -> None:
     localStorage on every launch (on macOS it wipes the whole store), which
     would lose the page's record of which "this device" cameras it publishes,
     so a reopened window would never resume them.
+
+    ``PRINTGUARD_DEBUG_PORT`` opens the Windows webview to the DevTools protocol on
+    that port, which is how CI drives the window. WebView2 ignores its own
+    environment switch for this, since pywebview sets the browser arguments itself.
     """
     if sys.platform == "darwin":
         _enable_wkwebview_media()
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+    webview.settings["REMOTE_DEBUGGING_PORT"] = os.environ.get("PRINTGUARD_DEBUG_PORT")
     webview.create_window(APP_NAME, width=1280, height=820, **contents)
     webview.start(private_mode=False, storage_path=os.path.join(os.environ["DATA_DIR"], "webview"))
 

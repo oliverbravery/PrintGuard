@@ -1,18 +1,29 @@
 import { useState } from "react";
-import { useStore } from "../store";
-import { Wordmark } from "./Header";
-import dashboardDark from "../../../docs/assets/dashboard.png";
-import dashboardLight from "../../../docs/assets/dashboard-light.png";
-import printerDetail from "../../../docs/assets/printer-detail.png";
-import customise from "../../../docs/assets/customise.png";
+import { Wordmark } from "../src/components/Wordmark";
+import dashboardDark from "../../docs/assets/dashboard.png";
+import dashboardLight from "../../docs/assets/dashboard-light.png";
+import printerDetail from "../../docs/assets/printer-detail.png";
+import printViewer from "../../docs/assets/print-viewer.png";
+import pluginsLive from "../../docs/assets/plugins-live.png";
+import customise from "../../docs/assets/customise.png";
 
 const REPO_URL = "https://github.com/oliverbravery/PrintGuard";
 const MODEL_URL = "https://github.com/oliverbravery/Edge-FDM-Fault-Detection";
+const DOCS_URL = `${REPO_URL}/blob/main/docs`;
 const DOWNLOAD = `${REPO_URL}/releases/latest/download`;
 const MAC_DOWNLOAD = `${DOWNLOAD}/PrintGuard-macos-arm64.dmg`;
 const WIN_DOWNLOAD = `${DOWNLOAD}/PrintGuard-windows-x64.zip`;
 const UNRAID_URL = `${REPO_URL}/blob/main/templates/printguard.xml`;
-const ACCELERATION_URL = `${REPO_URL}#hardware-acceleration`;
+const ACCELERATION_URL = `${DOCS_URL}/hardware.md`;
+
+const DOCS: { title: string; page: string; body: string }[] = [
+  { title: "Printers & cameras", page: "printers.md", body: "Connect OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, add cameras and set up alert channels." },
+  { title: "Hardware", page: "hardware.md", body: "Pick an image variant and use an Intel or NVIDIA GPU, or an NPU." },
+  { title: "Deployment", page: "deployment.md", body: "Reach your hub from outside your network without exposing it." },
+  { title: "API & MCP", page: "api.md", body: "Drive the hub from a script, an agent or Home Assistant." },
+  { title: "Plugins", page: "plugins.md", body: "Install a plugin, see what it can reach, or write your own." },
+  { title: "Troubleshooting", page: "troubleshooting.md", body: "Fix a dead feed, a failing printer test or a port already in use." },
+];
 
 const DOCKER_CMD = `docker run -d --name printguard --restart unless-stopped \\
   -p 8000:8000 -p 8554:8554 \\
@@ -22,8 +33,8 @@ const COMPOSE_CMD =
   "curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml && docker compose up -d";
 
 function detectOS(): "mac" | "windows" | "other" {
-  if (typeof navigator === "undefined") return "other";
-  if (/Mac|iPhone|iPad/i.test(navigator.userAgent)) return "mac";
+  if (/iPhone|iPad|Android/i.test(navigator.userAgent)) return "other";
+  if (/Mac/i.test(navigator.userAgent)) return navigator.maxTouchPoints > 1 ? "other" : "mac";
   if (/Win/i.test(navigator.userAgent)) return "windows";
   return "other";
 }
@@ -106,7 +117,7 @@ function Shot({ src, alt, w, h, eager }: { src: string; alt: string; w: number; 
       <span className="corner corner-tr" />
       <span className="corner corner-bl" />
       <span className="corner corner-br" />
-      <img src={src} alt={alt} width={w} height={h} loading={eager ? "eager" : "lazy"} className="block h-auto w-full" />
+      <img src={src} alt={alt} width={w} height={h} loading={eager ? undefined : "lazy"} fetchPriority={eager ? "high" : undefined} className="block h-auto w-full" />
     </div>
   );
 }
@@ -126,10 +137,18 @@ function Showcase({ src, alt, w, h, kicker, title, body, flip }: { src: string; 
   );
 }
 
+function DocLink({ title, page, body }: { title: string; page: string; body: string }) {
+  return (
+    <a className="panel group block p-5 transition-colors hover:border-accent" href={`${DOCS_URL}/${page}`} target="_blank" rel="noreferrer">
+      <h3 className="display mb-1.5 text-sm font-semibold tracking-[0.14em] transition-colors group-hover:text-accent">{title} ↗</h3>
+      <p className="text-[0.84rem] leading-relaxed text-text-1">{body}</p>
+    </a>
+  );
+}
+
 export function Home() {
-  const chooseMode = useStore((s) => s.chooseMode);
-  const launch = () => chooseMode("local");
   const os = detectOS();
+  const download = os === "mac" ? { label: "macOS", href: MAC_DOWNLOAD } : os === "windows" ? { label: "Windows", href: WIN_DOWNLOAD } : null;
   const mac = <DownloadButton label="macOS" href={MAC_DOWNLOAD} icon={<AppleIcon />} primary={os === "mac"} />;
   const win = <DownloadButton label="Windows" href={WIN_DOWNLOAD} icon={<WindowsIcon />} primary={os === "windows"} />;
 
@@ -140,14 +159,14 @@ export function Home() {
           <Wordmark />
           <div className="flex-1" />
           <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#features" onClick={scrollToId("features")}>FEATURES</a>
-          <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#install" onClick={scrollToId("install")}>INSTALL</a>
-          <a className="mono text-[0.66rem] text-text-2 transition-colors hover:text-accent" href={REPO_URL} target="_blank" rel="noreferrer">GITHUB ↗</a>
-          <button className="btn btn-primary" onClick={launch}>Live demo</button>
+          <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#docs" onClick={scrollToId("docs")}>DOCS</a>
+          <a className="mono hidden whitespace-nowrap text-[0.66rem] text-text-2 transition-colors hover:text-accent min-[400px]:inline" href={REPO_URL} target="_blank" rel="noreferrer">GITHUB ↗</a>
+          <a className="btn btn-primary" href="#install" onClick={scrollToId("install")}>Install</a>
         </div>
       </nav>
 
       <section className="mx-auto max-w-4xl px-5 pb-12 pt-16 text-center sm:pt-24">
-        <p className="mono reveal mb-6 text-[0.65rem] tracking-[0.32em] text-text-2">FDM FAILURE DETECTION · LOCAL FIRST</p>
+        <p className="mono reveal mb-6 text-[0.65rem] tracking-[0.32em] text-text-2">FDM FAILURE DETECTION · SELF-HOSTED</p>
         <h1 className="display reveal mb-6 text-[2.7rem] font-bold leading-[0.95] sm:text-7xl" style={{ "--i": 1 } as React.CSSProperties}>
           EVERY LAYER WATCHED.
           <br />
@@ -159,8 +178,8 @@ export function Home() {
           cloud and no subscription, so your frames stay yours.
         </p>
         <div className="reveal flex flex-wrap items-center justify-center gap-3" style={{ "--i": 3 } as React.CSSProperties}>
-          <button className="btn btn-primary" onClick={launch}>Try the live demo →</button>
-          <a className="btn" href="#install" onClick={scrollToId("install")}>Install PrintGuard</a>
+          {download && <a className="btn btn-primary" href={download.href}>Download for {download.label}</a>}
+          <a className={`btn ${download ? "" : "btn-primary"}`} href="#install" onClick={scrollToId("install")}>Run it in Docker</a>
         </div>
         <div className="mt-10 grid grid-cols-2 gap-x-6 gap-y-4 sm:flex sm:items-center sm:justify-center sm:gap-12">
           <Spec index={3} value="≈5 MB" label="model" />
@@ -179,13 +198,15 @@ export function Home() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Feature index={2} led="led-infer" title="Detect" body="A compact encoder scores every frame against failure prototypes, scheduled fairly across all your cameras." />
           <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu, and inference rests while the printer is idle." />
-          <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, a snapshot lands on your phone over ntfy, Pushover, Telegram or Discord." />
+          <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, PrintGuard sends a snapshot to your phone over ntfy, Pushover, Telegram or Discord." />
           <Feature index={5} led="led-warn" title="Fail safe" body="A watchdog warns the second a camera drops, a feed freezes or your printer stops answering. Nothing fails silently." />
         </div>
       </section>
 
       <section className="mx-auto max-w-6xl space-y-16 px-5 pb-20">
-        <Showcase src={printerDetail} alt="Monitor detail with live risk score and printer controls" w={1360} h={760} kicker="EVERY MONITOR, IN DEPTH" title="Open any monitor" body="Live risk score, score history and one-tap pause, resume or cancel, bound to the printer through your print server." />
+        <Showcase src={printerDetail} alt="Monitor detail with live risk score and printer controls" w={1360} h={860} kicker="EVERY MONITOR, IN DEPTH" title="Open any monitor" body="Live risk score, score history, temperatures and one-tap pause, resume or cancel, bound to the printer through your print server." />
+        <Showcase flip src={printViewer} alt="A sliced file in the 3D viewer, with its print time, filament and temperatures" w={1360} h={860} kicker="PRINT LIBRARY" title="Send a print from the dashboard" body="Drop sliced files onto the hub to preview the toolpath layer by layer and check the print time, filament and temperatures. Send one to an idle printer when you're ready." />
+        <Showcase src={pluginsLive} alt="The dashboard with the Spotify plugin's panel and album cover behind it" w={1360} h={720} kicker="PLUGINS" title="Add what you need" body="Plugins are written in JavaScript and run in a sandbox with only the permissions you grant. Install verified plugins from the in-app plugin store or install them from GitHub repos or zips." />
         <Showcase flip src={customise} alt="Customise mode: drag to reorder, pin and hide monitors and cameras" w={1360} h={860} kicker="YOUR DASHBOARD, YOUR WAY" title="Arrange it around your workflow" body="Drag monitors into any order, pin the ones that matter to the front and hide the rest. The camera rail rearranges the same way, with mouse, touch or keyboard." />
         <Showcase src={dashboardLight} alt="PrintGuard in its light theme" w={1360} h={620} kicker="MAKE IT YOURS" title="Light, dark, or a theme you design" body="Pick System, Light or Dark from the header, or build your own in the theme editor, saved and synced to every browser that opens the hub." />
       </section>
@@ -219,9 +240,7 @@ export function Home() {
               )}
             </div>
             <p className="mt-4 text-xs leading-relaxed text-text-2">
-              Unsigned for now, so the first launch needs a one-time approval. On macOS, open{" "}
-              <span className="text-text-1">Privacy &amp; Security in System Settings</span> and click{" "}
-              <span className="text-text-1">Open Anyway</span>. On Windows, choose{" "}
+              The Windows build is unsigned for now, so its first launch needs a one-time approval. Choose{" "}
               <span className="text-text-1">More info</span>, then <span className="text-text-1">Run anyway</span>.
             </p>
           </div>
@@ -255,14 +274,14 @@ export function Home() {
         </div>
       </section>
 
-      <section id="demo" className="mx-auto max-w-3xl scroll-mt-20 px-5 pb-24 text-center">
-        <p className="label mb-2">NO INSTALL</p>
-        <h2 className="display mb-3 text-3xl font-bold sm:text-4xl">Try it in your browser</h2>
-        <p className="mx-auto mb-7 max-w-xl leading-relaxed text-text-1">
-          Local mode runs the entire engine right here, so point a webcam at a print and watch it score each frame live.
-          Nothing is installed and no frame leaves your device.
-        </p>
-        <button className="btn btn-primary" onClick={launch}>Launch the demo →</button>
+      <section id="docs" className="mx-auto max-w-6xl scroll-mt-20 px-5 pb-24">
+        <p className="label mb-2 text-center">DOCUMENTATION</p>
+        <h2 className="display mb-10 text-center text-3xl font-bold sm:text-4xl">Where to go next</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {DOCS.map((doc) => (
+            <DocLink key={doc.page} {...doc} />
+          ))}
+        </div>
       </section>
 
       <footer className="hairline flex flex-wrap items-center justify-center gap-x-7 gap-y-2 px-6 py-6">

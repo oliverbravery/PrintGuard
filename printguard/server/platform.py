@@ -1,4 +1,4 @@
-"""Server implementation of the platform contract for hub mode."""
+"""The hub's implementation of the platform contract."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from fractions import Fraction
 from functools import partial
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, AsyncIterable, Callable
 
 import av
 import httpx
@@ -162,7 +162,7 @@ def _video_devices() -> list[tuple[str, str]]:
         with av.logging.Capture(local=True) as logs:
             try:
                 av.open(spec, format=container_format, options={"list_devices": "true"})
-            except OSError:
+            except av.error.FFmpegError:
                 pass
     finally:
         av.logging.set_level(previous)
@@ -255,8 +255,8 @@ def _authorize_macos_camera() -> None:
     is undetermined starts a session that delivers no frames, and once refused
     the capture input fails instantly with EAGAIN. So consent is settled through
     AVFoundation first, blocking until the user answers. A grant recorded for a
-    previous build still reads as authorised while capture is refused - each
-    unsigned build re-signs ad hoc with a new identity - so an authorised state
+    build signed by another identity - an ad hoc local build, or a release before
+    2.5.0 - still reads as authorised while capture is refused, so an authorised state
     is probed with a real capture input, and a refusal resets this app's own
     consent entry to let the prompt be asked afresh. Other platforms gate
     camera capture without a per-process consent step.
@@ -507,10 +507,49 @@ class WebSocket:
         await self._connection.close()
 
 
-class ServerPlatform:
-    """Hub mode platform, with hardware inference and frames via MediaMTX."""
+class DiskFileStore:
+    """Print files and their previews on disk, under the data directory.
 
-    mode = "hub"
+    A file is written beside its final name and renamed into place once it is
+    complete, so a read never sees a partial upload and an upload that fails
+    part way leaves nothing behind.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        root.mkdir(parents=True, exist_ok=True)
+
+    def path(self, key: str) -> Path:
+        """Where a key's bytes live, for serving straight from disk."""
+        return self.root / key
+
+    async def store(self, key: str, chunks: AsyncIterable[bytes]) -> int:
+        """Writes a file from its chunks, replacing any under that key."""
+        partial = self.path(f"{key}.part")
+        size = 0
+        try:
+            with partial.open("wb") as handle:
+                async for chunk in chunks:
+                    handle.write(chunk)
+                    size += len(chunk)
+            partial.replace(self.path(key))
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+        return size
+
+    async def read(self, key: str) -> bytes:
+        """Returns a stored file's bytes."""
+        return await asyncio.to_thread(self.path(key).read_bytes)
+
+    async def remove(self, key: str) -> None:
+        """Deletes a stored file, if there is one."""
+        await asyncio.to_thread(self.path(key).unlink, True)
+
+
+class ServerPlatform:
+    """The hub's platform, with hardware inference and frames via MediaMTX."""
+
     update_repo = "oliverbravery/PrintGuard"
 
     def __init__(
@@ -533,6 +572,7 @@ class ServerPlatform:
         self._sources: dict[str, AVSource] = {}
         self._declares_devices = os.environ.get("PRINTGUARD_CAMERAS") == "auto"
         self.plugin_runtime = None if os.environ.get("PRINTGUARD_PLUGINS") == "off" else WasmPluginRuntime()
+        self.files = DiskFileStore(data_dir / "prints")
         if self.plugin_runtime is None:
             logger.warning("plugins are disabled by PRINTGUARD_PLUGINS=off")
 
@@ -623,7 +663,7 @@ class ServerPlatform:
             target = partial(open_bambu_jpeg_stream, source["host"], source["access_code"])
             publish_url = self.mediamtx.rtsp_url(camera_id)
         else:
-            raise ValueError(f"hub mode cannot open source kind {source['kind']!r}")
+            raise ValueError(f"cannot open source kind {source['kind']!r}")
         av_source = AVSource(target, publish_url, container_format, open_options)
         self._sources[camera_id] = av_source
         try:

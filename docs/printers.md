@@ -11,6 +11,8 @@ how alerts are wired up.
 
 - [How the pieces fit](#how-the-pieces-fit)
 - [Register a printer](#register-a-printer)
+- [Sending prints](#sending-prints)
+- [Temperatures and preheat](#temperatures-and-preheat)
 - [Supported print services](#supported-print-services)
 - [Printer cameras](#printer-cameras)
 - [Adding cameras yourself](#adding-cameras-yourself)
@@ -41,31 +43,85 @@ Open the printer registry, choose the service, fill in the form and **Test** it 
 saving. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
 print or cancels it.
 
-Linked printers report job name, progress and state on every monitor that uses them, and they
-gate inference. A printer that positively reports "not printing" stands its monitors down, so
-an idle printer costs nothing. Losing contact with a printer never stands monitoring down, and
-neither does a state the adapter cannot read, so a monitor left watching an apparently idle
-printer warns and says which state it is getting. See
-[failing safely](architecture.md#failing-safely).
+Linked printers report job name, progress, temperatures and state on every monitor that uses
+them, and they gate inference. Monitoring runs while a printer reports it is printing and stands
+down when it reports idle, paused or an error, so an idle printer costs nothing. Losing contact
+or a state the adapter cannot read keeps whatever the printer last reported, meaning a printer
+switched off after a print stays in standby while one that drops off mid-print keeps being
+watched and warns you. See [failing safely](architecture.md#failing-safely).
+
+## Sending prints
+
+The print library holds sliced files on the hub. Open **Prints** in the header and drop files in
+or browse for them. Each one opens in a panel that draws its toolpath on your device before
+anything is uploaded, where you can name it, tag it and correct its first layer nozzle and bed
+temperatures. Every other print temperature the slicer set moves by the same amount, while the
+temperatures a start gcode probes or wipes at stay put. Binary gcode keeps the temperatures it
+was sliced with.
+
+Each file keeps the preview, estimated time, filament and printer model its slicer wrote into it.
+Cura and a few others write no preview, so your browser draws one and adds it to the gcode as
+it's uploaded. A file uploaded through the REST API without a preview shows its format
+instead. Open a file to orbit its toolpath in 3D, layer by layer.
+
+Tag a file with the printers it was sliced for and it can only start on one of those. A file
+with no tags can go to any printer whose service takes the format. Either way the printer has to
+report idle at the moment you press **Print**, so nothing lands on top of a running job.
+
+| Service | Takes | How it starts |
+|---|---|---|
+| OctoPrint | `.gcode`, `.gco`, `.g` | Uploaded to local storage, selected and printed |
+| Klipper via Moonraker | `.gcode`, `.gco`, `.g` | Uploaded to the gcodes root and printed |
+| Elegoo | `.gcode` | Centauri: uploaded to internal storage and started. Neptune and OrangeStorm: through Moonraker |
+| Prusa via PrusaLink | `.gcode`, `.bgcode` | Put onto the USB stick, or local storage on a Raspberry Pi, and printed after upload |
+| Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the SD card over FTPS, then the first plate is started over MQTT |
+
+A file is sent under its library name, so rename it first if the printer's own file list
+matters to you. Binary gcode has no 3D view and no drawn preview, since its toolpath is
+compressed, so it shows the preview PrusaSlicer embedded and nothing else.
+
+A Bambu print uses the settings sliced into the file, with bed levelling on, flow and vibration
+calibration off, and filament from the external spool or the first AMS slot. Starting a 3mf
+needs Developer Mode, the same switch the MQTT connection needs. A project exported without its
+gcode is refused at upload.
+
+Files live in the data directory under `prints/`, so they survive a restart and travel with the
+`/data` volume.
+
+## Temperatures and preheat
+
+A linked printer's nozzle and bed temperatures sit on its monitor's tile and in the monitor's
+panel, where a running print also gets a progress bar and the time left. The panel takes a
+target for either heater, applied on Enter, and a row of preheat presets that set both at once.
+**Edit** beside them changes the presets, which every printer shares, and **Off** turns every
+heater off.
+
+| Service | Reads temperatures | Sets targets |
+|---|---|---|
+| OctoPrint | Yes | Yes, through its tool and bed endpoints |
+| Klipper via Moonraker | Yes | Yes, with `SET_HEATER_TEMPERATURE` |
+| Elegoo | Yes | Yes, on both families |
+| Prusa via PrusaLink | Yes | No, PrusaLink has no endpoint for it |
+| Bambu Lab | Yes | Yes, as the `M104` and `M140` lines Bambu Studio sends |
+
+A target is capped at 350 °C for the nozzle and 150 °C for the bed, and the printer's own
+firmware applies its limits on top. Temperatures refresh with the printer's state, every five
+seconds.
 
 ## Supported print services
 
-| Service | Modes | Authentication | Exposes a camera |
-|---|---|---|---|
-| [OctoPrint](https://octoprint.org) | Hub and local | API key | Yes, its webcam stream |
-| [Klipper via Moonraker](https://moonraker.readthedocs.io) | Hub and local | Optional API key | Yes, its configured webcams |
-| [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Hub only | Access code, or Moonraker API key | Centauri chamber camera |
-| [Prusa via PrusaLink](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | Hub only | HTTP Digest, user `maker` | No local stream |
-| [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | Hub only | Access code and serial | Chamber camera |
-
-"Hub only" means a browser cannot make the connection at all, so the integration is offered
-only when PrintGuard runs as a server. The reasons are per service and listed below.
+| Service | Authentication | Exposes a camera |
+|---|---|---|
+| [OctoPrint](https://octoprint.org) | API key | Yes, its webcam stream |
+| [Klipper via Moonraker](https://moonraker.readthedocs.io) | Optional API key | Yes, its configured webcams |
+| [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code, or Moonraker API key | Centauri chamber camera |
+| [Prusa via PrusaLink](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest, user `maker` | No local stream |
+| [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | Access code and serial | Chamber camera |
 
 <details>
-<summary><b>Bambu Lab</b>: LAN Only Mode, Developer Mode, and why hub only</summary>
+<summary><b>Bambu Lab</b>: LAN Only Mode and Developer Mode</summary>
 
-Bambu printers speak MQTT over TLS rather than HTTP, and a browser cannot open a raw
-socket, so control is hub only.
+Bambu printers speak MQTT over TLS rather than HTTP.
 
 1. On the printer, enable **LAN Only Mode**, then **Developer Mode** under
    Network in Settings. This opens the MQTT channel.
@@ -81,7 +137,7 @@ proprietary port 6000 protocol on the A1 and P1 series. The form links Bambu's
 <details>
 <summary><b>Elegoo</b>: two families, Centauri and Neptune/OrangeStorm</summary>
 
-Elegoo control is hub only. Choose the family that matches your printer:
+Choose the family that matches your printer:
 
 **Centauri** covers the Centauri Carbon and Centauri Carbon 2. PrintGuard detects which
 local protocol the printer speaks and registers its chamber camera automatically.
@@ -104,8 +160,7 @@ Elegoo's cloud is never involved.
 
 Prusa printers connect over **PrusaLink**, the API that runs on the printer itself on the
 MK4, MK4S, MK3.9, MK3.5, MINI, XL and CORE One, or on a Raspberry Pi attached to an MK3 or
-MK2.5. It authenticates with HTTP Digest, which a browser cannot perform, so Prusa is hub
-only.
+MK2.5. It authenticates with HTTP Digest.
 
 1. Enable **PrusaLink** on the printer under Settings, Network, then PrusaLink.
 2. Register it with its URL and the password shown there. The username is always `maker`.
@@ -136,8 +191,8 @@ Beyond printer webcams, a hub takes cameras three ways:
 | **This browser** | The browser's own camera | Publishes to the hub over a WebSocket and reconnects after a hub restart |
 
 > [!IMPORTANT]
-> Browsers only grant camera access on secure pages. **This browser** publishing and local
-> mode both need the hub served over HTTPS or opened on `localhost`.
+> Browsers only grant camera access on secure pages, so **This browser** publishing needs
+> the hub served over HTTPS or opened on `localhost`.
 > [Deployment](deployment.md) covers HTTPS with Tailscale or a tunnel.
 
 ### Cameras plugged into the hub
@@ -163,6 +218,12 @@ Set `PRINTGUARD_CAMERAS=off` to leave them unregistered and add them by hand fro
 machine** instead. The desktop app works that way already, since a computer's own webcam is
 rarely the one you want watched.
 
+## Framing the print
+
+The model only watches a square of each camera's view. Until you crop a camera that square is
+the middle of the frame, so on a wide camera the sides of the bed go unwatched. Open the camera
+in the registry and crop it to a square the print fills.
+
 ## Notifications
 
 Alert channels live in **Settings**. Enable a channel, fill in the form and send a test
@@ -181,28 +242,19 @@ nothing is watching is worth hearing about, and an outage nobody has answered is
 again every thirty minutes. The dashboard shows every fault as it happens whatever it is set
 to.
 
-| Channel | Modes | Notes |
-|---|---|---|
-| [ntfy](https://ntfy.sh) | Hub and local | Self-hostable, no account needed |
-| [Pushover](https://pushover.net) | Hub and local | One-off app purchase, and you create the application token. Priority covers every notice and defaults to High, which bypasses the quiet hours set on the device |
-| [Discord](https://discord.com) | Hub and local | Webhook URL |
-| [Telegram](https://telegram.org) | Hub only | Telegram's API sends no CORS headers |
-| Desktop notification | Desktop app only | Native OS notification on the computer running the app |
+| Channel | Notes |
+|---|---|
+| [ntfy](https://ntfy.sh) | Self-hostable, no account needed |
+| [Pushover](https://pushover.net) | One-off app purchase, and you create the application token. Priority covers every notice and defaults to High, which bypasses the quiet hours set on the device |
+| [Discord](https://discord.com) | Webhook URL |
+| [Telegram](https://telegram.org) | A bot token from @BotFather and your chat ID |
+| Desktop notification | Desktop app only. A native OS notification on the computer running the app |
 
 ## Networking caveats
 
-Most connection problems come down to who makes the request. In hub mode the server does,
-from inside the container. In local mode the browser does, under browser security rules.
-
-```mermaid
-flowchart LR
-    subgraph hub["Hub mode"]
-        server["PrintGuard server"] -->|"server-side HTTP, no browser rules"| svc1["Print service"]
-    end
-    subgraph local["Local mode"]
-        browser["Browser tab"] -->|"CORS and mixed content apply"| svc2["Print service"]
-    end
-```
+The hub makes every request to a print service itself, so the address you register has to be
+one the hub can reach, not one your browser can. The browser never calls the printer, so an
+`http://` printer works from a hub you open over HTTPS.
 
 ### Running in Docker
 
@@ -212,24 +264,9 @@ fails with *all connection attempts failed*. Use `http://host.docker.internal:50
 shipped [`docker-compose.yaml`](../docker-compose.yaml) maps that name for you. On a Linux
 host the print service must also listen on `0.0.0.0` rather than loopback only.
 
-### Local mode URLs
+### The desktop app
 
-Give the browser a URL it can reach itself: `http://localhost:5000`
-when the service runs on the same machine, otherwise the host's LAN IP. Never
-`host.docker.internal`, which only resolves inside a container.
-
-### CORS in local mode
-
-The browser enforces CORS, so enable it in OctoPrint under
-Settings, API, or add `cors_domains` to `moonraker.conf`. Without it the connection test
-fails with *access control checks*.
-
-### Mixed content
-
-If PrintGuard itself is served over HTTPS, for example through a
-Cloudflare Tunnel, the browser blocks calls to an `http://` printer. Safari reports *not
-allowed to request resource* even for `http://localhost`. To control an HTTP printer from
-an HTTPS deployment, use hub mode, where the server makes the request, or serve the printer
-over HTTPS.
+The app runs on your computer rather than in a container, so `http://localhost:5000` reaches
+a print service on the same machine, and anything else is its LAN address.
 
 [Troubleshooting](troubleshooting.md) has more symptoms and fixes.

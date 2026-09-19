@@ -7,7 +7,73 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.4.1] - 2026-09-01
+## [2.5.0] - 2026-09-19
+
+### Added
+
+- A print library, behind **Prints** in the header. Drop sliced files in and each
+  opens in a panel that draws its toolpath on your device before it's uploaded, where you can
+  name it and correct its nozzle and bed temperatures. Files stay on the hub with the preview,
+  print time and filament the slicer wrote into them. Cura and a few others write no preview, so
+  your browser draws one into the file as it's uploaded. Open a file to orbit that toolpath in
+  3D, layer by layer. Tag a file with the printers it was sliced for
+  and it can only ever start on those, and a printer has to be idle before a file is sent to it.
+  OctoPrint, Klipper and Elegoo take gcode, PrusaLink also takes bgcode and Bambu Lab takes a
+  sliced 3mf. The REST API and MCP server can list, tag and start files too.
+  [docs/printers.md](docs/printers.md#sending-prints) has the details.
+- Nozzle and bed temperatures for a linked printer, on its monitor tile and in the monitor's
+  panel, with a progress bar and the time left while it prints. The panel takes a target for
+  either heater and has preheat presets you can edit in place, starting with PLA, PETG and ABS,
+  plus an Off that cools everything. PrusaLink reports temperatures but has no way to set them,
+  so a Prusa printer's heaters are read-only. The REST API and MCP server can set targets too,
+  and Home Assistant gets a temperature sensor per heater.
+  [docs/printers.md](docs/printers.md#temperatures-and-preheat) has the details.
+- The container reports its own health, so `docker ps` shows when the hub is ready and
+  `docker compose up --wait` waits for it.
+
+### Changed
+
+- Camera crops are square, since the model only ever watches a square of the view and ignored
+  the sides of anything wider. The crop editor shows the watched square before you set a crop.
+- The dashboard fits phones and tablets, folding ones included. Phones get a bottom bar with
+  icons and a more menu in the header, while tablets and landscape phones get a side rail.
+  Buttons, fields and switches are sized for a thumb, and tabs that run off the edge of a
+  dialog fade there so you know to scroll. A long dialog no longer sits under Safari's toolbar
+  on an iPhone.
+- The macOS app is signed and notarised, so it opens without a trip to Privacy & Security and
+  keeps its camera permission when you update.
+
+### Removed
+
+- Local mode, which ran the engine in a browser tab with nothing installed. Few people used it
+  and it made everything else harder to build, so PrintGuard runs only as a hub, in Docker or as
+  the macOS and Windows app. [The website](https://oliverbravery.github.io/PrintGuard/) has the
+  downloads where the live demo was. The state the REST API, MCP server and plugins read has no
+  `mode` field any more.
+- The sensitivity setting, which only ever moved the same line as the alert threshold. The
+  REST API and MCP server's classify calls no longer take one.
+
+### Fixed
+
+- A printer switched off or unreachable after a print leaves its monitor in standby, where
+  inference used to start again and run until the printer came back. A printer that drops off
+  mid-print is still watched and still warns you.
+- The Progress reports plugin only sends a report while its monitor is watching, so nothing
+  arrives while the printer is idle or paused.
+- The Windows desktop app starts on Windows 11 24H2 and newer without the Windows App Runtime
+  installed, where it used to stop at a prompt to install it. Detection runs on the CPU until
+  you install it.
+- The Windows desktop app starts on a PC without a GPU driver, such as a virtual machine, where
+  it used to close straight away.
+- The Windows desktop app's server starts, where 2.4.1 showed "PrintGuard could not start" after
+  looking for cameras plugged into the PC.
+
+- A monitor left on its default settings could never raise an alert, since its score topped
+  out at 0.68 under the 0.75 threshold. The score is now the model's own confidence that the
+  print is failing, and existing thresholds carry over. If you raised sensitivity to make
+  alerts fire, check the threshold after updating.
+
+## [2.4.1] - 2026-09-09
 
 ### Added
 
@@ -115,7 +181,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   camera's full frame rate with nothing explaining why. A printer that starts reporting again
   is announced as recovered even if it comes back idle.
 
-## [2.3.12] - 2026-08-12
+## [2.3.12] - 2026-08-13
 
 ### Fixed
 
@@ -162,7 +228,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   leaves the bundled streaming server running behind it, holding port 8554 against the next
   hub you start.
 
-## [2.3.8] - 2026-07-24
+## [2.3.8] - 2026-08-02
 
 ### Added
 
@@ -218,7 +284,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   on that machine, failed with "address already in use" from an app that was no longer
   running. The streaming server now always stops with the hub, however the hub ends.
 
-## [2.3.7] - 2026-07-22
+## [2.3.7] - 2026-07-24
 
 ### Added
 
@@ -350,7 +416,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   sensitive data. The token is still shown once and only its hash is stored — nothing about your
   existing tokens changes.
 
-## [2.3.0] - 2026-07-03
+## [2.3.0] - 2026-07-10
 
 ### Added
 
@@ -510,7 +576,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   starts the page. Text, status colours and the light theme were tuned to meet **WCAG 2.2 AA**
   contrast, and all motion respects your system's reduced-motion setting.
 
-## [2.1.2] - 2026-06-20
+## [2.1.2] - 2026-06-22
 
 ### Fixed
 
@@ -547,7 +613,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   the live view and alert images (rotation, crop, brightness/contrast/sharpness) instead of
   returning the raw frame.
 
-## [2.1.0] - 2026-06-16
+## [2.1.0] - 2026-06-19
 
 ### Added
 
@@ -618,7 +684,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - `LICENSE.md` with the full GNU General Public License v2 text, matching the
   `GPL-2.0-only` declaration in `pyproject.toml`.
 
-## [2.0.0] - 2026-06-12
+## [2.0.0] - 2026-06-15
 
 A ground-up rewrite. One Python engine now runs everywhere — in your browser on Pyodide
 or on a server on CPython — with every runtime difference behind a single `Platform`

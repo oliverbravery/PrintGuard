@@ -152,7 +152,7 @@ plugin.render((ctx) => {
 `;
 
 const MONITOR = {
-  id: "m1", name: "Bench", camera_id: "c1", printer_id: "", enabled: true, threshold: 0.6, sensitivity: 1,
+  id: "m1", name: "Bench", camera_id: "c1", printer_id: "", enabled: true, threshold: 0.6,
   consecutive: 3, notify: true, on_defect: "pause", cooldown_s: 30, alert: null, watching: true, result: null,
 };
 
@@ -168,7 +168,6 @@ async function dashboardWithPlugin(
   granted = PLUGIN.granted,
   surfaces = PLUGIN.manifest.surfaces,
   assets: Record<string, string> = {},
-  worker?: string,
 ) {
   await page.addInitScript(() => {
     class Offline extends EventTarget {
@@ -181,16 +180,15 @@ async function dashboardWithPlugin(
   await page.goto("/");
   await page.waitForFunction(() => Boolean((window as any).__pg.getState().link));
   await page.evaluate(
-    ({ plugin, permissions, code, granted, surfaces, monitor, assets, worker }) => {
+    ({ plugin, permissions, code, granted, surfaces, monitor, assets }) => {
       const win = window as any;
       const sent: any[] = [];
       win.__sent = sent;
       win.__pg.setState({
-        mode: "hub",
         phase: "ready",
         link: { send: (cmd: any) => sent.push(cmd), close() {} },
         engine: {
-          mode: "hub", version: "test", update: null,
+          version: "test", update: null,
           cameras: [
             {
               id: "c1", name: "Workshop", source: { kind: "rtsp", url: "rtsp://camera" }, printer_id: null,
@@ -198,22 +196,20 @@ async function dashboardWithPlugin(
               target_fps: 30, achieved_fps: 29.8, inferring: false, in_use: true, online: true, standby: false, last_result: null,
             },
           ],
-          printers: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
+          printers: [], prints: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
           settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
           stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
-          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result"] }, granted, files: worker ? ["plugin.js", "worker.js"] : ["plugin.js"] }],
+          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result"] }, granted, files: ["plugin.js"] }],
           plugin_permissions: permissions,
           plugin_events: { state: [], result: ["monitor_id", "prediction"] },
           plugin_assets: { png: "image/png", txt: "text/plain", mp3: "audio/mpeg" },
-          plugin_host: !worker,
         },
       });
       win.__pgEvent({ event: "state", ...win.__pg.getState().engine });
       const request = sent.find((c) => c.cmd === "plugin.code");
-      const sources = worker ? { "plugin.js": code, "worker.js": worker } : { "plugin.js": code };
-      win.__pgEvent({ event: "plugin_code", id: "pip", sources, assets, req_id: request?.req_id });
+      win.__pgEvent({ event: "plugin_code", id: "pip", sources: { "plugin.js": code }, assets, req_id: request?.req_id });
     },
-    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets, worker },
+    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets },
   );
   await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().pluginTrees).length)).toBeGreaterThan(0);
 }
@@ -427,7 +423,7 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
 
 
 test("an event never wipes the per-monitor views the plugin drew", async ({ page }) => {
-  await dashboardWithPlugin(page, MONITOR_PIP, PLUGIN.granted, ["monitor"], {}, "plugin.on('result', () => {});");
+  await dashboardWithPlugin(page, `${MONITOR_PIP}\nplugin.on('result', () => {});`, PLUGIN.granted, ["monitor"]);
   const float = page.getByRole("button", { name: "Float Bench" });
 
   await expect(float).toBeVisible();

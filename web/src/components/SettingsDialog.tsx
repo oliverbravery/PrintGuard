@@ -1,24 +1,18 @@
 import { useEffect, useState } from "react";
 import { type SettingsTabId, useStore } from "../store";
-import { applyTheme, beginPreview, endPreview, GLASS, GLASS_DEFAULT, PALETTES } from "../theme";
+import { applyTheme, beginPreview, endPreview, GLASS_DEFAULT, PALETTES } from "../theme";
 import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
 import { Dialog } from "./Dialog";
 import { PluginsTab } from "./PluginsTab";
 import { SettingsFooter } from "./SettingsFooter";
 import { SaveStatus } from "./SaveStatus";
 import { SchemaForm } from "./SchemaForm";
+import { SchemePicker } from "./SchemePicker";
 import { TestRow } from "./TestRow";
-import { GlassSliders } from "./GlassTuner";
 import { Slider } from "./Slider";
+import { TabPanel, Tabs } from "./Tabs";
 import { ThemeEditor } from "./ThemeEditor";
 import { Toggle } from "./Toggle";
-
-const SCHEMES: { id: string; name: string; glyph: string }[] = [
-  { id: "system", name: "System", glyph: "◐" },
-  { id: "light", name: "Light", glyph: "☀" },
-  { id: "dark", name: "Dark", glyph: "☾" },
-  { id: "glass", name: "Glass", glyph: "◈" },
-];
 
 function Swatch({ colors }: { colors: CustomTheme["colors"] }) {
   return (
@@ -35,7 +29,6 @@ export function SettingsDialog() {
     engine,
     send,
     openDialog,
-    leaveMode,
     isPending,
     notifyTest,
     testingNotifier,
@@ -95,71 +88,29 @@ export function SettingsDialog() {
   }, [editing]);
 
   const desktopApp = "pywebview" in window;
-  const channels = (engine?.notifiers ?? []).filter(
-    (n) => (engine?.mode === "hub" || n.browser_ok) && (!n.desktop_only || desktopApp),
-  );
+  const channels = (engine?.notifiers ?? []).filter((n) => !n.desktop_only || desktopApp);
 
   const tabs: { id: SettingsTabId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
     { id: "alerts", label: "Alerts" },
     { id: "plugins", label: "Plugins" },
-    ...(engine?.mode === "hub"
-      ? ([
-          { id: "mqtt", label: "Home Assistant" },
-          { id: "updates", label: "Updates" },
-          { id: "api", label: "API" },
-          { id: "advanced", label: "Advanced" },
-        ] as const)
-      : []),
+    { id: "mqtt", label: "Home Assistant" },
+    { id: "updates", label: "Updates" },
+    { id: "api", label: "API" },
+    { id: "advanced", label: "Advanced" },
   ];
-
-  const onTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const delta = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-    const i = tabs.findIndex((t) => t.id === tab);
-    let next = i;
-    if (delta) next = (i + delta + tabs.length) % tabs.length;
-    else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = tabs.length - 1;
-    else return;
-    event.preventDefault();
-    setTab(tabs[next].id);
-    document.getElementById(`settings-tab-${tabs[next].id}`)?.focus();
-  };
 
   return (
     <SettingsFooter>
       {(footer) => (
-    <Dialog title="Settings" onClose={close}>
+    <Dialog
+      title="Settings"
+      onClose={close}
+      toolbar={<Tabs prefix="settings" label="Settings sections" tabs={tabs} value={tab} onChange={setTab} />}
+    >
       <div className="space-y-5">
-        {tabs.length > 1 && (
-          <div
-            role="tablist"
-            aria-label="Settings sections"
-            onKeyDown={onTabKeyDown}
-            className="flex gap-1 border-b border-line-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                id={`settings-tab-${t.id}`}
-                type="button"
-                role="tab"
-                aria-selected={tab === t.id}
-                aria-controls={`settings-panel-${t.id}`}
-                tabIndex={tab === t.id ? 0 : -1}
-                onClick={() => setTab(t.id)}
-                className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-xs transition-colors cursor-pointer ${
-                  tab === t.id ? "border-accent text-text-0" : "border-transparent text-text-2 hover:text-text-1"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        )}
-
         {tab === "appearance" && (
-          <div role="tabpanel" id="settings-panel-appearance" aria-labelledby="settings-tab-appearance" tabIndex={0}>
+          <TabPanel prefix="settings" id="appearance">
             {editing ? (
             <ThemeEditor
               value={editing}
@@ -171,22 +122,7 @@ export function SettingsDialog() {
           ) : (
             <div className="space-y-4">
               <span className="label block">Theme</span>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {SCHEMES.map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => selectTheme(opt.id)}
-                    className={`flex flex-col items-center gap-1 rounded border px-2 py-3 transition-colors cursor-pointer ${
-                      theme === opt.id ? "border-accent bg-accent/5 text-text-0" : "border-line-0 text-text-1 hover:border-line-1"
-                    }`}
-                  >
-                    <span className="text-base leading-none">{opt.glyph}</span>
-                    <span className="text-xs">{opt.name}</span>
-                  </button>
-                ))}
-              </div>
-
-              {theme === GLASS && <GlassSliders />}
+              <SchemePicker />
 
               <div className="flex items-center justify-between">
                 <span className="label block">Custom themes</span>
@@ -221,11 +157,11 @@ export function SettingsDialog() {
               </div>
             </div>
             )}
-          </div>
+          </TabPanel>
         )}
 
         {tab === "alerts" && (
-          <div role="tabpanel" id="settings-panel-alerts" aria-labelledby="settings-tab-alerts" tabIndex={0} className="space-y-4">
+          <TabPanel prefix="settings" id="alerts" className="space-y-4">
             <span className="label block">When to alert</span>
             <Slider
               label="Fault grace period (seconds)"
@@ -289,17 +225,17 @@ export function SettingsDialog() {
             <span className="text-[0.7rem] text-text-2 block">
               Channels hold credentials, so they apply on Save rather than automatically.
             </span>
-          </div>
+          </TabPanel>
         )}
 
         {tab === "plugins" && (
-          <div role="tabpanel" id="settings-panel-plugins" aria-labelledby="settings-tab-plugins" tabIndex={0}>
+          <TabPanel prefix="settings" id="plugins">
             <PluginsTab />
-          </div>
+          </TabPanel>
         )}
 
         {tab === "mqtt" && (
-          <div role="tabpanel" id="settings-panel-mqtt" aria-labelledby="settings-tab-mqtt" tabIndex={0} className="space-y-3">
+          <TabPanel prefix="settings" id="mqtt" className="space-y-3">
             <span className="label block">Home Assistant (MQTT)</span>
             <Toggle label="Publish to an MQTT broker" on={!!mqtt.enabled} onChange={(on) => setMqttField("enabled", on)} />
             {mqtt.enabled && (
@@ -366,11 +302,11 @@ export function SettingsDialog() {
             <span className="text-[0.7rem] text-text-2 block">
               Broker settings open a live connection, so they apply on Save rather than automatically.
             </span>
-          </div>
+          </TabPanel>
         )}
 
         {tab === "updates" && (
-          <div role="tabpanel" id="settings-panel-updates" aria-labelledby="settings-tab-updates" tabIndex={0} className="space-y-3">
+          <TabPanel prefix="settings" id="updates" className="space-y-3">
             <span className="label block">Software updates</span>
             <Toggle
               label="Automatically check for updates"
@@ -400,11 +336,11 @@ export function SettingsDialog() {
             <div className="flex justify-end">
               <SaveStatus />
             </div>
-          </div>
+          </TabPanel>
         )}
 
         {tab === "api" && (
-          <div role="tabpanel" id="settings-panel-api" aria-labelledby="settings-tab-api" tabIndex={0} className="space-y-3">
+          <TabPanel prefix="settings" id="api" className="space-y-3">
             <div>
               <span className="label block">API &amp; MCP access</span>
               <span className="text-[0.7rem] text-text-2 block mt-1">
@@ -481,17 +417,11 @@ export function SettingsDialog() {
                 </button>
               </div>
             </div>
-          </div>
+          </TabPanel>
         )}
 
         {tab === "advanced" && (
-          <div
-            role="tabpanel"
-            id="settings-panel-advanced"
-            aria-labelledby="settings-tab-advanced"
-            tabIndex={0}
-            className="space-y-3"
-          >
+          <TabPanel prefix="settings" id="advanced" className="space-y-3">
             <label className="label block" htmlFor="inference-runtime">
               Model runtime
             </label>
@@ -516,20 +446,14 @@ export function SettingsDialog() {
             <div className="flex justify-end">
               <SaveStatus />
             </div>
-          </div>
+          </TabPanel>
         )}
 
-        <div className="hairline flex items-center justify-between gap-3 pt-4">
-          <span className="mono min-w-0 flex-1 truncate text-[0.65rem] text-text-2">{footer}</span>
-          <span className="text-xs text-text-1">
-            Mode: <span className="mono text-accent">{engine?.mode}</span>
-          </span>
-          {engine?.mode === "local" && (
-            <button className="btn" onClick={leaveMode}>
-              Back to start
-            </button>
-          )}
-        </div>
+        {footer && (
+          <div className="hairline pt-4">
+            <span className="mono block truncate text-[0.65rem] text-text-2">{footer}</span>
+          </div>
+        )}
       </div>
     </Dialog>
       )}

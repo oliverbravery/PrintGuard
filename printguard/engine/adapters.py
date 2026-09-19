@@ -1,13 +1,13 @@
 """Shared contract for pluggable service adapters.
 
-Adapters (printer integrations, alert notifiers) are shared code: they
-talk to external services only through the platform's HTTP function, so
-the same adapter runs in the browser (local mode) and on the server (hub
-mode).
+Adapters (printer integrations, alert notifiers) reach external services
+through the platform's HTTP function, so the tests can pin every request an
+adapter makes.
 """
 
 from __future__ import annotations
 
+import uuid
 from abc import ABC
 from typing import Any, Awaitable, Callable
 
@@ -22,14 +22,10 @@ class Adapter(ABC):
         label: Human-readable service name.
         docs_url: Link to the official API reference the adapter is built
             against; mandatory so reviewers can verify behaviour.
-        browser_ok: Whether the adapter can run in local (browser) mode.
-            Adapters needing a transport the browser sandbox forbids - a
-            raw socket, or HTTP to a service without CORS headers - set
-            this False and are offered in hub mode only.
         desktop_only: Whether the adapter runs only in the desktop app (the
             hub packaged as a native window), where it can reach a service the
-            headless container and the browser cannot - a local OS call. Set
-            this True and it is offered only when the UI runs inside that app.
+            headless container cannot - a local OS call. Set this True and it
+            is offered only when the UI runs inside that app.
         experimental: Whether the adapter is new and not yet battle-tested;
             the config form flags it so users know to expect rough edges.
         setup_url: Optional link to a user-facing setup guide, shown in the
@@ -46,7 +42,6 @@ class Adapter(ABC):
     id: str
     label: str
     docs_url: str
-    browser_ok: bool = True
     desktop_only: bool = False
     experimental: bool = False
     setup_url: str | None = None
@@ -59,7 +54,6 @@ class Adapter(ABC):
             "id": self.id,
             "label": self.label,
             "docs_url": self.docs_url,
-            "browser_ok": self.browser_ok,
             "desktop_only": self.desktop_only,
             "experimental": self.experimental,
             "setup_url": self.setup_url,
@@ -70,3 +64,31 @@ class Adapter(ABC):
     def secret_keys(self) -> set[str]:
         """Config property names the schema marks secret (credentials)."""
         return {key for key, prop in self.schema.get("properties", {}).items() if prop.get("secret")}
+
+
+def multipart_form(
+    fields: dict[str, str], file_field: str, filename: str, file_bytes: bytes, content_type: str = "image/jpeg"
+) -> tuple[dict[str, str], bytes]:
+    """Encodes text fields plus one file as a multipart/form-data request.
+
+    Args:
+        fields: Plain form fields.
+        file_field: Form name of the file part.
+        filename: Filename reported for the file part.
+        file_bytes: Content of the file part.
+        content_type: Media type reported for the file part.
+
+    Returns:
+        (headers, body) ready for the platform HTTP function.
+    """
+    boundary = uuid.uuid4().hex
+    parts = [
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+        for name, value in fields.items()
+    ]
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
+        f"Content-Type: {content_type}\r\n\r\n".encode() + file_bytes + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode())
+    return {"Content-Type": f"multipart/form-data; boundary={boundary}"}, b"".join(parts)

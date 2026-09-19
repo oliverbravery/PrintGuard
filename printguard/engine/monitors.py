@@ -17,7 +17,6 @@ MONITOR_DEFAULTS: dict[str, Any] = {
     "printer_id": "",
     "enabled": True,
     "threshold": 0.75,
-    "sensitivity": 1.0,
     "consecutive": 3,
     "notify": False,
     "on_defect": "none",
@@ -26,24 +25,23 @@ MONITOR_DEFAULTS: dict[str, Any] = {
 
 STANDBY_STATUSES = ("idle", "paused", "error")
 
-_CLAMPS = {"threshold": (0.05, 1.0), "sensitivity": (0.2, 5.0), "consecutive": (1, 30), "cooldown_s": (0, 600)}
+_CLAMPS = {"threshold": (0.05, 1.0), "consecutive": (1, 30), "cooldown_s": (0, 600)}
 
 
 def monitor_watching(monitor: dict[str, Any], printers: "PrinterRegistry") -> bool:
     """Whether monitoring should run for a monitor right now.
 
-    A monitor is watched unless its linked printer positively reports a
-    non-printing state. With no printer linked, no state polled yet, or an
-    unreachable printer the monitor stays watched - failing towards watching
-    is the safe direction.
+    A monitor is watched unless its linked printer last positively reported a
+    non-printing state. An unreachable printer or a state the adapter cannot
+    read keeps that last answer, so contact lost mid-print keeps watching
+    while a printer switched off after a print stays in standby. With no
+    printer linked or nothing read yet the monitor is watched - failing
+    towards watching is the safe direction.
     """
     if not monitor.get("enabled"):
         return False
     printer = printers.get(monitor.get("printer_id") or "")
-    if printer is None:
-        return True
-    state = printer.device_state
-    return not state or state["status"] not in STANDBY_STATUSES
+    return printer is None or printer.reported_status not in STANDBY_STATUSES
 
 
 def _clamp(key: str, value: float) -> float:
@@ -65,7 +63,6 @@ def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any
     record = {**(base or MONITOR_DEFAULTS), **patch, "id": monitor_id}
     record["name"] = str(record["name"]).strip() or "Monitor"
     record["threshold"] = _clamp("threshold", float(record["threshold"]))
-    record["sensitivity"] = _clamp("sensitivity", float(record["sensitivity"]))
     record["consecutive"] = int(_clamp("consecutive", int(record["consecutive"])))
     record["cooldown_s"] = int(_clamp("cooldown_s", int(record["cooldown_s"])))
     record["enabled"] = bool(record["enabled"])
@@ -76,5 +73,5 @@ def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any
 
 
 def persisted_monitor(record: dict[str, Any]) -> dict[str, Any]:
-    """Strips runtime-only fields before persistence."""
-    return {k: v for k, v in record.items() if k not in ("alert", "watching")}
+    """Keeps only a monitor's configuration, dropping runtime and retired fields."""
+    return {k: record[k] for k in ("id", *MONITOR_DEFAULTS)}

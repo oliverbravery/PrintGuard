@@ -22,6 +22,9 @@ def _monitor(**overrides: Any) -> dict[str, Any]:
     return {**base, **overrides}
 
 
+HEATED = {"status": "printing", "progress": 42.5, "job": "boat.gcode", "nozzle": {"actual": 209.94, "target": 210.0}, "bed": None}
+
+
 def _printer(**overrides: Any) -> dict[str, Any]:
     base = {"id": "prn1", "name": "Ender", "provider": "octoprint", "device_state": {"status": "printing", "progress": 42.5, "job": "boat.gcode"}}
     return {**base, **overrides}
@@ -68,6 +71,23 @@ def test_discovery_config_omits_printer_entities_without_a_printer() -> None:
     assert with_printer["components"]["pause"]["command_topic"] == action_topic
     assert with_printer["components"]["pause"]["payload_press"] == "pause"
     assert with_printer["components"]["cancel"]["payload_press"] == "cancel"
+
+
+def test_heaters_appear_once_the_printer_reports_them() -> None:
+    without = mqtt.discovery_config(_monitor(printer_id="prn1"), _printer(), "2.4.2", "printguard")
+    assert {"nozzle", "bed"}.isdisjoint(without["components"])
+    heated = mqtt.discovery_config(_monitor(printer_id="prn1"), _printer(device_state=HEATED), "2.4.2", "printguard")
+    assert "bed" not in heated["components"], "a heater the printer does not report gets no sensor"
+    nozzle = heated["components"]["nozzle"]
+    assert nozzle["device_class"] == "temperature" and nozzle["unit_of_measurement"] == "°C"
+    assert nozzle["value_template"] == "{{ value_json.nozzle_temp }}"
+    payload = mqtt.monitor_state(_monitor(printer_id="prn1", result={"score": 0.1, "ts": 1.0}), _printer(device_state=HEATED))
+    assert payload["nozzle_temp"] == 209.9 and "bed_temp" not in payload
+    warmer = mqtt.monitor_state(
+        _monitor(printer_id="prn1", result={"score": 0.1, "ts": 1.0}),
+        _printer(device_state={**HEATED, "nozzle": {"actual": 213.0, "target": 210.0}}),
+    )
+    assert not mqtt.state_changed(payload, warmer), "a few degrees of drift is within the deadband"
 
 
 def test_monitor_state_phase_and_score() -> None:
