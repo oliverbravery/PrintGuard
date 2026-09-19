@@ -266,15 +266,10 @@ provider are in **[CONTRIBUTING.md](CONTRIBUTING.md)**. Issues and pull requests
 
 ## Sponsor
 
-PrintGuard is free, GPL-2.0, and has no paid tier. It has one cost I cannot design around.
-Apple charges $99 a year for the Developer Program, and without it the macOS app cannot be
-signed or notarised. That is why macOS warns you that PrintGuard is from an unidentified
-developer, and why the first launch takes a trip through System Settings.
-
-[**Sponsoring the project**](https://github.com/sponsors/oliverbravery) fixes that. Sustained
-sponsorship of $10 a month covers the licence across the year and removes that warning for
-everyone. Anything past it goes on the hardware the integrations get tested against. One-off
-and monthly both work, and nothing in PrintGuard is ever locked behind it.
+PrintGuard is free, GPL-2.0 and has no paid tier.
+[**Sponsoring the project**](https://github.com/sponsors/oliverbravery) helps me keep working on
+it and goes on the hardware the integrations get tested against. One-off and monthly both work,
+and nothing in PrintGuard is ever locked behind it.
 
 ## Licence
 

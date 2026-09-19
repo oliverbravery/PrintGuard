@@ -255,8 +255,8 @@ def _authorize_macos_camera() -> None:
     is undetermined starts a session that delivers no frames, and once refused
     the capture input fails instantly with EAGAIN. So consent is settled through
     AVFoundation first, blocking until the user answers. A grant recorded for a
-    previous build still reads as authorised while capture is refused - each
-    unsigned build re-signs ad hoc with a new identity - so an authorised state
+    build signed by another identity - an ad hoc local build, or a release before
+    2.5.0 - still reads as authorised while capture is refused, so an authorised state
     is probed with a real capture input, and a refusal resets this app's own
     consent entry to let the prompt be asked afresh. Other platforms gate
     camera capture without a per-process consent step.
