@@ -240,9 +240,7 @@ export function Home() {
               )}
             </div>
             <p className="mt-4 text-xs leading-relaxed text-text-2">
-              Unsigned for now, so the first launch needs a one-time approval. On macOS, open{" "}
-              <span className="text-text-1">Privacy &amp; Security in System Settings</span> and click{" "}
-              <span className="text-text-1">Open Anyway</span>. On Windows, choose{" "}
+              The Windows build is unsigned for now, so its first launch needs a one-time approval. Choose{" "}
               <span className="text-text-1">More info</span>, then <span className="text-text-1">Run anyway</span>.
             </p>
           </div>

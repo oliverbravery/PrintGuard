@@ -89,10 +89,9 @@ phone at `http://<computer>:8000`.
 Turn on **Start at login** from the tray menu and forget about it.
 
 > [!NOTE]
-> The builds are unsigned for now, so the first launch needs one approval. On macOS,
-> double-click the app, then open Privacy & Security in System Settings and click
-> **Open Anyway** under Security. On Windows, choose **More info** and then **Run anyway**. On
-> Linux, run the [Docker hub](#docker-for-an-always-on-server-or-nas) instead.
+> The macOS app is signed and notarised. The Windows build is unsigned for now, so on its
+> first launch choose **More info** and then **Run anyway**. On Linux, run the
+> [Docker hub](#docker-for-an-always-on-server-or-nas) instead.
 
 ### Docker for an always-on server or NAS
 

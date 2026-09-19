@@ -40,6 +40,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   Buttons, fields and switches are sized for a thumb, and tabs that run off the edge of a
   dialog fade there so you know to scroll. A long dialog no longer sits under Safari's toolbar
   on an iPhone.
+- The macOS app is signed and notarised, so it opens without a trip to Privacy & Security and
+  keeps its camera permission when you update.
 
 ### Removed
 
