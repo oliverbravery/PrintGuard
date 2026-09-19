@@ -2,7 +2,8 @@
 """PyInstaller spec for the PrintGuard desktop app.
 
 Set ``MEDIAMTX_BUNDLE`` to the path of a MediaMTX binary to ship video streaming,
-and ``PRINTGUARD_ICON`` to a platform icon (.icns / .ico). The web UI must be built
+``PRINTGUARD_ICON`` to a platform icon (.icns / .ico), and ``APPLE_SIGNING_IDENTITY`` to
+sign the macOS app with the hardened runtime. The web UI must be built
 into ``web/dist`` and the model present in ``models`` before building.
 """
 
@@ -67,7 +68,16 @@ a = Analysis(
     hiddenimports=hiddenimports,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, exclude_binaries=True, name="PrintGuard", console=False, icon=ICON)
+exe = EXE(
+    pyz,
+    a.scripts,
+    exclude_binaries=True,
+    name="PrintGuard",
+    console=False,
+    icon=ICON,
+    codesign_identity=os.environ.get("APPLE_SIGNING_IDENTITY"),
+    entitlements_file=str(Path(SPECPATH) / "entitlements.plist"),
+)
 coll = COLLECT(exe, a.binaries, a.datas, name="PrintGuard")
 
 if sys.platform == "darwin":
