@@ -35,8 +35,6 @@ export function GuideEntry({ section, lead, fill }: { section: GuideSection; lea
 
 export function GuideDialog() {
   const openDialog = useStore((s) => s.openDialog);
-  const mode = useStore((s) => s.mode);
-  const sections = GUIDE.filter((s) => !s.hubOnly || mode === "hub");
   return (
     <Dialog title="Guide" size="wide" onClose={() => openDialog(null)}>
       <div className="space-y-6">
@@ -44,7 +42,7 @@ export function GuideDialog() {
           What everything on the dashboard means, and what you can do with it. Use a section's action
           to jump straight in.
         </p>
-        {sections.map((section) => (
+        {GUIDE.map((section) => (
           <GuideEntry key={section.id} section={section} />
         ))}
         <footer className="hairline flex flex-wrap gap-x-6 gap-y-2 pt-4">

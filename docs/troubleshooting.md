@@ -22,8 +22,11 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 |---|---|---|
 | `bind: address already in use` for `8000` or `8554` | Another PrintGuard already holds the port, often a desktop app or a container you forgot | Find the holder with `lsof -nP -iTCP:8554 -sTCP:LISTEN` on macOS or Linux, or `netstat -ano \| findstr 8554` on Windows, then stop it. Versions before 2.3.8 could leave the streaming server behind after a crash |
 | Dashboard loads but the header shows "Reconnecting" | The engine WebSocket cannot connect, usually a proxy that does not forward WebSockets, or a rewritten `Origin` | Check the proxy forwards upgrade headers, then see [origin checking](deployment.md#origin-checking) |
-| First launch of the desktop app is blocked | The builds are unsigned | On macOS, open Privacy & Security in System Settings and click **Open Anyway**. On Windows, choose **More info** and then **Run anyway** |
+| First launch of the Windows desktop app is blocked | The Windows build is unsigned | Choose **More info** and then **Run anyway** |
 | The desktop app opens an empty white window | Its server did not start. 2.3.7 and 2.3.8 on macOS always hit this, because Core ML could not load the model from a data directory whose path contains a space | Update to 2.3.9 or later, where the window reports what failed and shows the end of the log ([logs](#getting-logs-and-diagnostics)) |
+| The Windows desktop app closes straight away without a window | Without a GPU driver, as in most virtual machines, Windows offers its Basic Render Driver as a GPU and versions before 2.5.0 crashed running the model on it | Update to 2.5.0 or later, or install the GPU driver |
+| The Windows desktop app shows "PrintGuard could not start" and the log ends in `Immediate exit requested: 'video=dummy'` | 2.4.1 treated the end of its camera listing as a failure | Update to 2.5.0 or later |
+| The website has no live demo, or a `#local` bookmark opens the landing page | Local mode, which ran PrintGuard in a browser tab, was removed in 2.5.0 | Install the desktop app or the Docker image from the [quick start](../README.md#quick-start) |
 | Container restarts repeatedly | Usually an unwritable `/data` volume | Check the volume mount and its permissions, then read `docker logs printguard` |
 
 ## Cameras and video
@@ -45,24 +48,23 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | Symptom | Cause | Fix |
 |---|---|---|
 | Test fails with *all connection attempts failed* | The hub is in a container, so `localhost` is the container | Use `http://host.docker.internal:5000`, and make the service listen on `0.0.0.0` on Linux hosts. [Details](printers.md#networking-caveats) |
-| Test fails with *access control checks* | Local mode only, where the print service sends no CORS headers | Enable CORS in OctoPrint or add `cors_domains` to `moonraker.conf`, or use hub mode |
-| Test fails with *not allowed to request resource* over HTTPS | The browser blocks an `http://` printer from an HTTPS page as mixed content | Use hub mode, where the server makes the request, or serve the printer over HTTPS |
-| Bambu, Elegoo or Prusa is missing from the list | Those services need a raw socket, an access code exchange or HTTP Digest, none of which a browser can do | Use hub mode. [Supported print services](printers.md#supported-print-services) |
 | Printer shows `offline` but is printing | The hub cannot reach the service | Monitoring keeps running by design. Fix reachability, then the state clears itself |
 | Pause or cancel did nothing | The service rejected the action | The failure is in the alert, the dashboard error feed and the notification. Check the service's own logs |
+| **Print** is greyed out in the library | The printer is not idle, or the file is tagged for other printers | Wait for the job to finish or cancel it, and tag this printer from the file's row. [Sending prints](printers.md#sending-prints) |
+| A Bambu printer refuses a file | It is not a sliced 3mf, or Developer Mode is off | Export the plate from Bambu Studio or Orca with the gcode included, and enable Developer Mode under Network in Settings |
 
 ## Detection and alerts
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Too many false alerts | Sensitivity or threshold too aggressive for your camera and lighting | Raise the threshold or lower sensitivity on that monitor, and raise the consecutive-frame count so brief blips are ridden out |
+| Too many false alerts | The threshold is too low for your camera and lighting | Raise the threshold on that monitor, and raise the consecutive-frame count so brief blips are ridden out |
 | Failures caught too late | The opposite | Lower the threshold or the frame count. Watch the risk history on the monitor's detail page to pick a value |
+| Real failures barely move the score | The print is small in the frame, or off to one side of the square the model watches | Crop the camera to a square the print fills, see [framing the print](printers.md#framing-the-print) |
 | No notifications arrive | The channel is off for that monitor, or the channel itself is failing | Send a test alert from **Settings**. Delivery failures raise an `error` event rather than passing silently |
 | A stream of camera offline and back notifications | The feed keeps dropping out. Before 2.4.0 every reconnection announced itself, and the monitor's cooldown only covers defect alerts | Update to 2.4.0, where one unstable episode is one warning. The drop-outs themselves are worth chasing, so check the camera's own connection and, for RTSP or WHEP, that MediaMTX holds the pull |
 | A wireless camera still notifies when it drops out for a few seconds | The fault grace period is shorter than the camera takes to reconnect | Raise **Fault grace period** in the Alerts tab in Settings. It goes up to fifteen minutes, and the dashboard still shows the drop-out as it happens |
 | A warning that the camera dropped out for a share of the last ten minutes | It reconnects quickly enough to clear the grace period every time, so the print is only being watched part of the time | Chase the connection rather than the notification. This one fires once for the whole unstable episode |
 | Pushover alerts arrive during quiet hours | Priority defaults to High, which bypasses them, and it covers every notice including warnings and recoveries | Set it to Normal in the Alerts tab in Settings. [Notifications](printers.md#notifications) |
-| Telegram is not offered | Telegram's API sends no CORS headers | Hub mode only. [Notifications](printers.md#notifications) |
 | Home Assistant shows nothing | The broker settings are wrong, or discovery is disabled in Home Assistant | Check the Home Assistant tab in Settings and the broker's own log |
 
 ## Plugins
@@ -83,6 +85,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 |---|---|---|
 | An Intel GPU is not used | The standard image leaves the Intel GPU runtime out, the render device was not passed in, or the GPU predates Tiger Lake | Use the `latest-intel` tag and pass `--device /dev/dri`. **compute** reads `intel gpu` when the GPU is in use, and the log lists what the providers offered at start. [Intel GPU](hardware.md#intel-gpu) |
 | An NVIDIA GPU is not used | Missing Container Toolkit, the container started without the NVIDIA runtime, or the wrong tag | The log names the provider it could not load, then falls back to the CPU. [NVIDIA GPU](hardware.md#nvidia-gpu) |
+| **compute** names a CPU in the Windows desktop app | Windows ML needs the Windows App Runtime 2.x. Versions before 2.5.0 stopped at a prompt to install it instead of starting | Run the x64 installer from [Windows App SDK downloads](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads), then restart PrintGuard |
 | **compute** names a CPU on a machine with an accelerator | No provider was handed the accelerator, so the model stayed on the processor | [Execution providers by platform](hardware.md#execution-providers-by-platform) |
 | Throughput differs from what you expected | Automatic mode picks whichever runtime benchmarks faster on the host | The choice is logged at start. Pin one in the Advanced tab in Settings |
 

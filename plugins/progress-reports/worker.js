@@ -45,17 +45,27 @@ plugin.on("tick", (event, ctx) => {
       jobs[monitor.id] = job;
       sent[monitor.id] = now;
     }
+    // watching is false while PrintGuard is not running inference for the monitor,
+    // such as while its printer is idle or paused. Nothing goes out then, and the
+    // clock is held at now so the first report comes a full interval after
+    // watching starts again.
+    if (!monitor.watching) {
+      sent[monitor.id] = now;
+      continue;
+    }
     if (on[monitor.id] !== true) continue;
     if (now - (sent[monitor.id] || 0) < (every[monitor.id] || DEFAULT_MINUTES) * 60000) continue;
     sent[monitor.id] = now;
     const seen = counts[monitor.id] || { alerts: 0, frames: 0 };
-    const how = device && device.status === "printing" ? Math.round(device.progress) + "% done" : "not printing";
+    // A monitor can watch with no printer linked, or one it has lost contact with,
+    // and then there is no progress to give.
+    const progress = device && device.status === "printing" ? ", " + Math.round(device.progress) + "% done" : "";
     // notify.send is an engine command rather than something the plugin does
     // itself, so this goes out through whichever alert channels the user set up.
     // It needs alert:send, and a command the plugin was not granted is refused.
     ctx.command({
       cmd: "notify.send",
-      title: monitor.name + ", " + how,
+      title: monitor.name + progress,
       text: seen.alerts + " alerts and " + seen.frames + " frames over " + monitor.threshold + " this print",
     });
   }

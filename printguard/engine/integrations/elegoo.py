@@ -2,9 +2,9 @@
 
 Elegoo's official Link SDK supports Centauri Carbon 1 and 2, Neptune 4
 Pro/Plus/Max, OrangeStorm Giga and other Moonraker printers through one
-local-LAN surface. Centauri models use raw WebSocket or MQTT connections,
-so this adapter is hub-only; Moonraker models reuse PrintGuard's Klipper
-adapter instead of duplicating its HTTP implementation.
+local-LAN surface. Centauri models use raw WebSocket or MQTT connections
+through pycentauri; Moonraker models reuse PrintGuard's Klipper adapter
+instead of duplicating its HTTP implementation.
 
 Official SDK and model list: https://github.com/ELEGOO-3D/elegoo-link
 Centauri Python client: https://github.com/bjan/pycentauri
@@ -13,9 +13,14 @@ Centauri Python client: https://github.com/bjan/pycentauri
 from __future__ import annotations
 
 import asyncio
+import socket
+import tempfile
+from pathlib import Path
 from typing import Any
 
-from .base import DeviceAction, DeviceState, DeviceStatus, HttpFn, IntegrationAdapter
+import pycentauri
+
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 from .klipper import KlipperAdapter
 
 _CENTAURI = "centauri"
@@ -41,8 +46,9 @@ class ElegooAdapter(IntegrationAdapter):
         "Centauri Carbon 2 needs LAN Only Mode and its screen access code. "
         "Neptune 4 and OrangeStorm printers use their stock Moonraker service."
     )
-    browser_ok = False
     experimental = False
+    formats = ("gcode",)
+    heater_control = True
     schema = {
         "type": "object",
         "properties": {
@@ -85,10 +91,14 @@ class ElegooAdapter(IntegrationAdapter):
         except Exception:
             await self.close(config)
             raise
+        remaining = (status.raw.get("_cc2") or {}).get("remaining_time_sec")
         return DeviceState(
             self._status(status.print_status),
             float(status.progress or 0.0),
             status.filename or None,
+            remaining_s=int(remaining) if remaining is not None else None,
+            nozzle=Heater.reported(status.temp_nozzle, status.temp_nozzle_target),
+            bed=Heater.reported(status.temp_bed, status.temp_bed_target),
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
@@ -99,6 +109,38 @@ class ElegooAdapter(IntegrationAdapter):
         try:
             printer = await self._connect_centauri(config)
             await getattr(printer, _ACTIONS[action])()
+        except Exception:
+            await self.close(config)
+            raise
+
+    async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
+        """Sets a heater target, through Moonraker or pycentauri's set_temperatures."""
+        if self._family(config) == _MOONRAKER:
+            await self._moonraker.heat(http, self._moonraker_config(config), heater, target)
+            return
+        try:
+            printer = await self._connect_centauri(config)
+            await printer.set_temperatures(**{heater: target})
+        except Exception:
+            await self.close(config)
+            raise
+
+    async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
+        """Uploads to the printer's internal storage and starts the print.
+
+        pycentauri transfers from a path, chunked and checksummed the way the
+        printer expects, so the bytes pass through a temporary file.
+        """
+        if self._family(config) == _MOONRAKER:
+            await self._moonraker.print_file(http, self._moonraker_config(config), filename, data)
+            return
+        try:
+            printer = await self._connect_centauri(config)
+            with tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / filename
+                await asyncio.to_thread(path.write_bytes, data)
+                remote = await printer.upload_file(path, remote_name=filename)
+            await printer.start_print(remote)
         except Exception:
             await self.close(config)
             raise
@@ -138,8 +180,6 @@ class ElegooAdapter(IntegrationAdapter):
             self._connection_locks.clear()
 
     async def _connect_centauri(self, config: dict[str, Any]) -> Any:
-        from pycentauri import connect_auto
-
         key = self._connection_key(config)
         printer = self._connections.get(key)
         if printer is not None and not printer._closed:
@@ -149,7 +189,7 @@ class ElegooAdapter(IntegrationAdapter):
             if printer is not None and not printer._closed:
                 return printer
             mainboard_id = self._mainboard_ids.get(key[0]) or await self._discover_mainboard_id(key[0])
-            printer = await connect_auto(
+            printer = await pycentauri.connect_auto(
                 key[0],
                 access_code=key[1] or None,
                 enable_control=True,
@@ -159,14 +199,10 @@ class ElegooAdapter(IntegrationAdapter):
             return printer
 
     async def _discover_mainboard_id(self, host: str) -> str | None:
-        import socket
-
-        from pycentauri import discover
-
         resolved = await asyncio.get_running_loop().getaddrinfo(host, None, family=socket.AF_INET)
         addresses = {entry[4][0] for entry in resolved}
         addresses.add(host)
-        printers = await discover(timeout=1.0, retries=2)
+        printers = await pycentauri.discover(timeout=1.0, retries=2)
         return next((printer.mainboard_id for printer in printers if printer.host in addresses and printer.mainboard_id), None)
 
     def _connection_key(self, config: dict[str, Any]) -> tuple[str, str]:

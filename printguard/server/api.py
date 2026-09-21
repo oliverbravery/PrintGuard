@@ -1,4 +1,4 @@
-"""Versioned REST surface over the engine protocol (hub mode only).
+"""Versioned REST surface over the engine protocol.
 
 Every route delegates to the same engine command/event protocol the UI speaks,
 so the REST API, the MCP tools derived from it and the dashboard can never
@@ -13,7 +13,7 @@ import logging
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -21,6 +21,7 @@ from ..engine.engine import Engine
 from ..engine.integrations import INTEGRATIONS
 from ..engine.notifiers import NOTIFIERS
 from ..engine.tokens import SCOPE_ORDER, expand_scope, hash_secret
+from .prints import PrintUpload, file_response, receive_print
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,6 @@ class MonitorFields(BaseModel):
     printer_id: str | None = None
     enabled: bool | None = None
     threshold: float | None = None
-    sensitivity: float | None = None
     consecutive: int | None = None
     notify: bool | None = None
     on_defect: Literal["none", "pause", "cancel"] | None = None
@@ -130,10 +130,34 @@ class SettingsPatch(BaseModel):
     notifiers: dict[str, dict[str, Any]] | None = None
     mqtt: dict[str, Any] | None = None
     inference_runtime: Literal["auto", "litert", "onnx"] | None = None
+    preheat: list[dict[str, Any]] | None = None
 
 
 class ActionBody(BaseModel):
     action: Literal["pause", "resume", "cancel"]
+
+
+class HeatBody(BaseModel):
+    nozzle: float | None = None
+    bed: float | None = None
+
+
+class PrintFields(BaseModel):
+    name: str | None = None
+    printer_ids: list[str] | None = None
+
+
+class StartBody(BaseModel):
+    printer_id: str
+
+
+UPLOAD_TIMEOUT_S = 600.0
+UPLOAD_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+    }
+}
 
 
 class _ReadModel(BaseModel):
@@ -188,7 +212,6 @@ class MonitorOut(_ReadModel):
     printer_id: str | None = None
     enabled: bool | None = None
     threshold: float | None = None
-    sensitivity: float | None = None
     consecutive: int | None = None
     notify: bool | None = None
     on_defect: Literal["none", "pause", "cancel"] | None = None
@@ -350,6 +373,13 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         await engine.request({"cmd": "printer.action", "id": printer_id, "action": body.action})
         return _find(public_state(engine)["printers"], printer_id, "printer")
 
+    @api.post("/printers/{printer_id}/heat", operation_id="heat_printer", tags=["control"])
+    async def heat_printer(printer_id: str, body: HeatBody, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Sets the nozzle and bed targets in degrees Celsius through the printer's service, 0 turning a heater off."""
+        _find(public_state(engine)["printers"], printer_id, "printer")
+        await engine.request({"cmd": "printer.heat", "id": printer_id, **body.model_dump(exclude_none=True)})
+        return _find(public_state(engine)["printers"], printer_id, "printer")
+
     @api.post("/printers", operation_id="add_printer", tags=["manage"])
     async def add_printer(body: PrinterFields, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
         """Registers a printer and returns the updated printer list."""
@@ -373,6 +403,59 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         """Checks whether a printer service is reachable with the given config."""
         events = await engine.request({"cmd": "printer.test", "provider": body.provider, "config": body.config})
         return next((e for e in events if e.get("event") == "printer_test"), {"ok": False})
+
+    @api.get("/prints", operation_id="list_prints", tags=["read"])
+    async def list_prints(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
+        """Lists every sliced file in the print library with the printers it is tagged for."""
+        return public_state(engine)["prints"]
+
+    @api.get("/prints/{print_id}", operation_id="get_print", tags=["read"])
+    async def get_print(print_id: str, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Returns one print file's record: name, format, size, tags and what the slicer wrote into it."""
+        return _find(public_state(engine)["prints"], print_id, "print")
+
+    @api.get(
+        "/prints/{print_id}/file",
+        operation_id="get_print_file",
+        tags=["read"],
+        responses={200: {"content": {"application/octet-stream": {}}}},
+        response_class=Response,
+    )
+    async def get_print_file(print_id: str, engine: Engine = Depends(get_engine)) -> Response:
+        """Downloads a print file as the library keeps it."""
+        return file_response(engine, print_id)
+
+    @api.post("/prints", operation_id="add_print", tags=["manage"], openapi_extra=UPLOAD_BODY)
+    async def add_print(
+        request: Request,
+        upload: Annotated[PrintUpload, Query()],
+        engine: Engine = Depends(get_engine),
+    ) -> dict[str, Any]:
+        """Uploads a sliced file, sent as the raw body, into the print library.
+
+        ``nozzle`` and ``bed`` rewrite the file so its first layer heats to them,
+        moving its other print temperatures by the same amount.
+        """
+        record = await receive_print(engine, upload, request.stream())
+        return record.public()
+
+    @api.patch("/prints/{print_id}", operation_id="update_print", tags=["manage"])
+    async def update_print(print_id: str, body: PrintFields, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Renames a print file or changes the printers it is tagged for."""
+        await engine.request({"cmd": "print.update", "id": print_id, "patch": body.model_dump(exclude_none=True)})
+        return _find(public_state(engine)["prints"], print_id, "print")
+
+    @api.delete("/prints/{print_id}", operation_id="remove_print", tags=["manage"])
+    async def remove_print(print_id: str, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
+        """Removes a print file and returns the updated library."""
+        await engine.request({"cmd": "print.remove", "id": print_id})
+        return public_state(engine)["prints"]
+
+    @api.post("/prints/{print_id}/start", operation_id="start_print", tags=["control"])
+    async def start_print(print_id: str, body: StartBody, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+        """Sends a print file to an idle printer it is tagged for and starts it."""
+        await engine.request({"cmd": "print.start", "id": print_id, "printer_id": body.printer_id}, timeout=UPLOAD_TIMEOUT_S)
+        return _find(public_state(engine)["printers"], body.printer_id, "printer")
 
     @api.get("/cameras", operation_id="list_cameras", tags=["read"], response_model=list[CameraOut])
     async def list_cameras(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
@@ -401,11 +484,10 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
     @api.post("/classify", operation_id="classify_frame", tags=["read"])
     async def classify_frame(
         image: Annotated[bytes, Body(media_type="image/jpeg")],
-        sensitivity: float = 1.0,
         engine: Engine = Depends(get_engine),
     ) -> dict[str, Any]:
         """Classifies a supplied JPEG frame - the model's verdict without a registered camera."""
-        return await engine.classify(image, sensitivity)
+        return await engine.classify(image)
 
     @api.post("/cameras", operation_id="add_camera", tags=["manage"], response_model=list[CameraOut])
     async def add_camera(body: CameraCreate, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:

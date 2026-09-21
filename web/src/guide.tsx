@@ -1,5 +1,5 @@
+import { Bug } from "lucide-react";
 import type { ReactNode } from "react";
-import { BugIcon } from "./components/BugIcon";
 import type { DialogKind } from "./store";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
@@ -14,7 +14,6 @@ export interface GuideSection {
   shot?: string;
   visual?: ReactNode;
   action?: { label: string; dialog: DialogKind };
-  hubOnly?: boolean;
 }
 
 const WATCH_STATES: { led: string; when: string; then: string }[] = [
@@ -118,19 +117,6 @@ export const GUIDE: GuideSection[] = [
     ),
   },
   {
-    id: "modes",
-    led: "led-on",
-    title: "Local vs Hub mode",
-    body: (
-      <>
-        <strong>Local</strong> runs the whole engine in this browser tab and uses this device's
-        cameras, with nothing to install. <strong>Hub</strong> runs on your own hardware, watches RTSP and
-        published streams, and keeps monitoring with every tab closed. Switch any time from the mode
-        chip in the header.
-      </>
-    ),
-  },
-  {
     id: "cameras",
     led: "led-on",
     title: "Cameras",
@@ -139,7 +125,8 @@ export const GUIDE: GuideSection[] = [
       <>
         A camera is any video source PrintGuard can read, so a USB or CSI device, an RTSP, MJPEG or
         WebRTC (WHEP) stream URL, or a camera published from this device. Printers that expose a
-        webcam register theirs automatically.
+        webcam register theirs automatically. The model only watches a square of each view, shown
+        in the camera's crop editor, so crop it tightly around the print.
       </>
     ),
     action: { label: "Open cameras", dialog: "cameras" },
@@ -152,14 +139,28 @@ export const GUIDE: GuideSection[] = [
     body: (
       <>
         Connect a printer, whether <strong>OctoPrint</strong>, <strong>Klipper (Moonraker)</strong>, <strong>Elegoo</strong>,{" "}
-        <strong>PrusaLink</strong> or <strong>Bambu Lab</strong>, and PrintGuard can read its status and pause or cancel a print on
-        a defect. It's optional: without one, a monitor still watches and alerts.{" "}
+        <strong>PrusaLink</strong> or <strong>Bambu Lab</strong>, and PrintGuard can read its status, progress and temperatures,
+        preheat it and pause or cancel a print on a defect. It's optional: without one, a monitor still watches and alerts.{" "}
         <a className={link} href={docs("printers.md")} target="_blank" rel="noreferrer">
           Setup guides ↗
         </a>
       </>
     ),
     action: { label: "Open printers", dialog: "printers" },
+  },
+  {
+    id: "prints",
+    led: "led-on",
+    title: "Print library",
+    shot: "prints",
+    body: (
+      <>
+        Drop sliced files onto the hub to preview their toolpath, name them and correct their temperatures before
+        they're uploaded. Each keeps the preview, print time and filament the slicer wrote into it. Tag a file with the printers it was sliced for and it can only ever start on those. Send it
+        to an idle printer from the library or from the 3D viewer, which lets you orbit the toolpath layer by layer.
+      </>
+    ),
+    action: { label: "Open the library", dialog: "prints" },
   },
   {
     id: "monitors",
@@ -182,10 +183,10 @@ export const GUIDE: GuideSection[] = [
     shot: "tuning",
     body: (
       <>
-        Every frame is scored against failure prototypes. <strong>Alert threshold</strong> sets how
-        high that score must reach, <strong>sensitivity</strong> widens or narrows the margin, and a
-        defect must hold for a number of <strong>consecutive detections</strong> before PrintGuard
-        acts. Tune it all per monitor from its detail panel.
+        Every frame is scored with the model's confidence that the print is failing.{" "}
+        <strong>Alert threshold</strong> sets how high that score must reach, and a defect must hold
+        for a number of <strong>consecutive detections</strong> before PrintGuard acts. Tune both per
+        monitor from its detail panel.
       </>
     ),
   },
@@ -235,10 +236,9 @@ export const GUIDE: GuideSection[] = [
     id: "integrate",
     led: "led-infer",
     title: "Automate & integrate",
-    hubOnly: true,
     body: (
       <>
-        On the hub, drive PrintGuard from a <strong>REST API</strong> or an <strong>MCP</strong>{" "}
+        Drive PrintGuard from a <strong>REST API</strong> or an <strong>MCP</strong>{" "}
         server with scoped tokens (read ⊂ control ⊂ manage), and surface every monitor in{" "}
         <strong>Home Assistant</strong> over MQTT.{" "}
         <a className={link} href={docs("api.md")} target="_blank" rel="noreferrer">
@@ -272,8 +272,8 @@ export const GUIDE: GuideSection[] = [
     title: "Your frames stay yours",
     body: (
       <>
-        Inference runs entirely on your hardware, in this browser in local mode or on your hub. No
-        frames, snapshots or scores are ever sent to a third party.
+        Inference runs entirely on your own hardware. No frames, snapshots or scores are ever sent
+        to a third party.
       </>
     ),
   },
@@ -283,7 +283,7 @@ export const GUIDE: GuideSection[] = [
     title: "Something broken?",
     body: (
       <>
-        Report a bug from the <BugIcon className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" /> chip in the header,
+        Report a bug from the <Bug className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" aria-hidden /> chip in the header,
         anonymously, no account needed. A diagnostics bundle goes with it, with every credential stripped and no
         camera frames. Download the same bundle from that dialog to read it or send it somewhere else yourself.
       </>

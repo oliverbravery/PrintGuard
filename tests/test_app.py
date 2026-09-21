@@ -190,3 +190,67 @@ async def test_a_gating_plugin_can_refuse_a_request_but_never_its_own_routes() -
     assert own.status_code == 200, "the gate locked out the very page that signs you in"
     assert other.status_code == 403, "another plugin's pages went out without the gate seeing them"
     assert health.status_code == 200, "readiness is never gated, so an uptime check still works"
+
+
+async def test_the_dashboard_inspects_a_sample_before_uploading(monkeypatch) -> None:
+    from test_gcode import CURA, PRUSA
+
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+    from printguard.server import prints
+
+    engine = Engine(FakePlatform())
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    octet = {"Content-Type": "application/octet-stream", "origin": "http://test"}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            foreign = await client.post("/api/prints/inspect?ext=gcode", content=PRUSA, headers={**octet, "origin": "https://evil.example"})
+            assert foreign.status_code == 403
+            prusa = (await client.post("/api/prints/inspect?ext=gcode", content=PRUSA, headers=octet)).json()
+            assert prusa["thumbnail"] is True and prusa["meta"]["printer_model"] == "MK4"
+            cura = (await client.post("/api/prints/inspect?ext=gcode", content=CURA, headers=octet)).json()
+            assert cura["thumbnail"] is False, "the dashboard draws one for a file that carries none"
+            assert (await client.post("/api/prints/inspect?ext=stl", content=b"solid", headers=octet)).status_code == 400
+            assert (await client.post("/api/prints/inspect?ext=bgcode", content=CURA, headers=octet)).status_code == 400
+            monkeypatch.setattr(prints, "MAX_SAMPLE_BYTES", 16)
+            assert (await client.post("/api/prints/inspect?ext=gcode", content=CURA, headers=octet)).status_code == 413
+    finally:
+        await engine.stop()
+
+
+async def test_dashboard_upload_is_same_origin_and_feeds_the_viewer(tmp_path) -> None:
+    from fakes import FakePlatform
+    from test_gcode import PRUSA
+
+    from printguard.engine.engine import Engine
+    from printguard.server.platform import DiskFileStore
+
+    platform = FakePlatform()
+    platform.files = DiskFileStore(tmp_path)
+    engine = Engine(platform)
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    octet = {"Content-Type": "application/octet-stream"}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            foreign = await client.post("/api/prints?filename=benchy.gcode", content=PRUSA, headers={**octet, "origin": "https://evil.example"})
+            assert foreign.status_code == 403, "a cross-site page cannot fill the library through the session cookie"
+            uploaded = await client.post("/api/prints?filename=benchy.gcode&name=Boat", content=PRUSA, headers={**octet, "origin": "http://test"})
+            assert uploaded.status_code == 200, uploaded.text
+            print_id = uploaded.json()["id"]
+            assert engine.prints.get(print_id).name == "Boat"
+            cold = await client.post("/api/prints?filename=benchy.gcode&bed=60", content=PRUSA, headers={**octet, "origin": "http://test"})
+            assert cold.status_code == 400 and "never heats the bed" in cold.json()["detail"]
+
+            text = await client.get(f"/api/prints/{print_id}/gcode")
+            assert text.status_code == 200 and text.content == PRUSA and text.headers["content-type"].startswith("text/plain")
+            image = await client.get(f"/api/prints/{print_id}/thumbnail")
+            assert image.status_code == 200 and image.content == b"BIG" and image.headers["content-type"] == "image/png"
+            assert "immutable" in image.headers["cache-control"]
+            assert (await client.get("/api/prints/nope/gcode")).status_code == 404
+    finally:
+        await engine.stop()

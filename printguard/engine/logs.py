@@ -4,7 +4,7 @@ Modules log through the stdlib as usual; entry points call ``setup`` (or
 ``setup_from_env`` where the environment configures deployment) exactly once.
 Every record then reaches stdout for ``docker logs``, a rotating file where no
 console exists (the desktop app), and a bounded in-memory tail that bug
-reports attach - the same code on CPython and Pyodide.
+reports attach.
 """
 
 from __future__ import annotations

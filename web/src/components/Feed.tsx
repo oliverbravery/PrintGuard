@@ -1,9 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { registerFeed } from "../float";
 import { renderVideoFrame, useVideoStream } from "../image";
 import type { Camera } from "../types";
 
-export function Feed({ camera, mode, active = true }: { camera: Camera | undefined; mode: string; active?: boolean }) {
+export function Feed({
+  camera,
+  active = true,
+  children,
+}: {
+  camera: Camera | undefined;
+  active?: boolean;
+  children?: ReactNode;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -14,7 +22,7 @@ export function Feed({ camera, mode, active = true }: { camera: Camera | undefin
   const rotation = camera?.rotation ?? 0;
   const useCanvas = sharpness > 0 || crop !== null || brightness !== 1 || contrast !== 1 || rotation !== 0;
 
-  useVideoStream(videoRef, camera, mode, active);
+  useVideoStream(videoRef, camera, active);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -64,6 +72,7 @@ export function Feed({ camera, mode, active = true }: { camera: Camera | undefin
           </span>
         </div>
       )}
+      {children}
     </div>
   );
 }

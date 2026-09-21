@@ -93,7 +93,6 @@ function InstallButton({ entry, installed }: { entry: CatalogueEntry; installed:
 function EnableToggle({ plugin }: { plugin: PluginRecord }) {
   const send = useStore((s) => s.send);
   const permissions = useStore((s) => s.engine?.plugin_permissions ?? []);
-  const hubOnly = useStore((s) => s.engine?.plugin_host ?? false);
   const [consenting, setConsenting] = useState(false);
   const accepted = plugin.manifest.permissions.every((p) => plugin.granted.includes(p));
   return (
@@ -107,7 +106,7 @@ function EnableToggle({ plugin }: { plugin: PluginRecord }) {
         }
       />
       {consenting && (
-        <ConsentDialog plugin={plugin} permissions={permissions} hubOnly={hubOnly} onClose={() => setConsenting(false)} />
+        <ConsentDialog plugin={plugin} permissions={permissions} onClose={() => setConsenting(false)} />
       )}
     </span>
   );
@@ -201,7 +200,6 @@ function PluginPage({
   children?: ReactNode;
 }) {
   const permissions = useStore((s) => s.engine?.plugin_permissions ?? []);
-  const hubOnly = useStore((s) => s.engine?.plugin_host ?? false);
   useSettingsFooter(origin);
   return (
     <div className="space-y-4">
@@ -263,7 +261,7 @@ function PluginPage({
 
       <div>
         <span className="label mb-2 block">{action ? "Permissions it will ask for" : "Permissions it asks for"}</span>
-        <PermissionList plugin={{ manifest }} permissions={permissions} hubOnly={hubOnly} />
+        <PermissionList plugin={{ manifest }} permissions={permissions} />
       </div>
     </div>
   );

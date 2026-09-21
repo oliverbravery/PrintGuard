@@ -5,7 +5,7 @@ import type { Permission, PluginManifest, PluginRecord } from "../types";
 import { phrase, reachesLocal } from "../urls";
 import { Dialog } from "./Dialog";
 
-export function PermissionList({ plugin, permissions, hubOnly }: { plugin: { manifest: PluginManifest }; permissions: Permission[]; hubOnly: boolean }) {
+export function PermissionList({ plugin, permissions }: { plugin: { manifest: PluginManifest }; permissions: Permission[] }) {
   const asked = permissions.filter((p) => plugin.manifest.permissions.includes(p.id));
   if (asked.length === 0) return <span className="text-[0.7rem] text-text-2">Asks for nothing.</span>;
   return (
@@ -48,7 +48,6 @@ export function PermissionList({ plugin, permissions, hubOnly }: { plugin: { man
                   ))}
                 </ul>
               )}
-              {permission.hub_only && !hubOnly && <span className="block text-text-2">Hub only.</span>}
             </td>
             <td className="text-text-1">{plugin.manifest.reasons[permission.id]}</td>
           </tr>
@@ -87,7 +86,7 @@ function Findings({ plugin }: { plugin: PluginRecord }) {
   );
 }
 
-export function ConsentDialog({ plugin, permissions, hubOnly, onClose }: { plugin: PluginRecord; permissions: Permission[]; hubOnly: boolean; onClose: () => void }) {
+export function ConsentDialog({ plugin, permissions, onClose }: { plugin: PluginRecord; permissions: Permission[]; onClose: () => void }) {
   const send = useStore((s) => s.send);
   const accept = () => {
     send({ cmd: "plugin.update", id: plugin.id, patch: { granted: plugin.manifest.permissions, enabled: true } });
@@ -103,7 +102,7 @@ export function ConsentDialog({ plugin, permissions, hubOnly, onClose }: { plugi
             : "Unreviewed third-party code. Read it first."}
         </span>
         <Findings plugin={plugin} />
-        <PermissionList plugin={plugin} permissions={permissions} hubOnly={hubOnly} />
+        <PermissionList plugin={plugin} permissions={permissions} />
         {Object.keys(plugin.manifest.secrets).length > 0 && (
           <span className="block text-[0.7rem] text-text-2">
             It also needs {Object.keys(plugin.manifest.secrets).join(", ").replace(/[_-]/g, " ")}, which PrintGuard fills

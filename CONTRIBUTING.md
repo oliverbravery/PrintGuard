@@ -1,8 +1,8 @@
 # Contributing
 
-Read [docs/architecture.md](docs/architecture.md) first. PrintGuard runs in two modes, local
-in the browser and hub on a server, and the engine is shared code running on CPython and
-Pyodide. All mode differences live behind the `Platform` contract.
+Read [docs/architecture.md](docs/architecture.md) first. One engine owns every decision, the
+hub server runs it, and everything that touches hardware, the network or disk lives behind the
+`Platform` contract.
 
 - [Development setup](#development-setup)
 - [Documentation is part of the change](#documentation-is-part-of-the-change)
@@ -19,6 +19,7 @@ Pyodide. All mode differences live behind the `Platform` contract.
 uv sync                              # Python engine + hub server
 uv run printguard                    # hub on :8000 (MediaMTX is bundled into the image; for video in dev, brew install mediamtx and set MEDIAMTX_BINARY=$(which mediamtx))
 cd web && npm install && npm run dev # UI with hot reload on :5173, proxied to :8000
+cd web && npm run site               # the GitHub Pages landing page in web/site, with hot reload
 ```
 
 To work on the desktop app, run the tray build in dev or produce a local installer:
@@ -49,6 +50,17 @@ The browser half of the plugin sandbox is only meaningful in a real engine, so
 `web/tests/sandbox.spec.ts` drives it through Playwright in both chromium and webkit. Run it
 if you touch anything under `web/public/plugin-sandbox.html`, `web/src/plugins.ts` or the
 node renderer.
+
+`web/launch/launch.spec.ts` checks a build the way a user meets it. It registers two cameras
+fed by a fake MJPEG server, one showing a healthy print and one a failing print, binds a
+monitor to each and expects only the failing one to raise an alert. The **launch** check runs
+it on pull requests into `main` in parallel for the container, the macOS app and the Windows
+app, which it drives inside the app's own window through `PRINTGUARD_DEBUG_PORT`. To run it
+against a fresh hub:
+
+```bash
+cd web && PRINTGUARD_URL=http://localhost:8000 npx playwright test --project=launch
+```
 
 ## Documentation is part of the change
 
@@ -104,14 +116,23 @@ theme the reader is on. Point a guide entry at one with `shot: "<id>"` in `web/s
 ## Adding a printer integration
 
 Integrations talk to print servers, such as OctoPrint or Moonraker, to read state and pause
-or cancel jobs. One adapter runs in both modes because it only speaks through the platform's
-HTTP function.
+or cancel jobs. An adapter speaks through the platform's HTTP function, which is what lets
+`tests/test_adapters.py` pin every request it makes. A service with no HTTP API, such as Bambu
+Lab over MQTT, uses its own client library.
 
 1. Create `printguard/engine/integrations/<service>.py` subclassing
    [`IntegrationAdapter`](printguard/engine/integrations/base.py):
    - implement `fetch_state()`, normalising to the canonical `DeviceStatus` values.
-     `offline` must mean "unreachable", not "idle", because it keeps inference watching.
+     `offline` must mean "unreachable", not "idle", because it keeps inference watching. Fill
+     in `remaining_s`, `nozzle` and `bed` where the service reports them, the heaters through
+     `Heater.reported()`, so the dashboard can show them.
    - implement `send()` for pause, resume and cancel, raising `RuntimeError` on rejection.
+   - set `heater_control` and implement `heat()` where the service takes a nozzle or bed
+     target, raising `RuntimeError` on rejection. Leave it off and the dashboard shows the
+     temperatures without a way to set them.
+   - set `formats` to the extensions the service prints from an upload and implement
+     `print_file()` to upload one and start it, raising `RuntimeError` on rejection. Leave
+     `formats` empty and the print library never offers the printer.
    - describe the config form as a JSON Schema, where `secret: true` masks fields,
      `placeholder` hints at the expected value, and `default` preselects an optional
      `enum`, so the form never offers an empty choice the adapter quietly fills in.
@@ -121,8 +142,9 @@ HTTP function.
 3. Add the service to the table in [docs/printers.md](docs/printers.md), with a `<details>`
    block if it needs setup steps of its own.
 
-The configuration form, connection test, device polling, inference gating and defect actions
-all follow from the adapter. No other change is needed in either mode.
+The configuration form, connection test, device polling, inference gating, defect actions,
+temperature controls and the print library all follow from the adapter. No other change is
+needed.
 
 ## Adding a notification provider
 
@@ -133,8 +155,6 @@ Notifiers deliver defect snapshots and watchdog warnings.
    - implement `send(http, config, title, body, image)`. Attach the JPEG `image` when the
      service supports uploads, where `multipart_form()` in the same module builds the body,
      and raise `RuntimeError` with the service's error detail on rejection.
-   - set `browser_ok = False` if the service sends no CORS headers, which offers it in hub
-     mode only. Check from a browser console before assuming.
    - JSON-schema config and `docs_url`, exactly as for integrations.
 2. Register an instance in
    [`notifiers/__init__.py`](printguard/engine/notifiers/__init__.py).
@@ -167,8 +187,9 @@ with the ones it does, and declares the network hosts you would expect.
 
 ## Ground rules
 
-- Never fork on mode. If shared code needs something runtime-specific, extend the `Platform`
-  protocol on both sides with identical signatures.
+- Keep the engine free of I/O. It never imports from `server/`, and a feature that needs a
+  runtime service gets it through the `Platform` protocol, implemented in `server/platform.py`
+  and in the test fake.
 - Fail loudly. Anything on the alert path that can fail must emit an `error` or `warning`
   event, so no bare `except: pass` where a user would want to know.
 - Keep it minimal. Prefer consolidating existing code over adding parallel variants, and leave
@@ -203,15 +224,19 @@ Then add a matching section at the top of [CHANGELOG.md](CHANGELOG.md) in
 ```
 
 The section is published verbatim as the GitHub release notes, so describe the user-visible
-effect, not the implementation.
+effect, not the implementation. Its date is the day the release merges into `main`, in London
+time. The check on a pull request into `main` compares it with today, and the release itself
+refuses a section dated any other day than its merge commit, so a release that waits a day
+needs its date moved on before it merges.
 
-A pull request can only merge once three required checks pass:
+A pull request can only merge once four required checks pass:
 
 | Check | Enforces |
 |---|---|
 | **tests** | The engine simulation suite |
 | **image** | Every production image variant builds, so a change that breaks an image can never reach `main` |
-| **version** | The version is bumped past the last release and has a matching `CHANGELOG.md` section, so every merge ships as a unique, documented, immutable version. Re-publishing an existing tag is refused |
+| **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |
+| **version** | The version is bumped past the last release and has a matching `CHANGELOG.md` section dated the day it merges into `main`, London time, so every merge ships as a unique, documented, immutable version. Re-publishing an existing tag is refused |
 
 On merge, the [release workflow](.github/workflows/release.yml):
 
@@ -219,8 +244,11 @@ On merge, the [release workflow](.github/workflows/release.yml):
    and `latest`, plus the `-intel` and `-nvidia` variants.
 2. only once the images are published, tags the merge commit `vX.Y.Z` and creates the GitHub
    release with the changelog section as its notes, so a failed build never becomes a release.
-3. deploys the in-browser demo to GitHub Pages.
-4. builds the macOS and Windows desktop apps and attaches them to the release.
+3. deploys the website to GitHub Pages.
+4. builds the macOS and Windows desktop apps and attaches them to the release. The macOS app
+   is signed and notarised with the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+   `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` repository secrets, which the
+   **launch** check uses too.
 
 Docker is the supported distribution for servers and NAS boxes, and the desktop app is the
 one for personal computers.

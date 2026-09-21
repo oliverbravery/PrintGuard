@@ -78,7 +78,7 @@ function NodeView({ node, pluginId, mayViewCameras }: { node: Node; pluginId: st
     const camera = engine?.cameras.find((c) => c.id === node.camera_id);
     return (
       <div className="min-w-[12rem] flex-1 border border-line-0">
-        <Feed camera={camera} mode={engine?.mode ?? "hub"} />
+        <Feed camera={camera} />
       </div>
     );
   }

@@ -72,8 +72,8 @@ authentication is your tailnet identity.
    then run `tailscale up` on each.
 2. Open `http://<hub-machine-name>:8000` from any device on the tailnet. Invite others from
    the Tailscale admin console if they should have access.
-3. Browsers only grant camera access on secure pages, so local mode and **This device**
-   publishing from phones both need HTTPS:
+3. Browsers only grant camera access on secure pages, so publishing a phone's camera from
+   **This browser** needs HTTPS:
 
    ```bash
    sudo tailscale serve --bg --https=443 8000
@@ -190,8 +190,11 @@ The hub checks GitHub releases once a day and the header's version chip turns in
 badge. Open it to read the changelog for any release, then update:
 
 ```bash
-docker compose pull && docker compose up -d
+docker compose pull && docker compose up -d --wait
 ```
+
+The image checks `/api/health` every 30 seconds, so `--wait` returns once the new hub is ready
+and `docker ps` shows it as healthy.
 
 PrintGuard never updates its own container, and deliberately never asks for the Docker
 socket. A process with that socket has root-equivalent control of the host, which is not a

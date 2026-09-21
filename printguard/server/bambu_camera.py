@@ -1,4 +1,4 @@
-"""Bambu Lab chamber-camera reader for the A1 and P1 series (hub mode).
+"""Bambu Lab chamber-camera reader for the A1 and P1 series.
 
 X1- and H2-series printers expose the chamber camera over RTSP, but the A1,
 A1 mini, P1P and P1S stream it over a proprietary protocol on port 6000: a

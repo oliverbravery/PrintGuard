@@ -9,15 +9,16 @@ export function CustomiseBar() {
   const hiddenCameras = applyLayout(engine.cameras, section(engine.settings.layout, "cameras")).hidden;
   return (
     <div className="mx-auto max-w-[1500px] px-4 pt-5 sm:px-6">
-      <div className="panel flex items-center gap-3 px-4 py-2.5">
-        <span className="label">Customising, drag to reorder, pin or hide</span>
-        <div className="flex-1" />
-        <button className="btn btn-danger !py-1.5 !px-3 !text-[0.68rem]" onClick={resetLayout}>
-          Reset layout
-        </button>
-        <button className="btn btn-primary !py-1.5 !px-3 !text-[0.68rem]" onClick={() => setCustomising(false)}>
-          Done
-        </button>
+      <div className="panel flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
+        <span className="label grow basis-48">Customising, drag to reorder, pin or hide</span>
+        <div className="ml-auto flex gap-2">
+          <button className="btn btn-danger !py-1.5 !px-3 !text-[0.68rem]" onClick={resetLayout}>
+            Reset layout
+          </button>
+          <button className="btn btn-primary !py-1.5 !px-3 !text-[0.68rem]" onClick={() => setCustomising(false)}>
+            Done
+          </button>
+        </div>
       </div>
       <HiddenTray
         label="HIDDEN"

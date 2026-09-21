@@ -38,6 +38,7 @@ WINDOWS_PROVIDERS = {
 }
 DEFAULT_CPU_PROVIDER = "CPUExecutionProvider"
 DEVICE_PRIORITY = ("GPU", "NPU", "CPU")
+SOFTWARE_ADAPTER = (0x1414, 0x8C)
 REGISTERED_LIBRARIES: set[str] = set()
 logger = logging.getLogger(__name__)
 
@@ -86,13 +87,17 @@ def _execution_devices(devices: list[ort.OrtEpDevice]) -> list[ort.OrtEpDevice]:
     slower. ONNX Runtime's own selection policies pick a device without saying which,
     and OpenVINO's meta devices choose again at inference time, so neither can name
     the hardware actually in use: the choice is made here instead, where it is named
-    in the `compute` readout and in the log.
+    in the `compute` readout and in the log. Microsoft's Basic Render Driver is left
+    out, since it is the software adapter Windows falls back to without a GPU driver
+    and DirectML ends the process when a session is created on it.
     """
     return sorted(
         (
             device
             for device in devices
-            if device.ep_name != DEFAULT_CPU_PROVIDER and "ov_meta_device" not in device.ep_metadata
+            if device.ep_name != DEFAULT_CPU_PROVIDER
+            and "ov_meta_device" not in device.ep_metadata
+            and (device.device.vendor_id, device.device.device_id) != SOFTWARE_ADAPTER
         ),
         key=_device_rank,
     )
@@ -189,10 +194,14 @@ class OnnxInference:
     def _register_windows_providers(self) -> None:
         if sys.getwindowsversion().build < 26100:
             return
-        from winui3.microsoft.windows.applicationmodel.dynamicdependency.bootstrap import InitializeOptions, initialize
+        from winui3.microsoft.windows.applicationmodel.dynamicdependency.bootstrap import initialize
         import winui3.microsoft.windows.ai.machinelearning as winml
 
-        self._resources.enter_context(initialize(options=InitializeOptions.ON_NO_MATCH_SHOW_UI))
+        try:
+            self._resources.enter_context(initialize())
+        except OSError as error:
+            logger.warning("Windows ML is unavailable without the Windows App Runtime 2.x: %s", error)
+            return
         providers = [
             provider
             for provider in winml.ExecutionProviderCatalog.get_default().find_all_providers()

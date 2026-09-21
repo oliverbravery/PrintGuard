@@ -8,6 +8,7 @@ dist
 tests
 web/node_modules
 web/dist
+web/dist-site
 **/__pycache__
 *.tsbuildinfo
 .DS_Store

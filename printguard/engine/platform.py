@@ -1,13 +1,14 @@
-"""The complete contract between the shared engine and a runtime platform.
+"""The complete contract between the engine and the runtime it runs on.
 
-Hub mode and local mode differ only in the implementations of these
-protocols; everything that consumes them is shared code.
+The engine holds the logic and nothing that touches hardware, the network or
+disk. Those services live behind these protocols, implemented by the hub in
+``printguard.server`` and in memory by the tests.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
+from typing import TYPE_CHECKING, Any, AsyncIterable, Awaitable, Callable, Protocol
 
 import numpy as np
 
@@ -53,13 +54,41 @@ class FrameSource(Protocol):
         ...
 
 
-class PluginRuntime(Protocol):
-    """Sandbox that runs the background half of installed plugins.
+class FileStore(Protocol):
+    """Where uploaded print files and their previews live.
 
-    Only the hub has one. In local mode the browser runs the same source in
-    the same sandbox the UI half uses, so ``Platform.plugin_runtime`` is None
-    there and the engine simply has nothing to drive.
+    A sliced file is far too large for the state the engine persists as JSON,
+    so the bytes are kept here under a key the engine chooses and the state
+    carries only the record describing them.
     """
+
+    async def store(self, key: str, chunks: AsyncIterable[bytes]) -> int:
+        """Writes a file from its chunks, replacing any under that key.
+
+        Args:
+            key: Name the file is read back by.
+            chunks: The bytes, in order.
+
+        Returns:
+            The number of bytes written.
+        """
+        ...
+
+    async def read(self, key: str) -> bytes:
+        """Returns a stored file's bytes.
+
+        Raises:
+            FileNotFoundError: If nothing is stored under the key.
+        """
+        ...
+
+    async def remove(self, key: str) -> None:
+        """Deletes a stored file, if there is one."""
+        ...
+
+
+class PluginRuntime(Protocol):
+    """Sandbox that runs the background half of installed plugins."""
 
     def attach(self, request: Callable[..., Awaitable[Any]], failed: Callable[[str, str], None]) -> None:
         """Gives the runtime the engine's command channel and failure report."""
@@ -93,7 +122,6 @@ class PluginRuntime(Protocol):
 class Platform(Protocol):
     """Runtime services the engine needs but cannot implement portably."""
 
-    mode: str
     host: str
     """Which deployment this is, one of ``plugins.PLATFORMS``. A plugin declares
     the ones it runs on, and the store offers what matches."""
@@ -101,17 +129,19 @@ class Platform(Protocol):
     workers: int
     inference_device: str
     version: str
-    update_repo: str | None
-    """GitHub ``owner/name`` to check for updates, or None to never call out
-    (local mode is always the latest deployed build)."""
+    update_repo: str
+    """GitHub ``owner/name`` whose releases are checked for updates."""
 
     update_asset: str | None
     """Release asset filename this deployment updates with (the desktop app's
     installer), or None when the deployment updates outside the app."""
 
     plugin_runtime: PluginRuntime | None
-    """Sandbox for the background half of plugins, or None where the runtime
-    lives outside the engine (the browser runs it in its own sandbox)."""
+    """Sandbox for the background half of plugins, or None when plugins are
+    switched off at boot."""
+
+    files: FileStore
+    """Where uploaded print files are kept."""
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Applies platform-owned settings before inference starts."""

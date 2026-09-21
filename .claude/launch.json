@@ -24,17 +24,19 @@
       "autoPort": true
     },
     {
-      "name": "pages-sim",
-      "runtimeExecutable": "python3",
+      "name": "site",
+      "runtimeExecutable": "npm",
       "runtimeArgs": [
-        "-m",
-        "http.server",
+        "run",
+        "site",
+        "--prefix",
+        "web",
+        "--",
+        "--port",
         "4731",
-        "-d",
-        "web/.pages-sim"
+        "--strictPort"
       ],
-      "port": 4731,
-      "autoPort": true
+      "port": 4731
     },
     {
       "name": "printguard-hls",

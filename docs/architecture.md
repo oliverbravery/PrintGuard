@@ -6,10 +6,10 @@
 
 </div>
 
-PrintGuard is a monolith whose engine is shared code, running unchanged on CPython in hub
-mode and on Pyodide in the browser in local mode. Everything mode-specific is confined to
-one `Platform` implementation per runtime. The two modes cannot drift apart because there is
-nothing to drift, since they execute the same files.
+PrintGuard is a monolith. One Python engine owns every decision, a hub server runs it, and
+the React dashboard, the REST API, the MCP server and the MQTT bridge are transports that only
+send it commands. The engine reaches hardware, the network and disk through one `Platform`
+protocol, so the tests run the whole of it against an in-memory fake.
 
 - [The shape of it](#the-shape-of-it)
 - [The platform contract](#the-platform-contract)
@@ -23,19 +23,20 @@ nothing to drift, since they execute the same files.
 - [The defect pipeline](#the-defect-pipeline)
 - [Failing safely](#failing-safely)
 - [Repository layout](#repository-layout)
-- [The static demo](#the-static-demo)
+- [The website](#the-website)
 
 ## The shape of it
 
 ```mermaid
 flowchart LR
-    subgraph UI["React UI (presentation only)"]
-        store["zustand store"]
+    subgraph transports["Transports (no logic of their own)"]
+        ui["React UI<br/>WebSocket"]
+        surface["REST API · MCP · MQTT bridge"]
     end
 
-    store <-- "JSON commands / events" --> engine
+    transports <-- "JSON commands / events" --> engine
 
-    subgraph engine["printguard/engine (shared Python)"]
+    subgraph engine["printguard/engine"]
         registry["camera + printer registries"]
         monitors["monitors (camera + printer)"]
         scheduler["fair scheduler"]
@@ -45,12 +46,7 @@ flowchart LR
         notifiers["notifier adapters"]
     end
 
-    engine -- "Platform protocol" --> platform
-
-    subgraph platform["one Platform per runtime"]
-        server["server/platform.py<br/>CPython · LiteRT / ONNX Runtime · PyAV · httpx"]
-        browser["browser/platform.py<br/>Pyodide · LiteRT.js · getUserMedia · fetch"]
-    end
+    engine -- "Platform protocol" --> server["server/platform.py<br/>LiteRT / ONNX Runtime · PyAV · httpx"]
 
     server --- mediamtx["MediaMTX<br/>RTSP / RTMP / WHEP / HLS"]
     integrations --- printersvc["OctoPrint / Moonraker / Elegoo / PrusaLink / Bambu Lab"]
@@ -60,28 +56,33 @@ flowchart LR
 ## The platform contract
 
 [`engine/platform.py`](../printguard/engine/platform.py) defines everything the engine needs
-but cannot implement portably. Identical signatures, different runtimes:
+but does not do itself. [`server/platform.py`](../printguard/server/platform.py) implements it
+for the hub:
 
-| Method | Hub (CPython) | Local (browser) |
-|---|---|---|
-| `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count | No-op |
-| `infer(rgb)` | Selected LiteRT or ONNX Runtime model | LiteRT.js in WASM via a JS bridge |
-| `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list | `enumerateDevices()` |
-| `open_camera(id, source)` | PyAV reader thread; MediaMTX pulls RTSP and WHEP streams | `getUserMedia` and canvas grabs |
-| `http(...)` | httpx | `fetch`, so CORS applies |
-| `encode_jpeg(rgb)` | PyAV mjpeg | canvas `toBlob` |
-| `load_state` / `save_state` | `data/state.json` | `localStorage` |
-| `plugin_runtime` | QuickJS in WebAssembly, under wasmtime | `None`: the browser runs workers in its own sandbox |
+| Member | On the hub |
+|---|---|
+| `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count |
+| `infer(rgb)` | The selected LiteRT or ONNX Runtime model |
+| `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list |
+| `open_camera(id, source)` | PyAV reader thread, with MediaMTX pulling RTSP and WHEP streams |
+| `http(...)` | httpx |
+| `open_socket(url, arrived)` | A `websockets` client connection held for a plugin |
+| `encode_jpeg(rgb)` / `decode_jpeg(data)` | PyAV |
+| `load_state` / `save_state` | `data/state.json` |
+| `plugin_runtime` | QuickJS in WebAssembly, under wasmtime, or `None` with `PRINTGUARD_PLUGINS=off` |
+| `files` | Print files and their previews on disk under `data/prints/` |
+| `host`, `update_repo`, `update_asset` | Which deployment this is, and where and how it updates |
 
-The UI is presentation-only and speaks one JSON command and event protocol, over a WebSocket
-in hub mode and over an in-page Pyodide bridge in local mode. The engine cannot tell which
-transport it is on.
+[`tests/fakes.py`](../tests/fakes.py) implements the same protocol in memory, with synthetic
+cameras, a canned model and recorded HTTP. That is how the engine tests drive alerts, outages
+and printer actions in milliseconds with no camera, model or network.
+
+The UI is presentation-only and speaks one JSON command and event protocol over a WebSocket.
 
 > [!IMPORTANT]
-> **Never add mode-specific logic anywhere else.** If a feature needs a runtime service,
-> extend the Platform contract on both sides with identical signatures. Where a mode merely
-> lacks a capability, express that as platform data, such as `update_repo` being `None` in
-> the browser, rather than a mode check.
+> **The engine never imports from `server/` and never touches the OS, the network or disk
+> itself.** If a feature needs a runtime service, add it to the `Platform` protocol and
+> implement it in `server/platform.py` and in the test fake.
 
 ## The protocol
 
@@ -90,7 +91,8 @@ Commands, UI to engine:
 | Group | Commands |
 |---|---|
 | Cameras | `discover`, `camera.add`, `camera.update`, `camera.remove` |
-| Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.test`, `printer.cameras.refresh` |
+| Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.heat`, `printer.test`, `printer.cameras.refresh` |
+| Prints | `print.add`, `print.update`, `print.remove`, `print.start` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
 | History | `history.get`, `snapshot.get` |
 | Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.http`, `plugin.effect` |
@@ -107,7 +109,8 @@ Events, engine to UI:
 | `result` | One monitor's score, sampled at up to 5 Hz per monitor |
 | `alert` | A sustained defect, with the action taken |
 | `warning` | Watchdog conditions and their recovery |
-| `device` | A printer's status, progress and job |
+| `device` | A printer's status, progress, job, time left and heaters |
+| `print_started` | A file from the library has been sent to a printer and started |
 | `discovered`, `printer_test`, `notify_test` | Command responses |
 | `history`, `snapshot` | Risk history buckets and stored alert snapshots |
 | `releases` | The changelog history the update dialog browses |
@@ -135,6 +138,20 @@ series or the proprietary port 6000 protocol on the A1 and P1. The adapter's opt
 demand through `printer.cameras.refresh` to pick up a camera attached later. Such cameras
 cannot be removed on their own and are dropped with their printer.
 
+A print file is the third registered resource. The bytes are far
+too large for the protocol, so the hub's own upload route streams them into the platform's
+`files` store under an id it mints and `print.add` then registers the record, reading the
+slicer's estimates, temperatures and preview out of the file through
+[`engine/gcode.py`](../printguard/engine/gcode.py). A `nozzle` or `bed` target on `print.add`
+rewrites the stored file first. Before uploading, the dashboard sends the same head and tail
+of the file that module reads to `/api/prints/inspect`, so its upload panel shows what the slicer
+wrote while the file is still on the user's device. Where the slicer wrote no preview the
+dashboard draws one from the toolpath and adds it to the gcode as a standard thumbnail block,
+so the record arrives with a picture like any other.
+A file carries the printers it is tagged for, checked against the adapter's `formats` when the
+tag is set, and `print.start` re-polls the printer and refuses unless it answers idle before
+the adapter's `print_file()` uploads and starts it.
+
 A deployment can declare video devices the same way. The Docker image sets
 `PRINTGUARD_CAMERAS=auto`, so every capture device passed into the container comes back from
 `discover_cameras()` marked `declared`, and the engine reconciles those into the registry at
@@ -155,15 +172,15 @@ open.
 ([`engine/reports.py`](../printguard/engine/reports.py)). It is one user-initiated POST of a
 Sentry feedback envelope carrying the description, an optional contact email, user-attached files,
 a diagnostics bundle and the engine and UI log tails, with every credential redacted, sent
-through `platform.http` so it works identically in both modes. There is no SDK and no
+through `platform.http`. There is no SDK and no
 automatic telemetry, and nothing is sent unless the user submits a report. `report.bundle` packs
 those same scrubbed files into a zip the UI downloads instead, for a user who would rather
 read the diagnostics or take them somewhere else.
 
 ## Logging
 
-One setup ([`engine/logs.py`](../printguard/engine/logs.py)) serves every runtime. Entry
-points call it once and records flow to stdout for `docker logs`, to a rotating file where
+One setup ([`engine/logs.py`](../printguard/engine/logs.py)) serves the container and the
+desktop app. Entry points call it once and records flow to stdout for `docker logs`, to a rotating file where
 no console exists, since the desktop app sets `LOG_FILE` in its data directory, and into a
 bounded in-memory tail.
 
@@ -180,13 +197,12 @@ traces and exception tracebacks.
 
 ## The programmatic surface
 
-Hub only. The MCP server, REST API and Home Assistant MQTT bridge are thin transports over
-the same commands the UI sends, so they add no logic of their own and cannot drift from the
-dashboard. Local mode never mounts them.
+The MCP server, REST API and Home Assistant MQTT bridge are thin transports over the same
+commands the UI sends, so they add no logic of their own and cannot drift from the dashboard.
 
 - [`engine.request()`](../printguard/engine/engine.py) turns the broadcast protocol into
   request and response by correlating a `req_id`, and `engine.snapshot()` encodes a camera's
-  freshest frame as JPEG. Both are mode-agnostic engine methods.
+  freshest frame as JPEG.
 - [`server/api.py`](../printguard/server/api.py) is a FastAPI sub-app at `/api/v1` whose
   routes delegate to those methods, each tagged with the scope it requires.
 - [`server/mcp.py`](../printguard/server/mcp.py) derives its tools from that app with
@@ -304,12 +320,15 @@ A monitor's watching state gates inference
 | Linked printer reports | Watched? | Why |
 |---|---|---|
 | No printer linked | Yes | Nothing to gate on |
+| No state yet | Yes | Cannot tell, so watch |
 | `printing` | Yes | The job needs eyes |
-| No state yet, or `unknown` | Yes | Cannot tell, so watch |
-| `offline`, unreachable | Yes | Losing the signal must not stop monitoring |
 | `idle`, `paused`, `error` | No, standby | Positively not printing |
+| `offline`, `unknown`, unreachable | Whatever it last reported | Contact lost mid-print keeps watching, and a printer switched off after a print stays in standby |
 
-Only a positive "not printing" stands inference down. The watchdog loop then keeps the
+Only a positive "not printing" stands inference down, and only a positive "printing" wakes
+it again ([`Printer.observe`](../printguard/engine/registry.py) keeps the last status the
+service could report). A command sent from PrintGuard, such as a pause or starting a print
+from the library, re-reads the printer and re-gates straight away. The watchdog loop then keeps the
 pipeline honest. A condition has to hold for the grace period before it is announced, so a
 brief outage passes unremarked, and it is then repeated every thirty minutes for as long as
 it lasts. Recovery is announced once health has held.
@@ -318,7 +337,7 @@ it lasts. Recovery is announced once health has held.
 stateDiagram-v2
     direction LR
     [*] --> Watching
-    Standby --> Watching: printing, or contact lost
+    Standby --> Watching: positively printing
     Watching --> Standby: positively not printing
     Watching --> Faulting: fault
     Faulting --> Watching: recovered inside the grace period
@@ -336,9 +355,9 @@ The four watchdog conditions are a watched camera going offline, a watched camer
 online but producing no fresh frames, since a frozen RTSP feed must not pass for monitoring,
 a watched camera that delivered frames for under 90% of the last ten minutes, and a linked
 printer whose state cannot be read, whether it is unreachable or reporting something the
-adapter does not recognise. The last one is why the monitor is watching, and it means a
-defect could not pause the print, so it is checked for every enabled monitor rather than
-only for watched ones.
+adapter does not recognise. The last one only counts while the monitor is watching, where it
+means a defect could not pause the print. A printer switched off after a print leaves its
+monitor in standby and warns about nothing.
 
 The grace period is `settings.fault_grace_s`, two minutes by default, and it is clamped to
 between thirty seconds and fifteen minutes so it can be lengthened for a camera that drops
@@ -360,10 +379,12 @@ Notifier delivery failures and inference crashes emit `error` events. There is n
 
 ```
 printguard/
-  engine/            shared engine - runs on CPython and Pyodide
+  engine/            the engine - every decision, and no I/O except through the Platform protocol
     registry.py      camera + printer registries (registered resources)
     monitors.py      monitor config: a camera + printer pairing and its thresholds
     printers.py      registered-printer (integration connection) validation
+    prints.py        print library records: formats, names and which printers a file may go to
+    gcode.py         what a sliced file says about itself: estimates, printer model, preview
     watchdog.py      defect response: streaks, printer actions, notifications, health
     updates.py       GitHub release check and changelog history
     reports.py       anonymous bug report and downloadable diagnostics bundle
@@ -374,30 +395,24 @@ printguard/
   server/            hub platform: FastAPI, bundled MediaMTX (child process), LiteRT / ONNX Runtime, PyAV
     api.py           REST API (/api/v1) over the engine protocol, scoped by token
     mcp.py           MCP server for agents, derived from the REST API
+    prints.py        print library uploads and downloads, shared by the dashboard and the REST API
     mqtt.py          Home Assistant MQTT bridge (device discovery + two-way control)
     plugins.py       plugin worker sandbox: QuickJS in WebAssembly, under wasmtime
     runtime/         the vendored quickjs-ng WASI build the sandbox runs
     mediamtx.py      MediaMTX control client and supervisor for the bundled binary
     bambu_camera.py  Bambu A1/P1 chamber-camera reader (proprietary port-6000 protocol)
     desktop.py       macOS and Windows tray app around the hub
-  browser/           local platform: Pyodide bridge to LiteRT.js and getUserMedia
-  pysrc.py           builds the engine source archive Pyodide unpacks
 web/                 React + Tailwind UI (presentation only)
   public/            plugin-sandbox.html, the opaque-origin frame a plugin panel runs in
+  site/              the landing page published to GitHub Pages
 plugins/             first-party plugins and the hash-pinned catalogue they are verified by
 models/              TFLite and ONNX encoders, normalisation metadata, class prototypes
 tests/               engine simulation, adapter contracts and the plugin sandbox (pytest)
 ```
 
-## The static demo
+## The website
 
-Local mode needs no backend at all, so the same `web/dist` build deploys to GitHub Pages.
-The release workflow zips the engine source with `printguard/pysrc.py`, copies `models/` into
-the bundle, and every asset is fetched base-relative. The mode picker probes `api/health`,
-and when no hub answers the hub card becomes a Docker self-host link.
-
-Because the demo is most people's first contact with PrintGuard, local mode opens a notice
-listing what a hub adds (`web/src/components/DemoDialog.tsx`). It shows once per browser,
-keyed on `pg.demo.seen` in `localStorage`, and the header's **local** chip reopens it. The
-list is copy, not capability data, since the dialogs already hide what a mode cannot do
-through each adapter's `browser_ok` flag.
+[oliverbravery.github.io/PrintGuard](https://oliverbravery.github.io/PrintGuard/) is the landing
+page in [`web/site`](../web/site), a second Vite root that shares the dashboard's stylesheet
+and takes its screenshots from `docs/assets`. The release workflow builds it with
+`npm run site:build` and publishes `web/dist-site` to GitHub Pages. The hub never serves it.
