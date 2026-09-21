@@ -12,5 +12,5 @@ web/dist-site/
 /build/
 /dist/
 web/test-results/
-web/playwright-report/
 plugins/*.zip
+.claude/settings.local.json
