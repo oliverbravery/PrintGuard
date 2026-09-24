@@ -9,6 +9,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.5.1] - 2026-09-24
 
+### Fixed
+
+- A camera looking at a still scene holds a steady score, where a grainy webcam used to jump
+  by 20 points or more from frame to frame. Frames are shrunk for the model the way it was
+  trained, which also stops noise pulling a failing print's score under the threshold.
+
 ## [2.5.0] - 2026-09-21
 
 ### Added

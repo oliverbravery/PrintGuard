@@ -19,6 +19,7 @@ dependencies = [
     "onnxruntime-windowsml>=1.24.1; sys_platform == 'win32'",
     "packaging>=24.0",
     "paho-mqtt>=2.1",
+    "pillow>=10",
     "pycentauri>=0.7.0",
     "pydantic-settings>=2.14.2",
     "pyprusalink>=3.0",
@@ -37,7 +38,6 @@ printguard-desktop = "printguard.server.desktop:main"
 [project.optional-dependencies]
 desktop = [
     "desktop-notifier>=6.1",
-    "pillow>=10",
     "platformdirs>=4",
     "pystray>=0.19.5",
     "pywebview>=6.2",

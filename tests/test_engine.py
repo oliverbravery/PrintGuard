@@ -818,6 +818,17 @@ def test_rotate_frame_and_transform_compose() -> None:
     assert cropped.shape == (64, 24, 3), "crop is applied on the rotated frame"
 
 
+def test_preprocess_averages_sensor_noise_on_a_still_scene() -> None:
+    assets = vision.Assets(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), prototypes={})
+    scene = np.full((720, 1280, 3), 128.0)
+    noisy = np.clip(scene + np.random.default_rng(0).normal(0, 8, scene.shape), 0, 255).astype(np.uint8)
+
+    residual = vision.preprocess(noisy, assets) - vision.preprocess(scene.astype(np.uint8), assets)
+
+    assert residual.std() < 0.04, "point sampling leaves about 0.09 of noise for the model to score"
+    assert vision.preprocess(vision.transform(noisy, rotation=90), assets).shape == (1, 3, 224, 224)
+
+
 async def test_camera_rotation_persists_and_rejects_off_axis() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[10.0]) as (engine, _):

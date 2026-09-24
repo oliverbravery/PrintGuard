@@ -1,4 +1,4 @@
-"""Pure-numpy preprocessing, prototype classification and defect scoring.
+"""Preprocessing, prototype classification and defect scoring.
 
 The model invocation itself is the platform's responsibility.
 """
@@ -10,10 +10,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from PIL import Image
 
 INPUT_SIZE = 224
 RESIZE_SHORTEST = 256
-GREYSCALE_WEIGHTS = np.asarray([0.2989, 0.5870, 0.1140], dtype=np.float32)
 
 
 @dataclass(frozen=True)
@@ -43,35 +43,27 @@ def assets_from_dicts(meta: dict[str, Any], protos: dict[str, list[float]]) -> A
     )
 
 
-def _resize(arr: np.ndarray, nw: int, nh: int) -> np.ndarray:
-    h, w = arr.shape[:2]
-    y_idx = np.linspace(0, h - 1, nh).astype(np.int64)
-    x_idx = np.linspace(0, w - 1, nw).astype(np.int64)
-    return arr[y_idx[:, None], x_idx[None, :]]
-
-
 def preprocess(rgb: np.ndarray, assets: Assets) -> np.ndarray:
     """Converts an RGB frame into the model's normalised NCHW input tensor.
 
-    Resizes the shortest edge to 256, centre-crops to 224, collapses to
-    luminance and replicates across three normalised channels.
+    Follows the torchvision transforms the model was trained with, resizing the
+    shortest edge to 256 through Pillow's bilinear filter, collapsing to luminance
+    and centre-cropping to 224. Sampling single pixels instead hands each frame's
+    sensor noise to the model, so a still scene's score jitters.
 
     Args:
-        rgb: HxWx3 uint8 or float frame in RGB channel order.
+        rgb: HxWx3 uint8 frame in RGB channel order.
         assets: Normalisation constants to apply.
 
     Returns:
         Float32 tensor of shape (1, 3, 224, 224).
     """
-    if rgb.ndim != 3 or rgb.shape[2] != 3:
-        raise ValueError(f"expected HxWx3 RGB frame, got {rgb.shape}")
-    arr = rgb.astype(np.float32) / 255.0
-    h, w = arr.shape[:2]
-    scale = RESIZE_SHORTEST / min(w, h)
-    arr = _resize(arr, max(INPUT_SIZE, round(w * scale)), max(INPUT_SIZE, round(h * scale)))
-    h, w = arr.shape[:2]
-    top, left = (h - INPUT_SIZE) // 2, (w - INPUT_SIZE) // 2
-    grey = arr[top : top + INPUT_SIZE, left : left + INPUT_SIZE] @ GREYSCALE_WEIGHTS
+    image = Image.fromarray(rgb)
+    scale = RESIZE_SHORTEST / min(image.size)
+    image = image.resize((round(image.width * scale), round(image.height * scale)), Image.Resampling.BILINEAR)
+    left, top = (image.width - INPUT_SIZE) // 2, (image.height - INPUT_SIZE) // 2
+    image = image.convert("L").crop((left, top, left + INPUT_SIZE, top + INPUT_SIZE))
+    grey = np.asarray(image, dtype=np.float32) / 255.0
     chans = np.stack([(grey - m) / s for m, s in zip(assets.mean, assets.std)], axis=0)
     return chans[np.newaxis, ...].astype(np.float32)
 
