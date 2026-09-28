@@ -2,10 +2,11 @@
 
 Capacity is never benchmarked up front: a smoothed estimate of observed
 inference latency continuously yields the sustainable total rate, which is
-water-filled across cameras so no camera is allocated beyond its native
-frame rate and spare capacity flows to cameras that can use it. Frames are
-grabbed at dispatch time and identified by sequence, so a frame is never
-inferred twice and results always describe the present.
+water-filled across cameras so no camera is allocated beyond its effective
+rate (its native frame rate, or a configured throttle when set) and spare
+capacity flows to cameras that can use it. Frames are grabbed at dispatch
+time and identified by sequence, so a frame is never inferred twice and
+results always describe the present.
 """
 
 from __future__ import annotations
@@ -76,10 +77,10 @@ class Scheduler:
     def allocate(self) -> None:
         """Water-fills capacity into per-camera target rates.
 
-        Cameras are visited in ascending order of native frame rate; each
-        takes the smaller of its native rate and an equal share of what
-        remains, releasing any surplus to faster cameras. Until the first
-        latency observation exists, targets fall back to native rates and
+        Cameras are visited in ascending order of effective rate; each takes
+        the smaller of its effective rate and an equal share of what remains,
+        releasing any surplus to faster cameras. Until the first latency
+        observation exists, targets fall back to effective rates and
         the worker semaphore alone provides backpressure.
         """
         cameras = self._registry.schedulable()
@@ -88,11 +89,11 @@ class Scheduler:
         remaining = self.capacity_fps()
         if remaining <= 0:
             for camera in cameras:
-                camera.target_fps = camera.max_fps
+                camera.target_fps = camera.effective_fps
             return
-        for index, camera in enumerate(sorted(cameras, key=lambda c: c.max_fps)):
+        for index, camera in enumerate(sorted(cameras, key=lambda c: c.effective_fps)):
             share = remaining / (len(cameras) - index)
-            camera.target_fps = min(camera.max_fps, share)
+            camera.target_fps = min(camera.effective_fps, share)
             remaining -= camera.target_fps
 
     def cancel_camera(self, camera: Camera) -> None:
@@ -111,7 +112,7 @@ class Scheduler:
                     camera = min(due, key=lambda c: c.next_due)
                     await self._slots.acquire()
                     camera.inferring = True
-                    camera.next_due = time.monotonic() + 1.0 / max(0.1, camera.target_fps or camera.max_fps)
+                    camera.next_due = time.monotonic() + 1.0 / max(0.1, camera.target_fps or camera.effective_fps)
                     task = asyncio.create_task(self._job(camera))
                     self._jobs.add(task)
                     task.add_done_callback(self._jobs.discard)

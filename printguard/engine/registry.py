@@ -69,6 +69,9 @@ class Camera:
             into the container. Such cameras are managed by the deployment: they
             cannot be removed on their own and go when it stops declaring them.
         max_fps: Native frame rate measured when the camera was registered.
+        detect_fps: Cap on the inference rate in inferences per second, zero
+            meaning uncapped. Throttles detection well below the native rate
+            to cut compute load where a slower cadence is enough.
         target_fps: Inference rate currently allocated by the scheduler.
         achieved_fps: Smoothed rate of completed inferences.
         inferring: Whether an inference on this camera is in flight.
@@ -80,6 +83,7 @@ class Camera:
     name: str
     source: dict[str, Any]
     max_fps: float
+    detect_fps: float = CAMERA_DEFAULTS["detect_fps"]
     printer_id: str | None = None
     declared: bool = False
     brightness: float = CAMERA_DEFAULTS["brightness"]
@@ -96,6 +100,11 @@ class Camera:
     last_done: float = 0.0
     last_result: dict[str, Any] | None = None
     frame_source: FrameSource | None = field(default=None, repr=False)
+
+    @property
+    def effective_fps(self) -> float:
+        """The inference rate cap: the native rate, or the configured throttle when set."""
+        return min(self.max_fps, self.detect_fps) if self.detect_fps > 0 else self.max_fps
 
     @property
     def online(self) -> bool:
@@ -125,6 +134,7 @@ class Camera:
             "printer_id": self.printer_id,
             "declared": self.declared,
             "max_fps": round(self.max_fps, 2),
+            "detect_fps": round(self.detect_fps, 2),
             "target_fps": round(self.target_fps, 2),
             "achieved_fps": round(self.achieved_fps, 2),
             "inferring": self.inferring,
@@ -148,6 +158,7 @@ class Camera:
             "printer_id": self.printer_id,
             "declared": self.declared,
             "max_fps": self.max_fps,
+            "detect_fps": self.detect_fps,
             "brightness": self.brightness,
             "contrast": self.contrast,
             "sharpness": self.sharpness,
