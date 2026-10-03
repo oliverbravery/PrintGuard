@@ -17,7 +17,7 @@ const series = (fn: (i: number) => number, n = 48): ScorePoint[] =>
   Array.from({ length: n }, (_, i) => ({ ts: NOW - (n - i) * 1500, score: Math.min(1, Math.max(0, fn(i))) }));
 
 const camera = (id: string, name: string, source: Camera["source"], inferring = false): Camera => ({
-  id, name, source, printer_id: null, max_fps: 30, brightness: 1, contrast: 1, sharpness: 0,
+  id, name, source, printer_id: null, max_fps: 30, detect_fps: 60, brightness: 1, contrast: 1, sharpness: 0,
   crop: null, rotation: 0, target_fps: 30, achieved_fps: 29.8, inferring, in_use: true, online: true, last_result: null,
 });
 

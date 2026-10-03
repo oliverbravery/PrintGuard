@@ -21,6 +21,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const owner = camera.printer_id ? engine?.printers.find((p) => p.id === camera.printer_id) : null;
   const managed = Boolean(owner) || Boolean(camera.declared);
+  const detectFpsCeiling = Math.min(60, Math.ceil(camera.max_fps));
 
   useEffect(() => {
     if (focus) {
@@ -89,6 +90,16 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             max={2}
             step={0.1}
             onChange={(v) => updateCamera(camera.id, { sharpness: v })}
+          />
+          <Slider
+            label="Detection rate"
+            value={Math.min(camera.detect_fps, detectFpsCeiling)}
+            min={0.5}
+            max={detectFpsCeiling}
+            step={0.5}
+            format={(v) => `${v} fps`}
+            hint="Lower it to lighten the load on the hub. A defect then takes longer to confirm."
+            onChange={(v) => updateCamera(camera.id, { detect_fps: v })}
           />
           <div className="space-y-1.5">
             <span className="label">Rotation</span>

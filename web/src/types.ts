@@ -27,6 +27,7 @@ export interface Camera {
   printer_id?: string | null;
   declared?: boolean;
   max_fps: number;
+  detect_fps: number;
   brightness: number;
   contrast: number;
   sharpness: number;

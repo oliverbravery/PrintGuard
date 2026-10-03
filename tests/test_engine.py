@@ -85,6 +85,32 @@ async def test_fair_allocation_and_dedup() -> None:
     assert abs(fast_rate - mid_rate) < 4.0, f"fast/mid should share fairly: {fast_rate} vs {mid_rate}"
 
 
+async def test_detection_rate_cap() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, _):
+        camera = engine.cameras.values()[0]
+        seen: list[float] = []
+        original = engine.scheduler._on_result
+
+        async def spy(cam, frame, result):
+            seen.append(frame.seq)
+            await original(cam, frame, result)
+
+        engine.scheduler._on_result = spy
+        await asyncio.sleep(0.5)
+        uncapped = len(seen)
+        await engine.handle({"cmd": "camera.update", "id": camera.id, "patch": {"detect_fps": 2.0}})
+        del seen[:]
+        await asyncio.sleep(3.0)
+        state = engine.state_event()["cameras"][0]
+
+    assert uncapped > 4, f"an uncapped camera should run near its native rate, got {uncapped} in 0.5s"
+    assert state["detect_fps"] == 2.0
+    assert state["target_fps"] == 2.0, f"a capped camera should be allocated its cap, got {state['target_fps']}"
+    rate = len(seen) / 3.0
+    assert 1.0 <= rate <= 3.0, f"a capped camera should run near 2 fps, got {rate}"
+
+
 async def test_defect_pipeline() -> None:
     platform = FakePlatform(infer_s=0.02, failing=True)
     async with running_engine(platform, camera_fps=[10.0]) as (engine, events):

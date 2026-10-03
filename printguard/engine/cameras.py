@@ -55,9 +55,10 @@ CAMERA_DEFAULTS: dict[str, Any] = {
     "sharpness": 0.0,
     "crop": None,
     "rotation": 0,
+    "detect_fps": 60.0,
 }
 
-_CLAMP = {"brightness": (0.25, 2.0), "contrast": (0.25, 2.0), "sharpness": (0.0, 2.0)}
+_CLAMP = {"brightness": (0.25, 2.0), "contrast": (0.25, 2.0), "sharpness": (0.0, 2.0), "detect_fps": (0.1, 60.0)}
 _ROTATIONS = (0, 90, 180, 270)
 
 
@@ -110,4 +111,5 @@ def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] 
     record["sharpness"] = _clamp("sharpness", float(record["sharpness"]))
     record["crop"] = _sanitise_crop(record.get("crop"))
     record["rotation"] = _sanitise_rotation(record.get("rotation"))
+    record["detect_fps"] = _clamp("detect_fps", float(record["detect_fps"]))
     return record

@@ -119,6 +119,7 @@ class CameraPatch(BaseModel):
     sharpness: float | None = None
     crop: dict[str, float] | None = None
     rotation: int | None = None
+    detect_fps: float | None = None
 
 
 class ProviderTest(BaseModel):
@@ -180,6 +181,7 @@ class CameraOut(_ReadModel):
     source: dict[str, Any] | None = None
     printer_id: str | None = None
     max_fps: float | None = None
+    detect_fps: float | None = None
     target_fps: float | None = None
     achieved_fps: float | None = None
     inferring: bool | None = None

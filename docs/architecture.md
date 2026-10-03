@@ -262,7 +262,8 @@ is fully dynamic:
    extrapolating past a ceiling the host cannot reach. See
    [model runtimes](hardware.md#model-runtimes).
 2. That capacity is water-filled across in-use cameras with max-min fairness, so no camera is
-   allocated beyond its native fps and surplus flows to cameras that can use it.
+   allocated beyond its native fps, or beyond the detection rate its user capped it at, and
+   surplus flows to cameras that can use it.
 3. A free worker takes the most overdue camera and grabs its freshest frame at dispatch
    time. Frames carry a sequence identity, so the same frame is never inferred twice and
    results always describe the present, not a backlog.
@@ -271,7 +272,7 @@ is fully dynamic:
 flowchart LR
     lat["observed latency<br/>smoothed"] --> cap["sustainable total fps<br/>workers / latency"]
     cap --> fill["water-fill across cameras<br/>max-min fairness"]
-    native["each camera's native fps"] --> fill
+    native["each camera's native fps<br/>held to its detection rate cap"] --> fill
     fill --> target["per-camera target fps"]
     target --> pick["free worker takes the<br/>most overdue camera"]
     pick --> fresh["grab its freshest frame<br/>never the same frame twice"]

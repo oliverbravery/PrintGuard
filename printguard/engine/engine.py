@@ -188,6 +188,7 @@ class Engine:
                 printer_id=record.get("printer_id"),
                 declared=record.get("declared", False),
                 max_fps=record["max_fps"],
+                detect_fps=settings["detect_fps"],
                 brightness=settings["brightness"],
                 contrast=settings["contrast"],
                 sharpness=settings["sharpness"],
@@ -567,6 +568,7 @@ class Engine:
                 "sharpness": camera.sharpness,
                 "crop": camera.crop,
                 "rotation": camera.rotation,
+                "detect_fps": camera.detect_fps,
             },
         )
         if "name" in message.get("patch", {}):
@@ -576,6 +578,7 @@ class Engine:
         camera.sharpness = settings["sharpness"]
         camera.crop = settings["crop"]
         camera.rotation = settings["rotation"]
+        camera.detect_fps = settings["detect_fps"]
 
     async def _cmd_camera_remove(self, message: dict[str, Any]) -> None:
         camera = self.cameras.get(message["id"])
