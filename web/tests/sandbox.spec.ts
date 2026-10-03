@@ -192,7 +192,7 @@ async function dashboardWithPlugin(
           cameras: [
             {
               id: "c1", name: "Workshop", source: { kind: "rtsp", url: "rtsp://camera" }, printer_id: null,
-              max_fps: 30, brightness: 1, contrast: 1, sharpness: 0, crop: null, rotation: 0,
+              max_fps: 30, detect_fps: 60, brightness: 1, contrast: 1, sharpness: 0, crop: null, rotation: 0,
               target_fps: 30, achieved_fps: 29.8, inferring: false, in_use: true, online: true, standby: false, last_result: null,
             },
           ],

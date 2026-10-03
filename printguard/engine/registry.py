@@ -69,9 +69,8 @@ class Camera:
             into the container. Such cameras are managed by the deployment: they
             cannot be removed on their own and go when it stops declaring them.
         max_fps: Native frame rate measured when the camera was registered.
-        detect_fps: Cap on the inference rate in inferences per second, zero
-            meaning uncapped. Throttles detection well below the native rate
-            to cut compute load where a slower cadence is enough.
+        detect_fps: Most inferences a second the user wants spent on this
+            camera, to hold down the load on a shared host.
         target_fps: Inference rate currently allocated by the scheduler.
         achieved_fps: Smoothed rate of completed inferences.
         inferring: Whether an inference on this camera is in flight.
@@ -103,8 +102,8 @@ class Camera:
 
     @property
     def effective_fps(self) -> float:
-        """The inference rate cap: the native rate, or the configured throttle when set."""
-        return min(self.max_fps, self.detect_fps) if self.detect_fps > 0 else self.max_fps
+        """The most inferences a second worth allocating: the native rate, held to the user's cap."""
+        return min(self.max_fps, self.detect_fps)
 
     @property
     def online(self) -> bool:

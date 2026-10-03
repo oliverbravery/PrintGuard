@@ -21,6 +21,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const owner = camera.printer_id ? engine?.printers.find((p) => p.id === camera.printer_id) : null;
   const managed = Boolean(owner) || Boolean(camera.declared);
+  const detectFpsCeiling = Math.min(60, Math.ceil(camera.max_fps));
 
   useEffect(() => {
     if (focus) {
@@ -90,22 +91,16 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             step={0.1}
             onChange={(v) => updateCamera(camera.id, { sharpness: v })}
           />
-          <div className="space-y-1.5">
-            <span className="label">Detection rate</span>
-            <div className="flex items-center gap-2">
-              <input
-                className="field flex-1"
-                type="number"
-                min={0}
-                max={60}
-                step={0.5}
-                value={camera.detect_fps ?? 0}
-                onChange={(e) => updateCamera(camera.id, { detect_fps: Number(e.target.value) || 0 })}
-              />
-              <span className="mono text-[0.72rem] text-text-1 shrink-0">fps</span>
-            </div>
-            <p className="text-[0.7rem] leading-snug text-text-2">Cap on inferences per second. 0 runs at the camera's full frame rate.</p>
-          </div>
+          <Slider
+            label="Detection rate"
+            value={Math.min(camera.detect_fps, detectFpsCeiling)}
+            min={0.5}
+            max={detectFpsCeiling}
+            step={0.5}
+            format={(v) => `${v} fps`}
+            hint="Lower it to lighten the load on the hub. A defect then takes longer to confirm."
+            onChange={(v) => updateCamera(camera.id, { detect_fps: v })}
+          />
           <div className="space-y-1.5">
             <span className="label">Rotation</span>
             <div className="flex gap-1.5">

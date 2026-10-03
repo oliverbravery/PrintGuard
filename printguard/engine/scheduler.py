@@ -3,7 +3,7 @@
 Capacity is never benchmarked up front: a smoothed estimate of observed
 inference latency continuously yields the sustainable total rate, which is
 water-filled across cameras so no camera is allocated beyond its effective
-rate (its native frame rate, or a configured throttle when set) and spare
+rate (its native frame rate, held to the cap its user set) and spare
 capacity flows to cameras that can use it. Frames are grabbed at dispatch
 time and identified by sequence, so a frame is never inferred twice and
 results always describe the present.

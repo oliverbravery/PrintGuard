@@ -252,6 +252,7 @@ The camera object, from `GET /cameras` and `GET /cameras/{id}`:
   "printer_id": "prn_…" | null,
   "declared": false,                                        // passed in by the deployment
   "max_fps": 5.0, "target_fps": 2.0, "achieved_fps": 1.9,   // rate
+  "detect_fps": 60.0,                                       // cap on target_fps, set by the user
   "inferring": true, "in_use": true, "online": true,        // health
   "last_result": {                                          // latest score (per FRAME)
     "prediction": "success",                                //   "success" | "failure" | "unknown"

@@ -55,10 +55,10 @@ CAMERA_DEFAULTS: dict[str, Any] = {
     "sharpness": 0.0,
     "crop": None,
     "rotation": 0,
-    "detect_fps": 0.0,
+    "detect_fps": 60.0,
 }
 
-_CLAMP = {"brightness": (0.25, 2.0), "contrast": (0.25, 2.0), "sharpness": (0.0, 2.0)}
+_CLAMP = {"brightness": (0.25, 2.0), "contrast": (0.25, 2.0), "sharpness": (0.0, 2.0), "detect_fps": (0.1, 60.0)}
 _ROTATIONS = (0, 90, 180, 270)
 
 
@@ -92,14 +92,6 @@ def _sanitise_rotation(raw: Any) -> int:
     return rotation if rotation in _ROTATIONS else 0
 
 
-def _sanitise_detect_fps(raw: Any) -> float:
-    """A detection rate cap in inferences per second, zero meaning uncapped."""
-    try:
-        return max(0.0, min(60.0, float(raw)))
-    except (TypeError, ValueError):
-        return 0.0
-
-
 def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] | None = None) -> dict[str, Any]:
     """Merges a camera patch over defaults or an existing record.
 
@@ -119,5 +111,5 @@ def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] 
     record["sharpness"] = _clamp("sharpness", float(record["sharpness"]))
     record["crop"] = _sanitise_crop(record.get("crop"))
     record["rotation"] = _sanitise_rotation(record.get("rotation"))
-    record["detect_fps"] = _sanitise_detect_fps(record.get("detect_fps"))
+    record["detect_fps"] = _clamp("detect_fps", float(record["detect_fps"]))
     return record

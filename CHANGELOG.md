@@ -9,6 +9,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ## [2.5.1] - 2026-09-24
 
+### Added
+
+- A detection rate for each camera, under **Cameras**. Lower it to cut the load PrintGuard puts
+  on a shared host. A defect takes longer to confirm at a lower rate. Thanks to @eikaramba.
+
 ### Fixed
 
 - A camera looking at a still scene holds a steady score, where a grainy webcam used to jump
