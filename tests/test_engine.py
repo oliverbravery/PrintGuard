@@ -241,6 +241,31 @@ async def test_lost_contact_keeps_the_last_reported_status(monkeypatch) -> None:
         assert printer_warnings(), "contact lost mid-print must warn"
 
 
+async def test_a_restart_remembers_the_printer_was_idle(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.05)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    platform = FakePlatform(infer_s=0.02)
+    platform.device_status = "Operational"
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "settings.update", "patch": {"fault_grace_s": 0.1}})
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await asyncio.sleep(0.5)
+
+    platform.device_status = "Offline"
+    restarted = Engine(platform)
+    events: list[dict] = []
+    await restarted.start()
+    restarted.add_sink(events.append)
+    await asyncio.sleep(0.5)
+    watching = restarted.state_event()["monitors"][0]["watching"]
+    await restarted.stop()
+    assert not watching, "a hub restarted while an idle printer is switched off must stay in standby"
+    assert not [e for e in events if e.get("event") == "warning"], "a hub restarted while an idle printer is switched off must not warn"
+
+
 async def test_a_printer_command_regates_without_waiting_for_the_poll(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
     platform = FakePlatform(infer_s=0.02)

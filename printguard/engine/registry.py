@@ -177,7 +177,7 @@ class Printer:
         config: Connection values matching the adapter's schema.
         device_state: Last normalised state polled from the service, or None.
         reported_status: The last status the service could actually report,
-            kept through an outage, or None before the first.
+            kept through an outage and a restart, or None before the first.
     """
 
     id: str
@@ -220,7 +220,7 @@ class Printer:
 
     def persisted(self) -> dict[str, Any]:
         """Serialises only what is needed to restore the printer on boot."""
-        return {"id": self.id, "name": self.name, "provider": self.provider, "config": self.config}
+        return {"id": self.id, "name": self.name, "provider": self.provider, "config": self.config, "reported_status": self.reported_status}
 
 
 @dataclass
