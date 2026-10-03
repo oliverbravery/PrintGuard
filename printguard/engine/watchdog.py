@@ -92,9 +92,14 @@ class Watchdog:
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def poll_devices(self) -> None:
-        """Periodically refreshes registered printer states."""
+        """Periodically refreshes registered printer states.
+
+        A change in the status a printer last reported is saved, so a hub
+        restarted while the printer is switched off still knows it was idle.
+        """
         while True:
             changed = False
+            reported = [printer.reported_status for printer in self._engine.printers.values()]
             for printer in self._engine.printers.values():
                 adapter = INTEGRATIONS.get(printer.provider)
                 if not adapter:
@@ -109,6 +114,8 @@ class Watchdog:
                     self._engine.emit({"event": "device", "printer_id": printer.id, **snapshot})
             if changed:
                 self.follow_printers()
+            if reported != [printer.reported_status for printer in self._engine.printers.values()]:
+                self._engine.save()
             await asyncio.sleep(DEVICE_POLL_S)
 
     def follow_printers(self) -> None:

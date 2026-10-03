@@ -327,7 +327,7 @@ A monitor's watching state gates inference
 
 Only a positive "not printing" stands inference down, and only a positive "printing" wakes
 it again ([`Printer.observe`](../printguard/engine/registry.py) keeps the last status the
-service could report). A command sent from PrintGuard, such as a pause or starting a print
+service could report, and it is saved with the printer so a restart keeps it too). A command sent from PrintGuard, such as a pause or starting a print
 from the library, re-reads the printer and re-gates straight away. The watchdog loop then keeps the
 pipeline honest. A condition has to hold for the grace period before it is announced, so a
 brief outage passes unremarked, and it is then repeated every thirty minutes for as long as

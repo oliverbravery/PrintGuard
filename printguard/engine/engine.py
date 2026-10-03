@@ -169,7 +169,7 @@ class Engine:
                 printer = sanitise_printer(record["id"], record)
             except (KeyError, ValueError):
                 continue
-            self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=printer["config"]))
+            self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=printer["config"], reported_status=record.get("reported_status")))
         for record in persisted.get("monitors", []):
             self.monitors[record["id"]] = sanitise_monitor(record["id"], record)
         for record in persisted.get("prints", []):
@@ -388,7 +388,8 @@ class Engine:
         result = await self.platform.infer(rgb)
         return {**result, "defect_score": vision.defect_score(result)}
 
-    def _save(self) -> None:
+    def save(self) -> None:
+        """Writes the registries and settings to the platform's state store."""
         self.platform.save_state(
             {
                 "cameras": [c.persisted() for c in self.cameras.values()],
@@ -403,7 +404,7 @@ class Engine:
 
     def _sync(self, req_id: Any = None) -> None:
         self.cameras.sync_in_use(self.monitors, self.printers)
-        self._save()
+        self.save()
         event = self.state_event()
         if req_id is not None:
             event["req_id"] = req_id

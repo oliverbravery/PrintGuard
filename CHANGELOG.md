@@ -14,6 +14,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A camera looking at a still scene holds a steady score, where a grainy webcam used to jump
   by 20 points or more from frame to frame. Frames are shrunk for the model the way it was
   trained, which also stops noise pulling a failing print's score under the threshold.
+- Restarting PrintGuard while an idle printer is switched off no longer warns that the printer
+  and its camera are offline. The printer's last status is kept across restarts.
 
 ## [2.5.0] - 2026-09-21
 

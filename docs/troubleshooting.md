@@ -48,6 +48,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | Symptom | Cause | Fix |
 |---|---|---|
 | Test fails with *all connection attempts failed* | The hub is in a container, so `localhost` is the container | Use `http://host.docker.internal:5000`, and make the service listen on `0.0.0.0` on Linux hosts. [Details](printers.md#networking-caveats) |
+| Warnings that the printer and camera are offline while the printer is switched off | Before 2.5.1 a restart forgot the printer had been idle, so it watched and warned until the printer came back | Update to 2.5.1. A printer added while switched off still warns, since it has never reported a status |
 | Printer shows `offline` but is printing | The hub cannot reach the service | Monitoring keeps running by design. Fix reachability, then the state clears itself |
 | Pause or cancel did nothing | The service rejected the action | The failure is in the alert, the dashboard error feed and the notification. Check the service's own logs |
 | **Print** is greyed out in the library | The printer is not idle, or the file is tagged for other printers | Wait for the job to finish or cancel it, and tag this printer from the file's row. [Sending prints](printers.md#sending-prints) |
