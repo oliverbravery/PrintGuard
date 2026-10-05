@@ -37,8 +37,8 @@ channels.
 
 ## Register a printer
 
-Open the printer registry, choose the service, fill in the form and **Test** it before
-saving. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
+Open the printer registry, choose the service, fill in the form and press **Test connection**
+before saving. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
 print or cancels it.
 
 Linked printers report job name, progress, temperatures and state on every monitor that uses
@@ -54,7 +54,7 @@ watched and warns you. See [failing safely](architecture.md#failing-safely).
 |---|---|---|
 | [OctoPrint](https://octoprint.org) | API key | Yes, its webcam stream |
 | [Klipper via Moonraker](https://moonraker.readthedocs.io) | Optional API key | Yes, its configured webcams |
-| [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code, or Moonraker API key | Centauri chamber camera |
+| [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code, or Moonraker API key | Centauri chamber camera, or Moonraker's configured webcams |
 | [Prusa via PrusaLink](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest, user `maker` | No local stream |
 | [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | Access code and serial | Chamber camera |
 
@@ -88,7 +88,7 @@ local protocol the printer speaks and registers its chamber camera automatically
 
 **Neptune/OrangeStorm** covers the Neptune 4 Pro, Plus and Max, the OrangeStorm Giga, and
 any other Elegoo printer running Moonraker. PrintGuard uses the stock Moonraker service on
-port `7125` and accepts an API key if you set one.
+port `7125`, accepts an API key if you set one and registers the webcams Moonraker lists.
 
 All state, camera and control traffic stays between PrintGuard and the printer on your LAN.
 Elegoo's cloud is never involved.
@@ -116,12 +116,14 @@ if the printer has a camera, add it separately as a [stream URL](cameras.md#stre
 The print library holds sliced files on the hub. Open **Prints** in the header and drop files in
 or browse for them.
 
-![The print library: three sliced files with their slicer, print time and filament, each tagged for a printer](assets/prints.png)
+![The print library: three sliced files with their slicer, print time and filament, with the printers each is tagged for](assets/prints.png)
 
 Each one opens in a panel that draws its toolpath on your device before
-anything is uploaded, where you can name it, tag it and correct its first layer nozzle and bed
-temperatures. Every other print temperature the slicer set moves by the same amount, while the
-temperatures a start gcode probes or wipes at stay put. Binary gcode keeps the temperatures it
+the file is uploaded, where you can name it, tag it and correct its first layer nozzle and bed
+temperatures. The panel sends the start and end of the file to the hub to read its print time,
+filament and temperatures. Every other print temperature the slicer set moves by the same amount, while the
+temperatures a start gcode probes or wipes at stay put. A file whose slicer lists no print
+temperatures has every one of its set-points moved. Binary gcode keeps the temperatures it
 was sliced with.
 
 Each file keeps the preview, estimated time, filament and printer model its slicer wrote into it.
@@ -131,7 +133,8 @@ instead. Open a file to orbit its toolpath in 3D, layer by layer.
 
 ![A sliced vase in the 3D viewer with a layer slider, its print time, filament and temperatures](assets/print-viewer.png)
 
-Tag a file with the printers it was sliced for and it can only start on one of those. A file
+Tag a file with the printers it was sliced for and it can only start on one of those. A tag is
+only offered for a printer whose service takes the format. A file
 with no tags can go to any printer whose service takes the format. Either way the printer has to
 report idle at the moment you press **Print**, so nothing lands on top of a running job.
 
@@ -143,9 +146,12 @@ report idle at the moment you press **Print**, so nothing lands on top of a runn
 | Prusa via PrusaLink | `.gcode`, `.bgcode` | Put onto the USB stick, or local storage on a Raspberry Pi, and printed after upload |
 | Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the SD card over FTPS, then the first plate is started over MQTT |
 
-A file is sent under its library name, so rename it first if the printer's own file list
-matters to you. Binary gcode has no 3D view and no drawn preview, since its toolpath is
-compressed, so it shows the preview PrusaSlicer embedded and nothing else.
+A file is sent under its library name, cut to 60 characters with anything outside plain letters,
+digits, dots and dashes turned into `_`. Rename it first if the printer's own file list matters
+to you. PrusaLink replaces a file of the same name already on the printer. A file can be up to
+512 MB. Binary gcode has no 3D view and no drawn preview, since its toolpath is
+compressed, so it shows the preview PrusaSlicer embedded and nothing else. Its print time and filament can
+be blank too, where PrusaSlicer compressed them.
 
 A Bambu print uses the settings sliced into the file, with bed levelling on, flow and vibration
 calibration off, and filament from the external spool or the first AMS slot. Starting a 3mf
@@ -159,13 +165,13 @@ Files live in the data directory under `prints/`, so they survive a restart and 
 
 A linked printer's nozzle and bed temperatures sit on its monitor's tile and in the monitor's
 panel, where a running print also gets a progress bar and the time left. The panel takes a
-target for either heater, applied on Enter, and a row of preheat presets that set both at once.
+target for either heater, applied on Enter or when you leave the field, and a row of preheat presets that set both at once.
 **Edit** beside them changes the presets, which every printer shares, and **Off** turns every
 heater off.
 
 | Service | Reads temperatures | Sets targets |
 |---|---|---|
-| OctoPrint | Yes | Yes, through its tool and bed endpoints |
+| OctoPrint | Yes | Yes, through its tool and bed endpoints, for the first nozzle |
 | Klipper via Moonraker | Yes | Yes, with `SET_HEATER_TEMPERATURE` |
 | Elegoo | Yes | Yes, on both families |
 | Prusa via PrusaLink | Yes | No, PrusaLink has no endpoint for it |

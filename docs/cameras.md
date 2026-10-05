@@ -33,12 +33,13 @@ If a registered printer exposes a webcam, PrintGuard registers it as a camera fo
 stream URL to copy. **Refresh** picks up a camera attached after the printer was registered.
 
 These cameras belong to their printer, so they can't be removed on their own and they're dropped
-when the printer is. [Supported print services](printers.md#supported-print-services) lists which
+when the printer is. One the printer stops exposing stays registered until then. [Supported print services](printers.md#supported-print-services) lists which
 services expose one.
 
 ## Stream URLs
 
-Paste the URL and PrintGuard pulls the stream through the MediaMTX server bundled into it.
+Paste the URL and PrintGuard pulls RTSP, RTMP and WHEP streams through the MediaMTX server
+bundled into it. It reads an MJPEG stream itself and re-encodes it for the dashboard.
 
 | Scheme | Typical source |
 |---|---|
@@ -51,8 +52,10 @@ Cameras with their own WebRTC signalling, including camera-streamer and Creality
 WHEP endpoint. Use their MJPEG URL, or put [go2rtc](https://github.com/AlexxIT/go2rtc) in front.
 
 A camera that pushes a stream instead of serving one can publish to the hub on port `8554` for
-RTSP or `1935` for RTMP. Add what it publishes as a stream URL. Those two ports only need
-publishing for this, as [deployment](deployment.md#what-listens-where) explains.
+RTSP or `1935` for RTMP. The dashboard doesn't list pushed streams, so add one through the
+[REST API](api.md#rest-api), where `POST /cameras/discover` names it. Those two ports only need
+publishing for this, as [deployment](deployment.md#what-listens-where) explains, and the
+compose file publishes only `8554`.
 
 The URL has to be one the hub can reach. In Docker, `localhost` is the container, covered under
 [networking](printers.md#networking-caveats).
@@ -78,13 +81,14 @@ Docker can't hand a running container a camera plugged in after it started, so a
 means another `devices:` entry and `docker compose up -d`.
 
 To leave passed-in cameras unregistered and add them by hand, add `PRINTGUARD_CAMERAS=off` to
-the environment.
+the environment. Cameras it had already registered go at the next start.
 
 ## This browser
 
 A phone or an old laptop can be the camera. Open the dashboard on it, add **This browser** and
 leave the page open. It publishes to the hub over a WebSocket and reconnects after a hub
-restart. The desktop app's own window doesn't offer it, since **This machine** covers that
+restart, on that browser only. A browser that can only record VP8 can't be viewed from other
+devices. The desktop app's own window doesn't offer it, since **This machine** covers that
 computer's cameras.
 
 > [!IMPORTANT]
@@ -97,5 +101,6 @@ Rename it from **Edit**, then set it up for the model. Rotation, the square crop
 contrast, sharpness and the detection rate are all in
 [tuning the camera](monitoring.md#tuning-the-camera). Then bind it to a monitor.
 
-A camera whose printer is idle and whose feed nobody is viewing goes into standby and stops
-being decoded. It resumes when the print starts or someone opens the feed.
+A camera that no monitor is watching and nobody is viewing goes into standby after about ten
+seconds and stops being decoded. That covers an idle printer, a monitor you switched off and a
+camera with no monitor. It resumes when a print starts or someone opens the feed.
