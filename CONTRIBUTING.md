@@ -63,7 +63,7 @@ counts what is about to expire and the rule is what deletes it:
 ```bash
 cd feedback-worker
 npx wrangler r2 bucket create printguard-feedback --jurisdiction eu
-npx wrangler r2 bucket lifecycle add printguard-feedback expire-uncollected --expire-days 30 --jurisdiction eu
+npx wrangler r2 bucket lifecycle add printguard-feedback expire-after-30-days --expire-days 30 --jurisdiction eu
 npx wrangler r2 bucket lifecycle list printguard-feedback --jurisdiction eu
 npx wrangler deploy --secrets-file <file>   # TOKEN_SECRET, REMINDER_TO and REMINDER_FROM, on the first deploy
 ```
