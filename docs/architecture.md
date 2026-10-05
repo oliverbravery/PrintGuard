@@ -94,7 +94,7 @@ Commands, UI to engine:
 | Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.heat`, `printer.test`, `printer.cameras.refresh` |
 | Prints | `print.add`, `print.update`, `print.remove`, `print.start` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
-| History | `history.get`, `snapshot.get`, `review.get` |
+| History | `history.get`, `snapshot.get`, `review.get`, `review.send`, `review.retry`, `review.dismiss` |
 | Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.http`, `plugin.effect` |
 | System | `settings.update`, `notify.test`, `token.create`, `token.remove`, `update.check`, `update.releases`, `report.send`, `report.bundle` |
 
@@ -113,6 +113,7 @@ Events, engine to UI:
 | `print_started` | A file from the library has been sent to a printer and started |
 | `discovered`, `printer_test`, `notify_test` | Command responses |
 | `history`, `snapshot`, `review` | Risk history buckets, a kept frame's JPEG, and the frames kept from one print |
+| `review_sent` | How far a reviewed print's upload got, with the refusal code and retry time when it is queued |
 | `releases` | The changelog history the update dialog browses |
 | `token_created` | A new API token's secret, delivered to the requesting transport and never written to the log |
 | `report_sent`, `report_bundle` | Bug report outcome, and the downloadable diagnostics zip |
@@ -166,6 +167,27 @@ printer closes its print after a day.
 
 The hub holds the last 20 prints or 200 MB and drops the oldest finished print first. The
 `state` snapshot carries only a count per print, and `review.get` returns one print's frames.
+
+A finished print can be [sent as training data](feedback.md). `review.send` records which
+frames show a failure and which were left out, and
+[`engine/feedback.py`](../printguard/engine/feedback.py) uploads the rest through
+`platform.http` to the Worker in [`feedback-worker/`](../feedback-worker), one frame per
+request. The upload runs as a background task and its progress rides in the `state` snapshot.
+It is deliberately absent from the REST API, the MCP server and the plugin permission table,
+so frames only leave the hub when a person presses Send in the dashboard.
+
+| `status` | Meaning |
+|---|---|
+| `running` | The print is still being watched |
+| `ready` | It has ended and waits to be reviewed |
+| `dismissed` | Nobody wants to review it, or `settings.feedback` is `off` |
+| `queued` | It was reviewed and frames are uploading, or wait on a refusal's `retry_at` |
+| `sent` | Every chosen frame is in the inbox |
+
+The Worker is the only writer to a private R2 bucket and holds every limit in one Durable
+Object, so the hub only reports what it was told. A refused print keeps its frames and the
+engine's ticker sends the rest once `retry_at` passes. The hub's token is issued by the Worker
+and persisted, and the `state` snapshot carries only its public half as `feedback_hub`.
 
 A deployment can declare video devices the same way. The Docker image sets
 `PRINTGUARD_CAMERAS=auto`, so every capture device passed into the container comes back from
@@ -401,6 +423,7 @@ printguard/
     printers.py      registered-printer (integration connection) validation
     prints.py        print library records: formats, names and which printers a file may go to
     reviews.py       the frames kept from each watched print, and which ones are worth keeping
+    feedback.py      uploads a reviewed print's frames to the training inbox
     gcode.py         what a sliced file says about itself: estimates, printer model, preview
     watchdog.py      defect response: streaks, printer actions, notifications, health
     updates.py       GitHub release check and changelog history
@@ -423,6 +446,7 @@ web/                 React + Tailwind UI (presentation only)
   public/            plugin-sandbox.html, the opaque-origin frame a plugin panel runs in
   site/              the landing page published to GitHub Pages
 plugins/             first-party plugins and the hash-pinned catalogue they are verified by
+feedback-worker/     the Cloudflare Worker and R2 inbox that take training frames, and the script that empties it
 models/              TFLite and ONNX encoders, normalisation metadata, class prototypes
 tests/               engine simulation, adapter contracts and the plugin sandbox (pytest)
 ```

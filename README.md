@@ -18,7 +18,7 @@
 A compact vision model scores every camera frame on the machine you run it on. When a defect
 holds for long enough, PrintGuard pauses or cancels the print through your print server and
 pushes a snapshot to your phone. There's no cloud and no subscription, and your camera frames
-never leave hardware you own.
+stay on hardware you own unless you choose to [send some to help train the model](docs/feedback.md).
 
 The detector is my own, trained for this. Against Obico's Spaghetti Detective, the only other
 open model, over the same four unseen test sets:
@@ -256,6 +256,7 @@ retraining.
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Symptom-first fixes, and how to pull logs and diagnostics |
 | [docs/api.md](docs/api.md) | REST API and MCP server, scoped tokens, every endpoint and tool |
 | [docs/plugins.md](docs/plugins.md) | Installing plugins, what they can reach, and writing your own |
+| [docs/feedback.md](docs/feedback.md) | Sending labelled frames to help train the model, what's sent and the limits |
 | [docs/architecture.md](docs/architecture.md) | The engine and its protocol, the platform contract, the scheduler, the fail-safe design |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in every release |
 

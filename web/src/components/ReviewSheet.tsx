@@ -181,7 +181,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
                   The frames shown here with the labels you gave them, each frame's risk score and time, this monitor's alert
                   threshold, the type of printer connection, the printer model if you type one, the PrintGuard version and a
                   random ID for this hub. No names, addresses or camera URLs. Frames are stored privately in the EU and used
-                  only to train PrintGuard's detection model. To have yours deleted, send me the hub ID from Settings.
+                  only to train PrintGuard's detection model. To have yours deleted, raise an issue on GitHub with the hub ID from Settings.
                 </p>
               </details>
             </>

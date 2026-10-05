@@ -16,6 +16,7 @@ Start at the [README](../README.md) to install PrintGuard. These pages cover eve
 | [Troubleshooting](troubleshooting.md) | Fix a symptom like a dead feed, a failing printer test or a port already in use |
 | [API & MCP](api.md) | Drive the hub from a script or an agent, with scoped access tokens |
 | [Plugins](plugins.md) | Install an extension, understand what it can reach, or write one |
+| [Training frames](feedback.md) | Send labelled frames to help train the model, and see what's sent and the limits |
 | [Architecture](architecture.md) | Understand how the engine, the hub and the dashboard fit together, or change the code |
 | [Contributing](../CONTRIBUTING.md) | Set up a dev environment, run the tests, add an integration or notifier |
 

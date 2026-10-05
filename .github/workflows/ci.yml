@@ -21,6 +21,8 @@ jobs:
       - run: npm ci --prefix web
       - run: uv sync --frozen
       - run: uv run pytest
+      - run: npm ci --prefix feedback-worker
+      - run: npm test --prefix feedback-worker
 
   image:
     name: image (${{ matrix.name }})
