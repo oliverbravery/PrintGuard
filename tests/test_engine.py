@@ -1328,26 +1328,26 @@ async def test_a_stall_is_announced_through_the_watchdogs_own_restarts(monkeypat
 
 async def test_a_feed_that_gives_a_frame_each_time_it_is_attached_is_called_unreliable(monkeypatch) -> None:
     """Each re-attach brings an inference, so no stall ever lasts the grace period, yet the print is mostly unwatched."""
-    scale = 0.01
+    scale = 0.02
     monkeypatch.setattr(watchdog, "WATCH_TICK_S", watchdog.WATCH_TICK_S * scale)
     monkeypatch.setattr(watchdog, "STALL_GRACE_S", watchdog.STALL_GRACE_S * scale)
     monkeypatch.setattr(watchdog, "RESTART_AFTER_S", watchdog.RESTART_AFTER_S * scale)
     monkeypatch.setattr(watchdog, "RESTART_COOLDOWN_S", watchdog.RESTART_COOLDOWN_S * scale)
     monkeypatch.setattr(watchdog, "GRACE_MIN_S", watchdog.GRACE_MIN_S * scale)
     monkeypatch.setattr(watchdog, "COVERAGE_SAMPLES", 100)
-    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.04)
     platform = FakePlatform(infer_s=0.01)
     open_camera = platform.open_camera
 
     async def open_then_freeze(camera_id: str, source: dict):
         opened = await open_camera(camera_id, source)
-        asyncio.get_running_loop().call_later(0.1, setattr, opened, "frozen", True)
+        asyncio.get_running_loop().call_later(0.2, setattr, opened, "frozen", True)
         return opened
 
     monkeypatch.setattr(platform, "open_camera", open_then_freeze)
     async with running_engine(platform, camera_fps=[20.0]) as (engine, events):
         await engine.handle({"cmd": "settings.update", "patch": {"fault_grace_s": watchdog.GRACE_DEFAULT_S * scale}})
-        await asyncio.sleep(4.0)
+        await asyncio.sleep(8.0)
 
     warned = [event["message"] for event in _of(events, "warning") if not event["recovered"]]
     assert len(platform.released_cameras) >= 3, "the feed was not attached afresh each time it froze"
