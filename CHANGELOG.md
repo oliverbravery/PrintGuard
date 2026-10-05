@@ -20,6 +20,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Fixed
 
+- The Windows desktop app opens its window when the zip was downloaded in a browser and
+  extracted with Explorer. It used to show only the tray icon.
 - Alert snapshots in the risk history survive a restart.
 - A camera looking at a still scene holds a steady score, where a grainy webcam used to jump
   by 20 points or more from frame to frame. Frames are shrunk for the model the way it was

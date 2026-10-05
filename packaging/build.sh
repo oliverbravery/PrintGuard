@@ -73,6 +73,9 @@ if [ "$OS" = darwin ]; then
   fi
 else
   out="dist/PrintGuard-${LABEL}.zip"
+  # Explorer marks every file of a downloaded zip as from the internet, and .NET refuses
+  # to load the window's assemblies with that mark unless the exe's config allows it.
+  cp packaging/PrintGuard.exe.config dist/PrintGuard/
   powershell -NoProfile -Command "Compress-Archive -Path dist/PrintGuard -DestinationPath '$out' -Force"
 fi
 echo "$out"
