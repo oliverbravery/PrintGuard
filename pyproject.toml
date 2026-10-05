@@ -29,6 +29,7 @@ dependencies = [
     "wasmtime>=47.0",
     "wasdk-Microsoft.Windows.AI.MachineLearning>=2.1.3; sys_platform == 'win32'",
     "wasdk-Microsoft.Windows.ApplicationModel.DynamicDependency.Bootstrap; sys_platform == 'win32'",
+    "cachetools>=7.1.4",
 ]
 
 [project.scripts]

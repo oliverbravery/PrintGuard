@@ -10,7 +10,6 @@ import logging
 import os
 import re
 import secrets
-import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from string import Template
@@ -19,6 +18,7 @@ from urllib.parse import urlsplit
 
 import httpx
 import uvicorn
+from cachetools import TTLCache
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -147,6 +147,7 @@ class HostGuard:
 REFUSED_HOSTS_LOGGED = 32
 GATE_EXEMPT_PREFIXES = ("/api/health",)
 GATE_CACHE_TTL_S = 10.0
+GATE_CACHE_ENTRIES = 4096
 PLUGIN_REQUEST_HEADERS = ("cookie", "authorization", "accept", "content-type", "x-forwarded-for", "user-agent")
 PLUGIN_RESPONSE_HEADERS = ("set-cookie", "location", "cache-control")
 PLUGIN_BODY_LIMIT = 64 * 1024
@@ -235,24 +236,26 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="PrintGuard", lifespan=lifespan)
     app.add_middleware(HostGuard, named={urlsplit(origin).hostname or "" for origin in allowed_origins})
-    gate_cache: dict[tuple[str, ...], float] = {}
+    gate_cache: TTLCache[tuple[str, ...], bool] = TTLCache(GATE_CACHE_ENTRIES, GATE_CACHE_TTL_S)
 
     async def gate_allows(request: Request) -> bool:
         """Asks a gating plugin whether a request may proceed.
 
         Answers are cached per credential and path for a few seconds so a
         dashboard polling HLS does not wake the sandbox on every segment.
-        Refusals are never cached, so signing in takes effect at once.
+        Refusals are never cached, so signing in takes effect at once. The
+        cache holds a fixed number of answers, so a flood of made-up cookies
+        cannot grow it.
         """
         runtime = app.state.engine.platform.plugin_runtime
         if runtime is None or request.url.path.startswith(GATE_EXEMPT_PREFIXES + runtime.gate_paths()):
             return True
         key = (request.headers.get("cookie", ""), request.headers.get("authorization", ""), request.method, request.url.path)
-        if gate_cache.get(key, 0.0) > time.monotonic():
+        if key in gate_cache:
             return True
         verdict = await runtime.authorise(plugin_request(request, request.method))
         if verdict is None or verdict:
-            gate_cache[key] = time.monotonic() + GATE_CACHE_TTL_S
+            gate_cache[key] = True
             return True
         return False
 

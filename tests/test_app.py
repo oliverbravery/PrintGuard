@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
+from printguard.server import app as app_module
 from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app, host_trusted
 from printguard.server.events import ConflatedEventQueue
 
@@ -267,6 +268,21 @@ async def test_a_gating_plugin_can_refuse_a_request_but_never_its_own_routes() -
     assert own.status_code == 200, "the gate locked out the very page that signs you in"
     assert other.status_code == 403, "another plugin's pages went out without the gate seeing them"
     assert health.status_code == 200, "readiness is never gated, so an uptime check still works"
+
+
+async def test_a_flood_of_made_up_cookies_cannot_grow_the_gate_cache(monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "GATE_CACHE_ENTRIES", 2)
+    runtime = StubRuntime(verdict=True)
+    app = app_with(runtime)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        for session in ("a", "b", "c"):
+            await client.get("/", headers={"cookie": f"s={session}"})
+        asked = len(runtime.seen)
+        await client.get("/", headers={"cookie": "s=c"})
+        await client.get("/", headers={"cookie": "s=a"})
+
+    assert len(runtime.seen) == asked + 1, "the newest answer should still be cached and the oldest pushed out"
 
 
 async def test_the_dashboard_inspects_a_sample_before_uploading(monkeypatch) -> None:
