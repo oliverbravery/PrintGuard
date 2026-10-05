@@ -342,7 +342,8 @@ class Watchdog:
         """
         if now - self._down_since.get(key, now) < RESTART_AFTER_S:
             return False
-        if now - self._restarted.get(key, now - RESTART_COOLDOWN_S) < RESTART_COOLDOWN_S:
+        restarted = self._restarted.get(key)
+        if restarted is not None and now - restarted < RESTART_COOLDOWN_S:
             return False
         self._restarted[key] = now
         return True
