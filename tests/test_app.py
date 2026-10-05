@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
-from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app
+from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app, host_trusted
 from printguard.server.events import ConflatedEventQueue
 
 
@@ -44,6 +45,83 @@ async def test_health_reports_ready_version_without_caching() -> None:
     assert response.status_code == 200
     assert response.json() == {"ok": True, "version": "2.3.7"}
     assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["192.168.1.20:8000", "203.0.113.7", "[fd00::1]:8000", "localhost:8000", "printguard.local", "tower:8000", "hub.lan", "HUB.example.com"],
+)
+def test_a_hub_answers_to_addresses_and_local_names_with_no_setup(host: str) -> None:
+    assert host_trusted(host, {"hub.example.com"})
+
+
+@pytest.mark.parametrize("host", ["evil.example:8000", "hub.example.com.evil.example", "localhost.evil.example", "192.168.1.20.nip.io"])
+def test_a_hub_does_not_answer_to_a_public_name_nobody_listed(host: str) -> None:
+    assert not host_trusted(host, {"hub.example.com"})
+
+
+@asynccontextmanager
+async def named_hub(monkeypatch):
+    """Yields a hub that lists one proxied name, a client for it and the warnings it logs."""
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", "https://hub.example.com")
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.5.1", plugin_runtime=None))
+    told: list[str] = []
+    monkeypatch.setattr("printguard.server.app.logger.warning", lambda message, *args: told.append(message % args))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        yield app, client, told
+
+
+async def handshake_status(app, path: str, headers: dict[str, str]) -> int:
+    """Opens a WebSocket against the app and returns the HTTP status that refused it."""
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        return {"type": "websocket.connect"}
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "websocket",
+        "scheme": "ws",
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": "",
+        "query_string": b"",
+        "headers": [(name.encode(), value.encode()) for name, value in headers.items()],
+        "subprotocols": [],
+        "extensions": {"websocket.http.response": {}},
+    }
+    await app(scope, receive, send)
+    return sent[0]["status"]
+
+
+async def test_a_rebinding_page_is_refused_whatever_it_asks_for(monkeypatch) -> None:
+    """Its origin and host agree, so only knowing the host is not the hub's stops it."""
+    rebound = {"host": "evil.example:8000", "origin": "http://evil.example:8000"}
+    forged = {"host": "192.168.1.20:8000", "x-forwarded-host": "evil.example", "origin": "http://evil.example"}
+    async with named_hub(monkeypatch) as (app, client, told):
+        read = await client.get("/api/health", headers={"host": "evil.example:8000"})
+        assert read.status_code == 403
+        assert "PRINTGUARD_ORIGINS=http://evil.example:8000" in read.text
+        assert (await client.get("/api/v1/state", headers=rebound)).status_code == 403
+        assert (await client.post("/api/prints?filename=a.gcode", content=b"G28", headers=rebound)).status_code == 403
+        assert await handshake_status(app, "/api/ws", rebound) == 403
+        assert await handshake_status(app, "/api/publish/cam", rebound) == 403
+        assert (await client.get("/api/health", headers=forged)).status_code == 403
+
+    assert len(told) == 2, "one line a name, however many requests it sends"
+    assert "PRINTGUARD_ORIGINS=http://evil.example:8000" in told[0]
+
+
+async def test_a_proxied_hub_answers_to_the_name_in_printguard_origins(monkeypatch) -> None:
+    proxied = {"host": "printguard:8000", "x-forwarded-host": "hub.example.com", "x-forwarded-proto": "https"}
+    async with named_hub(monkeypatch) as (_app, client, _told):
+        assert (await client.get("/api/health", headers=proxied)).status_code == 200
+        assert (await client.get("/api/health", headers={"host": "hub.example.com"})).status_code == 200
+        unlisted = await client.get("/api/health", headers={**proxied, "x-forwarded-host": "other.example.com"})
+        assert unlisted.status_code == 403 and "PRINTGUARD_ORIGINS=https://other.example.com" in unlisted.text
 
 
 async def test_event_queue_conflates_telemetry_without_dropping_ordered_events() -> None:

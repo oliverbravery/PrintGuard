@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import ipaddress
 import json
 import logging
 import os
@@ -19,16 +20,18 @@ from urllib.parse import urlsplit
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
+from starlette.datastructures import Headers
 from starlette.requests import HTTPConnection
-from starlette.types import Scope
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 import printguard
 
 from ..engine import logs, oauth
 from ..engine.engine import Engine
+from ..engine.urls import LOCAL_HOSTNAMES, LOCAL_SUFFIXES
 from .api import ApiAuth, build_api_app
 from .events import ConflatedEventQueue
 from .mcp import build_mcp_app
@@ -62,9 +65,10 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str]) -> bool:
     Proxies in front of the hub authenticate the session cookie, which the
     browser attaches to any socket a page opens or form it posts, so a
     logged-in user's other tabs could otherwise drive the engine and read its
-    secrets. The browser sets Origin and the forwarded host itself and forbids
-    pages from forging them, so a same-origin (or explicitly allow-listed)
-    Origin is the gate.
+    secrets. The browser sets Origin itself and forbids pages from forging it,
+    so a same-origin (or explicitly allow-listed) Origin is the gate. Same-origin
+    only means something because ``HostGuard`` has already refused a host the hub
+    does not answer to.
     """
     origin = connection.headers.get("origin")
     if not origin:
@@ -73,6 +77,65 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str]) -> bool:
         return True
     host = connection.headers.get("x-forwarded-host") or connection.headers.get("host")
     return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
+
+
+def host_trusted(host: str, named: set[str]) -> bool:
+    """Whether a request's host is one a hostile page cannot have chosen.
+
+    A DNS rebinding page reaches the hub under a public name its author points
+    at a private address, and the browser sends that name as the host. It cannot
+    make the browser send an address, ``localhost``, a name with no dot in it or
+    a name under a suffix public DNS never answers for, so those need no setup.
+
+    Args:
+        host: A Host or X-Forwarded-Host value, with or without a port.
+        named: The hostnames listed in ``PRINTGUARD_ORIGINS``.
+
+    Returns:
+        True when the hub answers to that host.
+    """
+    name = (urlsplit(f"//{host}").hostname or "").lower()
+    try:
+        ipaddress.ip_address(name)
+    except ValueError:
+        return "." not in name or name in LOCAL_HOSTNAMES or name.endswith(LOCAL_SUFFIXES) or name in named
+    return True
+
+
+class HostGuard:
+    """Refuses every request addressed to a name the hub does not answer to.
+
+    This is what stops DNS rebinding. The origin checks compare a page's origin
+    with the host it asked for, and a rebinding page makes the two agree, so the
+    host itself has to be one the hub knows. A forwarded host is held to the
+    same rule, since a page can set that header on a request to its own origin.
+    """
+
+    def __init__(self, app: ASGIApp, named: set[str]) -> None:
+        self._app = app
+        self._named = named
+        self._refused: set[str] = set()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Passes a request on, or answers 403 naming the setting that allows its host."""
+        if scope["type"] not in ("http", "websocket"):
+            await self._app(scope, receive, send)
+            return
+        headers = Headers(scope=scope)
+        hosts = [headers.get("host", ""), *headers.get("x-forwarded-host", "").split(",")]
+        unknown = next((host.strip() for host in hosts if not host_trusted(host.strip(), self._named)), None)
+        if unknown is None:
+            await self._app(scope, receive, send)
+            return
+        secure = scope["scheme"] in ("https", "wss") or headers.get("x-forwarded-proto", "").startswith("https")
+        message = (
+            f"PrintGuard refused a request for {unknown} because it does not know that name. "
+            f"To reach the hub there, add PRINTGUARD_ORIGINS={'https' if secure else 'http'}://{unknown} to its environment and restart it."
+        )
+        if unknown not in self._refused:
+            self._refused.add(unknown)
+            logger.warning(message)
+        await PlainTextResponse(message, status_code=403)(scope, receive, send)
 
 
 GATE_EXEMPT_PREFIXES = ("/api/health",)
@@ -164,6 +227,7 @@ def create_app() -> FastAPI:
             logger.info("hub shutting down")
 
     app = FastAPI(title="PrintGuard", lifespan=lifespan)
+    app.add_middleware(HostGuard, named={urlsplit(origin).hostname or "" for origin in allowed_origins})
     gate_cache: dict[tuple[str, ...], float] = {}
 
     async def gate_allows(request: Request) -> bool:
