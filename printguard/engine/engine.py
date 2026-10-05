@@ -284,7 +284,13 @@ class Engine:
                 self._sinks.remove(sink)
 
     def state_event(self) -> dict[str, Any]:
-        """Builds the full state snapshot event."""
+        """Builds the full state snapshot event.
+
+        A plugin reads as disabled while the platform has no plugin runtime, so
+        the dashboard stops its half of a plugin when the hub has stopped the
+        other.
+        """
+        plugins_running = self.platform.plugin_runtime is not None
         return {
             "event": "state",
             "host": self.platform.host,
@@ -308,7 +314,7 @@ class Engine:
             "stats": self.scheduler.stats(),
             "integrations": integrations_meta(),
             "notifiers": notifiers_meta(),
-            "plugins": [p.public() for p in self.plugins.values()],
+            "plugins": [{**p.public(), "enabled": p.enabled and plugins_running} for p in self.plugins.values()],
             "plugin_permissions": plugins.permissions_meta(),
             "plugin_events": plugins.EVENTS,
             "plugin_event_permissions": plugins.EVENT_PERMISSIONS,

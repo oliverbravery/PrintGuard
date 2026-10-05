@@ -281,6 +281,17 @@ async def test_a_printer_command_regates_without_waiting_for_the_poll(monkeypatc
         assert not camera.in_use, "pausing from PrintGuard must stand the camera down straight away"
 
 
+async def test_plugins_read_as_disabled_while_the_hub_runs_none() -> None:
+    platform = FakePlatform()
+    engine = Engine(platform)
+    await engine.start()
+    await install_demo(engine)
+    assert engine.plugins.get("demo").enabled
+    assert not engine.state_event()["plugins"][0]["enabled"], "the dashboard would keep running a plugin the hub has switched off"
+    platform.plugin_runtime = object()
+    assert engine.state_event()["plugins"][0]["enabled"]
+
+
 async def test_zip_install_keeps_its_page_and_serves_it_on_request() -> None:
     platform = FakePlatform()
     engine = Engine(platform)

@@ -285,7 +285,7 @@ every connected client, so a tab ignores one whose `req_id` is not its own, or a
 starts a duplicate sandbox.
 
 The hub mounts `/plugins/<id>/` onto a plugin's route handler and consults a `gate` plugin
-before serving anything else. `PRINTGUARD_PLUGINS=off` starts with every plugin off. See
+before serving anything else. `PRINTGUARD_PLUGINS=off` starts with every plugin off, and the state snapshot reports each as disabled so the dashboard stops its half too. See
 [plugins](plugins.md).
 
 ## Scheduling inference
