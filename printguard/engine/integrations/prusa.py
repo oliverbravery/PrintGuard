@@ -110,7 +110,7 @@ class PrusaAdapter(IntegrationAdapter):
         await self._command(config, int(job["id"]), action)
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
-        """Puts the file onto the printer's first available storage and prints it.
+        """Puts the file onto the printer's first writable storage and prints it.
 
         PrusaLink starts the job itself on ``Print-After-Upload``, and the
         storage is whichever the printer offers: the USB stick on a printer
@@ -122,7 +122,7 @@ class PrusaAdapter(IntegrationAdapter):
     async def _storage(self, config: dict[str, Any]) -> str:
         async with self._link(config) as link:
             storages = await link.get_storage()
-        available = next((s["path"] for s in storages if s.get("available")), None)
+        available = next((s["path"] for s in storages if s.get("available") and not s.get("read_only")), None)
         if not available:
             raise RuntimeError("Prusa printer has no storage to upload to")
         return available if available.endswith("/") else f"{available}/"
