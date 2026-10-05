@@ -94,7 +94,10 @@ def host_trusted(host: str, named: set[str]) -> bool:
     Returns:
         True when the hub answers to that host.
     """
-    name = (urlsplit(f"//{host}").hostname or "").lower()
+    try:
+        name = (urlsplit(f"//{host}").hostname or "").lower()
+    except ValueError:
+        return False
     try:
         ipaddress.ip_address(name)
     except ValueError:
@@ -132,7 +135,7 @@ class HostGuard:
             f"PrintGuard refused a request for {unknown} because it does not know that name. "
             f"To reach the hub there, add PRINTGUARD_ORIGINS={'https' if secure else 'http'}://{unknown} to its environment and restart it."
         )
-        if unknown not in self._refused:
+        if unknown not in self._refused and len(self._refused) < REFUSED_HOSTS_LOGGED:
             self._refused.add(unknown)
             logger.warning(message)
         if scope["type"] == "websocket":
@@ -141,6 +144,7 @@ class HostGuard:
             await PlainTextResponse(message, status_code=403)(scope, receive, send)
 
 
+REFUSED_HOSTS_LOGGED = 32
 GATE_EXEMPT_PREFIXES = ("/api/health",)
 GATE_CACHE_TTL_S = 10.0
 PLUGIN_REQUEST_HEADERS = ("cookie", "authorization", "accept", "content-type", "x-forwarded-for", "user-agent")

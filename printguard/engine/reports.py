@@ -44,7 +44,6 @@ REDACTED = "[redacted]"
 MESSAGE_MAX = 4096
 TIMEOUT_S = 20.0
 SOURCE_KEYS = ("kind", "path", "device_id", "label")
-MIN_SECRET_LENGTH = 4
 
 
 def envelope_endpoint(dsn: str) -> str:
@@ -75,15 +74,14 @@ def url_secrets(url: str) -> set[str]:
         url: A camera, printer or notifier address as the user entered it.
 
     Returns:
-        Its username, password and query values. A query value too short to
-        replace everywhere it occurs goes in with its key.
+        Its username and password, and each query value with its key, since a
+        value such as ``stream`` on its own is an ordinary word.
     """
     parts = urlsplit(url)
     secrets = {part for part in (parts.username, parts.password) if part}
     for pair in parts.query.split("&"):
-        value = pair.partition("=")[2]
-        if value:
-            secrets.add(value if len(value) >= MIN_SECRET_LENGTH else pair)
+        if pair.partition("=")[2]:
+            secrets.add(pair)
     return secrets
 
 

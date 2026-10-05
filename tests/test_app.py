@@ -331,3 +331,8 @@ async def test_dashboard_upload_is_same_origin_and_feeds_the_viewer(tmp_path) ->
             assert (await client.get("/api/prints/nope/gcode")).status_code == 404
     finally:
         await engine.stop()
+
+
+
+def test_a_host_that_cannot_be_read_is_not_trusted() -> None:
+    assert not host_trusted("[::1", set())

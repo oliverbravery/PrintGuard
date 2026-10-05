@@ -419,11 +419,11 @@ async def test_credentials_inside_urls_reach_neither_the_read_surface_nor_a_bug_
             assert not [leak for leak in LEAKS if leak in payload.decode()], name
 
 
-def test_a_short_query_value_is_scrubbed_from_a_log_only_beside_its_key() -> None:
-    """Replacing every 5 in a log because a camera URL ends ``?fps=5`` would leave nothing to read."""
-    found = reports.url_secrets("http://cam/stream?fps=5&pwd=abc&token=longer")
-    assert found == {"fps=5", "pwd=abc", "longer"}
-    assert reports.scrub("5 frames from http://cam/stream?fps=5&pwd=abc", found) == "5 frames from http://cam/stream?[redacted]&[redacted]"
+def test_a_query_value_is_scrubbed_from_a_log_only_beside_its_key() -> None:
+    """A value such as ``stream`` or ``5`` is an ordinary word, so blanking it everywhere would leave nothing to read."""
+    found = reports.url_secrets("http://cam/?action=stream&fps=5&pwd=abc")
+    assert found == {"action=stream", "fps=5", "pwd=abc"}
+    assert reports.scrub("5 frames, stream stalled at http://cam/?fps=5&pwd=abc", found) == "5 frames, stream stalled at http://cam/?[redacted]&[redacted]"
 
 
 async def test_a_bearer_that_is_not_ascii_is_refused_rather_than_crashing() -> None:
