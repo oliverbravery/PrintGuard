@@ -345,7 +345,7 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
           <div className="flex flex-wrap items-center gap-2">
             <span className={`chip ${plugin.verified ? "chip-ok" : ""}`}>{plugin.verified ? "verified" : "third party"}</span>
             {fromRepo && (
-              <button className="btn" onClick={() => send({ cmd: "plugin.install", source: { ...plugin.source, ref: "HEAD" } })}>
+              <button className="btn" onClick={() => send({ cmd: "plugin.install", source: { ...plugin.source, ref: plugin.source.branch ?? "HEAD" } })}>
                 Update
               </button>
             )}

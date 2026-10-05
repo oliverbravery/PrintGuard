@@ -1465,6 +1465,7 @@ async def test_plugin_installs_from_github_pinned_to_a_commit() -> None:
         record = engine.plugins.get("demo")
 
     assert record.source["ref"] == sha, "a moving branch was stored instead of the commit it resolved to"
+    assert record.source["branch"] == "main", "an update would not know which branch to follow"
     assert list(record.sources) == ["plugin.js"]
 
 
@@ -1498,6 +1499,7 @@ async def test_an_update_from_the_same_repository_keeps_what_the_user_gave_it() 
         updated = engine.plugins.get("vault")
 
     assert updated.manifest["version"] == "1.1.0", "the new revision did not replace the old one"
+    assert updated.source["branch"] == "main"
     assert updated.secrets["api_key"] == "s3cr3t", "an update made the user type its credentials again"
     assert updated.enabled and updated.granted == SECRET_MANIFEST["permissions"]
 
@@ -2155,12 +2157,24 @@ def test_a_platform_covers_its_own_variants_and_nothing_else() -> None:
 
 async def test_a_manifest_keeps_only_platforms_printguard_runs_on() -> None:
     platform = FakePlatform(infer_s=0.02)
-    manifest = {**MANIFEST, "platforms": ["windows", "toaster"]}
+    manifest = {**MANIFEST, "platforms": ["windows", "docker", "toaster"]}
     async with running_engine(platform, camera_fps=[]) as (engine, _):
         await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
         record = engine.plugins.get("demo").public()
 
-    assert record["manifest"]["platforms"] == ["windows"]
+    assert record["manifest"]["platforms"] == ["docker", "windows"]
+
+
+async def test_a_plugin_for_another_platform_is_refused_from_any_source() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    manifest = {**MANIFEST, "platforms": ["windows"]}
+    platform.responses = github_files("a" * 40, manifest)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        with pytest.raises(RuntimeError, match="only runs on windows"):
+            await engine.request({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
+        with pytest.raises(RuntimeError, match="only runs on windows"):
+            await engine.request({"cmd": "plugin.install", "source": {"kind": "github", "repo": "someone/pack", "ref": "main"}})
+        assert engine.plugins.get("demo") is None
 
 
 async def test_plugins_survive_a_restart() -> None:

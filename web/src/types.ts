@@ -296,7 +296,7 @@ export interface PluginRecord {
   manifest: PluginManifest;
   files: string[];
   digests: Record<string, string>;
-  source: { kind: string; repo?: string; path?: string; ref?: string; filename?: string };
+  source: { kind: string; repo?: string; path?: string; ref?: string; branch?: string; filename?: string };
   granted: string[];
   config: Record<string, unknown>;
   secrets_set: string[];

@@ -1129,10 +1129,13 @@ class Engine:
         source = dict(message.get("source") or {})
         page: dict[str, str] = {}
         if source.get("kind") == "github":
+            requested = str(source.get("ref") or "HEAD")
             manifest, sources, files, sha = await plugins.fetch_github(
-                self.platform.http, str(source.get("repo", "")), str(source.get("path", "")), str(source.get("ref") or "HEAD")
+                self.platform.http, str(source.get("repo", "")), str(source.get("path", "")), requested
             )
             source = {"kind": "github", "repo": source["repo"], "path": str(source.get("path", "")), "ref": sha}
+            if requested != sha:
+                source["branch"] = requested
         elif source.get("kind") == "file":
             manifest, sources, files, page_files = plugins.unpack(base64.b64decode(message["zip"]))
             page = plugins.sanitise_page(page_files)
@@ -1140,6 +1143,8 @@ class Engine:
         else:
             raise ValueError(f"unknown plugin source {source.get('kind')!r}")
         manifest = plugins.sanitise_manifest(manifest)
+        if not plugins.runs_here(manifest["platforms"], self.platform.host):
+            raise ValueError(f"{manifest['id']} only runs on {', '.join(manifest['platforms'])}, not {self.platform.host}")
         sources = plugins.sanitise_sources(sources)
         assets = plugins.sanitise_assets(files)
         if set(manifest["assets"]) - set(assets):

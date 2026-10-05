@@ -49,8 +49,8 @@ the catalogue though, since `pin.py` will not pin a plugin whose code and manife
 Verified means the manifest and every file hash to what the catalogue pins at a commit.
 Anything else is third party, so read it first. Both run under the same restrictions.
 
-A repository install pins the commit it resolved to. **Update** re-resolves the branch and
-re-checks the hashes.
+A repository install pins the commit it resolved to. **Update** re-resolves the branch it was
+installed from, or the default branch if it had none, and re-checks the hashes.
 
 A plugin arrives switched off. **Enable** lists what it asks for, what each permission allows
 and the author's reason for it. It is all or nothing. Disabling keeps what you accepted.
@@ -238,7 +238,7 @@ settings in the panel behind it. Anything that belongs to one monitor rather tha
 goes in `settings`.
 
 `platforms` says where it runs, and leaving it out means everywhere. The store filters the
-catalogue by the one you are on, so anything that would not work is out of the way.
+catalogue by the one you are on, and an install from a repository or a zip is refused on any other.
 
 | Platform | |
 |---|---|
