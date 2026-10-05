@@ -259,7 +259,7 @@ export const GUIDE: GuideSection[] = [
         Plugins are third-party code, so they run in a sandbox with only what you grant them.{" "}
         <strong>Picture in picture</strong>, <strong>Alert sounds</strong>, <strong>Progress reports</strong>{" "}
         and <strong>Spotify</strong> come as standard.{" "}
-        <a className={link} href={docs("plugins.md")} target="_blank" rel="noreferrer">
+        <a className={link} href={docs("plugin-development.md")} target="_blank" rel="noreferrer">
           Writing one ↗
         </a>
       </>

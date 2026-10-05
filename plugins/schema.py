@@ -54,7 +54,7 @@ def schema() -> dict:
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": SCHEMA_URL,
         "title": "PrintGuard plugin",
-        "description": "The manifest of a PrintGuard plugin. See https://github.com/oliverbravery/PrintGuard/blob/main/docs/plugins.md",
+        "description": "The manifest of a PrintGuard plugin. See https://github.com/oliverbravery/PrintGuard/blob/main/docs/plugin-development.md",
         "type": "object",
         "required": ["id", "version"],
         "additionalProperties": False,
