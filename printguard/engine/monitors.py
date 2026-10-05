@@ -62,6 +62,8 @@ def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any
     """
     record = {**(base or MONITOR_DEFAULTS), **patch, "id": monitor_id}
     record["name"] = str(record["name"]).strip() or "Monitor"
+    record["camera_id"] = str(record["camera_id"] or "")
+    record["printer_id"] = str(record["printer_id"] or "")
     record["threshold"] = _clamp("threshold", float(record["threshold"]))
     record["consecutive"] = int(_clamp("consecutive", int(record["consecutive"])))
     record["cooldown_s"] = int(_clamp("cooldown_s", int(record["cooldown_s"])))

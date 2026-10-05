@@ -101,31 +101,34 @@ class Scheduler:
         if task := self._camera_jobs.get(camera.id):
             task.cancel()
 
-    async def run(self) -> None:
-        """Dispatch loop that hands the most overdue camera to a free worker."""
-        while True:
-            async with self._dispatch_lock:
-                self.allocate()
-                now = time.monotonic()
-                due = [c for c in self._registry.schedulable() if not c.inferring and now >= c.next_due]
-                if due:
-                    camera = min(due, key=lambda c: c.next_due)
-                    await self._slots.acquire()
-                    camera.inferring = True
-                    camera.next_due = time.monotonic() + 1.0 / max(0.1, camera.target_fps or camera.effective_fps)
-                    task = asyncio.create_task(self._job(camera))
-                    self._jobs.add(task)
-                    task.add_done_callback(self._jobs.discard)
-                    self._camera_jobs[camera.id] = task
+    async def dispatch(self) -> float:
+        """Hands the most overdue camera to a free worker.
 
-                    def forget(done: asyncio.Task[None], camera_id: str = camera.id) -> None:
-                        if self._camera_jobs.get(camera_id) is done:
-                            self._camera_jobs.pop(camera_id)
+        Returns:
+            Seconds until another pass is worth making, which is none after a
+            camera was dispatched.
+        """
+        async with self._dispatch_lock:
+            self.allocate()
+            now = time.monotonic()
+            due = [c for c in self._registry.schedulable() if not c.inferring and now >= c.next_due]
+            if not due:
+                return self._sleep_until_due(now)
+            camera = min(due, key=lambda c: c.next_due)
+            await self._slots.acquire()
+            camera.inferring = True
+            camera.next_due = time.monotonic() + 1.0 / max(0.1, camera.target_fps or camera.effective_fps)
+            task = asyncio.create_task(self._job(camera))
+            self._jobs.add(task)
+            task.add_done_callback(self._jobs.discard)
+            self._camera_jobs[camera.id] = task
 
-                    task.add_done_callback(forget)
-                    continue
-                sleep_s = self._sleep_until_due(now)
-            await asyncio.sleep(sleep_s)
+            def forget(done: asyncio.Task[None]) -> None:
+                if self._camera_jobs.get(camera.id) is done:
+                    self._camera_jobs.pop(camera.id)
+
+            task.add_done_callback(forget)
+            return 0.0
 
     def _sleep_until_due(self, now: float) -> float:
         cameras = self._registry.schedulable()

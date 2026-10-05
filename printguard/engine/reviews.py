@@ -242,8 +242,8 @@ class ReviewLibrary:
         review.submission, review.status = None, "dismissed"
 
     def due(self, now: float) -> list[Review]:
-        """The queued reviews whose retry time has passed."""
-        return [review for review in self._reviews.values() if review.status == "queued" and (review.submission or {}).get("retry_at") and review.submission["retry_at"] <= now]
+        """The queued reviews whose retry time has passed, or whose send was cut short before it set one."""
+        return [review for review in self._reviews.values() if review.status == "queued" and (review.submission["retry_at"] or 0.0) <= now]
 
     async def forget(self, monitor_id: str) -> None:
         """Deletes every review of a monitor, with their frames."""
