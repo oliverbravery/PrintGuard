@@ -35,6 +35,7 @@ function StepRow({ step, primary }: { step: Step; primary: boolean }) {
       ) : (
         <button
           className={`btn shrink-0 ${primary ? "btn-primary" : ""}`}
+          aria-label={`Open ${step.title}`}
           onClick={() => openDialog(step.dialog, step.focusCameraId)}
         >
           Open
@@ -117,7 +118,7 @@ export function GettingStarted() {
           className="mt-5 text-xs text-text-2 underline transition-colors hover:text-accent"
           onClick={() => openDialog("intro")}
         >
-          New here? How PrintGuard works →
+          New here? How PrintGuard works
         </button>
       </div>
     </div>

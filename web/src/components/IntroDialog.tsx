@@ -38,7 +38,7 @@ export function IntroDialog() {
           </button>
           {!last && (
             <button className="btn btn-primary" onClick={() => setPage(page + 1)}>
-              Next →
+              Next
             </button>
           )}
         </footer>

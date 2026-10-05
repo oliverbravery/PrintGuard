@@ -1,5 +1,5 @@
-import { useRef, useState, type DragEvent } from "react";
-import { ACCEPT, ago, formatBytes, summary } from "../prints";
+import { useEffect, useRef, useState } from "react";
+import { ACCEPT, acceptedTags, ago, formatBytes, summary } from "../prints";
 import { useStore } from "../store";
 import type { PrintFile } from "../types";
 import { Dialog } from "./Dialog";
@@ -20,12 +20,13 @@ function Thumbnail({ print }: { print: PrintFile }) {
 }
 
 function PrintRow({ print }: { print: PrintFile }) {
-  const { send, isPending, openPrint } = useStore();
+  const { send, isPending, openPrint, updatePrint } = useStore();
   const [editing, setEditing] = useState(false);
-  const removing = isPending("print.remove");
+  const removing = isPending("print.remove", print.id);
   const toggleTag = (id: string) => {
-    const printer_ids = print.printer_ids.includes(id) ? print.printer_ids.filter((p) => p !== id) : [...print.printer_ids, id];
-    send({ cmd: "print.update", id: print.id, patch: { printer_ids } });
+    const engine = useStore.getState().engine!;
+    const tags = acceptedTags(engine, engine.prints.find((p) => p.id === print.id)!.printer_ids, print.ext);
+    updatePrint(print.id, { printer_ids: tags.includes(id) ? tags.filter((p) => p !== id) : [...tags, id] });
   };
   return (
     <div className="panel space-y-2.5 px-3 py-2.5">
@@ -65,20 +66,29 @@ function DropZone() {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const take = (files: FileList | null) => files && stagePrints(Array.from(files));
-  const onDrop = (event: DragEvent) => {
-    event.preventDefault();
-    setOver(false);
-    take(event.dataTransfer.files);
-  };
+
+  useEffect(() => {
+    const carriesFiles = (event: DragEvent) => event.dataTransfer?.types.includes("Files") ?? false;
+    const allowDrop = (event: DragEvent) => carriesFiles(event) && event.preventDefault();
+    const takeDrop = (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      setOver(false);
+      take(event.dataTransfer!.files);
+    };
+    window.addEventListener("dragover", allowDrop);
+    window.addEventListener("drop", takeDrop);
+    return () => {
+      window.removeEventListener("dragover", allowDrop);
+      window.removeEventListener("drop", takeDrop);
+    };
+  }, []);
+
   return (
     <div
       className={`rounded border border-dashed px-4 py-5 text-center transition-colors ${over ? "border-accent bg-accent/5" : "border-line-1 bg-ink-0/40"}`}
-      onDragOver={(event) => {
-        event.preventDefault();
-        setOver(true);
-      }}
+      onDragOver={() => setOver(true)}
       onDragLeave={() => setOver(false)}
-      onDrop={onDrop}
     >
       <input
         ref={input}

@@ -21,12 +21,14 @@ function FrameCard({
   monitorId,
   frame,
   failure,
+  removed,
   onToggle,
   onRemove,
 }: {
   monitorId: string;
   frame: ReviewFrame;
   failure: boolean;
+  removed: boolean;
   onToggle: () => void;
   onRemove: () => void;
 }) {
@@ -37,12 +39,13 @@ function FrameCard({
   }, [monitorId, frame.id]);
   const label = verdict(frame, failure);
   return (
-    <div className={`panel relative overflow-hidden ${failure ? "!border-bad" : ""}`}>
+    <div className={`panel relative overflow-hidden ${failure && !removed ? "!border-bad" : ""}`}>
       <button
         type="button"
-        className="block w-full cursor-pointer text-left"
+        className={`block w-full text-left ${removed ? "opacity-40" : "cursor-pointer"}`}
         aria-pressed={failure}
         aria-label={`Frame at ${clock(frame.ts)}, marked ${label}. Press to change`}
+        disabled={removed}
         onClick={onToggle}
       >
         <div className="aspect-video bg-ink-0">{url && <img src={url} alt="" className="h-full w-full object-cover" />}</div>
@@ -56,10 +59,10 @@ function FrameCard({
       <button
         type="button"
         className="btn absolute right-1 top-1 !bg-ink-1 !px-2 !py-0.5"
-        aria-label={`Don't send the frame at ${clock(frame.ts)}`}
+        aria-label={`${removed ? "Send" : "Don't send"} the frame at ${clock(frame.ts)}`}
         onClick={onRemove}
       >
-        ×
+        {removed ? "Undo" : "×"}
       </button>
     </div>
   );
@@ -106,25 +109,30 @@ function Progress({ review, onClose }: { review: ReviewSummary; onClose: () => v
 }
 
 export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monitor: Monitor }) {
-  const { send, isPending, openReview, reviewData } = useStore();
+  const { send, isPending, openReview, fetchReview, reviewData, reconnecting } = useStore();
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [failures, setFailures] = useState<Set<string>>(new Set());
+  const [relabelled, setRelabelled] = useState<Set<string>>(new Set());
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [printer, setPrinter] = useState("");
   const frames = reviewData[review.id]?.frames ?? [];
   const kept = frames.filter((frame) => !removed.has(frame.id));
+  const showsFailure = (frame: ReviewFrame) => (outcome === "failed" && frame.kind === "alert") !== relabelled.has(frame.id);
   const close = () => openReview(null);
+
+  useEffect(() => {
+    if (!reconnecting) fetchReview(review.id);
+  }, [reconnecting, review.id, review.frames]);
 
   const answer = (next: Outcome) => {
     setOutcome(next);
-    setFailures(new Set(next === "failed" ? frames.filter((frame) => frame.kind === "alert").map((frame) => frame.id) : []));
+    setRelabelled(new Set());
   };
 
   const submit = () =>
     send({
       cmd: "review.send",
       id: review.id,
-      failures: kept.filter((frame) => failures.has(frame.id)).map((frame) => frame.id),
+      failures: kept.filter(showsFailure).map((frame) => frame.id),
       removed: [...removed],
       printer: printer.trim(),
     });
@@ -136,7 +144,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
       {(review.status === "ready" || review.status === "dismissed") && (
         <div className="space-y-4 px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <p className="text-sm text-text-1">
-            PrintGuard kept {frames.length} frames from this print. Label them and send them to me, and I'll use them to train the detection model.
+            PrintGuard kept {review.frames} frames from this print. Label them and send them to me, and I'll use them to train the detection model.
           </p>
           <div>
             <span className="label mb-2 block">Did this print finish fine?</span>
@@ -153,17 +161,18 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
             <>
               <p className="text-[0.7rem] leading-relaxed text-text-2">
                 {outcome === "failed"
-                  ? "Press every frame where you can see the failure. Use the × to leave a frame out."
-                  : "Every frame is marked good. Press one to change it, or use the × to leave it out."}
+                  ? "Press every frame where you can see the failure. Use the × to leave a frame out, and Undo to put it back."
+                  : "Every frame is marked good. Press one to change it, or use the × to leave it out and Undo to put it back."}
               </p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {kept.map((frame) => (
+                {frames.map((frame) => (
                   <FrameCard
                     key={frame.id}
                     monitorId={monitor.id}
                     frame={frame}
-                    failure={failures.has(frame.id)}
-                    onToggle={() => setFailures((current) => toggled(current, frame.id))}
+                    failure={showsFailure(frame)}
+                    removed={removed.has(frame.id)}
+                    onToggle={() => setRelabelled((current) => toggled(current, frame.id))}
                     onRemove={() => setRemoved((current) => toggled(current, frame.id))}
                   />
                 ))}
@@ -180,7 +189,8 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
                 <p className="mt-1.5 leading-relaxed">
                   The frames shown here with the labels you gave them, each frame's risk score and time, this monitor's alert
                   threshold, the type of printer connection, the printer model if you type one, the PrintGuard version and a
-                  random ID for this hub. No names, addresses or camera URLs. Frames are stored privately in the EU and used
+                  random ID for this hub. No names or camera URLs. The inbox sees your IP address, as any server does, and keeps
+                  only a hash of it until the next day for the daily limit. Frames are stored privately in the EU and used
                   only to train PrintGuard's detection model. To have yours deleted, raise an issue on GitHub with the hub ID from Settings.
                 </p>
               </details>

@@ -1,6 +1,7 @@
 import { Bug } from "lucide-react";
 import type { ReactNode } from "react";
-import type { DialogKind } from "./store";
+import { NewTab } from "./components/NewTab";
+import type { DialogKind, SettingsTabId } from "./store";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
 const docs = (page: string) => `${REPO}/blob/main/docs/${page}`;
@@ -13,7 +14,7 @@ export interface GuideSection {
   body: ReactNode;
   shot?: string;
   visual?: ReactNode;
-  action?: { label: string; dialog: DialogKind };
+  action?: { label: string; dialog: DialogKind; tab?: SettingsTabId };
 }
 
 const WATCH_STATES: { led: string; when: string; then: string }[] = [
@@ -96,7 +97,7 @@ export const INTRO: GuideSection[] = [
       <>
         Register a camera, then add a monitor binding it. Connect a printer and a notification channel
         such as ntfy or Telegram for the full net. The rest of the guide sits behind the ? in the
-        header.
+        header, or under More on a phone.
       </>
     ),
     action: { label: "Register a camera", dialog: "cameras" },
@@ -123,7 +124,7 @@ export const GUIDE: GuideSection[] = [
     shot: "cameras",
     body: (
       <>
-        A camera is any video source PrintGuard can read, so a USB or CSI device, an RTSP, MJPEG or
+        A camera is any video source PrintGuard can read, so a USB device, an RTSP, RTMP, MJPEG or
         WebRTC (WHEP) stream URL, or a camera published from this device. Printers that expose a
         webcam register theirs automatically. The model only watches a square of each view, shown
         in the camera's crop editor, so crop it tightly around the print.
@@ -142,7 +143,7 @@ export const GUIDE: GuideSection[] = [
         <strong>PrusaLink</strong> or <strong>Bambu Lab</strong>, and PrintGuard can read its status, progress and temperatures,
         preheat it and pause or cancel a print on a defect. It's optional: without one, a monitor still watches and alerts.{" "}
         <a className={link} href={docs("printers.md")} target="_blank" rel="noreferrer">
-          Setup guides ↗
+          Setup guides <NewTab />
         </a>
       </>
     ),
@@ -230,7 +231,7 @@ export const GUIDE: GuideSection[] = [
         the hub.
       </>
     ),
-    action: { label: "Open settings", dialog: "settings" },
+    action: { label: "Open settings", dialog: "settings", tab: "appearance" },
   },
   {
     id: "integrate",
@@ -242,11 +243,11 @@ export const GUIDE: GuideSection[] = [
         server with scoped tokens (read ⊂ control ⊂ manage), and surface every monitor in{" "}
         <strong>Home Assistant</strong> over MQTT.{" "}
         <a className={link} href={docs("api.md")} target="_blank" rel="noreferrer">
-          API reference ↗
+          API reference <NewTab />
         </a>
       </>
     ),
-    action: { label: "Manage access", dialog: "settings" },
+    action: { label: "Manage access", dialog: "settings", tab: "api" },
   },
   {
     id: "plugins",
@@ -258,13 +259,13 @@ export const GUIDE: GuideSection[] = [
         Add a panel to the dashboard or a job on the hub, from the catalogue or any GitHub repo.
         Plugins are third-party code, so they run in a sandbox with only what you grant them.{" "}
         <strong>Picture in picture</strong>, <strong>Alert sounds</strong>, <strong>Progress reports</strong>{" "}
-        and <strong>Spotify</strong> come as standard.{" "}
+        and <strong>Spotify</strong> are in the catalogue.{" "}
         <a className={link} href={docs("plugin-development.md")} target="_blank" rel="noreferrer">
-          Writing one ↗
+          Writing one <NewTab />
         </a>
       </>
     ),
-    action: { label: "Browse plugins", dialog: "settings" },
+    action: { label: "Browse plugins", dialog: "settings", tab: "plugins" },
   },
   {
     id: "privacy",
@@ -285,7 +286,7 @@ export const GUIDE: GuideSection[] = [
     title: "Something broken?",
     body: (
       <>
-        Report a bug from the <Bug className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" aria-hidden /> chip in the header,
+        Report a bug from the <Bug className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" aria-hidden /> chip in the header, or from More on a phone,
         anonymously, no account needed. A diagnostics bundle goes with it, with every credential stripped and no
         camera frames unless you attach them. Download the same bundle from that dialog to read it or send it somewhere else yourself.
       </>

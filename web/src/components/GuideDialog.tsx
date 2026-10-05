@@ -1,12 +1,14 @@
 import { GUIDE, type GuideSection } from "../guide";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
+import { NewTab } from "./NewTab";
 
 const REPO = "https://github.com/oliverbravery/PrintGuard";
 const MODEL = "https://github.com/oliverbravery/Edge-FDM-Fault-Detection";
 
 export function GuideEntry({ section, lead, fill }: { section: GuideSection; lead?: boolean; fill?: boolean }) {
   const openDialog = useStore((s) => s.openDialog);
+  const openSettings = useStore((s) => s.openSettings);
   const { action } = section;
   return (
     <section className={`reveal ${fill ? "flex h-full min-h-0 flex-col" : ""}`}>
@@ -25,8 +27,8 @@ export function GuideEntry({ section, lead, fill }: { section: GuideSection; lea
       )}
       {section.visual && <div className="mt-3">{section.visual}</div>}
       {action && (
-        <button className="btn mt-2.5" onClick={() => openDialog(action.dialog)}>
-          {action.label} →
+        <button className="btn mt-2.5" onClick={() => (action.tab ? openSettings(action.tab) : openDialog(action.dialog))}>
+          {action.label}
         </button>
       )}
     </section>
@@ -52,7 +54,7 @@ export function GuideDialog() {
             target="_blank"
             rel="noreferrer"
           >
-            Documentation ↗
+            Documentation <NewTab />
           </a>
           <a
             className="mono text-[0.66rem] text-text-2 transition-colors hover:text-accent"
@@ -60,7 +62,7 @@ export function GuideDialog() {
             target="_blank"
             rel="noreferrer"
           >
-            The vision model ↗
+            The vision model <NewTab />
           </a>
         </footer>
       </div>

@@ -18,7 +18,7 @@ function ColorField({ value, onChange }: { value: string; onChange: (hex: string
         className="h-7 w-8 cursor-pointer rounded border border-line-1 bg-transparent p-0"
         aria-label="Colour"
       />
-      <input className="field mono" style={{ width: "5.5rem" }} value={text} spellCheck={false} onChange={(e) => commit(e.target.value)} />
+      <input className="field mono" aria-label="Hex colour" style={{ width: "5.5rem" }} value={text} spellCheck={false} onChange={(e) => commit(e.target.value)} />
     </div>
   );
 }
@@ -44,12 +44,13 @@ export function ThemeEditor({
       <div className="flex gap-2">
         <input
           className="field flex-1"
+          aria-label="Theme name"
           placeholder="Theme name"
           value={value.name}
           autoFocus
           onChange={(e) => onChange({ ...value, name: e.target.value })}
         />
-        <select className="field shrink-0" style={{ width: "8rem" }} value={value.base} onChange={(e) => setBase(e.target.value as ThemeBase)}>
+        <select className="field shrink-0" aria-label="Starting palette" style={{ width: "8rem" }} value={value.base} onChange={(e) => setBase(e.target.value as ThemeBase)}>
           <option value="dark">From dark</option>
           <option value="light">From light</option>
         </select>

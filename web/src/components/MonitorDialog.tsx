@@ -23,8 +23,8 @@ export function MonitorDialog() {
   return (
     <Dialog title="Add monitor" onClose={close}>
       <div className="space-y-3">
-        <input className="field" placeholder="Monitor name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-        <select className="field" value={cameraId} onChange={(e) => setCameraId(e.target.value)}>
+        <input className="field" aria-label="Monitor name" placeholder="Monitor name" value={name} onChange={(e) => setName(e.target.value)} />
+        <select className="field" aria-label="Camera" value={cameraId} onChange={(e) => setCameraId(e.target.value)}>
           <option value="">Bind a camera…</option>
           {cameras.map((c) => (
             <option key={c.id} value={c.id}>
@@ -35,7 +35,7 @@ export function MonitorDialog() {
         {!cameras.length && (
           <p className="text-xs text-text-1">No cameras registered yet, add one from the camera registry first.</p>
         )}
-        <select className="field" value={printerId} onChange={(e) => setPrinterId(e.target.value)}>
+        <select className="field" aria-label="Printer" value={printerId} onChange={(e) => setPrinterId(e.target.value)}>
           <option value="">No printer (alerts only)</option>
           {printers.map((p) => (
             <option key={p.id} value={p.id}>

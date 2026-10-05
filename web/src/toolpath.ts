@@ -32,10 +32,15 @@ export async function drawToolpath(canvas: HTMLCanvasElement, toolpath: string |
     preview.controls.target.copy(centre);
     preview.controls.update();
   } catch (err) {
-    preview.dispose();
+    releaseToolpath(preview);
     throw err;
   }
   return preview;
+}
+
+export function releaseToolpath(preview: WebGLPreview) {
+  preview.dispose();
+  preview.renderer.forceContextLoss();
 }
 
 async function renderPreview(toolpath: ParsedToolpath): Promise<Blob> {
@@ -58,7 +63,7 @@ async function renderPreview(toolpath: ParsedToolpath): Promise<Blob> {
     preview.render();
     return await tint(canvas);
   } finally {
-    preview?.dispose();
+    if (preview) releaseToolpath(preview);
     canvas.remove();
   }
 }

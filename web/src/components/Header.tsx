@@ -48,7 +48,7 @@ function VersionChip() {
       title={available ? `Update available: v${update!.latest}` : `PrintGuard v${version}`}
       onClick={() => openDialog("update")}
     >
-      {available ? `↑ v${update!.latest}` : `v${version}`}
+      {available ? `update v${update!.latest}` : `v${version}`}
     </button>
   );
 }

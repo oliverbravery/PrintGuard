@@ -6,8 +6,9 @@ export function useVideoStream(
   videoRef: React.RefObject<HTMLVideoElement | null>,
   camera: Camera | undefined,
   active = true,
-): boolean {
+): { streaming: boolean; refused: boolean } {
   const [streaming, setStreaming] = useState(false);
+  const [refused, setRefused] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -25,10 +26,17 @@ export function useVideoStream(
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !camera || !streaming) return;
-    return playHls(video, hlsUrl(camera.source.kind === "path" ? camera.source.path! : camera.id));
+    const play = () => setRefused(false);
+    video.addEventListener("play", play);
+    const stop = playHls(video, hlsUrl(camera.source.kind === "path" ? camera.source.path! : camera.id), () => setRefused(true));
+    return () => {
+      video.removeEventListener("play", play);
+      setRefused(false);
+      stop();
+    };
   }, [videoRef, camera?.id, camera?.online, streaming]);
 
-  return streaming;
+  return { streaming, refused };
 }
 
 export function adjust(data: ImageData, brightness: number, contrast: number, sharpness: number): void {
@@ -112,6 +120,7 @@ export function renderVideoFrame(
   }
   ctx.drawImage(video, 0, 0);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (opts.brightness === 1 && opts.contrast === 1 && opts.sharpness <= 0) return;
   const image = ctx.getImageData(0, 0, dw, dh);
   adjust(image, opts.brightness, opts.contrast, opts.sharpness);
   ctx.putImageData(image, 0, 0);

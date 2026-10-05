@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Wordmark } from "../src/components/Wordmark";
+import { NewTab } from "../src/components/NewTab";
 import dashboardDark from "../../docs/assets/dashboard.png";
 import dashboardLight from "../../docs/assets/dashboard-light.png";
 import printerDetail from "../../docs/assets/printer-detail.png";
@@ -20,7 +21,7 @@ const DOCS: { title: string; page: string; body: string }[] = [
   { title: "Printers", page: "printers.md", body: "Connect OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, send a print and set temperatures." },
   { title: "Cameras", page: "cameras.md", body: "Add a printer webcam, a stream URL, a USB camera or a phone." },
   { title: "Monitoring", page: "monitoring.md", body: "Tune a monitor's thresholds, frame its camera and read its risk history." },
-  { title: "Notifications", page: "notifications.md", body: "Set up ntfy, Pushover, Telegram or Discord, and quieten a flaky camera." },
+  { title: "Notifications", page: "notifications.md", body: "Set up ntfy, Pushover, Telegram, Discord or desktop notifications, and quieten a flaky camera." },
   { title: "Hardware", page: "hardware.md", body: "Pick an image variant and use an Intel or NVIDIA GPU, or an NPU." },
   { title: "Deployment", page: "deployment.md", body: "Reach your hub from outside your network without exposing it." },
   { title: "API & MCP", page: "api.md", body: "Drive the hub from a script, an agent or Home Assistant." },
@@ -147,7 +148,7 @@ function Showcase({ src, alt, w, h, kicker, title, body, flip }: { src: string; 
 function DocLink({ title, page, body }: { title: string; page: string; body: string }) {
   return (
     <a className="panel group block p-5 transition-colors hover:border-accent" href={`${DOCS_URL}/${page}`} target="_blank" rel="noreferrer">
-      <h3 className="display mb-1.5 text-sm font-semibold tracking-[0.14em] transition-colors group-hover:text-accent">{title} ↗</h3>
+      <h3 className="display mb-1.5 text-sm font-semibold tracking-[0.14em] transition-colors group-hover:text-accent">{title} <NewTab /></h3>
       <p className="text-[0.84rem] leading-relaxed text-text-1">{body}</p>
     </a>
   );
@@ -167,7 +168,7 @@ export function Home() {
           <div className="flex-1" />
           <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#features" onClick={scrollToId("features")}>FEATURES</a>
           <a className="mono hidden text-[0.66rem] text-text-2 transition-colors hover:text-accent sm:inline" href="#docs" onClick={scrollToId("docs")}>DOCS</a>
-          <a className="mono hidden whitespace-nowrap text-[0.66rem] text-text-2 transition-colors hover:text-accent min-[400px]:inline" href={REPO_URL} target="_blank" rel="noreferrer">GITHUB ↗</a>
+          <a className="mono hidden whitespace-nowrap text-[0.66rem] text-text-2 transition-colors hover:text-accent min-[400px]:inline" href={REPO_URL} target="_blank" rel="noreferrer">GITHUB <NewTab /></a>
           <a className="btn btn-primary" href="#install" onClick={scrollToId("install")}>Install</a>
         </div>
       </nav>
@@ -204,11 +205,11 @@ export function Home() {
         <p className="label mb-8 text-center">WHAT IT DOES</p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Feature index={2} led="led-infer" title="Detect" body="A compact encoder scores every frame against failure prototypes, scheduled fairly across all your cameras." />
-          <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu, and inference rests while the printer is idle." />
-          <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, PrintGuard sends a snapshot to your phone over ntfy, Pushover, Telegram or Discord." />
+          <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, and inference rests while the printer is idle." />
+          <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, PrintGuard sends a snapshot to your phone over ntfy, Pushover, Telegram or Discord, or to your desktop from the app." />
           <Feature index={5} led="led-warn" title="Fail safe" body="A watchdog warns the second a camera drops, a feed freezes or your printer stops answering. Nothing fails silently." />
           <Feature index={6} led="led-infer" title="Tune" body="Each monitor has its own threshold, hold time and cooldown, set against a history of its risk score and a snapshot of every alert." />
-          <Feature index={7} led="led-on" title="Automate" body="Every monitor appears in Home Assistant over MQTT, and a REST API and MCP server let a script or an agent do anything the dashboard can." />
+          <Feature index={7} led="led-on" title="Automate" body="Every monitor appears in Home Assistant over MQTT, and a REST API and MCP server let a script or an agent watch and control your printers." />
           <Feature index={8} led="led-on" title="Accelerate" body="Runs on a Raspberry Pi 4's CPU, and uses Core ML, Windows ML, OpenVINO or TensorRT where your machine has them." />
           <Feature index={9} led="led-infer" title="Anywhere" body="The dashboard fits a phone or a tablet, and works from the keyboard and with a screen reader." />
         </div>
@@ -251,7 +252,7 @@ export function Home() {
               )}
             </div>
             <p className="mt-4 text-xs leading-relaxed text-text-2">
-              The Windows build is unsigned for now, so its first launch needs a one-time approval. Choose{" "}
+              The macOS build is for Apple silicon. The Windows build is unsigned for now, so its first launch needs a one-time approval. Choose{" "}
               <span className="text-text-1">More info</span>, then <span className="text-text-1">Run anyway</span>.
             </p>
           </div>
@@ -276,11 +277,11 @@ export function Home() {
               <span className="text-text-1">:latest-nvidia</span> image with{" "}
               <span className="text-text-1">--gpus all</span>.{" "}
               <a className="text-text-1 underline decoration-line-0 underline-offset-2 transition-colors hover:text-accent" href={ACCELERATION_URL} target="_blank" rel="noreferrer">
-                Hardware acceleration ↗
+                Hardware acceleration <NewTab />
               </a>
             </p>
             <a className="mono mt-4 inline-block text-[0.7rem] text-text-2 transition-colors hover:text-accent" href={UNRAID_URL} target="_blank" rel="noreferrer">
-              Unraid, install from Community Applications ↗
+              Unraid, install from Community Applications <NewTab />
             </a>
           </div>
         </div>

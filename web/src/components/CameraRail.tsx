@@ -11,7 +11,7 @@ export function sourceLabel(source: CameraSource): string {
   if (source.kind === "device") return source.label || "device camera";
   if (source.kind === "path") return `path://${source.path}`;
   if (source.kind === "bambu") return `bambu://${source.host ?? ""}`;
-  return source.url ? source.url.replace(/\/\/[^/@]+@/, "//") : source.kind;
+  return source.url ? source.url.replace(/\/\/[^?#]*@/, "//") : source.kind;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -63,8 +63,8 @@ function CameraCard({ camera }: { camera: Camera }) {
       )}
       <div className="order-3 flex w-full items-center gap-4 sm:order-2 sm:w-auto">
         <Stat label="max" value={`${camera.max_fps.toFixed(0)}`} />
-        <Stat label="target" value={camera.in_use ? camera.target_fps.toFixed(1) : "—"} />
-        <Stat label="actual" value={camera.in_use ? camera.achieved_fps.toFixed(1) : "—"} />
+        <Stat label="target" value={camera.in_use ? camera.target_fps.toFixed(1) : "none"} />
+        <Stat label="actual" value={camera.in_use ? camera.achieved_fps.toFixed(1) : "none"} />
       </div>
     </>
   );

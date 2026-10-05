@@ -37,5 +37,6 @@ export function statusText(review: ReviewSummary): string {
 }
 
 export function awaitingReview(reviews: ReviewSummary[], monitorId: string): ReviewSummary | undefined {
-  return reviews.filter((review) => review.monitor_id === monitorId && review.status === "ready").at(-1);
+  const lastPrint = reviews.filter((review) => review.monitor_id === monitorId && review.status !== "running").at(-1);
+  return lastPrint?.status === "ready" ? lastPrint : undefined;
 }

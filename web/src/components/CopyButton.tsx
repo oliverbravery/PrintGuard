@@ -7,7 +7,8 @@ async function copyText(text: string, button: HTMLButtonElement): Promise<void> 
   field.readOnly = true;
   field.className = "sr-only";
   button.after(field);
-  field.select();
+  field.focus();
+  field.setSelectionRange(0, text.length);
   const copied = document.execCommand("copy");
   field.remove();
   button.focus();

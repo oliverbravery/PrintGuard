@@ -51,7 +51,7 @@ export function RiskGauge({ score, threshold, size = 76 }: { score: number | nul
         fill={colour}
         style={{ font: "700 13px var(--font-mono)", transition: "fill 400ms" }}
       >
-        {score === null ? "—" : (score * 100).toFixed(0)}
+        {score === null ? "-" : (score * 100).toFixed(0)}
       </text>
       <text x="32" y="42" textAnchor="middle" fill="var(--color-text-2)" style={{ font: "600 6.5px var(--font-display)", letterSpacing: "0.18em" }}>
         RISK

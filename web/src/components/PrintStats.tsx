@@ -11,12 +11,12 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 export function PrintStats({ meta, temperatures = false }: { meta: PrintMeta | null; temperatures?: boolean }) {
-  const degrees = (value?: number | null) => (value ? `${Math.round(value)}°C` : "—");
+  const degrees = (value?: number | null) => (value ? `${Math.round(value)}°C` : "none");
   const stats: [string, string][] = [
-    ["print time", meta?.time_s ? formatDuration(meta.time_s) : "—"],
-    ["filament", (meta && formatFilament(meta)) ?? "—"],
-    ["sliced for", meta?.printer_model ?? "—"],
-    ["slicer", meta?.slicer ?? "—"],
+    ["print time", meta?.time_s ? formatDuration(meta.time_s) : "none"],
+    ["filament", (meta && formatFilament(meta)) ?? "none"],
+    ["sliced for", meta?.printer_model ?? "none"],
+    ["slicer", meta?.slicer ?? "none"],
     ...(temperatures ? ([["nozzle", degrees(meta?.nozzle)], ["bed", degrees(meta?.bed)]] as [string, string][]) : []),
   ];
   return (

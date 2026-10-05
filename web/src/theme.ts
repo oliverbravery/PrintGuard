@@ -1,3 +1,4 @@
+import { writeStored } from "./storage";
 import type { CustomTheme, Glass, ThemeBase, ThemeTokenKey } from "./types";
 
 interface TokenMeta {
@@ -83,10 +84,21 @@ function levelOf(luminance: number): number {
   return luminance <= 0.0031308 ? luminance * 12.92 : 1.055 * luminance ** (1 / 2.4) - 0.055;
 }
 
+function channels(hex: string): number[] {
+  const packed = parseInt(hex.slice(1), 16);
+  return [(packed >> 16) & 255, (packed >> 8) & 255, packed & 255].map((channel) => channel / 255);
+}
+
+function luminance([red, green, blue]: number[]): number {
+  return 0.2126 * grey(red) + 0.7152 * grey(green) + 0.0722 * grey(blue);
+}
+
+function contrast(one: number, other: number): number {
+  return (Math.max(one, other) + 0.05) / (Math.min(one, other) + 0.05);
+}
+
 function mutedRatio(level: number, ink: number, alpha: number): number {
-  const muted = grey(ink * alpha + level * (1 - alpha));
-  const surface = grey(level);
-  return (Math.max(muted, surface) + 0.05) / (Math.min(muted, surface) + 0.05);
+  return contrast(grey(ink * alpha + level * (1 - alpha)), grey(level));
 }
 
 function boundary(ink: number, alpha: number): number {
@@ -112,6 +124,29 @@ function mutedAlpha(level: number, ink: number): number {
   return high;
 }
 
+function legibleStatus(hex: string, level: number, ink: number): string {
+  const surface = grey(level);
+  const towardsInk = (share: number) => channels(hex).map((channel) => channel + (ink - channel) * share);
+  const readable = (share: number) => {
+    const status = luminance(towardsInk(share));
+    return (ink ? status > surface : status < surface) && contrast(status, surface) >= AA;
+  };
+  let low = 0;
+  let high = 1;
+  if (!readable(low)) {
+    for (let step = 0; step < 24; step += 1) {
+      const mid = (low + high) / 2;
+      if (readable(mid)) high = mid;
+      else low = mid;
+    }
+    low = high;
+  }
+  const settle = ink ? Math.ceil : Math.floor;
+  return `rgb(${towardsInk(low).map((channel) => settle(channel * 255)).join(" ")})`;
+}
+
+const STATUS_TOKENS = ["accent", "ok", "warn", "bad"] as const;
+
 const LIGHTEST_UNDER_WHITE_INK = boundary(1, 1);
 const DARKEST_UNDER_BLACK_INK = boundary(0, 1);
 
@@ -122,7 +157,7 @@ export function litGlass(tone: number): boolean {
 }
 
 function behindTheGlass(tone: number): { lo: number; hi: number } {
-  const page = levelOf(luminance(PALETTES[litGlass(tone) ? "light" : "dark"].ink0));
+  const page = levelOf(luminance(channels(PALETTES[litGlass(tone) ? "light" : "dark"].ink0)));
   return {
     lo: Math.min(cover ? cover.lo : page, tone),
     hi: Math.min(1, Math.max(cover ? cover.hi : page, tone) + SATURATION_HEADROOM),
@@ -153,43 +188,46 @@ export function glassMaterial({ opacity, tone }: Glass): { lit: boolean; vars: R
   const floor = clearestTint(tone);
   const settled = floor + opacity * (1 - floor);
   const { lo, hi } = behindTheGlass(tone);
-  const alpha = mutedAlpha(settled * tone + (1 - settled) * (lit ? lo : hi), lit ? 0 : 1);
+  const ink = lit ? 0 : 1;
+  const hardest = settled * tone + (1 - settled) * (lit ? lo : hi);
+  const alpha = mutedAlpha(hardest, ink);
   const level = Math.round(tone * 255);
-  const channels = lit ? "0 0 0" : "255 255 255";
+  const inked = lit ? "0 0 0" : "255 255 255";
+  const palette = PALETTES[lit ? "light" : "dark"];
   return {
     lit,
     vars: {
       "--glass-surface": `rgb(${level} ${level} ${level} / ${settled.toFixed(3)})`,
-      "--glass-ink": `rgb(${channels})`,
-      "--glass-muted": `rgb(${channels} / ${alpha.toFixed(3)})`,
+      "--glass-ink": `rgb(${inked})`,
+      "--glass-muted": `rgb(${inked} / ${alpha.toFixed(3)})`,
       "--glass-contrast": lit ? "rgb(255 255 255)" : "rgb(0 0 0)",
+      ...Object.fromEntries(STATUS_TOKENS.map((token) => [`--glass-${token}`, legibleStatus(palette[token], hardest, ink)])),
     },
   };
 }
 
-export async function measureCover(src: string | null): Promise<void> {
-  if (!src) cover = null;
-  else {
-    const picture = new Image();
-    picture.src = src;
-    await picture.decode();
-    const canvas = document.createElement("canvas");
-    canvas.width = BACKDROP_CELLS;
-    canvas.height = BACKDROP_CELLS;
-    const paper = canvas.getContext("2d", { willReadFrequently: true })!;
-    paper.drawImage(picture, 0, 0, BACKDROP_CELLS, BACKDROP_CELLS);
-    const { data } = paper.getImageData(0, 0, BACKDROP_CELLS, BACKDROP_CELLS);
-    let lo = 1;
-    let hi = 0;
-    for (let at = 0; at < data.length; at += 4) {
-      const level = levelOf(
-        0.2126 * grey(data[at] / 255) + 0.7152 * grey(data[at + 1] / 255) + 0.0722 * grey(data[at + 2] / 255),
-      );
-      lo = Math.min(lo, level);
-      hi = Math.max(hi, level);
-    }
-    cover = { lo, hi };
+async function coverRange(src: string): Promise<{ lo: number; hi: number }> {
+  const picture = new Image();
+  picture.src = src;
+  await picture.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = BACKDROP_CELLS;
+  canvas.height = BACKDROP_CELLS;
+  const paper = canvas.getContext("2d", { willReadFrequently: true })!;
+  paper.drawImage(picture, 0, 0, BACKDROP_CELLS, BACKDROP_CELLS);
+  const { data } = paper.getImageData(0, 0, BACKDROP_CELLS, BACKDROP_CELLS);
+  let lo = 1;
+  let hi = 0;
+  for (let at = 0; at < data.length; at += 4) {
+    const level = levelOf(luminance([data[at] / 255, data[at + 1] / 255, data[at + 2] / 255]));
+    lo = Math.min(lo, level);
+    hi = Math.max(hi, level);
   }
+  return { lo, hi };
+}
+
+export async function measureCover(src: string | null): Promise<void> {
+  cover = src ? await coverRange(src).catch(() => null) : null;
   applyTheme(current.themeId, current.themes, current.glass);
 }
 
@@ -201,17 +239,12 @@ export function resolveTheme(themeId: string, themes: CustomTheme[], glass: Glas
   return { base: window.matchMedia(MEDIA).matches ? "dark" : "light", colors: null };
 }
 
-function luminance(hex: string): number {
-  const n = parseInt(hex.slice(1), 16);
-  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
-    const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-}
+const ON_ACCENT_INKS = ["#0b0c0a", "#f3f4ed"];
 
 function readableOn(hex: string): string {
-  return luminance(hex) > 0.42 ? "#0b0c0a" : "#f3f4ed";
+  const accent = luminance(channels(hex));
+  const [dark, light] = ON_ACCENT_INKS;
+  return contrast(accent, luminance(channels(dark))) >= contrast(accent, luminance(channels(light))) ? dark : light;
 }
 
 let current: { themeId: string; themes: CustomTheme[]; glass: Glass } = { themeId: "system", themes: [], glass: GLASS_DEFAULT };
@@ -253,7 +286,7 @@ export function applyTheme(themeId: string, themes: CustomTheme[], given?: Parti
     : glassy
       ? material
       : null;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ id: themeId, base, vars, bg, glass: glassy }));
+  writeStored(STORAGE_KEY, JSON.stringify({ id: themeId, base, vars, bg, glass: glassy }));
 }
 
 window.matchMedia(MEDIA).addEventListener("change", () => {

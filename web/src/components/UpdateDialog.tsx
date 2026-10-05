@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
+import { NewTab } from "./NewTab";
 
 const PULL_COMMAND = "docker compose pull && docker compose up -d";
 
@@ -29,7 +30,7 @@ export function UpdateDialog() {
             {available ? (
               <>
                 <span className="mono text-text-2">v{update!.current}</span>
-                <span className="text-text-2"> → </span>
+                <span className="text-text-2"> to </span>
                 <span className="mono text-accent">v{update!.latest}</span>
               </>
             ) : (
@@ -75,7 +76,7 @@ export function UpdateDialog() {
               rel="noreferrer"
               className="text-[0.7rem] text-accent underline hover:opacity-80 inline-block"
             >
-              All releases on GitHub ↗
+              All releases on GitHub <NewTab />
             </a>
           </div>
         )}

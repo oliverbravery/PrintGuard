@@ -147,7 +147,7 @@ export function Sheet({
   const titleId = useId();
   return (
     <Modal onClose={onClose} variant="sheet" labelledBy={titleId}>
-      <aside className={`slide-in flex h-full w-full flex-col border-l border-line-0 bg-ink-1 ${width}`}>
+      <aside className={`sheet slide-in flex h-full w-full flex-col border-l border-line-0 bg-ink-1 ${width}`}>
         <div className="flex shrink-0 items-center gap-2.5 border-b border-line-0 px-5 py-3.5">
           {lead}
           <h2 id={titleId} className="display min-w-0 flex-1 truncate text-lg font-semibold">

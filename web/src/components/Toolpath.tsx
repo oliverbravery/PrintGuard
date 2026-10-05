@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { WebGLPreview } from "gcode-preview";
-import { drawToolpath, tooLargeToDraw, TOOLPATH_MAX_MB, type ParsedToolpath, type ToolpathSource } from "../toolpath";
+import { drawToolpath, releaseToolpath, tooLargeToDraw, TOOLPATH_MAX_MB, type ParsedToolpath, type ToolpathSource } from "../toolpath";
 import { Slider } from "./Slider";
 
 function token(name: string): string {
@@ -53,7 +53,7 @@ export function Toolpath({
         lastSegmentColor: token("--color-accent"),
         travelColor: token("--color-line-1"),
       });
-      if (disposed) return preview.dispose();
+      if (disposed) return releaseToolpath(preview);
       previewRef.current = preview;
       const count = preview.maxLayerIndex + 1;
       setLayers(count);
@@ -64,7 +64,7 @@ export function Toolpath({
     return () => {
       disposed = true;
       observer.disconnect();
-      previewRef.current?.dispose();
+      if (previewRef.current) releaseToolpath(previewRef.current);
       previewRef.current = null;
     };
   }, []);

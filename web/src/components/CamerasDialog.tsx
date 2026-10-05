@@ -11,8 +11,21 @@ import { SaveStatus } from "./SaveStatus";
 import { Slider } from "./Slider";
 import { type Tab, TabPanel, Tabs } from "./Tabs";
 
+const UNCAPPED_DETECT_FPS = 60;
+
 function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
+}
+
+function useRegistered(onRegistered: () => void) {
+  const { engine, isPending } = useStore();
+  const registering = isPending("camera.add");
+  const cameras = engine?.cameras.length ?? 0;
+  const camerasWhenSent = useRef(cameras);
+  useEffect(() => {
+    if (registering) camerasWhenSent.current = cameras;
+    else if (cameras > camerasWhenSent.current) onRegistered();
+  }, [registering]);
 }
 
 function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
@@ -21,7 +34,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const owner = camera.printer_id ? engine?.printers.find((p) => p.id === camera.printer_id) : null;
   const managed = Boolean(owner) || Boolean(camera.declared);
-  const detectFpsCeiling = Math.min(60, Math.ceil(camera.max_fps));
+  const detectFpsCeiling = Math.min(UNCAPPED_DETECT_FPS, Math.ceil(camera.max_fps));
 
   useEffect(() => {
     if (focus) {
@@ -53,13 +66,13 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           {!managed && (
             <button
               className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
-              disabled={isPending("camera.remove")}
+              disabled={isPending("camera.remove", camera.id)}
               onClick={() => {
                 if (camera.source.path) stopPublishing(camera.source.path);
                 send({ cmd: "camera.remove", id: camera.id });
               }}
             >
-              {isPending("camera.remove") ? "Removing…" : "Remove"}
+              {isPending("camera.remove", camera.id) ? "Removing…" : "Remove"}
             </button>
           )}
         </div>
@@ -89,6 +102,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             min={0}
             max={2}
             step={0.1}
+            hint="This preview sharpens the picture at the size it's drawn here, so it looks stronger than what the model gets."
             onChange={(v) => updateCamera(camera.id, { sharpness: v })}
           />
           <Slider
@@ -99,7 +113,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             step={0.5}
             format={(v) => `${v} fps`}
             hint="Lower it to lighten the load on the hub. A defect then takes longer to confirm."
-            onChange={(v) => updateCamera(camera.id, { detect_fps: v })}
+            onChange={(v) => updateCamera(camera.id, { detect_fps: v >= detectFpsCeiling ? UNCAPPED_DETECT_FPS : v })}
           />
           <div className="space-y-1.5">
             <span className="label">Rotation</span>
@@ -179,6 +193,11 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
   useEffect(() => {
     discover();
   }, []);
+  useRegistered(() => {
+    setName("");
+    setDeviceId("");
+    discover();
+  });
   const devices = (discovered ?? []).filter((s) => s.kind === "device");
   return (
     <div className="space-y-3">
@@ -191,7 +210,7 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
       )}
       {devices.length > 0 && (
         <>
-          <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+          <select className="field" aria-label="Camera" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
             <option value="">Select a camera…</option>
             {devices.map((d) => (
               <option key={d.device_id} value={d.device_id}>
@@ -199,7 +218,7 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
               </option>
             ))}
           </select>
-          <input className="field" placeholder="Name (e.g. Ender 3 nozzle cam)" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="field" aria-label="Name" placeholder="Name (e.g. Ender 3 nozzle cam)" value={name} onChange={(e) => setName(e.target.value)} />
           <button
             className="btn btn-primary w-full"
             disabled={!deviceId || busy}
@@ -228,6 +247,12 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
   const [deviceId, setDeviceId] = useState("");
   const [busy, setBusy] = useState(false);
 
+  useRegistered(() => {
+    setName("");
+    setUrl("");
+    setDeviceId("");
+  });
+
   useEffect(() => {
     if (tab === "browser" && !desktopApp) {
       listVideoInputs()
@@ -244,7 +269,7 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
         toast("error", `publishing stopped: ${reason}`),
       );
       if (!hlsPlayable) {
-        toast("alert", "this browser records VP8, so monitoring works and you can preview it here, but other devices can't view this camera");
+        toast("alert", "This browser records VP8, which the dashboard can't play, so this camera is monitored but has no live view. Chrome, Edge and Safari record H.264.");
       }
       await new Promise((r) => setTimeout(r, 800));
       addPublishedCamera(name || "Published camera", path);
@@ -275,9 +300,10 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
       </div>
       {tab === "url" && (
         <div className="space-y-3">
-          <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
           <input
             className="field"
+            aria-label="Stream URL"
             placeholder="rtsp:// rtmp:// http:// or whep:// stream URL"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -311,7 +337,7 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
             Streams this device's camera to the hub. It reconnects if the hub restarts and resumes
             when you reopen this page on this device.
           </p>
-          <select className="field" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+          <select className="field" aria-label="Camera" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
             <option value="">Select a camera…</option>
             {devices.map((d, i) => (
               <option key={d.deviceId} value={d.deviceId}>
@@ -319,7 +345,7 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
               </option>
             ))}
           </select>
-          <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
           <button className="btn btn-primary w-full" disabled={!deviceId || busy || isPending("camera.add")} onClick={publish}>
             {busy ? "Publishing…" : isPending("camera.add") ? "Registering…" : "Publish & register"}
           </button>

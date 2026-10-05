@@ -1,5 +1,6 @@
 import type { AdapterMeta } from "../types";
 import { ExperimentalBadge } from "./ExperimentalBadge";
+import { NewTab } from "./NewTab";
 
 export function SchemaForm({
   meta,
@@ -43,7 +44,7 @@ export function SchemaForm({
         </label>
       ))}
       <a href={meta.setup_url ?? meta.docs_url} target="_blank" rel="noreferrer" className="mono text-[0.64rem] text-text-2 hover:text-accent inline-block">
-        {meta.label} {meta.setup_url ? "setup guide" : "API docs"} ↗
+        {meta.label} {meta.setup_url ? "setup guide" : "API docs"} <NewTab />
       </a>
     </div>
   );

@@ -1,3 +1,5 @@
+import { NewTab } from "./NewTab";
+
 const ISSUES_URL = "https://github.com/oliverbravery/PrintGuard/issues";
 const SUMMARY = "This feature is new and may still be buggy.";
 
@@ -9,7 +11,7 @@ export function ExperimentalBadge({ detail = false }: { detail?: boolean }) {
       <p className="text-[0.7rem] leading-snug text-text-2">
         {SUMMARY} Please{" "}
         <a href={ISSUES_URL} target="_blank" rel="noreferrer" className="text-warn underline hover:text-accent">
-          report any issues ↗
+          report any issues <NewTab />
         </a>
         .
       </p>

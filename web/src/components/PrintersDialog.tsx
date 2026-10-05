@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { AdapterMeta, Printer } from "../types";
 import { Dialog } from "./Dialog";
@@ -63,24 +63,24 @@ function PrinterRow({ printer }: { printer: Printer }) {
           </button>
           <button
             className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
-            disabled={isPending("printer.remove")}
+            disabled={isPending("printer.remove", printer.id)}
             onClick={() => send({ cmd: "printer.remove", id: printer.id })}
           >
-            {isPending("printer.remove") ? "Removing…" : "Remove"}
+            {isPending("printer.remove", printer.id) ? "Removing…" : "Remove"}
           </button>
         </div>
       </div>
       {open && meta && (
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
-          <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
           <PrinterTest target={printer.id} provider={printer.provider} config={config} />
           <button
             className="btn btn-primary w-full !py-1.5"
-            disabled={!dirty || isPending("printer.update")}
+            disabled={!dirty || isPending("printer.update", printer.id)}
             onClick={() => send({ cmd: "printer.update", id: printer.id, patch: { name: name.trim(), config } })}
           >
-            {isPending("printer.update") ? "Saving…" : "Save"}
+            {isPending("printer.update", printer.id) ? "Saving…" : "Save"}
           </button>
         </div>
       )}
@@ -96,11 +96,24 @@ function RegisterPrinter() {
   const [config, setConfig] = useState<Record<string, string>>({});
   const meta = integrations.find((i) => i.id === provider);
   const busy = isPending("printer.add");
+  const printers = engine?.printers.length ?? 0;
+  const printersWhenSent = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (busy || printersWhenSent.current === null) return;
+    if (printers > printersWhenSent.current) {
+      setProvider("");
+      setName("");
+      setConfig({});
+    }
+    printersWhenSent.current = null;
+  }, [busy]);
 
   return (
     <div className="space-y-3">
       <select
         className="field"
+        aria-label="Printer service"
         value={provider}
         onChange={(e) => {
           setProvider(e.target.value);
@@ -116,17 +129,15 @@ function RegisterPrinter() {
       </select>
       {meta && (
         <>
-          <input className="field" placeholder={`Name (e.g. ${meta.label} Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="field" aria-label="Name" placeholder={`Name (e.g. ${meta.label} Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
           <PrinterTest target={NEW_PRINTER} provider={provider} config={config} />
           <button
             className="btn btn-primary w-full"
             disabled={busy}
             onClick={() => {
+              printersWhenSent.current = printers;
               send({ cmd: "printer.add", printer: { name: name.trim(), provider, config } });
-              setProvider("");
-              setName("");
-              setConfig({});
             }}
           >
             {busy ? "Registering…" : "Register printer"}

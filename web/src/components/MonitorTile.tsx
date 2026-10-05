@@ -28,7 +28,8 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   const device = printer?.device_state;
   const live = Boolean(camera?.online);
-  const score = live ? (history[monitor.id]?.at(-1)?.score ?? 0) : null;
+  const inferring = live && monitor.watching;
+  const score = inferring ? (history[monitor.id]?.at(-1)?.score ?? 0) : null;
   const alerting = Boolean(monitor.alert);
   const pinned = section(engine?.settings.layout, "monitors").pinned.includes(monitor.id);
   const tools = usePluginSurface("monitor", monitor.id);
@@ -77,7 +78,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
         ) : (
           <>
             <DeviceChip state={printer?.device_state ?? undefined} />
-            {!monitor.watching && <span className="chip">{camera ? "standby" : "no camera"}</span>}
+            {!monitor.watching && <span className="chip">{!monitor.enabled ? "off" : camera ? "standby" : "no camera"}</span>}
             {tools.map(({ plugin, node }) => (
               <span key={plugin.id} className="relative z-[3]">
                 <PluginNodeView plugin={plugin} node={node} />
@@ -101,12 +102,12 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
         <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-1">
           <div>
             <div className="mono text-[0.8rem]">
-              {camera && live ? `${camera.achieved_fps.toFixed(1)}/${camera.target_fps.toFixed(1)}` : "—"}
+              {camera && inferring ? `${camera.achieved_fps.toFixed(1)}/${camera.target_fps.toFixed(1)}` : "none"}
             </div>
             <div className="label">infer fps</div>
           </div>
           <div>
-            <div className="mono text-[0.8rem]">{camera ? `${camera.max_fps.toFixed(0)} fps` : "—"}</div>
+            <div className="mono text-[0.8rem]">{camera ? `${camera.max_fps.toFixed(0)} fps` : "none"}</div>
             <div className="label">camera max</div>
           </div>
           {HEATERS.map((name) => {

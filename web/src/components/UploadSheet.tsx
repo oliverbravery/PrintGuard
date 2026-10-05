@@ -22,7 +22,7 @@ function TemperatureField({ heater, value, heats, onChange }: { heater: HeaterNa
         inputMode="numeric"
         min={1}
         max={HEATER_MAX[heater]}
-        placeholder="—"
+        placeholder="none"
         disabled={!heats}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -80,13 +80,7 @@ function StagedPrintForm({
   }
 
   const upload = () => {
-    uploadPrint({
-      file,
-      name: name.trim(),
-      printerIds,
-      temperatures,
-      thumbnailFrom: isText(file.name) && !inspection!.thumbnail ? drawn! : null,
-    });
+    uploadPrint({ file, name: name.trim(), printerIds, temperatures }, isText(file.name) && !inspection!.thumbnail ? drawn! : null);
     onDone();
   };
 

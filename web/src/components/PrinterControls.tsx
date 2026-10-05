@@ -36,7 +36,9 @@ export function ProgressBar({ state, className = "" }: { state: DeviceState; cla
 
 function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heater: Heater; busy: boolean; onCommit: (target: number) => void }) {
   const [draft, setDraft] = useState(String(Math.round(heater.target)));
-  useEffect(() => setDraft(String(Math.round(heater.target))), [heater.target]);
+  useEffect(() => {
+    if (!busy) setDraft(String(Math.round(heater.target)));
+  }, [heater.target, busy]);
   const commit = () => {
     const target = Math.min(HEATER_MAX[name], Math.max(0, Number(draft)));
     if (draft.trim() === "" || Number.isNaN(target)) return setDraft(String(Math.round(heater.target)));
@@ -74,7 +76,7 @@ function HeaterCard({ name, heater, control, busy, onTarget }: { name: HeaterNam
       {control ? (
         <TargetField name={name} heater={heater} busy={busy} onCommit={onTarget} />
       ) : (
-        <span className="mono text-[0.7rem] text-text-2">{heating ? `→ ${Math.round(heater.target)}°` : "off"}</span>
+        <span className="mono text-[0.7rem] text-text-2">{heating ? `to ${Math.round(heater.target)}°` : "off"}</span>
       )}
     </div>
   );

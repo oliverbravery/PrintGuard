@@ -205,7 +205,7 @@ function PluginPage({
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <button className="btn" onClick={onBack}>
-          ← All plugins
+          Back to all plugins
         </button>
         {extra}
       </div>

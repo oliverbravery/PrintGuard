@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useStore } from "../store";
 import type { PluginRecord } from "../types";
+import { NewTab } from "./NewTab";
 
 export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
   const send = useStore((s) => s.send);
+  const signIn = useStore((s) => s.signIn);
   const callback = useStore((s) => s.engine?.plugin_oauth_callback ?? "");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const names = Object.keys(plugin.manifest.secrets);
@@ -21,7 +23,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
             {provider} needs an app of your own.{" "}
             {plugin.manifest.oauth.register_url && (
               <a className="text-accent hover:underline" href={plugin.manifest.oauth.register_url} target="_blank" rel="noreferrer">
-                Create one ↗
+                Create one <NewTab />
               </a>
             )}{" "}
             with this redirect URI, then paste its client id below.
@@ -62,14 +64,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
           <button
             className={connected ? "btn" : "btn btn-primary"}
             disabled={!connected && !plugin.secrets_set.includes("oauth_client_id")}
-            onClick={() =>
-              send({
-                cmd: "plugin.oauth",
-                id: plugin.id,
-                action: connected ? "forget" : "start",
-                origin: window.location.origin,
-              })
-            }
+            onClick={() => (connected ? send({ cmd: "plugin.oauth", id: plugin.id, action: "forget" }) : signIn(plugin.id))}
           >
             {connected ? "Disconnect" : "Connect"}
           </button>

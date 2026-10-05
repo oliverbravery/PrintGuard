@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "react-image-crop/dist/ReactCrop.css";
+@import "./fonts/fonts.css";
 
 @theme {
   --color-ink-0: #0b0c0a;
@@ -129,12 +130,20 @@ body {
   --theme-ink-1: var(--color-ink-1);
   --theme-ink-2: var(--color-ink-2);
   --theme-ink-3: var(--color-ink-3);
+  --theme-accent: var(--color-accent);
+  --theme-ok: var(--color-ok);
+  --theme-warn: var(--color-warn);
+  --theme-bad: var(--color-bad);
 }
 
 :root[data-glass] body {
   --color-text-0: var(--painted-ink);
   --color-text-1: var(--painted-ink);
   --color-text-2: var(--painted-muted);
+  --color-accent: var(--glass-accent, var(--theme-accent));
+  --color-ok: var(--glass-ok, var(--theme-ok));
+  --color-warn: var(--glass-warn, var(--theme-warn));
+  --color-bad: var(--glass-bad, var(--theme-bad));
   --color-ink-1: color-mix(in srgb, var(--painted-contrast) 12%, transparent);
   --color-ink-2: color-mix(in srgb, var(--painted-contrast) 8%, transparent);
   --color-ink-3: color-mix(in srgb, var(--painted-contrast) 20%, transparent);
@@ -146,6 +155,7 @@ body {
 
 :root[data-glass] .panel,
 :root[data-glass] .tile,
+:root[data-glass] .sheet,
 :root[data-glass] header,
 :root[data-glass] .app-nav,
 :root[data-glass] .plate {
@@ -211,6 +221,10 @@ body {
     --color-text-0: var(--theme-text-0);
     --color-text-1: var(--theme-text-1);
     --color-text-2: var(--theme-text-2);
+    --color-accent: var(--theme-accent);
+    --color-ok: var(--theme-ok);
+    --color-warn: var(--theme-warn);
+    --color-bad: var(--theme-bad);
     --color-ink-1: var(--theme-ink-1);
     --color-ink-2: var(--theme-ink-2);
     --color-ink-3: var(--theme-ink-3);
@@ -456,6 +470,12 @@ body {
   backdrop-filter: var(--painted-glass);
   border-top: 1px solid var(--painted-edge, var(--color-line-0));
   border-left: 1px solid var(--painted-edge, var(--color-line-0));
+}
+
+@supports not selector(:popover-open) {
+  .tuner {
+    display: none;
+  }
 }
 
 @supports not (anchor-name: --theme-chip) {
@@ -812,7 +832,8 @@ video {
 }
 
 .changelog li::before {
-  content: "—";
+  content: "-";
+  content: "-" / "";
   position: absolute;
   left: 0;
   color: var(--color-accent);
@@ -924,6 +945,21 @@ video {
 
   .field {
     font-size: 1rem;
+  }
+
+  input[type="range"] {
+    height: 2rem;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+    margin-top: -10.5px;
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
   }
 
   button.chip,

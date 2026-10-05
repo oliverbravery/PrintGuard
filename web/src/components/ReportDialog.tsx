@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { recentLogs } from "../log";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
@@ -32,6 +32,7 @@ export function ReportDialog() {
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const filePicker = useRef<HTMLInputElement>(null);
   const sending = isPending("report.send");
   const bundling = isPending("report.bundle");
   const close = () => openDialog(null);
@@ -92,23 +93,34 @@ export function ReportDialog() {
         </p>
         <textarea
           className="field min-h-28"
+          aria-label="What happened"
           placeholder="What happened, and what did you expect instead?"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          autoFocus
         />
         <input
           className="field"
           type="email"
+          aria-label="Email for follow-up (optional)"
           placeholder="Email for follow-up (optional)"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
         <div className="flex flex-wrap items-center gap-2">
-          <label className="btn cursor-pointer">
+          <button type="button" className="btn" onClick={() => filePicker.current?.click()}>
             Attach screenshots
-            <input type="file" hidden multiple accept="image/*,video/*" onChange={(e) => void addFiles(e.target.files)} />
-          </label>
+          </button>
+          <input
+            ref={filePicker}
+            type="file"
+            hidden
+            multiple
+            accept="image/*,video/*"
+            onChange={(e) => {
+              void addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
           {attachments.map((attachment, index) => (
             <span key={`${attachment.name}-${index}`} className="chip inline-flex items-center gap-1.5">
               {attachment.name}
@@ -126,7 +138,8 @@ export function ReportDialog() {
         <details className="text-[0.7rem] text-text-2">
           <summary className="cursor-pointer hover:text-text-1">What's sent with your report</summary>
           <p className="mt-1.5 leading-relaxed">
-            Your description, any files you attach, and a diagnostics bundle: the app version and platform, your
+            Your description, any files you attach, the address this dashboard is open at, your browser's
+            user agent and window size, and a diagnostics bundle: the app version and platform, your
             camera, printer, monitor and notification configuration with every credential removed, performance
             stats, recent errors and warnings, and the app's recent logs, also scrubbed of credentials. No
             camera frames are included unless you attach them yourself. Download the same bundle to read it
