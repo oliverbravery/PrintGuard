@@ -51,7 +51,7 @@ Obico's Spaghetti Detective, the only other open model, over the same four unsee
 ## Quick start
 
 PrintGuard runs as a hub, a small server on a machine you own that keeps watching with every
-browser closed. The desktop app and the Docker image are the same hub, so pick whichever suits
+browser closed. The macOS app is for Apple silicon. The desktop app and the Docker image are the same hub, so pick whichever suits
 the machine next to your printer.
 
 ### Desktop app for macOS and Windows
@@ -82,6 +82,7 @@ PrintGuard is a single container:
 ```bash
 docker run -d --name printguard --restart unless-stopped \
   -p 8000:8000 -p 8554:8554 \
+  --add-host host.docker.internal:host-gateway \
   -v printguard:/data \
   ghcr.io/oliverbravery/printguard
 ```
@@ -108,8 +109,9 @@ monitor is watching.
 
 1. Add a camera under **Cameras**, and crop it to the print.
 2. Register your printer under **Printers** and test the connection.
-3. Add a monitor that binds the two, and choose whether a defect alerts you, pauses or cancels.
-4. Enable an alert channel in **Settings** and turn on push notifications for the monitor.
+3. Enable an alert channel in **Settings**.
+4. Add a monitor that binds the camera and printer. Choose whether a defect alerts you, pauses or
+   cancels, and turn on its push notifications.
 
 ## Printers and cameras
 
@@ -122,8 +124,7 @@ as a camera for you.
 | Cameras | Printer webcams, USB cameras plugged into the hub, RTSP, RTMP, HTTP/MJPEG, WHEP and a phone's or laptop's own camera |
 | Alerts | ntfy, Pushover, Telegram, Discord, and native notifications in the desktop app |
 
-Everything stays on your network. Bambu, Elegoo and Prusa printers are reached over their local
-APIs and never their clouds. [docs/printers.md](docs/printers.md) has the setup for each service,
+Bambu, Elegoo and Prusa printers are reached over their local APIs and never their clouds. [docs/printers.md](docs/printers.md) has the setup for each service,
 [docs/cameras.md](docs/cameras.md) each camera source and
 [docs/notifications.md](docs/notifications.md) each alert channel.
 
@@ -171,8 +172,8 @@ Anything the dashboard can do, an agent or a script can do. Point an MCP client 
 fetch the current frame as an image, score a frame you supply, pause, resume or cancel, set a
 heater target and start a file from the print library.
 
-Tokens are scoped and issued from Settings. `read` is status only, `control` adds the printer
-actions and `manage` adds the rest. `GET /api/health` needs no token and reports readiness and
+Tokens are scoped and issued from Settings. `read` covers status, camera frames and the print
+library, `control` adds the printer actions and `manage` adds the rest. `GET /api/health` needs no token and reports readiness and
 version. [docs/api.md](docs/api.md) has the full reference.
 
 ## Plugins

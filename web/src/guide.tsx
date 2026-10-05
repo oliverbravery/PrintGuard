@@ -43,7 +43,7 @@ export const INTRO: GuideSection[] = [
     shot: "cameras",
     body: (
       <>
-        A camera is any video source PrintGuard can read, so a USB device or an RTSP, MJPEG or WebRTC
+        A camera is any video source PrintGuard can read, so a USB device or an RTSP, RTMP, MJPEG or WebRTC
         stream. A printer is optional, and connecting one lets PrintGuard read whether it is printing
         and stop it when something goes wrong.
       </>
@@ -226,7 +226,7 @@ export const GUIDE: GuideSection[] = [
     body: (
       <>
         Reorder, pin and hide monitors and cameras with the ▦ Customise toggle, and switch between
-        light, dark and your own custom themes. Your layout and theme sync to every browser that opens
+        light, dark, glass and your own custom themes. Your layout and theme sync to every browser that opens
         the hub.
       </>
     ),
@@ -287,7 +287,7 @@ export const GUIDE: GuideSection[] = [
       <>
         Report a bug from the <Bug className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" aria-hidden /> chip in the header,
         anonymously, no account needed. A diagnostics bundle goes with it, with every credential stripped and no
-        camera frames. Download the same bundle from that dialog to read it or send it somewhere else yourself.
+        camera frames unless you attach them. Download the same bundle from that dialog to read it or send it somewhere else yourself.
       </>
     ),
     action: { label: "Report a bug", dialog: "report" },
