@@ -13,6 +13,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from ..adapters import Adapter, HttpFn
 
@@ -196,3 +197,24 @@ class IntegrationAdapter(Adapter):
 
     async def close(self, config: dict[str, Any] | None = None) -> None:
         """Releases persistent connections for one configuration or all configurations."""
+
+
+def webcam_url(base_url: str, stream: str) -> str:
+    """Resolves the webcam URL a service reports against the service's host.
+
+    Moonraker and OctoPrint report a relative path (``/webcam/?action=stream``)
+    as served on the host's web port, not the API port the base URL carries.
+    Neither API port (7125, 5000) routes a webcam path, so a relative URL is
+    joined to the bare host.
+
+    Args:
+        base_url: The service's configured API address.
+        stream: The stream URL the service reports.
+
+    Returns:
+        The stream URL, an absolute one unchanged.
+    """
+    if urlsplit(stream).scheme:
+        return stream
+    host = urlsplit(base_url)
+    return urljoin(urlunsplit((host.scheme, host.hostname or "", "", "", "")), stream)

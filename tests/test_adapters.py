@@ -277,8 +277,8 @@ async def test_octoprint_exposes_webcam_stream() -> None:
     assert http.last["url"] == "http://op:5000/api/settings"
     assert http.last["headers"] == {"X-Api-Key": "k"}
     assert cams == [
-        {"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": "http://op:5000/webcam/?action=stream"}}
-    ]
+        {"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": "http://op/webcam/?action=stream"}}
+    ], "a relative stream is served on the host's web port, not the API port"
 
 
 async def test_octoprint_reads_19_plus_classicwebcam_location() -> None:
