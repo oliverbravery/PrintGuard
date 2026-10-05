@@ -111,7 +111,8 @@ async def sweep_orphans(engine: Engine, *, unnamed: bool) -> None:
     A hub killed part way through an upload leaves a ``.part``, and a file
     whose record was never saved stays for good, since only a record's removal
     deletes a file. This runs once when the hub starts, before anything can be
-    uploaded.
+    uploaded. A folder is left alone, since a NAS keeps its own beside the
+    files, such as Synology's ``@eaDir``.
 
     Args:
         engine: The hub's engine, with its state loaded.
@@ -121,7 +122,11 @@ async def sweep_orphans(engine: Engine, *, unnamed: bool) -> None:
     """
     named = {key for record in engine.prints.values() for key in (record.file_key, record.thumbnail_key)}
     named |= {frame_key(review["id"], frame["id"]) for review in engine.reviews.persisted() for frame in review["frames"]}
-    orphans = [path for path in store_of(engine).root.iterdir() if path.suffix == ".part" or (unnamed and path.name not in named)]
+    orphans = [
+        path
+        for path in store_of(engine).root.iterdir()
+        if path.is_file() and (path.suffix == ".part" or (unnamed and path.name not in named))
+    ]
     for path in orphans:
         path.unlink()
     if orphans:
