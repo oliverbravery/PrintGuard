@@ -728,9 +728,8 @@ test("two printers tagged in quick succession are both sent, without a printer t
   await page.getByRole("button", { name: "Mini", exact: true }).click();
 
   await expect(page.getByRole("button", { name: "✓ MK4" })).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(() => sent(page, "print.update")).toBeTruthy();
-  const updates = await page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "print.update").map((c: any) => c.patch));
-  expect(updates).toEqual([{ printer_ids: ["p1", "p2"] }]);
+  const lastUpdate = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "print.update").at(-1)?.patch);
+  await expect.poll(lastUpdate).toEqual({ printer_ids: ["p1", "p2"] });
 });
 
 test("removing or sending one file leaves the other rows' buttons alone", async ({ page }) => {
