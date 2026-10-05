@@ -16,21 +16,23 @@ cd web && npm install && npm run dev      # UI hot-reload on :5173, proxied to :
 
 uv run pytest                             # engine simulation + adapter contract tests
 uv run pytest tests/test_engine.py::test_fair_allocation_and_dedup   # a single test (asyncio_mode=auto)
-cd web && npm run typecheck               # strict TypeScript over the UI (no test runner on the web side)
+cd web && npm run typecheck               # strict TypeScript over the UI
+cd web && npm run test:sandbox            # the browser plugin sandbox in Playwright, chromium and webkit
 cd web && npm run build                   # production UI build
 cd web && npm run site                    # the GitHub Pages landing page (web/site), hot-reload
 ```
 
-There is no separate Python lint step in the project's required checks - `uv run pytest`
-and `npm run typecheck` are the gates (see CONTRIBUTING.md "Release cycle").
+There is no Python lint step. CI runs `uv run pytest` and type-checks the UI only as part of
+building the image, so run `npm run typecheck`, and `npm run test:sandbox` after touching the
+plugin sandbox, yourself before pushing.
 
 ## Architecture
 
 Read [docs/architecture.md](docs/architecture.md) for the full picture and diagrams; the
 essentials a change must respect:
 
-- **The engine decides, the platform does.** Everything in `printguard/engine/` is logic
-  with no I/O of its own. Inference, capture, HTTP, sockets, JPEG coding and storage live
+- **The engine decides, the platform does.** The engine's own logic in `printguard/engine/` does
+  no I/O. Inference, capture, HTTP, sockets, JPEG coding and storage live
   behind the `Platform` protocol in [`engine/platform.py`](printguard/engine/platform.py),
   implemented for the hub in `server/platform.py` and in memory by `tests/fakes.py`. **The
   engine never imports from `server/`.** When engine code needs a runtime service, add it to
@@ -53,11 +55,15 @@ essentials a change must respect:
 
 - **Adapters are the extension points.** Printer integrations
   ([`engine/integrations/`](printguard/engine/integrations/)) and alert notifiers
-  ([`engine/notifiers/`](printguard/engine/notifiers/)) subclass the contracts in
-  [`engine/adapters.py`](printguard/engine/adapters.py), reach HTTP services through
+  ([`engine/notifiers/`](printguard/engine/notifiers/)) subclass `IntegrationAdapter` and
+  `NotifierAdapter` in their package's `base.py`, which share
+  [`engine/adapters.py`](printguard/engine/adapters.py). They reach HTTP services through
   `platform.http` so the tests can pin every request, and are registered in their package
-  `__init__.py`. Adding one needs no other change - the config form, connection test, polling
-  and actions all follow from the adapter. CONTRIBUTING.md has the step-by-step.
+  `__init__.py`. A service with no HTTP API (Bambu, Elegoo Centauri, PrusaLink's digest client,
+  the native notifier) uses its vendor's client library directly, which is the one place engine
+  code does its own I/O, and its tests monkeypatch the adapter's private connection functions.
+  Adding one needs no other code change - the config form, connection test, polling and
+  actions all follow from the adapter. CONTRIBUTING.md has the step-by-step.
 
 - **Plugins are third-party code, and none of it runs in the engine.**
   [`engine/plugins.py`](printguard/engine/plugins.py) only sources and hash-pins it; execution
@@ -135,12 +141,17 @@ change made wrong or redundant. Never leave a doc describing something that no l
 | Changed | Update |
 |---|---|
 | Install steps, ports, image tags, headline features | `README.md`, and the landing page in `web/site/Home.tsx` |
+| A supported printer service, camera source or alert channel | The lists in `README.md`, `web/site/Home.tsx` and `web/src/guide.tsx` |
 | Engine protocol, events, `Platform` contract, scheduler, logging, repo layout | `docs/architecture.md` |
-| A printer integration, camera source, notifier, or their setup | `docs/printers.md` |
+| A printer integration or its setup, the print library, temperatures | `docs/printers.md` |
+| A camera source | `docs/cameras.md` |
+| A monitor or camera setting, risk history | `docs/monitoring.md` |
+| A notifier, or when a notice is sent | `docs/notifications.md` |
 | Model runtimes, execution providers, image variants, GPU setup | `docs/hardware.md` |
-| Exposure, proxies, origin checks, ports, hardening | `docs/deployment.md` |
-| A REST endpoint, MCP tool, scope or response shape | `docs/api.md` |
-| The plugin API, a permission, either sandbox, or the catalogue | `docs/plugins.md` |
+| Exposure, proxies, origin checks, ports, hardening, an environment variable, the data directory | `docs/deployment.md` |
+| A REST endpoint, MCP tool, scope, response shape or Home Assistant entity | `docs/api.md` |
+| Installing plugins, a permission, what a plugin can reach | `docs/plugins.md` |
+| The plugin API, a manifest field, a limit, either sandbox, the catalogue | `docs/plugin-development.md` |
 | A failure mode users will hit, or its fix | `docs/troubleshooting.md` |
 | Anything user-visible | `CHANGELOG.md` (see Release) |
 | The UI's appearance | `docs/assets/` screenshots: `cd web && npm run screenshots` |
@@ -148,20 +159,28 @@ change made wrong or redundant. Never leave a doc describing something that no l
 
 Docs favour tables and Mermaid diagrams over long prose, keep the centred nav line at the top
 of each page, and link rather than restate: duplicated documentation rots. `docs/README.md`
-indexes the set, so a new page goes in that table and in the README's Documentation table.
+indexes the set, so a new page goes in that table, in the README's Documentation table and in
+the nav line of every page.
 
 ## Release
 
-Merging to `main` ships a release, so every PR carries its own metadata: a version bump and
-a matching top section in [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com)
-form), which is published **verbatim** as the GitHub release notes - write it for someone
-deciding whether to pull the new image, not about the implementation. Five required checks
-must pass: **tests**, **audit** (`uv audit` and `npm audit` over the lockfiles), the production **image** build, **launch** (on pull requests into
-`main`, the container and both desktop apps start and catch a failing print) and **version**
-(bumped past the last release with a matching changelog section, dated the day it merges into
-`main` in London time). Docker is the only supported distribution.
+Merging to `main` publishes a release, so work collects on a `release/vX.Y.Z` branch first.
+Check `gh pr list` for an open one before branching. A fix or feature branches off `main` and
+PRs into the release branch with **no version bump**, adding its line under the release's
+heading in [CHANGELOG.md](CHANGELOG.md). The release branch owns the bump and that heading
+([Keep a Changelog](https://keepachangelog.com) form), and its PR into `main` is the release.
+The changelog section is published **verbatim** as the GitHub release notes - write it for
+someone deciding whether to pull the new image, not about the implementation.
 
-Link every issue a PR resolves with a closing keyword (`Fixes #123`). The issue lifecycle
-hangs off that link: the merge reopens the issue rather than closing it, marks it
-`status: completed`, and the published release asks the reporter to verify. See
+Four checks are required: **tests** (`uv run pytest`), the production **image** build (which
+also type-checks and builds the UI), **version** (past the last release with a matching
+changelog section) and, on pull requests into `main` only, **launch** (the container and both
+desktop apps start and catch a failing print) plus the changelog date, which must be the day it
+merges into `main` in London time. PrintGuard is distributed as the Docker image and the macOS
+and Windows desktop app.
+
+The closing keyword (`Fixes #123`) goes on the release PR into `main`, and a PR into a release
+branch says `Reported in #123` instead. The issue lifecycle hangs off that link: the merge
+reopens the issue rather than closing it, marks it `status: completed`, and the published
+release asks the reporter to verify. See
 [CONTRIBUTING.md](CONTRIBUTING.md#what-a-merge-does-to-the-issues-it-fixes).

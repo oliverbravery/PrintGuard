@@ -10,13 +10,16 @@ Start at the [README](../README.md) to install PrintGuard. These pages cover eve
 
 | Page | Read it when you want to |
 |---|---|
-| [Printers & cameras](printers.md) | Connect OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, add cameras, and set up alert channels |
+| [Printers](printers.md) | Connect OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, send it a print or set its temperatures |
+| [Cameras](cameras.md) | Add a printer webcam, a stream URL, a USB camera or a phone |
+| [Monitoring](monitoring.md) | Tune a monitor's thresholds, frame its camera and read its risk history |
+| [Notifications](notifications.md) | Set up an alert channel, or quieten a camera that keeps dropping out |
 | [Hardware](hardware.md) | Pick an image variant, understand the model runtimes, and use a GPU or NPU |
-| [Deployment](deployment.md) | Reach a hub from outside your LAN without exposing it, and harden what you run |
+| [Deployment](deployment.md) | Reach a hub from outside your LAN without exposing it, harden it and back it up |
+| [API & MCP](api.md) | Drive the hub from a script, an agent or Home Assistant, with scoped access tokens |
+| [Plugins](plugins.md) | Install a plugin and understand what it can reach |
+| [Writing plugins](plugin-development.md) | Write a plugin and publish it to the catalogue |
 | [Troubleshooting](troubleshooting.md) | Fix a symptom like a dead feed, a failing printer test or a port already in use |
-| [API & MCP](api.md) | Drive the hub from a script or an agent, with scoped access tokens |
-| [Plugins](plugins.md) | Install an extension, understand what it can reach, or write one |
-| [Training frames](feedback.md) | Send labelled frames to help train the model, and see what's sent and the limits |
 | [Architecture](architecture.md) | Understand how the engine, the hub and the dashboard fit together, or change the code |
 | [Contributing](../CONTRIBUTING.md) | Set up a dev environment, run the tests, add an integration or notifier |
 
