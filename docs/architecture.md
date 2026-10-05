@@ -128,7 +128,7 @@ built on a vendor's client library open their own connections:
 
 | Module | Reaches outside `Platform` through |
 |---|---|
-| [`integrations/bambu.py`](../printguard/engine/integrations/bambu.py) | paho MQTT, `ftplib` over TLS and raw sockets |
+| [`integrations/bambu.py`](../printguard/engine/integrations/bambu.py) | paho MQTT on one connection held per printer, `ftplib` over TLS and raw sockets |
 | [`integrations/elegoo.py`](../printguard/engine/integrations/elegoo.py) | pycentauri, which holds its own connection, a DNS lookup and a temporary file for an upload |
 | [`integrations/prusa.py`](../printguard/engine/integrations/prusa.py) | pyprusalink with its own httpx client |
 | [`notifiers/native.py`](../printguard/engine/notifiers/native.py) | desktop-notifier and a temporary snapshot file |

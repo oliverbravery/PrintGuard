@@ -72,6 +72,11 @@ The chamber camera is registered automatically: RTSP on the X1 and H2 series, or
 proprietary port 6000 protocol on the A1 and P1 series. The form links Bambu's
 [Enable LAN Mode](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode) guide.
 
+PrintGuard holds one connection to the printer and reads the reports it pushes. A printer that
+pushes nothing for a minute is reconnected and shown offline until it reports again. With
+Developer Mode off the printer still reports its state but rejects a pause, cancel, heater
+target or print start, and PrintGuard reports that command as failed.
+
 </details>
 
 <details>
@@ -143,8 +148,11 @@ report idle at the moment you press **Print**, so nothing lands on top of a runn
 | OctoPrint | `.gcode`, `.gco`, `.g` | Uploaded to local storage, selected and printed |
 | Klipper via Moonraker | `.gcode`, `.gco`, `.g` | Uploaded to the gcodes root and printed |
 | Elegoo | `.gcode` | Centauri: uploaded to internal storage and started. Neptune and OrangeStorm: through Moonraker |
-| Prusa via PrusaLink | `.gcode`, `.bgcode` | Put onto the USB stick, or local storage on a Raspberry Pi, and printed after upload |
-| Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the SD card over FTPS, then the first plate is started over MQTT |
+| Prusa via PrusaLink | `.gcode`, `.bgcode` | Put onto the first writable storage, the USB stick or local storage on a Raspberry Pi, and printed after upload |
+| Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the printer's storage over FTPS, then the first plate is started over MQTT |
+
+A file the service stores but doesn't start, or a start the printer refuses, is reported as a
+failed print.
 
 A file is sent under its library name, cut to 60 characters with anything outside plain letters,
 digits, dots and dashes turned into `_`. Rename it first if the printer's own file list matters
