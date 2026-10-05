@@ -11,16 +11,17 @@ from __future__ import annotations
 import hmac
 import logging
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
-from ..engine.engine import Engine
+from ..engine.engine import REQUEST_TIMEOUT_S, Engine
 from ..engine.integrations import INTEGRATIONS
 from ..engine.notifiers import NOTIFIERS
+from ..engine.reports import is_url, scrub_url, scrub_urls
 from ..engine.tokens import SCOPE_ORDER, expand_scope, hash_secret
+from .platform import OPEN_WAIT_S
 from .prints import PrintUpload, file_response, receive_print
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ class ApiAuth:
         token = ""
         if header and header.lower().startswith("bearer "):
             token = header[7:].strip()
-        if self._internal and token and hmac.compare_digest(self._internal, token):
+        if self._internal and token and hmac.compare_digest(self._internal.encode(), token.encode()):
             return expand_scope("manage")
         if token:
             digest = hash_secret(token)
@@ -153,6 +154,7 @@ class StartBody(BaseModel):
 
 
 UPLOAD_TIMEOUT_S = 600.0
+CAMERA_OPEN_TIMEOUT_S = OPEN_WAIT_S + REQUEST_TIMEOUT_S
 UPLOAD_BODY = {
     "requestBody": {
         "required": True,
@@ -230,10 +232,33 @@ def _find(items: list[dict[str, Any]], item_id: str, kind: str) -> dict[str, Any
     raise HTTPException(404, f"no {kind} {item_id!r}")
 
 
+def _secret_keys(adapter: Any) -> set[str]:
+    return adapter.secret_keys() if adapter else set()
+
+
 def _public_config(config: dict[str, Any], adapter: Any) -> dict[str, Any]:
-    """Drops the credential values an adapter's schema marks secret."""
-    secrets = adapter.secret_keys() if adapter else set()
-    return {key: value for key, value in config.items() if key not in secrets}
+    """Drops the values an adapter's schema marks secret and scrubs the URLs left."""
+    return scrub_urls({key: value for key, value in config.items() if key not in _secret_keys(adapter)})
+
+
+def _stored_secrets(config: dict[str, Any], stored: dict[str, Any], secrets: set[str]) -> dict[str, Any]:
+    """Puts back the credentials a client could not have read.
+
+    A read gives a config with its secret fields dropped and its URLs scrubbed,
+    so a client that edits one and sends it back has neither.
+
+    Args:
+        config: The config a client sent.
+        stored: The config the engine holds for the same thing.
+        secrets: The fields its schema marks secret.
+
+    Returns:
+        The client's config, with each secret field it left out or blank and
+        each URL it sent back scrubbed taken from the stored one.
+    """
+    kept = {key: stored[key] for key in secrets if key in stored and config.get(key) in (None, "")}
+    unscrubbed = {key: stored[key] for key, value in config.items() if is_url(stored.get(key)) and value == scrub_url(stored[key])}
+    return {**config, **kept, **unscrubbed}
 
 
 def _public_printer(printer: dict[str, Any]) -> dict[str, Any]:
@@ -241,22 +266,11 @@ def _public_printer(printer: dict[str, Any]) -> dict[str, Any]:
     return {**printer, "config": config}
 
 
-def _strip_url_credentials(url: str) -> str:
-    """Removes any user:password@ prefix from a stream URL."""
-    parts = urlsplit(url)
-    if not (parts.username or parts.password):
-        return url
-    netloc = parts.hostname or ""
-    if parts.port:
-        netloc = f"{netloc}:{parts.port}"
-    return urlunsplit(parts._replace(netloc=netloc))
-
-
 def _public_camera(camera: dict[str, Any]) -> dict[str, Any]:
     """Drops camera-source credentials a printer integration embedded."""
     source = {key: value for key, value in (camera.get("source") or {}).items() if key != "access_code"}
     if source.get("url"):
-        source["url"] = _strip_url_credentials(source["url"])
+        source["url"] = scrub_url(source["url"])
     return {**camera, "source": source}
 
 
@@ -390,8 +404,15 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
 
     @api.patch("/printers/{printer_id}", operation_id="update_printer", tags=["manage"])
     async def update_printer(printer_id: str, body: PrinterFields, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
-        """Updates a printer's name or connection details."""
-        await engine.request({"cmd": "printer.update", "id": printer_id, "patch": body.model_dump(exclude_none=True)})
+        """Updates a printer's name or connection details.
+
+        A secret config field left out or blank keeps its stored value.
+        """
+        patch = body.model_dump(exclude_none=True)
+        stored = engine.printers.get(printer_id)
+        if stored and "config" in patch and patch.get("provider", stored.provider) == stored.provider:
+            patch["config"] = _stored_secrets(patch["config"], stored.config, _secret_keys(INTEGRATIONS.get(stored.provider)))
+        await engine.request({"cmd": "printer.update", "id": printer_id, "patch": patch})
         return _find(public_state(engine)["printers"], printer_id, "printer")
 
     @api.delete("/printers/{printer_id}", operation_id="remove_printer", tags=["manage"])
@@ -497,7 +518,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         payload = {"cmd": "camera.add", "source": body.source.model_dump(exclude_none=True)}
         if body.name is not None:
             payload["name"] = body.name
-        await engine.request(payload)
+        await engine.request(payload, timeout=CAMERA_OPEN_TIMEOUT_S)
         return public_state(engine)["cameras"]
 
     @api.patch("/cameras/{camera_id}", operation_id="update_camera", tags=["manage"], response_model=CameraOut)
@@ -531,8 +552,17 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
 
     @api.patch("/settings", operation_id="update_settings", tags=["manage"])
     async def update_settings(body: SettingsPatch, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
-        """Updates engine settings such as configured notifiers."""
-        await engine.request({"cmd": "settings.update", "patch": body.model_dump(exclude_none=True)})
+        """Updates engine settings such as configured notifiers.
+
+        A notifier secret or the MQTT password left out or blank keeps its stored value.
+        """
+        patch = body.model_dump(exclude_none=True)
+        stored = engine.settings.get("notifiers", {})
+        for provider, config in patch.get("notifiers", {}).items():
+            patch["notifiers"][provider] = _stored_secrets(config, stored.get(provider, {}), _secret_keys(NOTIFIERS.get(provider)))
+        if "mqtt" in patch:
+            patch["mqtt"] = _stored_secrets(patch["mqtt"], engine.settings.get("mqtt") or {}, {"password"})
+        await engine.request({"cmd": "settings.update", "patch": patch})
         return public_state(engine)["settings"]
 
     @api.post("/notifiers/test", operation_id="test_notifier", tags=["manage"])
