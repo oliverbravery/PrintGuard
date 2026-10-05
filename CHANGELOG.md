@@ -23,6 +23,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - The Windows desktop app opens its window when the zip was downloaded in a browser and
   extracted with Explorer. It used to show only the tray icon.
 - The Windows desktop app no longer opens a terminal window for its video server.
+- The desktop app says so when another program is using its port. On Windows it used to start
+  anyway and could show that program's page in its window.
+- The Windows desktop app opens the dashboard in your browser on a PC without WebView2, where
+  it used to show a blank window.
+- A desktop app window that fails to open writes the reason to the log.
 - Alert snapshots in the risk history survive a restart.
 - A camera looking at a still scene holds a steady score, where a grainy webcam used to jump
   by 20 points or more from frame to frame. Frames are shrunk for the model the way it was
