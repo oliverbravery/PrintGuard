@@ -57,7 +57,15 @@ def sanitised(raw: bytes) -> bytes | None:
 
 def labels(metadata: dict[str, str]) -> dict[str, str]:
     """Decodes an object's labels, which R2 hands back RFC 2047 encoded when they are not ASCII."""
-    return {name: str(make_header(decode_header(value))) for name, value in metadata.items()}
+    return {name: _decoded(value) for name, value in metadata.items()}
+
+
+def _decoded(value: str) -> str:
+    """Decodes one label, keeping it as sent when it only looks encoded, such as one naming a charset there isn't."""
+    try:
+        return str(make_header(decode_header(value)))
+    except (LookupError, ValueError):
+        return value
 
 
 def inbox(client: Any) -> Iterator[str]:
