@@ -196,6 +196,23 @@ async def test_a_slow_command_does_not_hold_the_next_one_from_the_same_tab(monke
         await engine.stop()
 
 
+async def test_a_command_sent_as_its_tab_closes_still_runs() -> None:
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+
+    engine = Engine(FakePlatform())
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    try:
+        async with Tab(app) as tab:
+            tab.send(text=json.dumps({"cmd": "settings.update", "patch": {"fault_grace_s": 300}}))
+        assert engine.settings["fault_grace_s"] == 300
+    finally:
+        await engine.stop()
+
+
 async def test_a_tab_cannot_have_more_than_a_few_commands_running_at_once(monkeypatch) -> None:
     monkeypatch.setattr(app_module, "SOCKET_COMMANDS_IN_FLIGHT", 2)
     started: list[int] = []
@@ -654,6 +671,8 @@ async def test_a_starting_hub_clears_the_files_no_print_or_review_names(tmp_path
         kept = {record.file_key, record.thumbnail_key, frame_key("r1", "f1")}
         for name in (frame_key("r1", "f1"), frame_key("r1", "gone"), "killed.gcode.part", "norecord.gcode", "norecord.thumb"):
             (tmp_path / name).write_bytes(b"x")
+        (tmp_path / "@eaDir").mkdir()
+        kept.add("@eaDir")
 
         await prints.sweep_orphans(engine, unnamed=False)
         assert {path.name for path in tmp_path.iterdir()} == kept | {frame_key("r1", "gone"), "norecord.gcode", "norecord.thumb"}, (
