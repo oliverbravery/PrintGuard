@@ -14,6 +14,7 @@ from __future__ import annotations
 import html
 import io
 import logging
+import logging.handlers
 import multiprocessing
 import os
 import signal
@@ -21,11 +22,13 @@ import socket
 import sys
 import threading
 import time
+import webbrowser
 from importlib import metadata
 from pathlib import Path
 from string import Template
 from typing import Any
 
+import httpx
 import platformdirs
 import pystray
 import uvicorn
@@ -43,6 +46,7 @@ READY_TIMEOUT_S = 30.0
 STOP_TIMEOUT_S = 10.0
 FAILURE_LOG_LINES = 30
 WIN_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+WEBVIEW2_DOWNLOAD = "https://developer.microsoft.com/microsoft-edge/webview2/"
 
 FAILURE_PAGE = Template("""<!doctype html>
 <meta charset="utf-8">
@@ -155,8 +159,12 @@ def _enable_wkwebview_media() -> None:
             decision_handler(1)
 
 
-def _run_webview(**contents: Any) -> None:
+def _run_webview(log_records: multiprocessing.Queue[logging.LogRecord], **contents: Any) -> None:
     """Child-process entry point that shows the hub, or why it is not there, in a native window.
+
+    Args:
+        log_records: Where this process's log records go, for the tray process to write.
+        **contents: What the window shows, a ``url`` or a page of ``html``.
 
     The window owns its process's main thread, so it never contends with the
     tray's, and closing it ends only this process. The webview must keep its
@@ -168,13 +176,33 @@ def _run_webview(**contents: Any) -> None:
     ``PRINTGUARD_DEBUG_PORT`` opens the Windows webview to the DevTools protocol on
     that port, which is how CI drives the window. WebView2 ignores its own
     environment switch for this, since pywebview sets the browser arguments itself.
+
+    Windows without the WebView2 runtime would draw the window with Internet Explorer's
+    engine, which cannot run the dashboard, so the dashboard opens in the browser there.
     """
-    if sys.platform == "darwin":
-        _enable_wkwebview_media()
-    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
-    webview.settings["REMOTE_DEBUGGING_PORT"] = os.environ.get("PRINTGUARD_DEBUG_PORT")
-    webview.create_window(APP_NAME, width=1280, height=820, **contents)
-    webview.start(private_mode=False, storage_path=os.path.join(os.environ["DATA_DIR"], "webview"))
+    root = logging.getLogger()
+    root.addHandler(logging.handlers.QueueHandler(log_records))
+    root.setLevel(logging.INFO)
+    try:
+        if sys.platform == "darwin":
+            _enable_wkwebview_media()
+        if sys.platform == "win32" and "url" in contents:
+            from webview.platforms import winforms
+
+            if not winforms.is_chromium:
+                logger.warning(
+                    "WebView2 is not installed, so the dashboard is opening in the browser; "
+                    "install it from %s for the app window",
+                    WEBVIEW2_DOWNLOAD,
+                )
+                webbrowser.open(contents["url"])
+                return
+        webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+        webview.settings["REMOTE_DEBUGGING_PORT"] = os.environ.get("PRINTGUARD_DEBUG_PORT")
+        webview.create_window(APP_NAME, width=1280, height=820, **contents)
+        webview.start(private_mode=False, storage_path=os.path.join(os.environ["DATA_DIR"], "webview"))
+    except Exception:
+        logger.exception("the window could not open")
 
 
 def _webview_url(port: int) -> str:
@@ -189,23 +217,54 @@ def _failure_page() -> str:
 
 
 class _Window:
-    """Shows the hub window in a child process spawned from the tray."""
+    """Shows the hub window in a child process spawned from the tray.
+
+    The window process has no log of its own, so its records come back over a queue
+    and are written by this process's handlers.
+    """
 
     def __init__(self, **contents: Any) -> None:
         self._contents = contents
         self._context = multiprocessing.get_context("spawn")
         self._process: multiprocessing.process.BaseProcess | None = None
+        self._log_records = self._context.Queue()
+        logging.handlers.QueueListener(self._log_records, *logging.getLogger().handlers).start()
 
     def open(self) -> None:
         """Opens the window, reusing the existing one if it is still up."""
         if self._process is None or not self._process.is_alive():
-            self._process = self._context.Process(target=_run_webview, kwargs=self._contents, daemon=True)
+            self._process = self._context.Process(
+                target=_run_webview, args=(self._log_records,), kwargs=self._contents, daemon=True
+            )
             self._process.start()
 
     def close(self) -> None:
         """Closes the window if it is open."""
         if self._process is not None and self._process.is_alive():
             self._process.terminate()
+
+
+def _listening_socket(port: int) -> socket.socket:
+    """Binds the hub's port so that no other program can share it.
+
+    uvicorn binds with ``SO_REUSEADDR``, which on Windows lets it take a port another
+    program is already serving, and both then report that they are listening.
+
+    Args:
+        port: The port the hub serves on.
+
+    Returns:
+        The bound socket for uvicorn to serve on.
+
+    Raises:
+        OSError: If another program holds the port.
+    """
+    listener = socket.socket()
+    listener.setsockopt(
+        socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE if sys.platform == "win32" else socket.SO_REUSEADDR, 1
+    )
+    listener.bind(("0.0.0.0", port))
+    return listener
 
 
 class _Server:
@@ -215,10 +274,29 @@ class _Server:
         from .app import create_app
 
         self._port = port
-        config = uvicorn.Config(create_app(), host="0.0.0.0", port=port, log_config=None, access_log=False)
-        self._server = uvicorn.Server(config)
+        self._server = uvicorn.Server(uvicorn.Config(create_app(), log_config=None, access_log=False))
         self._server.install_signal_handlers = lambda: None
-        self._thread = threading.Thread(target=self._server.run, daemon=True)
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+
+    def _serve(self) -> None:
+        try:
+            listener = _listening_socket(self._port)
+        except OSError:
+            logger.error("another program holds port %d, so the hub server cannot listen on it", self._port)
+            return
+        self._server.run(sockets=[listener])
+
+    def _answers(self) -> bool:
+        """Whether this hub is what a window opened on localhost would reach.
+
+        A program listening on the port over IPv6 does not stop the hub binding it over
+        IPv4, and localhost resolves to IPv6 first, so the window would show that program.
+        """
+        try:
+            health = httpx.get(f"http://localhost:{self._port}/api/health", trust_env=False).json()
+        except (httpx.HTTPError, ValueError):
+            return False
+        return health == {"ok": True, "version": metadata.version("printguard")}
 
     def start(self) -> bool:
         """Starts serving, blocks until startup completes, and reports whether it did.
@@ -231,8 +309,15 @@ class _Server:
         deadline = time.monotonic() + READY_TIMEOUT_S
         while time.monotonic() < deadline and self._thread.is_alive() and not self._server.started:
             time.sleep(0.1)
-        logger.info("hub server %s on :%d", "listening" if self._server.started else "did not start", self._port)
-        return self._server.started
+        if not self._server.started:
+            logger.error("hub server did not start on :%d", self._port)
+            return False
+        if not self._answers():
+            logger.error("another program answers on localhost:%d, so the hub server is stopping", self._port)
+            self.stop()
+            return False
+        logger.info("hub server listening on :%d", self._port)
+        return True
 
     def stop(self) -> None:
         """Asks the server to exit and waits for the thread to finish."""

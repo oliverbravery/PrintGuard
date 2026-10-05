@@ -149,7 +149,7 @@ jobs:
           cp -R "$RUNNER_TEMP/dmg/PrintGuard.app" /Applications/
           hdiutil detach "$RUNNER_TEMP/dmg"
           open --env LOG_FILE="$RUNNER_TEMP/printguard.log" /Applications/PrintGuard.app
-      - name: Unzip the app and open it with its window open to Playwright
+      - name: Unzip the app as Explorer would a download and open it with its window open to Playwright
         if: matrix.name == 'Windows'
         shell: pwsh
         env:
@@ -157,6 +157,9 @@ jobs:
           PRINTGUARD_DEBUG_PORT: "9222"
         run: |
           Expand-Archive dist\PrintGuard-windows-x64.zip -DestinationPath $env:RUNNER_TEMP
+          Get-ChildItem "$env:RUNNER_TEMP\PrintGuard" -Recurse -File -Exclude PrintGuard.exe | ForEach-Object {
+            Set-Content -LiteralPath $_.FullName -Stream Zone.Identifier -Value "[ZoneTransfer]`nZoneId=3"
+          }
           Start-Process "$env:RUNNER_TEMP\PrintGuard\PrintGuard.exe" -WorkingDirectory "$env:RUNNER_TEMP\PrintGuard"
       - name: Install the dashboard's dependencies
         if: matrix.name == 'container'

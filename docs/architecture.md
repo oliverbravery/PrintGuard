@@ -556,7 +556,8 @@ read the diagnostics or take them somewhere else.
 One setup ([`engine/logs.py`](../printguard/engine/logs.py)) serves the container and the
 desktop app. Entry points call it once and records flow to stdout for `docker logs`, to a rotating file where
 no console exists, since the desktop app sets `LOG_FILE` in its data directory, and into a
-bounded in-memory tail of 400 lines.
+bounded in-memory tail of 400 lines. The desktop app's window is a separate process, and its
+records come back over a queue to be written by the same handlers.
 
 Alert, warning and error events are logged as they broadcast, so the tail
 carries the same timeline the UI shows plus the lifecycle around it, so boot, camera attach
