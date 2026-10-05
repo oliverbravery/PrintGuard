@@ -129,6 +129,7 @@ class Engine:
             "history.get": self._cmd_history_get,
             "review.get": self._cmd_review_get,
             "review.send": self._cmd_review_send,
+            "review.retry": self._cmd_review_retry,
             "review.dismiss": self._cmd_review_dismiss,
             "snapshot.get": self._cmd_snapshot_get,
             "camera.snapshot": self._cmd_camera_snapshot,
@@ -976,6 +977,12 @@ class Engine:
             removed=set(message.get("removed") or []),
             printer=sanitise_name(message.get("printer"), ""),
         )
+        self._start_send(review, message.get("req_id"))
+
+    async def _cmd_review_retry(self, message: dict[str, Any]) -> None:
+        review = self.reviews.get(message["id"])
+        if review is None or review.status != "queued":
+            raise ValueError("only a queued print can be sent again")
         self._start_send(review, message.get("req_id"))
 
     async def _cmd_review_dismiss(self, message: dict[str, Any]) -> None:

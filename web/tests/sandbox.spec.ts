@@ -196,7 +196,7 @@ async function dashboardWithPlugin(
               target_fps: 30, achieved_fps: 29.8, inferring: false, in_use: true, online: true, standby: false, last_result: null,
             },
           ],
-          printers: [], prints: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
+          printers: [], prints: [], reviews: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
           settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
           stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
           plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result"] }, granted, files: ["plugin.js"] }],

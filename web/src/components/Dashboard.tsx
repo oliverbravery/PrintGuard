@@ -20,6 +20,7 @@ import { PrintViewer } from "./PrintViewer";
 import { ReportDialog } from "./ReportDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { rectSortingStrategy, Sortable } from "./Sortable";
+import { ReviewSheet } from "./ReviewSheet";
 import { StatsPage } from "./StatsPage";
 import { UpdateDialog } from "./UpdateDialog";
 import { UploadSheet } from "./UploadSheet";
@@ -67,11 +68,13 @@ function Toasts() {
 }
 
 export function Dashboard() {
-  const { engine, dialog, detailId, statsMonitorId, printId, staged, customising, mutateLayout, background } = useStore();
+  const { engine, dialog, detailId, statsMonitorId, reviewId, printId, staged, customising, mutateLayout, background } = useStore();
   const monitors = engine?.monitors ?? [];
   const { visible } = applyLayout(tiles(engine), section(engine?.settings.layout, "monitors"));
   const detail = monitors.find((m) => m.id === detailId);
   const stats = monitors.find((m) => m.id === statsMonitorId);
+  const review = engine?.reviews.find((r) => r.id === reviewId);
+  const reviewed = monitors.find((m) => m.id === review?.monitor_id);
   const print = engine?.prints.find((p) => p.id === printId);
   return (
     <div
@@ -123,6 +126,7 @@ export function Dashboard() {
       {dialog === "more" && <MoreSheet />}
       {detail && <DetailPanel monitor={detail} />}
       {stats && <StatsPage monitor={stats} />}
+      {review && reviewed && <ReviewSheet key={review.id} review={review} monitor={reviewed} />}
       {print && <PrintViewer print={print} />}
       {staged.length > 0 && <UploadSheet />}
       <Toasts />

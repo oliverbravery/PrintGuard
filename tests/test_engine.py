@@ -1153,6 +1153,7 @@ async def test_a_refused_print_waits_and_sends_the_rest_after_the_limit_resets(m
 
 async def test_an_unreachable_inbox_keeps_the_frames_and_tries_again_later(monkeypatch) -> None:
     platform = FakePlatform(infer_s=0.02)
+    reachable = platform.http
 
     async def unreachable(method: str, url: str, **request) -> tuple[int, object]:
         raise OSError("no route")
@@ -1162,10 +1163,17 @@ async def test_an_unreachable_inbox_keeps_the_frames_and_tries_again_later(monke
         monkeypatch.setattr(platform, "http", unreachable)
         await engine.handle({"cmd": "review.send", "id": review["id"]})
         outcome = await _sent(events)
+        stored = len(platform.files.blobs)
+        monkeypatch.setattr(platform, "http", reachable)
+        _inbox(platform, monkeypatch)
+        events.clear()
+        await engine.handle({"cmd": "review.retry", "id": review["id"]})
+        retried = await _sent(events)
 
     assert not outcome["ok"] and (outcome["status"], outcome["code"], outcome["sent"]) == ("queued", "offline", 0)
     assert outcome["retry_at"] > time.time() + engine_module.FEEDBACK_RETRY_S - 60
-    assert len(platform.files.blobs) == len(review["frames"]), "nothing is lost when the inbox cannot be reached"
+    assert stored == len(review["frames"]), "nothing is lost when the inbox cannot be reached"
+    assert retried["ok"] and retried["sent"] == len(review["frames"]), "a queued print can be sent again by hand"
 
 
 async def test_an_unrecognised_token_is_replaced_once(monkeypatch) -> None:
