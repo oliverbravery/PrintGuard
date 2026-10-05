@@ -13,15 +13,15 @@ import logging
 import time
 import uuid
 from collections import deque
-from typing import Any, AsyncIterator, Callable
+from typing import Any, Callable
 
-from . import gcode, oauth, plugins, reports, updates, urls, vision
+from . import feedback, gcode, oauth, plugins, reports, updates, urls, vision
 from .cameras import declared_camera_id, sanitise_camera
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, IntegrationAdapter, integrations_meta
 from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
-from .platform import Frame, Platform
+from .platform import Frame, Platform, as_chunks
 from .printers import PREHEAT_DEFAULTS, sanitise_presets, sanitise_printer, sanitise_targets
 from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers
 from .registry import (
@@ -36,16 +36,13 @@ from .registry import (
     Token,
     TokenRegistry,
 )
+from .reviews import Review, ReviewLibrary, frame_key
 from .scheduler import Scheduler
 from .sockets import SocketBroker
 from .tokens import new_token
 from .watchdog import GRACE_DEFAULT_S, Watchdog, clamp_grace
 
 logger = logging.getLogger(__name__)
-
-
-async def _chunks(data: bytes) -> AsyncIterator[bytes]:
-    yield data
 
 
 STATE_TICK_S = 1.0
@@ -61,6 +58,8 @@ PLUGIN_RATE_WINDOW_S = 60.0
 PLUGIN_TIMEOUT_S = 10.0
 MAX_PLUGIN_BODY = 256 * 1024
 CALL_TTL_S = 30.0
+FEEDBACK_RETRY_S = 6 * 3600.0
+FEEDBACK_SMALLER_PX = 384
 SETTINGS_DEFAULTS: dict[str, Any] = {
     "notifiers": {},
     "update_check": True,
@@ -73,6 +72,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "catalogue_url": plugins.CATALOGUE_URL,
     "fault_grace_s": GRACE_DEFAULT_S,
     "preheat": PREHEAT_DEFAULTS,
+    "feedback": "ask",
 }
 
 
@@ -86,6 +86,9 @@ class Engine:
         self.prints = PrintRegistry()
         self.monitors: dict[str, dict[str, Any]] = {}
         self.history: dict[str, MonitorHistory] = {}
+        self.reviews = ReviewLibrary(platform)
+        self.feedback_token: str | None = None
+        self._sends: dict[str, asyncio.Task[None]] = {}
         self._results: dict[str, dict[str, float]] = {}
         self._result_emitted_at: dict[str, float] = {}
         self.tokens = TokenRegistry()
@@ -124,6 +127,10 @@ class Engine:
             "monitor.update": self._cmd_monitor_update,
             "monitor.remove": self._cmd_monitor_remove,
             "history.get": self._cmd_history_get,
+            "review.get": self._cmd_review_get,
+            "review.send": self._cmd_review_send,
+            "review.retry": self._cmd_review_retry,
+            "review.dismiss": self._cmd_review_dismiss,
             "snapshot.get": self._cmd_snapshot_get,
             "camera.snapshot": self._cmd_camera_snapshot,
             "notify.test": self._cmd_notify_test,
@@ -172,6 +179,8 @@ class Engine:
             self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=printer["config"], reported_status=record.get("reported_status")))
         for record in persisted.get("monitors", []):
             self.monitors[record["id"]] = sanitise_monitor(record["id"], record)
+        self.reviews.restore(persisted.get("reviews", []))
+        self.feedback_token = persisted.get("feedback_token")
         for record in persisted.get("prints", []):
             self.prints.add(PrintFile(**record))
         for record in persisted.get("plugins", []):
@@ -199,6 +208,7 @@ class Engine:
             self._schedule_attach(camera)
         await self.reconcile_declared_cameras()
         self.cameras.sync_in_use(self.monitors, self.printers)
+        self.settle_reviews()
         runtime = self.platform.plugin_runtime
         if runtime is not None:
             runtime.attach(self.request, self.plugin_failed)
@@ -223,9 +233,9 @@ class Engine:
 
     async def stop(self) -> None:
         """Cancels background loops and closes every frame source."""
-        for task in self._tasks:
+        for task in (*self._tasks, *self._sends.values()):
             task.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        await asyncio.gather(*self._tasks, *self._sends.values(), return_exceptions=True)
         await self.sockets.drop_all(set())
         await self.watchdog.close()
         if self.platform.plugin_runtime is not None:
@@ -283,6 +293,8 @@ class Engine:
             "cameras": [c.public() for c in self.cameras.values()],
             "printers": [p.public() for p in self.printers.values()],
             "prints": [p.public() for p in self.prints.values()],
+            "reviews": self.reviews.public(),
+            "feedback_hub": self.feedback_token.split(".")[0] if self.feedback_token else None,
             "monitors": [
                 {
                     **monitor,
@@ -397,6 +409,8 @@ class Engine:
                 "printers": [p.persisted() for p in self.printers.values()],
                 "prints": [p.persisted() for p in self.prints.values()],
                 "monitors": [persisted_monitor(m) for m in self.monitors.values()],
+                "reviews": self.reviews.persisted(),
+                "feedback_token": self.feedback_token,
                 "settings": self.settings,
                 "tokens": [t.persisted() for t in self.tokens.values()],
                 "plugins": [p.persisted() for p in self.plugins.values()],
@@ -405,6 +419,7 @@ class Engine:
 
     def _sync(self, req_id: Any = None) -> None:
         self.cameras.sync_in_use(self.monitors, self.printers)
+        self.settle_reviews()
         self.save()
         event = self.state_event()
         if req_id is not None:
@@ -469,6 +484,8 @@ class Engine:
                         self._schedule_attach(camera)
                 elif camera.frame_source.fps > 0:
                     camera.max_fps = camera.frame_source.fps
+            for review in self.reviews.due(time.time()):
+                self._start_send(review)
             self.emit(self.state_event())
 
     async def _update_loop(self) -> None:
@@ -509,6 +526,8 @@ class Engine:
             monitor_id = monitor["id"]
             self._results[monitor_id] = point
             self.history.setdefault(monitor_id, MonitorHistory()).record(ts, score, monitor["threshold"])
+            if self.settings["feedback"] == "ask" and await self.reviews.sample(monitor, frame, score, ts):
+                self.save()
             emitted_at = time.monotonic()
             if emitted_at - self._result_emitted_at.get(monitor_id, 0.0) >= RESULT_EVENT_INTERVAL_S:
                 self._result_emitted_at[monitor_id] = emitted_at
@@ -525,14 +544,78 @@ class Engine:
                 )
             await self.watchdog.on_score(monitor, frame, score)
 
-    def note_alert(self, monitor_id: str, alert: dict[str, Any], jpeg: bytes | None) -> None:
-        """Records a fired alert and its triggering frame in a monitor's history."""
-        self.history.setdefault(monitor_id, MonitorHistory()).record_alert(alert["ts"], alert["score"], alert["action"], jpeg)
+    async def note_alert(self, monitor_id: str, alert: dict[str, Any], frame: Frame) -> None:
+        """Records a fired alert in a monitor's history and keeps the frame that fired it."""
+        self.history.setdefault(monitor_id, MonitorHistory()).record_alert(alert["ts"], alert["score"], alert["action"])
+        await self.reviews.keep_alert(monitor_id, alert, frame)
+        self.save()
 
-    def monitor_snapshot(self, monitor_id: str, snap_id: str) -> bytes | None:
-        """Returns a captured risky-moment snapshot's JPEG bytes, or None."""
-        history = self.history.get(monitor_id)
-        return history.snapshot(snap_id) if history else None
+    async def monitor_snapshot(self, monitor_id: str, snap_id: str) -> bytes | None:
+        """Returns the JPEG bytes of a frame kept from a monitor's prints, or None."""
+        return await self.reviews.read(monitor_id, snap_id)
+
+    def settle_reviews(self) -> bool:
+        """Ends the review of every print that is over, returning whether any did."""
+        return self.reviews.settle(self.monitors, self.printers, self.settings["feedback"] == "ask")
+
+    def _start_send(self, review: Review, req_id: Any = None) -> None:
+        if review.id not in self._sends:
+            self._sends[review.id] = asyncio.create_task(self._send_review(review, req_id))
+
+    async def _send_review(self, review: Review, req_id: Any) -> None:
+        """Uploads the frames a reviewer kept, stopping at the first one the inbox refuses.
+
+        A refused print stays queued with the reason and a time to try again,
+        which is the inbox's own reset time when it gives one.
+        """
+        submission = review.submission or {}
+        monitor = self.monitors[review.monitor_id]
+        printer = self.printers.get(monitor.get("printer_id") or "")
+        print_details = {
+            "print": review.id,
+            "threshold": monitor["threshold"],
+            "version": self.platform.version,
+            "provider": printer.provider if printer else "none",
+            "printer": submission["printer"],
+        }
+        submission["code"] = submission["retry_at"] = None
+        try:
+            for frame in review.unsent():
+                jpeg = await self._fit_for_feedback(await self.platform.files.read(frame_key(review.id, frame["id"])))
+                if jpeg is not None:
+                    frame_details = {"frame": frame["id"], "label": submission["labels"][frame["id"]], "kind": frame["kind"], "score": frame["score"], "ts": frame["ts"]}
+                    await self._put_feedback_frame(jpeg, {**print_details, **frame_details})
+                submission["sent"].append(frame["id"])
+            review.status = "sent"
+        except feedback.Refused as refused:
+            submission["code"] = refused.code
+            submission["retry_at"] = refused.retry_at or time.time() + FEEDBACK_RETRY_S
+            logger.info("feedback for review %s queued: %s", review.id, refused.code)
+        finally:
+            del self._sends[review.id]
+            self.save()
+        self.emit({"event": "review_sent", **review.public(), "ok": review.status == "sent", "req_id": req_id})
+        self.emit(self.state_event())
+
+    async def _fit_for_feedback(self, jpeg: bytes) -> bytes | None:
+        """Returns a frame small enough for the inbox, re-encoding it once if needed, or None."""
+        if len(jpeg) <= feedback.FRAME_BYTES_MAX:
+            return jpeg
+        rgb = await self.platform.decode_jpeg(jpeg)
+        smaller = await self.platform.encode_jpeg(vision.shrink(rgb, FEEDBACK_SMALLER_PX)) if rgb is not None else None
+        return smaller if smaller and len(smaller) <= feedback.FRAME_BYTES_MAX else None
+
+    async def _put_feedback_frame(self, jpeg: bytes, details: dict[str, Any]) -> None:
+        """Uploads a frame, registering the hub first and once more if its token is not recognised."""
+        for renew in (False, True):
+            if renew or not self.feedback_token:
+                self.feedback_token = await feedback.register(self.platform.http)
+                self.save()
+            try:
+                return await feedback.put_frame(self.platform.http, self.feedback_token, jpeg, details)
+            except feedback.Refused as refused:
+                if refused.code != "token" or renew:
+                    raise
 
     async def _cmd_discover(self, message: dict[str, Any]) -> None:
         sources = await self.platform.discover_cameras()
@@ -786,14 +869,14 @@ class Engine:
             targets = sanitise_targets(message)
             if targets:
                 data = await asyncio.to_thread(gcode.retemper, data, ext, targets)
-                await files.store(record.file_key, _chunks(data))
+                await files.store(record.file_key, as_chunks(data))
             sliced = await asyncio.to_thread(gcode.inspect, data, ext)
             record.size = len(data)
             record.name = sanitise_name(message.get("name"), filename.rsplit(".", 1)[0])
             record.printer_ids = sanitise_printers(message.get("printer_ids"), ext, self.printers)
             record.meta = sliced.meta
             if sliced.thumbnail:
-                await files.store(record.thumbnail_key, _chunks(sliced.thumbnail))
+                await files.store(record.thumbnail_key, as_chunks(sliced.thumbnail))
                 record.thumbnail = sliced.thumbnail_type
         except Exception:
             await files.remove(record.file_key)
@@ -866,19 +949,44 @@ class Engine:
         if self.monitors.pop(message["id"], None) is not None:
             logger.info("monitor %s removed", message["id"])
         self.history.pop(message["id"], None)
+        await self.reviews.forget(message["id"])
         self._results.pop(message["id"], None)
         self._result_emitted_at.pop(message["id"], None)
 
     async def _cmd_history_get(self, message: dict[str, Any]) -> None:
-        history = self.history.get(message["monitor_id"])
-        series = history.series() if history else {"buckets": [], "snaps": [], "alerts": [], "stats": {}}
+        history = self.history.get(message["monitor_id"]) or MonitorHistory()
+        series = history.series(self.reviews.alert_frames(message["monitor_id"]))
         self.emit({"event": "history", "monitor_id": message["monitor_id"], "now": time.time(), **series, "req_id": message.get("req_id")})
 
     async def _cmd_snapshot_get(self, message: dict[str, Any]) -> None:
-        jpeg = self.monitor_snapshot(message["monitor_id"], message["id"])
+        jpeg = await self.monitor_snapshot(message["monitor_id"], message["id"])
         if jpeg is None:
             raise KeyError(f"no snapshot {message['id']!r}")
         self.emit({"event": "snapshot", "id": message["id"], "jpeg": base64.b64encode(jpeg).decode(), "req_id": message.get("req_id")})
+
+    async def _cmd_review_get(self, message: dict[str, Any]) -> None:
+        review = self.reviews.get(message["id"])
+        if review is None:
+            raise KeyError(f"no review {message['id']!r}")
+        self.emit({"event": "review", **review.public(), "frames": review.frames, "req_id": message.get("req_id")})
+
+    async def _cmd_review_send(self, message: dict[str, Any]) -> None:
+        review = self.reviews.submit(
+            message["id"],
+            failures=set(message.get("failures") or []),
+            removed=set(message.get("removed") or []),
+            printer=sanitise_name(message.get("printer"), ""),
+        )
+        self._start_send(review, message.get("req_id"))
+
+    async def _cmd_review_retry(self, message: dict[str, Any]) -> None:
+        review = self.reviews.get(message["id"])
+        if review is None or review.status != "queued":
+            raise ValueError("only a queued print can be sent again")
+        self._start_send(review, message.get("req_id"))
+
+    async def _cmd_review_dismiss(self, message: dict[str, Any]) -> None:
+        self.reviews.dismiss(message["id"])
 
     async def _cmd_camera_snapshot(self, message: dict[str, Any]) -> None:
         """Hands back a still of a camera as it looks now.
@@ -913,6 +1021,8 @@ class Engine:
         settings = {**self.settings, **patch}
         if settings["inference_runtime"] not in ("auto", "litert", "onnx"):
             raise ValueError("inference runtime must be auto, litert or onnx")
+        if settings["feedback"] not in ("ask", "off"):
+            raise ValueError("feedback must be ask or off")
         settings["fault_grace_s"] = clamp_grace(settings["fault_grace_s"])
         settings["preheat"] = sanitise_presets(settings["preheat"])
         if settings["inference_runtime"] != self.settings["inference_runtime"]:

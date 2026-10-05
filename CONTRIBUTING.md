@@ -35,7 +35,12 @@ Run the tests before and after your change:
 uv run pytest                        # engine simulation, adapter contracts, plugin sandbox and lint
 cd web && npm run typecheck          # strict TypeScript over the UI
 cd web && npm run test:sandbox       # the browser plugin sandbox, in chromium and webkit
+cd feedback-worker && npm ci && npm test   # the training inbox Worker, in the Workers runtime
 ```
+
+[`feedback-worker/`](feedback-worker) is the Cloudflare Worker that takes
+[training frames](docs/feedback.md). Its limits are in `src/limits.ts` and every one has a test.
+Install with `npm ci`, since npm 10 fails to resolve Vitest's peers from scratch.
 
 `tests/test_engine.py` simulates cameras and printers against a fake platform, covering
 fairness, gating, the watchdog, alerts and the protocol. `tests/test_adapters.py` pins the

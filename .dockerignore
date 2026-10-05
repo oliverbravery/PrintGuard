@@ -13,3 +13,4 @@ web/dist-site
 *.tsbuildinfo
 .DS_Store
 README.md
+feedback-worker

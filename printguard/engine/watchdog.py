@@ -125,6 +125,8 @@ class Watchdog:
         prints, and a monitor that stands down drops its defect streak.
         """
         self._engine.cameras.sync_in_use(self._engine.monitors, self._engine.printers)
+        if self._engine.settle_reviews():
+            self._engine.save()
         for monitor in self._engine.monitors.values():
             if not monitor_watching(monitor, self._engine.printers):
                 self._streaks.pop(monitor["id"], None)
@@ -339,9 +341,8 @@ class Watchdog:
         if self._streaks.get(monitor["id"], 0):
             monitor["alert"] = alert
         self._engine.emit({"event": "alert", "monitor_id": monitor["id"], **alert})
-        image = await self._engine.platform.encode_jpeg(frame.rgb)
-        self._engine.note_alert(monitor["id"], alert, image)
-        await self._notify(monitor, score, action, image)
+        await self._engine.note_alert(monitor["id"], alert, frame)
+        await self._notify(monitor, score, action, await self._engine.platform.encode_jpeg(frame.rgb))
 
     async def _act(self, monitor: dict[str, Any]) -> str:
         wanted = monitor.get("on_defect", "none")

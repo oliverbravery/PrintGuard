@@ -1,4 +1,5 @@
 import { section, toggleHidden, togglePinned } from "../layout";
+import { awaitingReview } from "../review";
 import { useStore } from "../store";
 import type { DeviceState, Monitor } from "../types";
 import { Feed } from "./Feed";
@@ -20,8 +21,9 @@ export function DeviceChip({ state }: { state: DeviceState | undefined }) {
 }
 
 export function MonitorTile({ monitor, index }: { monitor: Monitor; index: number }) {
-  const { engine, history, openDetail, customising, mutateLayout, dialog, detailId, statsMonitorId } = useStore();
-  const covered = dialog !== null || detailId !== null || statsMonitorId !== null;
+  const { engine, history, openDetail, openReview, customising, mutateLayout, dialog, detailId, statsMonitorId, reviewId } = useStore();
+  const covered = dialog !== null || detailId !== null || statsMonitorId !== null || reviewId !== null;
+  const awaiting = awaitingReview(engine?.reviews ?? [], monitor.id);
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   const device = printer?.device_state;
@@ -119,6 +121,13 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
           })}
         </div>
       </div>
+      {awaiting && !handle && (
+        <div className="px-4 pb-2.5">
+          <button className="btn relative z-[3] w-full !text-[0.7rem]" onClick={() => openReview(awaiting.id)}>
+            Review {awaiting.frames} frames from the last print
+          </button>
+        </div>
+      )}
     </>
   );
 

@@ -59,6 +59,8 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | Symptom | Cause | Fix |
 |---|---|---|
 | Too many false alerts | The threshold is too low for your camera and lighting | Raise the threshold on that monitor, and raise the consecutive-frame count so brief blips are ridden out |
+| A reviewed print says it's queued | A [daily limit](feedback.md#limits) on training frames was hit, or the inbox couldn't be reached | Nothing. The frames stay on the hub and send by themselves at the time shown, or press **Try now** |
+| No **Review frames** prompt after a print | The monitor has no printer, so it can't tell a print ended, or the prompt is switched off | Open the print from **Prints** on the monitor's detailed history page, or turn the prompt on in **Settings**, under **Advanced** |
 | Failures caught too late | The opposite | Lower the threshold or the frame count. Watch the risk history on the monitor's detail page to pick a value |
 | Real failures barely move the score | The print is small in the frame, or off to one side of the square the model watches | Crop the camera to a square the print fills, see [framing the print](printers.md#framing-the-print) |
 | No notifications arrive | The channel is off for that monitor, or the channel itself is failing | Send a test alert from **Settings**. Delivery failures raise an `error` event rather than passing silently |

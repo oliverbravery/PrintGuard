@@ -10,7 +10,7 @@ import { applyTheme, measureCover } from "./theme";
 import { openExternally } from "./urls";
 import { extOf, FORMATS, sendPrint, type PrintDraft } from "./prints";
 import { withPreview } from "./toolpath";
-import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, ScorePoint, UpdateRelease } from "./types";
+import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, Review, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
 const MAX_BACKGROUND_CHARS = 3 * 1024 * 1024;
@@ -99,6 +99,8 @@ interface PgStore {
   toasts: Toast[];
   detailId: string | null;
   statsMonitorId: string | null;
+  reviewId: string | null;
+  reviewData: Record<string, Review>;
   printId: string | null;
   uploads: Upload[];
   staged: StagedPrint[];
@@ -140,6 +142,7 @@ interface PgStore {
   openSettings(tab?: SettingsTabId): void;
   openDetail(id: string | null): void;
   openStats(id: string | null): void;
+  openReview(id: string | null): void;
   openPrint(id: string | null): void;
   stagePrints(files: File[]): void;
   unstage(id: number): void;
@@ -471,6 +474,13 @@ export const useStore = create<PgStore>((set, get) => {
           },
         }));
         break;
+      case "review":
+        clearPending(event.req_id);
+        set((s) => ({ reviewData: { ...s.reviewData, [event.id]: event } }));
+        break;
+      case "review_sent":
+        clearPending(event.req_id);
+        break;
       case "snapshot":
         clearPending(event.req_id);
         set((s) => ({ snapshotCache: { ...s.snapshotCache, [event.id]: `data:image/jpeg;base64,${event.jpeg}` } }));
@@ -556,6 +566,8 @@ export const useStore = create<PgStore>((set, get) => {
     toasts: [],
     detailId: null,
     statsMonitorId: null,
+    reviewId: null,
+    reviewData: {},
     printId: null,
     uploads: [],
     staged: [],
@@ -706,6 +718,11 @@ export const useStore = create<PgStore>((set, get) => {
       get().flushUpdates();
       set({ statsMonitorId });
       if (statsMonitorId) get().send({ cmd: "history.get", monitor_id: statsMonitorId });
+    },
+
+    openReview(reviewId) {
+      set({ reviewId });
+      if (reviewId) get().send({ cmd: "review.get", id: reviewId });
     },
 
     openPrint(printId) {

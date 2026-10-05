@@ -7,15 +7,20 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.5.1] - 2026-10-03
+## [2.5.1] - 2026-10-05
 
 ### Added
 
 - A detection rate for each camera, under **Cameras**. Lower it to cut the load PrintGuard puts
   on a shared host. A defect takes longer to confirm at a lower rate. Thanks to @eikaramba.
+- A review at the end of each print. PrintGuard keeps a few frames per print on your hub, and you
+  can label them and send them to help train the detection model. Nothing is sent unless you
+  press Send, and **Settings**, under **Advanced**, switches the prompt off.
+  [What's sent](docs/feedback.md). Thanks to @eikaramba.
 
 ### Fixed
 
+- Alert snapshots in the risk history survive a restart.
 - A camera looking at a still scene holds a steady score, where a grainy webcam used to jump
   by 20 points or more from frame to frame. Frames are shrunk for the model the way it was
   trained, which also stops noise pulling a failing print's score under the threshold.

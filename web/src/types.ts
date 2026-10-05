@@ -131,6 +131,29 @@ export interface Snapshot {
   action: string;
 }
 
+export interface ReviewFrame extends Snapshot {
+  kind: "alert" | "near" | "spaced";
+  size: number;
+}
+
+export interface ReviewSummary {
+  id: string;
+  monitor_id: string;
+  started: number;
+  ended: number | null;
+  status: "running" | "ready" | "dismissed" | "queued" | "sent";
+  frames: number;
+  alerts: number;
+  chosen: number;
+  sent: number;
+  code: string | null;
+  retry_at: number | null;
+}
+
+export interface Review extends Omit<ReviewSummary, "frames"> {
+  frames: ReviewFrame[];
+}
+
 export interface HistoryAlert {
   ts: number;
   score: number;
@@ -366,6 +389,8 @@ export interface EngineState {
   cameras: Camera[];
   printers: Printer[];
   prints: PrintFile[];
+  reviews: ReviewSummary[];
+  feedback_hub: string | null;
   monitors: Monitor[];
   settings: {
     notifiers: Record<string, Record<string, string>>;
@@ -379,6 +404,7 @@ export interface EngineState {
     catalogue_url: string;
     fault_grace_s: number;
     preheat: PreheatPreset[];
+    feedback: "ask" | "off";
   };
   tokens: ApiToken[];
   stats: EngineStats;

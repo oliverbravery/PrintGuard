@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "printguard-feedback",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-05",
+  "observability": { "enabled": true },
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "printguard-feedback.oliverbravery.uk", "custom_domain": true }],
+  "r2_buckets": [{ "binding": "FRAMES", "bucket_name": "printguard-feedback", "jurisdiction": "eu" }],
+  "durable_objects": { "bindings": [{ "name": "GATE", "class_name": "Gate" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Gate"] }],
+  "send_email": [{ "name": "EMAIL" }],
+  "triggers": { "crons": ["0 3 * * *"] },
+  "vars": { "ACCEPTING": "true" },
+  "secrets": { "required": ["TOKEN_SECRET", "REMINDER_TO", "REMINDER_FROM"] }
+}

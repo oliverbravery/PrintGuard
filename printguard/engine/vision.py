@@ -88,6 +88,23 @@ def classify(embedding: np.ndarray, assets: Assets) -> dict[str, Any]:
     return {"prediction": ordered[0][0], "distances": distances, "margin": margin}
 
 
+def shrink(rgb: np.ndarray, shortest: int) -> np.ndarray:
+    """Scales a frame down so its shorter side is ``shortest`` pixels.
+
+    Args:
+        rgb: HxWx3 uint8 frame.
+        shortest: The shorter side's length after scaling.
+
+    Returns:
+        The scaled frame, or the original if it is already that small.
+    """
+    height, width = rgb.shape[:2]
+    scale = shortest / min(height, width)
+    if scale >= 1:
+        return rgb
+    return np.asarray(Image.fromarray(rgb).resize((round(width * scale), round(height * scale)), Image.Resampling.BILINEAR))
+
+
 def rotate_frame(rgb: np.ndarray, rotation: int) -> np.ndarray:
     """Rotates an RGB frame clockwise by a multiple of 90 degrees.
 

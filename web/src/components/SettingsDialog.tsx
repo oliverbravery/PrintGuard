@@ -443,6 +443,25 @@ export function SettingsDialog() {
               <span className="text-xs text-text-1">Active compute</span>
               <span className="chip">{engine?.stats.inference_device ?? "initialising"}</span>
             </div>
+            <span className="label block pt-2">Training frames</span>
+            <Toggle
+              label="Ask me to review frames after a print"
+              on={engine?.settings.feedback !== "off"}
+              onChange={(on) => updateSettings({ feedback: on ? "ask" : "off" })}
+            />
+            <span className="block text-[0.7rem] leading-relaxed text-text-2">
+              PrintGuard keeps a few frames from each print on this hub so you can label them and send them to help
+              train the detection model. Nothing is sent unless you review a print and press Send.{" "}
+              <a className="text-accent underline hover:opacity-80" href="https://github.com/oliverbravery/PrintGuard/blob/main/docs/feedback.md" target="_blank" rel="noreferrer">
+                What's sent
+              </a>
+            </span>
+            {engine?.feedback_hub && (
+              <div className="flex items-center justify-between gap-3 rounded border border-line-0 px-3 py-2">
+                <span className="text-xs text-text-1">Hub ID</span>
+                <span className="mono text-[0.65rem] break-all text-text-2">{engine.feedback_hub}</span>
+              </div>
+            )}
             <div className="flex justify-end">
               <SaveStatus />
             </div>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { groupBuckets, PERIODS, type Period } from "../history";
+import { statusText } from "../review";
 import { useStore } from "../store";
 import type { Monitor, Snapshot } from "../types";
 import { Sheet } from "./Dialog";
@@ -61,7 +62,8 @@ function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId:
 }
 
 export function StatsPage({ monitor }: { monitor: Monitor }) {
-  const { historyData, openStats } = useStore();
+  const { engine, historyData, openStats, openReview } = useStore();
+  const prints = (engine?.reviews ?? []).filter((review) => review.monitor_id === monitor.id && review.status !== "running").reverse();
   const [period, setPeriod] = useState<Period>("1h");
   const [sortByScore, setSortByScore] = useState(false);
   const [enlarged, setEnlarged] = useState<Snapshot | null>(null);
@@ -120,6 +122,31 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
           </>
         )}
       </div>
+
+      {prints.length > 0 && (
+        <div className="px-5 py-4 border-b border-line-0">
+          <h3 className="display mb-3 text-[0.68rem] font-semibold tracking-[0.24em] text-text-2">PRINTS</h3>
+          <ul className="space-y-1.5">
+            {prints.map((print) => (
+              <li key={print.id} className="flex items-center gap-3">
+                <span className="mono min-w-0 flex-1 truncate text-[0.7rem] text-text-1">
+                  {new Date((print.ended ?? print.started) * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · {print.frames} frames
+                </span>
+                <span className="label">{statusText(print)}</span>
+                <button
+                  className="btn !py-1 !px-2 !text-[0.6rem]"
+                  onClick={() => {
+                    close();
+                    openReview(print.id);
+                  }}
+                >
+                  {print.status === "ready" || print.status === "dismissed" ? "Review" : "View"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
         <div className="mb-3 flex items-center gap-2">

@@ -70,7 +70,7 @@ for the hub:
 | `encode_jpeg(rgb)` / `decode_jpeg(data)` | PyAV |
 | `load_state` / `save_state` | `data/state.json` |
 | `plugin_runtime` | QuickJS in WebAssembly, under wasmtime, or `None` with `PRINTGUARD_PLUGINS=off` |
-| `files` | Print files and their previews on disk under `data/prints/` |
+| `files` | Print files, their previews and the frames kept from each print, on disk under `data/prints/` |
 | `host`, `update_repo`, `update_asset` | Which deployment this is, and where and how it updates |
 
 [`tests/fakes.py`](../tests/fakes.py) implements the same protocol in memory, with synthetic
@@ -94,7 +94,7 @@ Commands, UI to engine:
 | Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.heat`, `printer.test`, `printer.cameras.refresh` |
 | Prints | `print.add`, `print.update`, `print.remove`, `print.start` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
-| History | `history.get`, `snapshot.get` |
+| History | `history.get`, `snapshot.get`, `review.get`, `review.send`, `review.retry`, `review.dismiss` |
 | Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.http`, `plugin.effect` |
 | System | `settings.update`, `notify.test`, `token.create`, `token.remove`, `update.check`, `update.releases`, `report.send`, `report.bundle` |
 
@@ -105,14 +105,15 @@ Events, engine to UI:
 
 | Event | Carries |
 |---|---|
-| `state` | Full snapshot, on connect, after every command and on a 1 s ticker: version, cameras, printers, monitors with their latest results, settings, stats and update status |
+| `state` | Full snapshot, on connect, after every command and on a 1 s ticker: version, cameras, printers, monitors with their latest results, a summary of each print's kept frames, settings, stats and update status |
 | `result` | One monitor's score, sampled at up to 5 Hz per monitor |
 | `alert` | A sustained defect, with the action taken |
 | `warning` | Watchdog conditions and their recovery |
 | `device` | A printer's status, progress, job, time left and heaters |
 | `print_started` | A file from the library has been sent to a printer and started |
 | `discovered`, `printer_test`, `notify_test` | Command responses |
-| `history`, `snapshot` | Risk history buckets and stored alert snapshots |
+| `history`, `snapshot`, `review` | Risk history buckets, a kept frame's JPEG, and the frames kept from one print |
+| `review_sent` | How far a reviewed print's upload got, with the refusal code and retry time when it is queued |
 | `releases` | The changelog history the update dialog browses |
 | `token_created` | A new API token's secret, delivered to the requesting transport and never written to the log |
 | `report_sent`, `report_bundle` | Bug report outcome, and the downloadable diagnostics zip |
@@ -151,6 +152,42 @@ so the record arrives with a picture like any other.
 A file carries the printers it is tagged for, checked against the adapter's `formats` when the
 tag is set, and `print.start` re-polls the printer and refuses unless it answers idle before
 the adapter's `print_file()` uploads and starts it.
+
+[`engine/reviews.py`](../printguard/engine/reviews.py) keeps a few frames from every print a
+monitor watches, scaled to 512px and stored in the same `files` store, with their records in
+the persisted state so they survive a restart. A print runs from a monitor's first frame until
+its printer positively reports idle or error, so a pause stays inside it, and a monitor with no
+printer closes its print after a day.
+
+| Kind | Kept | Chosen by |
+|---|---|---|
+| `alert` | The last 40 | The frame that fired each alert, which is what the risk history gallery shows |
+| `near` | The top 5 | The highest scores under the threshold, at least a minute apart |
+| `spaced` | 10 to 20 | One per interval, and every other one is dropped and the interval doubled at 20, so a long print keeps no more than a short one |
+
+The hub holds the last 20 prints or 200 MB and drops the oldest finished print first. The
+`state` snapshot carries only a count per print, and `review.get` returns one print's frames.
+
+A finished print can be [sent as training data](feedback.md). `review.send` records which
+frames show a failure and which were left out, and
+[`engine/feedback.py`](../printguard/engine/feedback.py) uploads the rest through
+`platform.http` to the Worker in [`feedback-worker/`](../feedback-worker), one frame per
+request. The upload runs as a background task and its progress rides in the `state` snapshot.
+It is deliberately absent from the REST API, the MCP server and the plugin permission table,
+so frames only leave the hub when a person presses Send in the dashboard.
+
+| `status` | Meaning |
+|---|---|
+| `running` | The print is still being watched |
+| `ready` | It has ended and waits to be reviewed |
+| `dismissed` | Nobody wants to review it, or `settings.feedback` is `off` |
+| `queued` | It was reviewed and frames are uploading, or wait on a refusal's `retry_at` |
+| `sent` | Every chosen frame is in the inbox |
+
+The Worker is the only writer to a private R2 bucket and holds every limit in one Durable
+Object, so the hub only reports what it was told. A refused print keeps its frames and the
+engine's ticker sends the rest once `retry_at` passes. The hub's token is issued by the Worker
+and persisted, and the `state` snapshot carries only its public half as `feedback_hub`.
 
 A deployment can declare video devices the same way. The Docker image sets
 `PRINTGUARD_CAMERAS=auto`, so every capture device passed into the container comes back from
@@ -385,6 +422,8 @@ printguard/
     monitors.py      monitor config: a camera + printer pairing and its thresholds
     printers.py      registered-printer (integration connection) validation
     prints.py        print library records: formats, names and which printers a file may go to
+    reviews.py       the frames kept from each watched print, and which ones are worth keeping
+    feedback.py      uploads a reviewed print's frames to the training inbox
     gcode.py         what a sliced file says about itself: estimates, printer model, preview
     watchdog.py      defect response: streaks, printer actions, notifications, health
     updates.py       GitHub release check and changelog history
@@ -407,6 +446,7 @@ web/                 React + Tailwind UI (presentation only)
   public/            plugin-sandbox.html, the opaque-origin frame a plugin panel runs in
   site/              the landing page published to GitHub Pages
 plugins/             first-party plugins and the hash-pinned catalogue they are verified by
+feedback-worker/     the Cloudflare Worker and R2 inbox that take training frames, and the script that empties it
 models/              TFLite and ONNX encoders, normalisation metadata, class prototypes
 tests/               engine simulation, adapter contracts and the plugin sandbox (pytest)
 ```

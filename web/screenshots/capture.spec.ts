@@ -73,12 +73,13 @@ function engine(): EngineState {
       print("f2", "wall_bracket", "gcode", 2_104_880, ["p2"], { slicer: "OrcaSlicer 2.2.0", time_s: 3540, filament_g: 8.1, printer_model: "Creality Ender-3 V3", nozzle: 220, bed: 55 }),
       print("f3", "cable_clip", "gcode", 611_002, [], { slicer: "Cura 5.7.0", time_s: 1260, filament_mm: 2100, printer_model: null, nozzle: 200, bed: 60 }),
     ],
+    reviews: [], feedback_hub: null,
     monitors: [
       monitor("m1", "Prusa MK4", "c1", "p1"),
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT },
+    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask" },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: INTEGRATIONS, notifiers: [],
     plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },
@@ -225,7 +226,33 @@ const idlePrinters = (e: EngineState) => {
   e.printers[1] = { ...e.printers[1], device_state: idle };
 };
 
+const REVIEW_FRAMES = [
+  ...[0.04, 0.06, 0.05, 0.07, 0.08, 0.11].map((score, index) => ({ id: `s${index}`, kind: "spaced" as const, score, ts: NOW / 1000 - 5400 + index * 600, action: "none", size: 41_000 })),
+  ...[0.58, 0.66].map((score, index) => ({ id: `n${index}`, kind: "near" as const, score, ts: NOW / 1000 - 1500 + index * 300, action: "none", size: 43_000 })),
+  { id: "a0", kind: "alert" as const, score: 0.91, ts: NOW / 1000 - 600, action: "pause", size: 44_000 },
+];
+const REVIEW = {
+  id: "r1", monitor_id: "m2", started: NOW / 1000 - 5400, ended: NOW / 1000 - 300, status: "ready" as const,
+  frames: REVIEW_FRAMES.length, alerts: 1, chosen: 0, sent: 0, code: null, retry_at: null,
+};
+
+async function openReview(page: Page): Promise<void> {
+  await page.evaluate(
+    ({ review, frames, pictures }) => {
+      (window as { __pg: { setState: (s: unknown) => void } }).__pg.setState({
+        reviewId: review.id,
+        reviewData: { [review.id]: { ...review, frames } },
+        snapshotCache: Object.fromEntries(frames.map((frame) => [frame.id, frame.score > 0.5 ? pictures.defect : pictures.healthy])),
+      });
+    },
+    { review: REVIEW, frames: REVIEW_FRAMES, pictures: FRAMES },
+  );
+  await page.getByRole("button", { name: "No, it failed" }).click();
+  await page.getByRole("button", { name: /^Frame at .* marked Good/ }).last().click();
+}
+
 const SCENES: Scene[] = [
+  { name: "review", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = [REVIEW]), prepare: openReview },
   { name: "dashboard", width: 1360, height: 620, theme: "dark" },
   { name: "dashboard-light", width: 1360, height: 620, theme: "light" },
   { name: "printer-detail", width: 1360, height: 860, theme: "dark", detailId: "m1" },

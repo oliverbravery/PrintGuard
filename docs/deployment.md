@@ -184,6 +184,15 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | Grant a plugin nothing you would not grant its author | Especially **Control printers** and **Authorise every request**. `PRINTGUARD_PLUGINS=off` is the way back from a lockout |
 | Keep the image current | `latest` moves on every release |
 
+## What the hub reaches out to
+
+| Host | When |
+|---|---|
+| `api.github.com` | Once a day for the update check, and when you browse the plugin store |
+| `*.ingest.de.sentry.io` | Only when you send a bug report |
+| `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
+| Your printers, cameras, notification services and MQTT broker | As you configure them |
+
 ## Staying up to date
 
 The hub checks GitHub releases once a day and the header's version chip turns into an update
