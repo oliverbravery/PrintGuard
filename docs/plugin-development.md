@@ -552,8 +552,8 @@ Call it from an event, since `render` runs again every second.
 Each tone follows the one before unless it says `together`, and `shape` picks `sine`, `square`,
 `sawtooth` or `triangle`. It stays quiet until the user has pressed something in the page.
 
-`ctx.background` takes a `data:image/` URL and clears when passed anything else. The Glass
-theme frosts the panels over it.
+`ctx.background` takes a base64 `data:` URL of a PNG, JPEG, WebP or GIF and clears when passed
+anything else. The Glass theme frosts the panels over it.
 
 ## Credentials
 

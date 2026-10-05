@@ -3,7 +3,7 @@ import { recentLogs } from "../log";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
 
-const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
 
 interface Attachment {
   name: string;

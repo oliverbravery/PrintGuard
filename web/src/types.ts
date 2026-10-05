@@ -131,7 +131,8 @@ export interface Snapshot {
   action: string;
 }
 
-export interface ReviewFrame extends Snapshot {
+export interface ReviewFrame extends Omit<Snapshot, "action"> {
+  action?: string;
   kind: "alert" | "near" | "spaced";
   size: number;
 }
@@ -425,6 +426,6 @@ export interface ScorePoint {
 }
 
 export interface EngineLink {
-  send(cmd: Record<string, unknown>): void;
+  send(cmd: Record<string, unknown>): boolean;
   close(): void;
 }

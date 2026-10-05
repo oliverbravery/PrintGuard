@@ -226,8 +226,8 @@ declare global {
     /** Plays an audio file you shipped, named as it appears in the manifest's `assets`. Needs `sound`. */
     sound(asset: string): void;
     /**
-     * Puts a picture behind the dashboard. Needs `background`, takes a `data:` URL,
-     * and clears when passed nothing.
+     * Puts a picture behind the dashboard. Needs `background`, takes a base64 `data:` URL
+     * of a PNG, JPEG, WebP or GIF, and clears when passed anything else.
      */
     background(image: string): void;
     /**
