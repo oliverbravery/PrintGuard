@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from ..engine.engine import Engine
 
 RECONNECT_DELAY_S = 5.0
+GOODBYE_TIMEOUT_S = 2.0
 KEEPALIVE_S = 30
 STATE_DEADBAND = 5.0
 CONTINUOUS_FIELDS = ("score", "progress", "nozzle_temp", "bed_temp")
@@ -385,7 +386,7 @@ class MqttBridge:
                     task.result()
             except (_Reconnect, asyncio.CancelledError):
                 with contextlib.suppress(aiomqtt.MqttError):
-                    await client.publish(status_topic(base), "offline", qos=1, retain=True)
+                    await client.publish(status_topic(base), "offline", qos=1, retain=True, timeout=GOODBYE_TIMEOUT_S)
                 raise
             finally:
                 self._engine.remove_sink(self._sink)

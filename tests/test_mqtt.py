@@ -191,7 +191,7 @@ class FakeBroker:
     async def __aexit__(self, *_: Any) -> None:
         return None
 
-    async def publish(self, topic: str, payload: Any, qos: int = 0, retain: bool = False) -> None:
+    async def publish(self, topic: str, payload: Any, qos: int = 0, retain: bool = False, timeout: float | None = None) -> None:
         self.published.append((topic, payload, retain))
 
     async def subscribe(self, *_: Any, **__: Any) -> None:
@@ -356,7 +356,7 @@ async def test_a_bridge_stops_when_the_broker_has_already_gone(monkeypatch: pyte
     """A stop that waited on telling a dead broker the hub is offline would hold the whole shutdown up."""
 
     class Gone(FakeBroker):
-        async def publish(self, topic: str, payload: Any, qos: int = 0, retain: bool = False) -> None:
+        async def publish(self, topic: str, payload: Any, qos: int = 0, retain: bool = False, timeout: float | None = None) -> None:
             if payload == "offline":
                 raise mqtt.aiomqtt.MqttError("broker gone")
             await super().publish(topic, payload, qos, retain)

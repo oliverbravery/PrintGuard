@@ -197,7 +197,7 @@ filtered to the scopes its token holds.
 |---|---|
 | `read` | `get_state`, `list_monitors`, `get_monitor`, `get_monitor_history`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `list_prints`, `get_print`, `recent_events` |
 | `read` | `get_camera_frame` and `get_monitor_snapshot`, which return the picture as image content an agent can look at |
-| `read` | `classify_frame`, which scores an image the agent supplies as base64 and needs no registered camera |
+| `read` | `classify_frame`, which scores an image of up to 32 MB the agent supplies as base64 and needs no registered camera |
 | `control` | `control_printer`, `heat_printer`, `start_print` |
 | `manage` | `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_print`, `remove_print`, `update_settings`, `test_notifier` |
 

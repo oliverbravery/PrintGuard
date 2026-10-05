@@ -106,6 +106,8 @@ async def test_classify_tool_scores_a_supplied_image() -> None:
             result = await client.call_tool("classify_frame", {"image_base64": image_base64})
             with pytest.raises(Exception):
                 await client.call_tool("classify_frame", {"image_base64": base64.b64encode(b"nope").decode()})
+            with pytest.raises(Exception, match="over 32 MB"):
+                await client.call_tool("classify_frame", {"image_base64": "A" * (33 * 1024 * 1024 * 4 // 3)})
         assert result.data["prediction"] in ("success", "failure", "unknown")
         assert "defect_score" in result.data
     finally:

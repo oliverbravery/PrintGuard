@@ -28,7 +28,7 @@ from fastmcp.utilities.types import Image
 from starlette.applications import Starlette
 
 from ..engine.engine import Engine
-from .api import ApiAuth, route_scope
+from .api import MAX_FRAME_BYTES, ApiAuth, route_scope
 
 INSTRUCTIONS = (
     "Monitor and control 3D printers through PrintGuard. Read monitor, printer and "
@@ -103,6 +103,8 @@ def build_mcp(
         same per-frame verdict the scheduler produces for a camera PrintGuard pulls
         itself. Use it to judge a still the model never captured directly.
         """
+        if len(image_base64) * 3 // 4 > MAX_FRAME_BYTES:
+            raise ToolError(f"could not classify image: it is over {MAX_FRAME_BYTES // 1024 // 1024} MB")
         try:
             return await get_engine().classify(base64.b64decode(image_base64))
         except (ValueError, RuntimeError) as exc:
