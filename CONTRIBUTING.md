@@ -49,9 +49,17 @@ real JavaScript in the shipped QuickJS build to hold the hub sandbox to what it 
 `tests/test_plugin_lint.py` reads every shipped plugin against its own manifest, the same check
 `pin.py` refuses to list a plugin without, and it needs `npm install` in `web/` since the
 checker runs on node. If you touch the scheduler, monitor or printer state handling, extend the
-first. A new adapter gets its payloads tested in the second. The REST API, MCP server, MQTT
-bridge, tokens, gcode reader and MediaMTX client each have a `tests/test_<name>.py` of their
-own.
+first. A new adapter gets its payloads tested in the second. `tests/test_plugin_network.py`
+holds where a plugin's requests, sockets and sign-in may go, `tests/test_urls.py` the match
+patterns its grant is written in and `tests/test_plugin_schema.py` the manifest schema. The hub
+has `tests/test_app.py` for its routes and `tests/test_platform.py` for capture, inference and
+storage. The REST API, MCP server, MQTT bridge, tokens, update check, gcode reader and MediaMTX
+client each have a `tests/test_<name>.py` of their own.
+
+`npm run test:sandbox` runs everything in `web/tests`. `sandbox.spec.ts` holds the browser
+plugin sandbox, `dashboard.spec.ts` drives the dashboard against a faked hub and
+`markdown.spec.ts` covers how a plugin's README is rendered. CI fails on a `test.only` left in
+any of them.
 
 [`feedback-worker/`](feedback-worker) is the Cloudflare Worker that takes
 [training frames](docs/feedback.md). Its limits are in `src/limits.ts` and every one has a test.
@@ -179,7 +187,11 @@ Bambu and Elegoo tests do.
      `formats` empty and the print library never offers the printer.
    - implement `cameras()` where the service exposes a webcam, returning a `key`, `name` and
      `source` for each. PrintGuard registers them as cameras owned by the printer.
-   - implement `close()` if the adapter holds a connection open.
+   - implement `close()` if the adapter holds a connection open, and `connection_key()` to
+     say which config fields that connection depends on, so testing an edited printer doesn't
+     close the one it is polled over.
+   - set `slow_action_s` if the service answers an action only once the printer has carried
+     it out. REST, MCP and Home Assistant wait that much longer for it.
    - describe the config form as a JSON Schema, where `secret: true` masks fields,
      `placeholder` hints at the expected value, and `default` preselects an optional
      `enum`, so the form never offers an empty choice the adapter quietly fills in.
@@ -291,16 +303,20 @@ The section is published verbatim as the GitHub release notes, so describe the u
 effect, not the implementation. Its date is the day the release merges into `main`, in London
 time. The check on a pull request into `main` compares it with today, and the release itself
 refuses a section dated any other day than its merge commit, so a release that waits a day
-needs its date moved on before it merges.
+needs its date moved on before it merges. The check only knows the day it last ran, so if
+midnight passes between a green **version** and the merge, move the date on first. A release
+that merges with the wrong date stops at its first job, before anything is published. Correct
+the date on `main` through another pull request to release it.
 
-Five checks are required. A pull request into a release branch runs **tests**, **audit**,
+Five checks are required on `main`. A release branch isn't protected, so there they run without
+blocking a merge. A pull request into a release branch runs **tests**, **audit**,
 **image** and **version**, and the release's own pull request into `main` adds **launch** and the date:
 
 | Check | Enforces |
 |---|---|
 | **tests** | Everything under `tests/`, with `uv run pytest`. The UI and its Playwright suites type-check, and the browser plugin sandbox holds in chromium and webkit. The feedback Worker type-checks and passes its tests |
 | **audit** | `uv audit` and `npm audit` find no known vulnerability in `uv.lock` or either `package-lock.json`. A new advisory fails every open pull request until the dependency is bumped |
-| **image** | Every production image variant builds, which also builds the UI, so a change that breaks an image can never reach `main` |
+| **image** | Every production image variant builds, which also builds the UI. The check builds for `amd64` only, so the `arm64` image is first built by the release itself |
 | **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |
 | **version** | The version has no release tag yet and has a matching `CHANGELOG.md` section, dated the day it merges into `main` in London time. Re-publishing an existing tag is refused |
 
@@ -313,13 +329,20 @@ On merge, the [release workflow](.github/workflows/release.yml):
 
 1. builds and pushes the images to `ghcr.io/oliverbravery/printguard`, tagged `X.Y.Z`, `X.Y`
    and `latest` for `amd64` and `arm64`, plus the `-intel` and `-nvidia` variants for `amd64`.
-2. only once the images are published, tags the merge commit `vX.Y.Z` and creates the GitHub
-   release with the changelog section as its notes, so a failed build never becomes a release.
+2. only once the images are published, drafts the GitHub release for `vX.Y.Z` with the
+   changelog section as its notes, so a failed build never becomes a release.
 3. deploys the website to GitHub Pages.
-4. builds the macOS and Windows desktop apps and attaches them to the release. The macOS app
+4. builds the macOS and Windows desktop apps and attaches them to the draft. The macOS app
    is signed and notarised with the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
    `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` repository secrets, which the
    **launch** check uses too.
+5. publishes the release, which tags the merge commit. The download links and the in-app
+   update check only see a release once it's published, so neither points at a release with
+   no desktop builds. If a desktop build fails, re-run it and the release publishes after it.
+
+Merge the release's pull request with a merge commit. The plugin catalogue pins plugins at
+commits on the release branch, and a squash or rebase merge leaves those commits off `main`.
+Both are still enabled in the repository's settings.
 
 Docker is the supported distribution for servers and NAS boxes, and the desktop app is the
 one for personal computers.

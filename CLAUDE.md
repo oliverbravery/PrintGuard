@@ -117,7 +117,13 @@ essentials a change must respect:
   (`FakePlatform`); `tests/test_adapters.py` pins each adapter's exact request shapes;
   `tests/test_plugin_runtime.py` runs real JavaScript in the shipped QuickJS build to hold the
   hub's plugin sandbox to what it promises, and `web/tests/sandbox.spec.ts` does the same for
-  the browser sandbox through Playwright (`npm run test:sandbox`, chromium and webkit).
+  the browser sandbox through Playwright (`npm run test:sandbox`, chromium and webkit), beside
+  `web/tests/dashboard.spec.ts`, which drives the dashboard against a faked hub, and
+  `web/tests/markdown.spec.ts` for README rendering. `tests/test_plugin_network.py` holds where
+  a plugin's requests, sockets and sign-in may go, with `test_urls.py` and
+  `test_plugin_schema.py` beside it; `tests/test_app.py` and `tests/test_platform.py` cover the
+  hub's routes and its `Platform`; the REST API, MCP server, MQTT bridge, tokens, update check,
+  gcode reader, MediaMTX client and plugin linter each have a `tests/test_<name>.py`.
   `web/launch/launch.spec.ts` drives a running build from camera to alert, and CI runs it on
   the container and both desktop apps before a release merges. New
   scheduler/monitor/watchdog/protocol behaviour extends the former; a new adapter is tested

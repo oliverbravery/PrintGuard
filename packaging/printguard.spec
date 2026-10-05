@@ -11,6 +11,7 @@ import os
 import shutil
 import sys
 import tempfile
+from importlib.metadata import version
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules, copy_metadata
@@ -31,6 +32,7 @@ if MEDIAMTX:
 datas = [
     (str(ROOT / "models"), "models"),
     (str(ROOT / "mediamtx.yml"), "."),
+    (str(ROOT / "THIRD_PARTY_NOTICES.md"), "."),
     (str(ROOT / "web" / "dist"), "static"),
     (str(icon_png), "."),
     (str(ROOT / "printguard" / "server" / "runtime"), "printguard/server/runtime"),
@@ -88,6 +90,7 @@ if sys.platform == "darwin":
         bundle_identifier="io.printguard.desktop",
         info_plist={
             "CFBundleName": "PrintGuard",
+            "CFBundleShortVersionString": version("printguard"),
             "NSHighResolutionCapable": True,
             "LSUIElement": True,
             "NSCameraUsageDescription": "PrintGuard watches this device's camera for print defects.",

@@ -15,7 +15,7 @@ jobs:
   triage:
     name: triage
     if: github.event_name == 'issues'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       issues: write
     steps:
@@ -28,7 +28,7 @@ jobs:
   resolved:
     name: resolved
     if: github.event_name == 'pull_request_target' && github.event.pull_request.merged
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       issues: write
       pull-requests: read
@@ -53,7 +53,7 @@ jobs:
   expire:
     name: expire
     if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       issues: write
     steps:

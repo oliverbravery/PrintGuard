@@ -2,10 +2,10 @@
 
 # PrintGuard
 
-**Catches failed 3D prints on your own hardware, pauses the printer and sends you a snapshot alert.**
+Catches failed 3D prints on your own hardware, pauses the printer and sends you a snapshot alert.
 
 [![Latest release](https://img.shields.io/github/v/release/oliverbravery/PrintGuard?style=flat&color=ff4d00&label=release)](https://github.com/oliverbravery/PrintGuard/releases/latest)
-[![GitHub stars](https://img.shields.io/github/stars/oliverbravery/PrintGuard?style=flat&color=ff4d00)](https://github.com/oliverbravery/PrintGuard/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/oliverbravery/PrintGuard?style=flat&color=ff4d00)](https://github.com/oliverbravery/PrintGuard)
 [![Licence](https://img.shields.io/badge/licence-GPL--2.0-2ea44f)](LICENSE.md)
 [![Container](https://img.shields.io/badge/ghcr.io-oliverbravery%2Fprintguard-2496ed?logo=docker&logoColor=white)](https://github.com/oliverbravery/PrintGuard/pkgs/container/printguard)
 [![Website](https://img.shields.io/badge/website-oliverbravery.github.io-ff4d00)](https://oliverbravery.github.io/PrintGuard/)
@@ -91,9 +91,9 @@ Then open `http://<host>:8000`.
 
 | Platform | How |
 |---|---|
-| **Unraid** | Add **PrintGuard** from Community Applications, or import the [template](templates/printguard.xml), and install from the UI. No terminal needed |
-| **Docker Compose** | `curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml && docker compose up -d` |
-| **Anything else** | The `docker run` above. Images are published for `amd64` and `arm64`, including Raspberry Pi 4 and 5 |
+| Unraid | Add **PrintGuard** from Community Applications, or import the [template](templates/printguard.xml), and install from the UI. No terminal needed |
+| Docker Compose | `curl -fsSLO https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/docker-compose.yaml && docker compose up -d` |
+| Anything else | The `docker run` above. Images are published for `amd64` and `arm64`, including Raspberry Pi 4 and 5 |
 
 GPU images, ports for cameras that push a stream and passing in a USB webcam are covered in
 [hardware](docs/hardware.md), [deployment](docs/deployment.md) and [cameras](docs/cameras.md).
@@ -167,7 +167,7 @@ and **Cancel**. Control is two-way, so your automations can drive PrintGuard.
 
 ## MCP and the REST API
 
-Anything the dashboard can do, an agent or a script can do. Point an MCP client at
+An agent or a script can watch and control your printers. Point an MCP client at
 `https://<host>/mcp/`, or use the REST API at `/api/v1`. Both read printer and camera status,
 fetch the current frame as an image, score a frame you supply, pause, resume or cancel, set a
 heater target and start a file from the print library.
@@ -182,7 +182,7 @@ Plugins are written in JavaScript and run in a sandbox. Install verified ones fr
 Settings, or from a GitHub repo or a zip. They ask for fine-grained permissions when you enable
 them, and you can take those back at any time.
 
-Four come as standard:
+Four are in the store:
 
 - **Picture in picture** floats a camera above your other windows
 - **Alert sounds** plays a horn the moment a defect is caught
@@ -263,19 +263,19 @@ report, or downloads the same diagnostics as a zip with every credential strippe
 | [API & MCP](docs/api.md) | REST API, MCP server and Home Assistant, with scoped tokens |
 | [Plugins](docs/plugins.md) | Installing plugins and what they can reach |
 | [Writing plugins](docs/plugin-development.md) | The plugin API, both sandboxes and publishing to the catalogue |
-| [Troubleshooting](docs/troubleshooting.md) | Symptom-first fixes, and how to pull logs and diagnostics |
 | [Architecture](docs/architecture.md) | The engine and its protocol, the platform contract, the scheduler, the fail-safe design |
+| [Troubleshooting](docs/troubleshooting.md) | Symptom-first fixes, and how to pull logs and diagnostics |
 | [Changelog](CHANGELOG.md) | What changed in every release |
 
 ## Contributing
 
 Dev setup, tests, and step-by-step guides for adding a printer integration or a notification
-provider are in **[CONTRIBUTING.md](CONTRIBUTING.md)**. Issues and pull requests are welcome.
+provider are in [CONTRIBUTING.md](CONTRIBUTING.md). Issues and pull requests are welcome.
 
 ## Sponsor
 
 PrintGuard is free, GPL-2.0 and has no paid tier.
-[**Sponsoring the project**](https://github.com/sponsors/oliverbravery) helps me keep working on
+[Sponsoring the project](https://github.com/sponsors/oliverbravery) helps me keep working on
 it and goes on the hardware the integrations get tested against. One-off and monthly both work,
 and nothing in PrintGuard is ever locked behind it.
 

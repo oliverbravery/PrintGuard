@@ -14,6 +14,7 @@ const launch = {
 
 export default defineConfig<LaunchOptions>({
   workers: 1,
+  forbidOnly: !!process.env.CI,
   reporter: "list",
   projects: [
     { name: "screenshots", testDir: "screenshots" },
