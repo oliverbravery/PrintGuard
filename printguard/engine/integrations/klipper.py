@@ -146,7 +146,7 @@ class KlipperAdapter(IntegrationAdapter):
                 {
                     "key": str(webcam.get("uid") or webcam.get("name") or len(found)),
                     "name": webcam.get("name") or "Webcam",
-                    "source": {"kind": "url", "url": webcam_url(config["base_url"], stream)},
+                    "source": {"kind": "url", "url": webcam_url(config["base_url"], stream, 7125)},
                 }
             )
         return found

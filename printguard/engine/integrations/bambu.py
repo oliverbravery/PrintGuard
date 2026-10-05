@@ -429,4 +429,10 @@ class BambuAdapter(IntegrationAdapter):
         return self._session(config).product()
 
     def _publish(self, config: dict[str, Any], payload: dict[str, Any]) -> None:
-        self._session(config).command(payload)
+        if self._session(config).lost():
+            self._drop(config)
+        try:
+            self._session(config).command(payload)
+        except Exception:
+            self._drop(config)
+            raise

@@ -21,6 +21,7 @@ from printguard.engine.cameras import webrtc_endpoint, whep_endpoint
 from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
 from printguard.engine.integrations import bambu
 from printguard.engine.integrations.bambu import BambuAdapter
+from printguard.engine.integrations.base import webcam_url
 from printguard.engine.integrations.elegoo import ElegooAdapter
 from printguard.engine.monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor
 from printguard.engine.notifiers import NOTIFIERS
@@ -1395,3 +1396,11 @@ async def test_elegoo_moonraker_family_uploads_through_moonraker() -> None:
     await INTEGRATIONS["elegoo"].print_file(http, ELEGOO_MOONRAKER_CONFIG, "benchy.gcode", b"G1\n")
     assert http.last["url"] == "http://192.168.1.91:7125/server/files/upload"
     assert http.last["headers"]["X-Api-Key"] == "secret"
+
+
+
+def test_a_relative_webcam_url_keeps_a_port_that_is_not_the_api_port() -> None:
+    """OctoPrint behind a proxy on 8080 serves its webcam there, while one on its own 5000 serves it on the web port."""
+    assert webcam_url("http://nas.lan:8080", "/webcam/?action=stream", 5000) == "http://nas.lan:8080/webcam/?action=stream"
+    assert webcam_url("http://nas.lan:5000", "/webcam/?action=stream", 5000) == "http://nas.lan/webcam/?action=stream"
+    assert webcam_url("http://nas.lan:5000", "http://cam.lan/stream", 5000) == "http://cam.lan/stream"

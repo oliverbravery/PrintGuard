@@ -139,4 +139,4 @@ class OctoPrintAdapter(IntegrationAdapter):
         stream = ((body.get("plugins") or {}).get("classicwebcam") or {}).get("stream") or (body.get("webcam") or {}).get("streamUrl")
         if not stream:
             return []
-        return [{"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": webcam_url(config["base_url"], stream)}}]
+        return [{"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": webcam_url(config["base_url"], stream, 5000)}}]
