@@ -160,7 +160,7 @@ Events, engine to UI:
 
 | Event | Carries |
 |---|---|
-| `state` | Full snapshot, on connect, after every command and on a 1 s ticker. The fields are listed below |
+| `state` | Full snapshot, on connect, after every command that can change it and on a 1 s ticker. `history.get`, `snapshot.get`, `review.get` and `camera.snapshot` only read, so they save nothing and answer with their own event alone. The fields are listed below |
 | `result` | One monitor's score, sampled at up to 5 Hz per monitor |
 | `alert` | A sustained defect, with the action taken |
 | `warning` | Watchdog conditions and their recovery, and an MQTT broker the bridge cannot reach |
@@ -219,8 +219,10 @@ that printer through `Camera.printer_id`, covering the OctoPrint and Moonraker s
 Elegoo Centauri chamber camera, and the Bambu chamber camera, over RTSP on the X1 and H2
 series or the proprietary port 6000 protocol on the A1 and P1. The adapter's optional
 `cameras()` declares them, and the engine reconciles them on printer add and update, and on
-demand through `printer.cameras.refresh` to pick up a camera attached later. Such cameras
-cannot be removed on their own and are dropped with their printer. See
+demand through `printer.cameras.refresh` to pick up a camera attached later. One printer is
+reconciled by one caller at a time, and a camera whose source changed with the printer's
+connection details is attached again at the new address with its name and tuning kept. Such
+cameras cannot be removed on their own and are dropped with their printer. See
 [printers](printers.md) and [cameras](cameras.md).
 
 A print file is the third registered resource. The bytes are far
@@ -246,6 +248,10 @@ A deployment can declare video devices the same way. The Docker image sets
 boot under a deterministic id through `Camera.declared`. A declared camera keeps the name and
 tuning it was given across restarts, cannot be removed on its own, and goes when the
 deployment stops passing it in.
+
+A monitor keeps its `camera_id` when a declared or printer-owned camera is dropped, so it
+watches again when the camera returns under the same id. Only `camera.remove` and
+`printer.remove` clear the binding.
 
 ## Scheduling inference
 
@@ -308,11 +314,13 @@ sequenceDiagram
         W->>I: pause / cancel the linked printer (retried on failure)
         I-->>W: ok, or "failed" after retries
         W-->>W: emit alert event (action included)
-        W->>E: note_alert (snapshot into history)
         W->>N: snapshot + outcome to every configured channel, if notify is on
+        W->>I: re-read the printer, so a paused print stands the monitor down
+        W->>E: note_alert (snapshot into history)
     else score below threshold
         W-->>W: streak and alert reset
     end
+    E-->>E: consider the frame for the print's review
 ```
 
 [`engine/vision.py`](../printguard/engine/vision.py) holds every image step. `transform`
@@ -334,9 +342,16 @@ lost on restart. The frame that fired each alert is kept on disk by [print revie
 | Rollup buckets | 60 s each, the newest 1440, so 24 hours of watching |
 | Alert log | The newest 50 |
 
-An alert starts the monitor's `cooldown_s`, and no second response fires inside it. Push
-notifications have their own 30 s floor per monitor. A printer action is tried 3 times, 1 s
-apart, then reported as failed in the alert, the UI error feed and the push notification.
+An alert starts the monitor's `cooldown_s`, and no second response fires inside it or while
+the first is still in flight. Push notifications have their own 30 s floor per monitor. A
+printer action is tried 3 times, 1 s apart, then reported as failed in the alert, the UI error
+feed and the push notification. A streak is dropped when its monitor stands down or is bound
+to another camera.
+
+Everything that writes to disk comes after the part that protects the print. A frame is
+scored and passed to the watchdog before it is considered for the review, and an alert is
+pushed before its frame is stored, so a full data volume raises an `error` event and costs
+only the kept frames.
 
 ### Print reviews
 
@@ -375,7 +390,7 @@ so frames only leave the hub when a person presses Send in the dashboard.
 The Worker is the only writer to a private R2 bucket and holds every limit in one Durable
 Object, so the hub only reports what it was told. A refused print keeps its frames and the
 engine's ticker sends the rest once `retry_at` passes, six hours on where the refusal named no
-time. A frame over 150 KB is re-encoded once at 384px and skipped if it is still too big. The hub's token is issued by the Worker
+time. A send cut short by a restart has no `retry_at` and is picked up on the next tick. A frame over 150 KB is re-encoded once at 384px and skipped if it is still too big, as is one whose file is missing or that the Worker rejects as `details`, `not_jpeg`, `too_large` or `length`, since it could never be sent. The hub's token is issued by the Worker
 and persisted, and the `state` snapshot carries only its public half as `feedback_hub`.
 
 ## Failing safely
@@ -417,13 +432,16 @@ stateDiagram-v2
     end note
 ```
 
-The four watchdog conditions are a watched camera going offline, a watched camera staying
+The four watchdog conditions are a watched camera going offline or not being registered at
+all, a watched camera staying
 online but producing no fresh frames, since a frozen RTSP feed must not pass for monitoring,
 a watched camera that was online for under 90% of the last ten minutes, and a linked
 printer whose state cannot be read, whether it is unreachable or reporting something the
 adapter does not recognise. The last one only counts while the monitor is watching, where it
 means a defect could not pause the print. A printer switched off after a print leaves its
-monitor in standby and warns about nothing.
+monitor in standby and warns about nothing. A monitor with no registered camera reads as not
+`watching` in the state, and a monitor that stands down forgets its camera faults, so the
+next print starts with a full grace period.
 
 The grace period is `settings.fault_grace_s`, two minutes by default, and it is clamped to
 between thirty seconds and fifteen minutes so it can be lengthened for a camera that drops
@@ -441,6 +459,11 @@ waits on the grace period. The dashboard shows a fault as it happens, and re-att
 failed camera runs on its own timer, so a longer grace period never delays recovery.
 Notifier delivery failures and inference crashes emit `error` events. There is no silent
 `except: pass` anywhere in the alert path.
+
+The scheduler, the printer poll, the health check and the state ticker each run one pass at a
+time under `Engine._repeat`. A pass that raises emits an `error` event and the loop carries
+on a second later, and a defect response that raises is reported the same way. A fault that
+repeats is reported once every 30 s.
 
 The timings are constants at the top of [`engine/watchdog.py`](../printguard/engine/watchdog.py):
 
