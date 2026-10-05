@@ -96,21 +96,24 @@ the result is the `workers` term the scheduler divides by latency to get
 
 ## Execution providers by platform
 
-ONNX Runtime takes the first device its providers offer, preferring a GPU, then an NPU, then
-the CPU. What is available depends on the platform:
+ONNX Runtime takes the first device its providers offer that can run the model, preferring a
+GPU, then an NPU, then the CPU. What is available depends on the platform:
 
 | Platform | Provider | Notes |
 |---|---|---|
 | macOS, desktop app | Core ML | Uses CPU, GPU and the Neural Engine |
-| Windows 11 24H2 or newer, desktop app | Windows ML | Installs the certified Intel, NVIDIA, AMD or Qualcomm provider on first launch. Needs the [Windows App Runtime](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads) 2.x and stays on the CPU without it |
-| Older Windows, desktop app | Optimised CPU | No provider install |
+| Windows 11 24H2 or newer, desktop app | Windows ML | Installs the certified Intel, NVIDIA, AMD or Qualcomm provider on first launch. Needs the [Windows App Runtime](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads) 2.x and uses DirectML without it |
+| Older Windows, desktop app | DirectML | Runs on the GPU through its DirectX 12 driver, with no provider install, and reads `microsoft gpu`. Stays on the CPU without a driver |
 | Linux `amd64`, standard image | OpenVINO | Intel CPU path out of the box, and the GPU needs `latest-intel` and `/dev/dri` |
 | Linux `amd64`, `latest-nvidia` | TensorRT RTX | Needs the NVIDIA Container Toolkit on the host |
 | Linux `arm64`, standard image | Optimised CPU | Raspberry Pi 4/5 and similar |
 
 If no accelerator is usable, PrintGuard keeps working on the CPU. On an `amd64` image that is
 OpenVINO's CPU path, which the `latest-nvidia` image carries too, and elsewhere it is ONNX
-Runtime's own CPU provider.
+Runtime's own CPU provider. That covers an accelerator that is offered but can't build or run
+the model, such as a GPU out of memory or a driver the provider rejects. The log names the
+device and the reason in a warning ending `cannot run the model and is skipped`, and
+**compute** names the device used instead. It applies with the runtime pinned to ONNX too.
 
 ## Intel GPU
 

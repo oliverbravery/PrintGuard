@@ -41,7 +41,8 @@ services expose one.
 ## Stream URLs
 
 Paste the URL and PrintGuard pulls RTSP, RTMP and WHEP streams through the MediaMTX server
-bundled into it. It reads an MJPEG stream itself and re-encodes it for the dashboard.
+bundled into it. It reads an MJPEG stream itself and re-encodes it for the dashboard. Detection
+runs on the frames it read, so a re-encode that fails costs the live view and nothing else.
 
 | Scheme | Typical source |
 |---|---|

@@ -32,7 +32,8 @@ async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None
     Returns:
         A status dict with ``current``, ``latest``, ``available``, every
         published ``releases`` entry (newest first, each carrying its
-        changelog ``notes`` and ``url``, so the UI can show the history as
+        changelog ``notes``, its ``url`` and the ``files_url`` its notes'
+        relative links resolve against, so the UI can show the history as
         well as what is pending) and ``download`` - the latest release's URL
         for ``asset``, or None.
 
@@ -62,6 +63,7 @@ async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None
                     "name": release.get("name") or str(version),
                     "notes": (release.get("body") or "").strip(),
                     "url": release.get("html_url") or f"https://github.com/{repo}/releases/tag/v{version}",
+                    "files_url": f"https://github.com/{repo}/blob/{release['tag_name']}/",
                     "published_at": release.get("published_at"),
                 },
             )

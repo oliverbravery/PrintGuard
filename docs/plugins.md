@@ -57,7 +57,8 @@ The Plugins tab in Settings lists what you have installed and what the catalogue
 
 ![The Spotify plugin's page in the store, with its screenshot, its README and the permissions it will ask for](assets/plugin-page.png)
 
-Every installed plugin has the same page, opened from its card.
+Every installed plugin has the same page, opened from its card. A README is shown as Markdown
+only, so any HTML in it beyond text, links, images, tables and code is dropped.
 
 The catalogue is filtered by where your hub runs, and an install from a repository or a zip is
 refused if the plugin names other platforms.

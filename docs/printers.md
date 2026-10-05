@@ -128,7 +128,9 @@ Each one opens in a panel that draws its toolpath on your device before
 the file is uploaded, where you can name it, tag it and correct its first layer nozzle and bed
 temperatures. The panel sends the start and end of the file to the hub to read its print time,
 filament and temperatures. Every other print temperature the slicer set moves by the same amount, while the
-temperatures a start gcode probes or wipes at stay put. A file whose slicer lists no print
+temperatures a start gcode probes or wipes at stay put. A file sliced with several filaments shows
+the one its first layer prints with and moves only that filament's temperatures, and nothing moves
+past 350°C on the nozzle or 150°C on the bed. A file whose slicer lists no print
 temperatures has every one of its set-points moved. Binary gcode keeps the temperatures it
 was sliced with.
 
@@ -158,14 +160,19 @@ failed print.
 A file is sent under its library name, cut to 60 characters with anything outside plain letters,
 digits, dots and dashes turned into `_`. Rename it first if the printer's own file list matters
 to you. PrusaLink replaces a file of the same name already on the printer. A file can be up to
-512 MB. Binary gcode has no 3D view and no drawn preview, since its toolpath is
+512 MB. A file whose gcode is over 32 MB isn't drawn in the browser, since parsing it takes
+about nine times its size in memory, so it has no 3D view and no drawn preview. It uploads and
+prints as usual, and the hub still reads its print time, filament and temperatures. A smaller
+file the browser can't draw, such as on a device with no WebGL, uploads without a drawn preview
+too. Binary gcode has no 3D view and no drawn preview, since its toolpath is
 compressed, so it shows the preview PrusaSlicer embedded and nothing else. Its print time and filament can
 be blank too, where PrusaSlicer compressed them.
 
 A Bambu print uses the settings sliced into the file, with bed levelling on, flow and vibration
 calibration off, and filament from the external spool or the first AMS slot. Starting a 3mf
 needs Developer Mode, the same switch the MQTT connection needs. A project exported without its
-gcode is refused at upload.
+gcode is refused at upload. A Bambu printer keeps reporting a cancelled or failed job as failed until
+the next one starts, which PrintGuard shows as idle, so clear the bed before you press **Print**.
 
 Files live in the data directory under `prints/`, so they survive a restart and travel with the
 `/data` volume.

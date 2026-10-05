@@ -15,7 +15,7 @@ import pytest
 from fakes import FakePlatform
 from printguard.engine import reports
 from printguard.engine.engine import Engine
-from printguard.engine.registry import Camera
+from printguard.engine.registry import Camera, Plugin
 from printguard.server.api import ApiAuth, build_api_app
 from printguard.server.platform import OPEN_WAIT_S
 
@@ -143,6 +143,19 @@ async def test_read_surface_strips_linked_service_secrets() -> None:
         full = engine.state_event()
         assert full["printers"][0]["config"]["api_key"] == "k"
         assert full["settings"]["notifiers"]["telegram"]["bot_token"] == "T"
+
+
+async def test_read_surface_leaves_out_what_a_plugin_stored() -> None:
+    """A gate plugin keeps its session in its store, and a read token is not the dashboard."""
+    async with api(("read", "manage")) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        manifest = {"id": "gate", "name": "Gate", "version": "1.0.0"}
+        engine.plugins.add(Plugin(id="gate", manifest=manifest, sources={}, digests={}, source={"kind": "file"}, config={"session": "S3SSION"}))
+
+        for scope in ("read", "manage"):
+            answer = await client.get("/state", headers={"Authorization": f"Bearer {tokens[scope]}"})
+            assert "S3SSION" not in answer.text
+            assert [plugin["id"] for plugin in answer.json()["plugins"]] == ["gate"]
+        assert engine.state_event()["plugins"][0]["config"] == {"session": "S3SSION"}, "the dashboard lost the store"
 
 
 async def test_refresh_printer_cameras_registers_exposed_cameras(monkeypatch) -> None:
@@ -396,6 +409,25 @@ async def test_heat_route_needs_control_and_returns_the_printer() -> None:
         assert (await client.post("/printers/nope/heat", json={"bed": 60}, headers=control)).status_code == 404
 
 
+@pytest.mark.parametrize("literal", [b"NaN", b"Infinity", b"-Infinity"])
+async def test_a_number_that_is_not_finite_is_refused_at_the_boundary(literal: bytes) -> None:
+    """Python's json writes these literals for a float that is not finite, and reads them back."""
+    async with api(("manage",)) as (client, engine, platform, monitor_id, printer_id, camera_id, tokens):
+        raw = {"Content-Type": "application/json", "Authorization": f"Bearer {tokens['manage']}"}
+        bodies = {
+            f"/printers/{printer_id}/heat": (client.post, b'{"nozzle": %s}'),
+            f"/monitors/{monitor_id}": (client.patch, b'{"threshold": %s}'),
+            f"/cameras/{camera_id}": (client.patch, b'{"crop": {"x": %s, "y": 0, "w": 0.5, "h": 0.5}}'),
+        }
+        for path, (send, body) in bodies.items():
+            refused = await send(path, content=body % literal, headers=raw)
+            assert refused.status_code == 422 and refused.json()["detail"][0]["type"] == "finite_number", (path, refused.text)
+        assert not [r for r in platform.http_requests if r["method"] == "POST"], "a heater was sent a target that is not a number"
+        assert engine.monitors[monitor_id]["threshold"] == 0.75 and engine.cameras.get(camera_id).crop is None
+        preset = await client.patch("/settings", content=b'{"preheat": [{"name": "x", "nozzle": %s, "bed": 60}]}' % literal, headers=raw)
+        assert preset.status_code == 400 and "nozzle temperature must be a finite number" in preset.text
+
+
 QUERY_CAMERA = "http://192.168.1.50/videostream.cgi?user=admin&pwd=QUERYPASS"
 BASIC_PRINTER = {"base_url": "http://opuser:BASICPASS@octopi.local", "api_key": "octo-secret"}
 BASIC_NTFY = {"url": "https://ntfyuser:NTFYPASS@ntfy.example/topic", "token": "tk_secret"}
@@ -420,6 +452,39 @@ async def test_credentials_inside_urls_reach_neither_the_read_surface_nor_a_bug_
         files = reports.report_files(diag=reports.diagnostics(engine), ui_logs=[failure], secrets=reports.collect_secrets(engine))
         for name, _content_type, payload in files:
             assert not [leak for leak in LEAKS if leak in payload.decode()], name
+
+
+BRACKET_CAMERA = "rtsp://admin:pa[ss@192.168.1.60/stream"
+BRACKET_HOST = "http://[192.168.1.5]:5000"
+
+
+async def test_an_address_that_cannot_be_split_is_refused_and_one_already_stored_is_redacted_whole() -> None:
+    async with api(("read", "manage")) as (client, engine, platform, _monitor_id, printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        refusals = [
+            await client.post("/cameras", json={"name": "c", "source": {"kind": "url", "url": BRACKET_CAMERA}}, headers=manage),
+            await client.post("/printers", json={"name": "p", "provider": "octoprint", "config": {"base_url": BRACKET_HOST, "api_key": "k"}}, headers=manage),
+            await client.patch(f"/printers/{printer_id}", json={"config": {"base_url": BRACKET_HOST, "api_key": "k"}}, headers=manage),
+            await client.patch("/settings", json={"notifiers": {"ntfy": {"url": BRACKET_HOST}}}, headers=manage),
+        ]
+        assert [refused.status_code for refused in refusals] == [400, 400, 400, 400]
+        assert all("not a valid URL" in refused.text and "pa[ss" not in refused.text for refused in refusals)
+
+        engine.cameras.add(Camera(id="old", name="Stored before", source={"kind": "url", "url": BRACKET_CAMERA}, max_fps=5.0))
+        engine.printers.get(printer_id).config = {"base_url": BRACKET_HOST, "api_key": "k"}
+        engine.settings["notifiers"] = {"ntfy": {"url": BRACKET_HOST}}
+
+        for path in ("/state", "/printers", "/monitors", "/cameras", "/prints"):
+            answer = await client.get(path, headers={"Authorization": f"Bearer {tokens['read']}"})
+            assert answer.status_code == 200 and "pa[ss" not in answer.text, path
+        state = (await client.get("/state", headers=manage)).json()
+        assert next(camera for camera in state["cameras"] if camera["id"] == "old")["source"]["url"] == reports.REDACTED
+        assert state["printers"][0]["config"] == {"base_url": reports.REDACTED}
+        assert (await client.patch("/settings", json={"theme": "dark"}, headers=manage)).status_code == 200
+
+        await engine.handle({"cmd": "report.send", "message": "it broke"})
+        envelope = next(r for r in platform.http_requests if "sentry.io" in r["url"])["data"]
+        assert b"pa[ss" not in envelope and BRACKET_CAMERA.encode() not in envelope
 
 
 def test_a_query_value_is_scrubbed_from_a_log_only_beside_its_key() -> None:

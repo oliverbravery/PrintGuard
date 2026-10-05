@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from printguard.engine import urls
@@ -20,6 +22,11 @@ MATCHING = [
     ("http://[fd00::1]/*", "http://[fd00::1]/status"),
     ("http://[fd00::1]:8080/*", "http://[FD00::1]:8080/status"),
     ("https://example.com/v1/*", "https://example.com/v1/a..b/.hidden"),
+    ("https://api.telegram.org/bot*/sendMessage", "https://api.telegram.org/bot123:abc/sendMessage"),
+    ("HTTPS://API.Telegram.org/bot*/sendMessage", "https://API.telegram.ORG/bot1/sendMessage"),
+    ("https://example.com/*/jobs/*/cancel", "https://example.com/v1/jobs/7/jobs/8/cancel"),
+    ("https://example.com/a*a", "https://example.com/aa"),
+    ("https://example.com/*.json*", "https://example.com/feed.json?page=2"),
 ]
 
 REFUSED = [
@@ -38,6 +45,10 @@ REFUSED = [
     ("https://example.com/v1/*", "https://example.com/v1/a/./../../admin"),
     ("https://example.com/v1/*", "https://example.com/v1/..\\admin"),
     ("https://example.com/v1/*", "https://example.com/v1/.."),
+    ("https://api.telegram.org/bot*/sendMessage", "https://api.telegram.org/bot1/sendmessage"),
+    ("https://example.com/a*a", "https://example.com/a"),
+    ("https://example.com/*/jobs/*/cancel", "https://example.com/v1/jobs/cancel"),
+    ("https://example.com/v1/*/a", "https://example.com/v1/b/ab"),
 ]
 
 
@@ -49,6 +60,20 @@ def test_a_pattern_covers_what_it_should(pattern: str, url: str) -> None:
 @pytest.mark.parametrize("pattern,url", REFUSED)
 def test_a_pattern_covers_nothing_else(pattern: str, url: str) -> None:
     assert not urls.matches(pattern, url)
+
+
+def test_a_pattern_keeps_the_case_of_its_path_and_drops_that_of_its_host() -> None:
+    assert urls.sanitise(["HTTPS://API.Telegram.org/bot*/sendMessage"]) == ["https://api.telegram.org/bot*/sendMessage"]
+
+
+def test_a_pattern_full_of_wildcards_is_matched_as_fast_as_any_other() -> None:
+    """The match runs on the event loop, so a slow one stops detection."""
+    pattern = "https://example.com/" + "*a" * 24 + "b"
+    started = time.perf_counter()
+
+    assert not urls.matches(pattern, "https://example.com/" + "a" * 4000)
+    assert urls.matches(pattern, "https://example.com/" + "a" * 4000 + "b")
+    assert time.perf_counter() - started < 0.5
 
 
 def test_malformed_patterns_are_refused_rather_than_ignored() -> None:

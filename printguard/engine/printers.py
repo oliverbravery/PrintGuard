@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from .bounds import HEATER_MAX, clamp
 from .integrations import HEATERS, INTEGRATIONS
 
-HEATER_MAX = {"nozzle": 350.0, "bed": 150.0}
 PRESET_NAME_MAX = 20
 PRESETS_MAX = 12
 PREHEAT_DEFAULTS: list[dict[str, Any]] = [
@@ -66,7 +66,7 @@ def require_fields(provider: str, config: dict[str, Any]) -> None:
 
 
 def _target(heater: str, value: Any) -> float:
-    return max(0.0, min(HEATER_MAX[heater], float(value)))
+    return clamp(f"{heater} temperature", value, 0.0, HEATER_MAX[heater])
 
 
 def sanitise_targets(fields: dict[str, Any]) -> dict[str, float]:
@@ -77,6 +77,9 @@ def sanitise_targets(fields: dict[str, Any]) -> dict[str, float]:
 
     Returns:
         Heater name to target in degrees Celsius, for the heaters named.
+
+    Raises:
+        ValueError: If a target is not a finite number.
     """
     return {heater: _target(heater, fields[heater]) for heater in HEATERS if fields.get(heater) is not None}
 
@@ -89,6 +92,9 @@ def sanitise_presets(raw: Any) -> list[dict[str, Any]]:
 
     Returns:
         The presets that carry a name, capped at ``PRESETS_MAX``.
+
+    Raises:
+        ValueError: If a preset's target is not a finite number.
     """
     presets = []
     for preset in raw if isinstance(raw, list) else []:

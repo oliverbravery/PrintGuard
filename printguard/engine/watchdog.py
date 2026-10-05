@@ -15,6 +15,7 @@ import time
 from collections import deque
 from typing import TYPE_CHECKING, Any, Coroutine
 
+from .bounds import clamp
 from .integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus
 from .monitors import monitor_watching
 from .notifiers import NOTIFIERS
@@ -58,16 +59,20 @@ def clamp_grace(seconds: Any) -> float:
     Returns:
         The grace period the watchdog will actually apply.
     """
-    return max(GRACE_MIN_S, min(GRACE_MAX_S, float(seconds)))
+    return clamp("fault_grace_s", seconds, GRACE_MIN_S, GRACE_MAX_S)
 
 
 class Watchdog:
-    """Watches inference scores per monitor and reacts to sustained defects."""
+    """Watches inference scores per monitor and reacts to sustained defects.
+
+    Attributes:
+        responding: Ids of the monitors with a defect response in flight.
+    """
 
     def __init__(self, engine: "Engine") -> None:
         self._engine = engine
         self._streaks: dict[str, int] = {}
-        self._responding: set[str] = set()
+        self.responding: set[str] = set()
         self._cooldown_until: dict[str, float] = {}
         self._last_notified: dict[str, float] = {}
         self._down_since: dict[str, float] = {}
@@ -209,6 +214,7 @@ class Watchdog:
                 self._online_since.pop(mid, None)
                 self._coverage.pop(mid, None)
                 self._forget(stall_key)
+                self._forget(f"unstable:{mid}")
                 if watching:
                     await self._edge(
                         offline_key,
@@ -253,7 +259,7 @@ class Watchdog:
             )
             if camera.online and not progressing and self._due_restart(stall_key, now):
                 await self._engine.restart_camera(camera)
-            await self._cover(monitor, camera, offline_key, now)
+            await self._cover(monitor, camera, offline_key, camera.online and progressing, now)
         return WATCH_TICK_S
 
     def _forget(self, key: str) -> None:
@@ -263,7 +269,7 @@ class Watchdog:
         self._last_warned.pop(key, None)
         self._warned.discard(key)
 
-    async def _cover(self, monitor: dict[str, Any], camera: "Camera", offline_key: str, now: float) -> None:
+    async def _cover(self, monitor: dict[str, Any], camera: "Camera", offline_key: str, delivering: bool, now: float) -> None:
         """Warns when a camera has been up for too little of the recent window.
 
         A camera that drops for a minute every few minutes never holds a fault
@@ -271,24 +277,30 @@ class Watchdog:
         share of its run. Sampling how much of the last COVERAGE_WINDOW_S it
         delivered frames for catches that as one warning about an unreliable
         feed rather than one per drop. A window that has not filled yet says
-        nothing, and an announced outage empties it, so this only ever speaks
-        about drops that were too short to announce on their own.
+        nothing, and an announced outage empties it and takes over from an
+        unreliable feed already warned about, so this only ever speaks about
+        drops that were too short to announce on their own. A feed is only
+        called steady again while its camera is delivering frames.
 
         Args:
             monitor: The monitor the camera is bound to.
             camera: The camera being sampled.
             offline_key: Watch key for that camera's outage condition.
+            delivering: Whether the camera is online and its feed has not stalled.
             now: Current monotonic time.
         """
+        key = f"unstable:{monitor['id']}"
         samples = self._coverage.setdefault(monitor["id"], deque(maxlen=COVERAGE_SAMPLES))
         if offline_key in self._warned:
             samples.clear()
+            self._forget(key)
+            return
         samples.append(camera.online)
         covered = sum(samples) / len(samples)
         steady = len(samples) < samples.maxlen or covered >= COVERAGE_MIN
         await self._edge(
-            f"unstable:{monitor['id']}",
-            steady,
+            key,
+            steady and (delivering or key not in self._warned),
             now,
             0.0,
             monitor,
@@ -389,10 +401,10 @@ class Watchdog:
                 monitor["alert"] = None
             return
         self._streaks[mid] = self._streaks.get(mid, 0) + 1
-        if self._streaks[mid] < monitor["consecutive"] or mid in self._responding or time.monotonic() < self._cooldown_until.get(mid, 0.0):
+        if self._streaks[mid] < monitor["consecutive"] or mid in self.responding or time.monotonic() < self._cooldown_until.get(mid, 0.0):
             return
         self._cooldown_until[mid] = time.monotonic() + monitor["cooldown_s"]
-        self._responding.add(mid)
+        self.responding.add(mid)
         self._schedule(f"the defect response for '{monitor['name']}'", self._respond(monitor, frame, score))
 
     async def _respond(self, monitor: dict[str, Any], frame: Frame, score: float) -> None:
@@ -404,8 +416,10 @@ class Watchdog:
         and a removal means there is nothing left to alert on. A printer that
         took the command is read again without waiting for the poll, so a
         paused or cancelled print stands its monitor down before another
-        defect frame can repeat the command. That read comes after the alert
-        is recorded, so the frame lands in the review of the print it stopped.
+        defect frame can repeat the command. The print's review stays open
+        for as long as its monitor is responding, so a printer read idle while
+        the notifiers are still answering cannot close it before the frame
+        that stopped the print is kept, and it is settled once that is done.
         """
         mid = monitor["id"]
         try:
@@ -425,7 +439,9 @@ class Watchdog:
                 if action not in ("none", "failed") and printer and await self._read(printer):
                     self.follow_printers()
         finally:
-            self._responding.discard(mid)
+            self.responding.discard(mid)
+            if self._engine.settle_reviews():
+                self._engine.save()
 
     async def _act(self, monitor: dict[str, Any]) -> str:
         wanted = monitor.get("on_defect", "none")

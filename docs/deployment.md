@@ -183,8 +183,8 @@ hub logs the same line once for each name. That includes the REST API, the MCP s
 The check reads both `Host` and `X-Forwarded-Host`, so it works whether your proxy keeps the
 host or forwards it. Tailscale, Cloudflare and oauth2-proxy all do one or the other.
 
-The hub also rejects any WebSocket or print upload a browser sends from an `Origin` that is not
-the address the request was for or one listed in `PRINTGUARD_ORIGINS`. A request with no
+The hub also rejects any WebSocket, print upload or camera stream request a browser sends from an
+`Origin` that is not the address the request was for or one listed in `PRINTGUARD_ORIGINS`. A request with no
 `Origin`, which is what a script sends, is let through. An auth proxy checks the session cookie,
 and the browser attaches that cookie to sockets opened by other sites too, so this is what stops
 a signed-in user's other tabs from driving the engine.

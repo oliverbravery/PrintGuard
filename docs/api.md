@@ -90,7 +90,8 @@ Base path `/api/v1`. JSON in and out, except the camera frame and alert snapshot
 `image/jpeg`, the print file download, and the frame and print file you upload as a raw body.
 Adding or removing a camera, printer or monitor returns the collection, and every other change
 returns the one thing it changed. A rejected command is a `400`, a timeout a `504`, and a
-missing or under-scoped token a `401` or `403`. Adding a camera waits up to 40 seconds for
+missing or under-scoped token a `401` or `403`. A body of the wrong shape is a `422`, which
+includes a number sent as `NaN` or `Infinity`. Adding a camera waits up to 40 seconds for
 its first frame. The interactive OpenAPI schema is served at `/api/v1/docs`.
 
 A hub opened at a domain name answers `403` to every request, this API included, until that
@@ -278,6 +279,8 @@ did not say, and `thumbnail` is the media type of its preview or `null`.
 > every REST and MCP response, and any address in a config or a camera source loses its
 > `user:pass@` and has its query values replaced with `[redacted]`. Only the dashboard's own
 > WebSocket, behind your proxy, receives them.
+>
+> What a plugin has stored is left out of `/state` as well, whatever the token's scope.
 >
 > You can send a config back as you read it. A secret field you leave out or blank, and an
 > address you send back unchanged, keep the stored value. To clear an optional secret, remove

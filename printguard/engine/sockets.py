@@ -5,7 +5,8 @@ with a tag, PrintGuard keeps it, and every frame comes back as a ``socket``
 event carrying that tag.
 
 Connections belong to the plugin that opened them and are dropped when it is
-disabled, reinstalled or removed, or loses a network permission.
+disabled, reinstalled or removed, fails, or loses a network permission. One
+still connecting is dropped the same way, and closed as soon as it lands.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ class SocketBroker:
         self._open = open_socket
         self._emit = emit
         self._sockets: dict[tuple[str, str], Socket] = {}
-        self._opening: set[tuple[str, str]] = set()
+        self._opening: dict[tuple[str, str], Callable[[str, str], None]] = {}
 
     async def act(self, plugin_id: str, action: str, tag: str, url: str, text: str) -> None:
         """Opens, sends on or closes one of a plugin's connections.
@@ -81,31 +82,39 @@ class SocketBroker:
         if sum(1 for held in (*self._sockets, *self._opening) if held[0] == key[0]) >= MAX_PER_PLUGIN:
             raise ValueError(f"a plugin holds {MAX_PER_PLUGIN} sockets at most")
         plugin_id, tag = key
+        socket: Socket | None = None
 
         def arrived(state: str, text: str) -> None:
-            if state == "closed":
-                self._sockets.pop(key, None)
+            if state == "closed" and socket is not None and self._sockets.get(key) is socket:
+                del self._sockets[key]
             self._emit({"event": "socket", "id": plugin_id, "tag": tag, "state": state, "text": text})
 
-        self._opening.add(key)
+        self._opening[key] = arrived
         try:
-            self._sockets[key] = await self._open(url, arrived)
+            socket = await self._open(url, arrived)
         finally:
-            self._opening.discard(key)
+            wanted = self._opening.get(key) is arrived
+            if wanted:
+                del self._opening[key]
+        if not wanted:
+            await socket.close()
+            return
+        self._sockets[key] = socket
         logger.info("plugin %s opened socket %s", plugin_id, tag)
 
     async def drop(self, plugin_id: str, tag: str) -> None:
-        """Closes one connection, if it is open."""
+        """Closes one connection, and disowns one still connecting so it is closed when it lands."""
+        self._opening.pop((plugin_id, tag), None)
         socket = self._sockets.pop((plugin_id, tag), None)
         if socket is not None:
             await socket.close()
 
     async def drop_for(self, plugin_id: str) -> None:
-        """Closes every connection one plugin holds."""
-        for tag in [held[1] for held in self._sockets if held[0] == plugin_id]:
+        """Closes every connection one plugin holds or is opening."""
+        for tag in {held[1] for held in (*self._sockets, *self._opening) if held[0] == plugin_id}:
             await self.drop(plugin_id, tag)
 
     async def drop_all(self, keep: set[str]) -> None:
-        """Closes every connection except those of the plugins named."""
-        for plugin_id in {held[0] for held in self._sockets} - keep:
+        """Closes every connection, open or opening, except those of the plugins named."""
+        for plugin_id in {held[0] for held in (*self._sockets, *self._opening)} - keep:
             await self.drop_for(plugin_id)

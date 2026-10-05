@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -95,6 +97,93 @@ async def handshake_answer(app, path: str, headers: dict[str, str]) -> str:
     }
     await app(scope, receive, send)
     return sent[0]["type"]
+
+
+class Tab:
+    """Plays a browser tab on the engine socket, a frame at a time."""
+
+    def __init__(self, app) -> None:
+        self._app = app
+        self._inbound: asyncio.Queue[dict] = asyncio.Queue()
+        self._sent: list[dict] = []
+        self._inbound.put_nowait({"type": "websocket.connect"})
+
+    async def __aenter__(self) -> "Tab":
+        scope = {
+            "type": "websocket",
+            "scheme": "ws",
+            "path": "/api/ws",
+            "raw_path": b"/api/ws",
+            "root_path": "",
+            "query_string": b"",
+            "headers": [(b"host", b"test")],
+            "subprotocols": [],
+        }
+        self._socket = asyncio.ensure_future(self._app(scope, self._inbound.get, self._keep))
+        return self
+
+    async def __aexit__(self, *_) -> None:
+        self._inbound.put_nowait({"type": "websocket.disconnect", "code": 1001})
+        async with asyncio.timeout(2):
+            await self._socket
+
+    async def _keep(self, message: dict) -> None:
+        self._sent.append(message)
+
+    def send(self, **frame) -> None:
+        self._inbound.put_nowait({"type": "websocket.receive", **frame})
+
+    def events(self, kind: str) -> list[dict]:
+        received = [json.loads(message["text"]) for message in self._sent if message["type"] == "websocket.send"]
+        return [event for event in received if event["event"] == kind]
+
+    async def until(self, kind: str) -> dict:
+        async with asyncio.timeout(2):
+            while not self.events(kind):
+                await asyncio.sleep(0.01)
+        return self.events(kind)[0]
+
+
+async def test_a_slow_command_does_not_hold_the_next_one_from_the_same_tab(monkeypatch) -> None:
+    """Registering a stream waits up to 25 s on the camera, and a pause pressed meanwhile cannot."""
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+
+    platform = FakePlatform()
+    opening, abandoned = asyncio.Event(), asyncio.Event()
+
+    async def never_opens(camera_id: str, source: dict) -> None:
+        opening.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            abandoned.set()
+
+    monkeypatch.setattr(platform, "open_camera", never_opens)
+    engine = Engine(platform)
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    try:
+        async with Tab(app) as other, Tab(app) as tab:
+            tab.send(text=json.dumps({"cmd": "camera.add", "name": "slow", "source": {"kind": "url", "url": "rtsp://cam/stream"}}))
+            await opening.wait()
+            tab.send(text=json.dumps({"cmd": "token.create", "name": "ci", "scope": "read", "req_id": 2}))
+            assert (await tab.until("token_created"))["req_id"] == 2
+            assert not other.events("token_created"), "a reply meant for the tab that asked reached another"
+
+            tab.send(text="not json")
+            tab.send(bytes=b"\x00")
+            tab.send(text="[1]")
+            async with asyncio.timeout(2):
+                while len(tab.events("error")) < 3:
+                    await asyncio.sleep(0.01)
+            assert {event["message"] for event in tab.events("error")} == {"a command must be a JSON object"}
+            assert not abandoned.is_set()
+        assert abandoned.is_set(), "a command still running when its tab closed was left behind"
+    finally:
+        await engine.stop()
 
 
 async def test_a_rebinding_page_is_refused_whatever_it_asks_for(monkeypatch) -> None:
@@ -202,6 +291,32 @@ async def test_a_sandboxed_page_cannot_pull_a_camera_stream() -> None:
     assert refused.status_code == 403
     assert allowed.status_code == 200
     platform.view_camera.assert_awaited_once_with("camera-one")
+
+
+async def test_a_page_on_another_origin_cannot_read_a_camera_stream() -> None:
+    """The auth proxy lets the request through with the session cookie, and MediaMTX may answer any origin."""
+    platform = SimpleNamespace(view_camera=AsyncMock(), plugin_runtime=None)
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=platform)
+    open_cors = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true", "Content-Type": "application/vnd.apple.mpegurl"}
+    app.state.hls = httpx.AsyncClient(
+        base_url="http://mediamtx",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, headers=open_cors, stream=AsyncContent(), request=request)),
+    )
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            foreign = await client.get("/hls/camera-one/index.m3u8", headers={"origin": "https://evil.example"})
+            own = await client.get("/hls/camera-one/index.m3u8", headers={"origin": "http://test"})
+            player = await client.get("/hls/camera-one/index.m3u8")
+    finally:
+        await app.state.hls.aclose()
+
+    assert foreign.status_code == 403
+    assert own.status_code == player.status_code == 200
+    assert own.headers["content-type"] == "application/vnd.apple.mpegurl"
+    assert not [name for name in own.headers if name.startswith("access-control-")]
+    assert platform.view_camera.await_count == 2, "a refused request woke the camera"
 
 
 async def test_failed_startup_stops_the_streaming_server(monkeypatch, tmp_path) -> None:

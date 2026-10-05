@@ -54,6 +54,7 @@ async def test_reports_stable_releases_newest_first() -> None:
     assert update["latest"] == "2.3.0"
     assert [r["version"] for r in engine.releases] == ["2.3.0", "2.2.0", "2.1.0"]
     assert engine.releases[0]["notes"] == "two-three"
+    assert engine.releases[0]["files_url"] == "https://github.com/o/r/blob/v2.3.0/"
     assert ("GET", "https://api.github.com/repos/o/r/releases") in platform.http_calls
 
 

@@ -19,8 +19,8 @@ from filling your phone.
 1. Open **Settings**, then the **Alerts** tab.
 2. Enable a channel and fill in its form. Each form links the service's own setup guide or API
    reference.
-3. Send a test alert from the form, which uses what you typed and carries no snapshot, then
-   press **Save channels**.
+3. Send a test alert from the form, which uses what you typed and carries a blank picture where
+   a real alert carries a snapshot, then press **Save channels**.
 4. Turn on **Push notifications** on each monitor that should use it.
 
 Every enabled channel gets every notice, so there's no routing to set up. A monitor with
@@ -30,7 +30,7 @@ Every enabled channel gets every notice, so there's no routing to set up. A moni
 
 | Channel | You need | Notes |
 |---|---|---|
-| [ntfy](https://ntfy.sh) | A topic URL, on ntfy.sh or your own server | No account needed. Use a hard-to-guess topic, or a protected one with an access token. Every notice is sent at urgent priority |
+| [ntfy](https://ntfy.sh) | A topic URL, on ntfy.sh or your own server | No account needed. Use a hard-to-guess topic, or a protected one with an access token. Every notice is sent at urgent priority. Your own server takes snapshots once [attachments](https://docs.ntfy.sh/config/#attachments) are on, which needs `attachment-cache-dir` and `base-url` set |
 | [Pushover](https://pushover.net) | An application token from [pushover.net/apps/build](https://pushover.net/apps/build) and your user key | A one-off app purchase. Priority covers every notice and defaults to High, which bypasses the quiet hours set on the device |
 | [Telegram](https://telegram.org) | A bot token from @BotFather and your chat ID | |
 | [Discord](https://discord.com) | A webhook URL, from Server Settings, Integrations, then Webhooks | |
@@ -55,7 +55,9 @@ A monitor's [cooldown](monitoring.md#monitor-settings) holds back its whole resp
 defect, the pause or cancel included. Defect pushes are also at least 30 seconds apart for each
 monitor, whatever the cooldown.
 
-A channel that fails to deliver raises an error on the dashboard. It isn't retried.
+A channel that fails to deliver raises an error on the dashboard. It isn't retried. An ntfy server
+that refuses the snapshot is sent the alert again as text, and the dashboard error says the
+picture was refused.
 
 ## Faults and the grace period
 

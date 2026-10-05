@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import zlib
 from fractions import Fraction
 from functools import partial
 from importlib import metadata
@@ -285,7 +286,9 @@ class AVSource:
     returning a fresh readable MJPEG byte stream (used for sources that speak a
     bespoke protocol, e.g. Bambu's chamber camera). When publish_url is set,
     each decoded frame is also transcoded to H.264 and pushed there, so sources
-    MediaMTX cannot pull itself reach viewers as HLS.
+    MediaMTX cannot pull itself reach viewers as HLS. A push that fails costs
+    the live view alone: capture carries on feeding detection, the failure is
+    reported once, and the push is tried again every RECONNECT_DELAY_S.
 
     Frames are converted to RGB through one reused single-threaded scaler,
     for the reason H264Push documents, and one conversion at a time: a scaler
@@ -315,6 +318,8 @@ class AVSource:
         self._stop = False
         self._monitoring = True
         self._demand_until = 0.0
+        self._publish_failed = False
+        self._publish_retry_at = 0.0
         self._wake = threading.Event()
         self._wake.set()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -358,7 +363,7 @@ class AVSource:
             for options in self._open_options:
                 try:
                     return av.open(self._source, format=self._container_format, options=options, timeout=5.0), None
-                except OSError as exc:
+                except av.error.FFmpegError as exc:
                     last = exc
             raise last if last else RuntimeError(f"could not open {self._source!r}")
         options = {}
@@ -427,7 +432,7 @@ class AVSource:
                     self._latest = (frame, float(self._seq), time.time())
                     self.online = True
                     if push is not None:
-                        push.send(frame)
+                        self._publish(push, frame)
                     if not self.fps and time.monotonic() >= warmup_until:
                         samples.append(time.monotonic())
                         if len(samples) == FPS_SAMPLE_FRAMES and samples[-1] > samples[0]:
@@ -435,6 +440,24 @@ class AVSource:
                 return
             except av.error.BlockingIOError:
                 time.sleep(0.02)
+
+    def _publish(self, push: H264Push, frame: av.VideoFrame) -> None:
+        """Pushes a frame to the live view, leaving capture running when that fails."""
+        if time.monotonic() < self._publish_retry_at:
+            return
+        try:
+            push.send(frame)
+        except av.error.FFmpegError as exc:
+            push.close()
+            self._publish_retry_at = time.monotonic() + RECONNECT_DELAY_S
+            if not self._publish_failed:
+                self._publish_failed = True
+                self.last_error = f"live view unavailable: {exc}"
+                logger.warning("camera %s, detection carries on without it", self.last_error)
+            return
+        if self._publish_failed:
+            self._publish_failed = False
+            logger.info("camera live view restored")
 
     async def grab(self) -> Frame | None:
         """Converts and returns the freshest decoded frame."""
@@ -467,6 +490,48 @@ class ConnectWithoutRedirects(websockets.connect):
     def process_redirect(self, exc: Exception) -> Exception:
         """Hands a redirect back as the refusal it arrived as, never the address to try next."""
         return exc
+
+
+async def _read_within(resp: httpx.Response, max_bytes: int) -> bytes:
+    """Reads a response body, giving up once it passes a size.
+
+    Args:
+        resp: A response whose body has not been read.
+        max_bytes: The most the body may come to once inflated.
+
+    Returns:
+        The body, inflated if it came as gzip.
+
+    Raises:
+        RuntimeError: If the body is larger, raised while it is still arriving.
+    """
+    inflate = zlib.decompressobj(zlib.MAX_WBITS | 16) if resp.headers.get("Content-Encoding", "").lower() == "gzip" else None
+    body = bytearray()
+    async for chunk in resp.aiter_raw():
+        body += inflate.decompress(chunk, max_bytes + 1 - len(body)) if inflate else chunk
+        if len(body) > max_bytes:
+            raise RuntimeError(f"{resp.url.host} answered with more than {max_bytes // 1024} KB")
+    return bytes(body)
+
+
+def _parsed(content: bytes, encoding: str | None, binary: bool) -> Any:
+    """Turns a response body into what ``Platform.http`` hands back.
+
+    Args:
+        content: The body as bytes.
+        encoding: The charset the response declared.
+        binary: Whether the caller asked for the bytes themselves.
+
+    Returns:
+        Base64 for a binary reply, parsed JSON where the body is JSON, and the
+        text otherwise.
+    """
+    if binary:
+        return base64.b64encode(content).decode()
+    try:
+        return json.loads(content)
+    except ValueError:
+        return content.decode(encoding or "utf-8", "replace")
 
 
 class WebSocket:
@@ -715,28 +780,32 @@ class ServerPlatform:
         binary: bool = False,
         timeout: float = 10.0,
         follow_redirects: bool = True,
+        max_bytes: int | None = None,
     ) -> tuple[int, Any]:
         """Performs an HTTP request with httpx, base64 encoding a binary reply.
+
+        A capped request asks for gzip or nothing and is inflated here as it
+        arrives, since httpx inflates a whole chunk before anyone can count it.
 
         Raises:
             RuntimeError: If a redirect made httpx replay the request under
                 another method, as it does a POST answered with 301 or 302,
-                so the request itself was never delivered.
+                so the request itself was never delivered, or if the body
+                passes ``max_bytes``.
         """
-        resp = await self._client.request(
+        if max_bytes is not None:
+            headers = httpx.Headers(headers)
+            headers["Accept-Encoding"] = "gzip"
+        async with self._client.stream(
             method, url, headers=headers, json=json, content=data, timeout=timeout, follow_redirects=follow_redirects
-        )
-        hops = [*resp.history, resp]
-        for hop, landed in zip(hops, hops[1:]):
-            if hop.status_code != 303 and landed.request.method != hop.request.method:
-                source, target = (f"{at.url.scheme}://{at.url.netloc.decode()}" for at in (hop, landed))
-                raise RuntimeError(f"{source} redirects to {target}, which drops the {method}. Use the address it redirects to")
-        if binary:
-            return resp.status_code, base64.b64encode(resp.content).decode()
-        try:
-            return resp.status_code, resp.json()
-        except ValueError:
-            return resp.status_code, resp.text
+        ) as resp:
+            hops = [*resp.history, resp]
+            for hop, landed in zip(hops, hops[1:]):
+                if hop.status_code != 303 and landed.request.method != hop.request.method:
+                    source, target = (f"{at.url.scheme}://{at.url.netloc.decode()}" for at in (hop, landed))
+                    raise RuntimeError(f"{source} redirects to {target}, which drops the {method}. Use the address it redirects to")
+            content = await resp.aread() if max_bytes is None else await _read_within(resp, max_bytes)
+        return resp.status_code, _parsed(content, resp.encoding, binary)
 
     async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> WebSocket:
         """Connects a WebSocket and reads it on a task of its own.

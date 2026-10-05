@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import fcntl
 import json
+import logging
+import socket
 import struct
 import sys
 import threading
 import time
+from contextlib import ExitStack
+from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import av
 import httpx
 import numpy as np
+import onnxruntime as ort
 import pytest
 import websockets
 from fakes import redirected_socket
@@ -22,6 +28,7 @@ from fakes import redirected_socket
 from printguard.engine import vision
 from printguard.server.inference import (
     Inference,
+    OnnxInference,
     _device_label,
     _execution_devices,
     _measure_concurrency,
@@ -30,6 +37,7 @@ from printguard.server.inference import (
 from printguard.server.platform import (
     V4L2_CAP_DEVICE_CAPS,
     V4L2_CAP_VIDEO_CAPTURE,
+    V4L2_OPEN_OPTIONS,
     AVSource,
     ServerPlatform,
     _v4l2_card,
@@ -170,6 +178,82 @@ def test_provider_library_that_cannot_load_leaves_the_cpu(tmp_path: Path) -> Non
     assert _register_library("printguard_test_provider", str(tmp_path / "libmissing.so")) is False
 
 
+@pytest.mark.parametrize(("runtime", "fault"), [("auto", "build"), ("onnx", "build"), ("onnx", "run")])
+async def test_an_accelerator_that_cannot_run_the_model_loses_to_the_cpu(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, runtime: str, fault: str
+) -> None:
+    """A GPU that is offered but cannot compile or run the model must not stop the hub starting.
+
+    The setting that picked the runtime is only reachable from a running hub, so a
+    start that fails here leaves editing the state file as the way back.
+    """
+    real_session = ort.InferenceSession
+
+    def refuse(*_: object) -> None:
+        raise RuntimeError("the GPU ran out of memory")
+
+    def session(path: str, sess_options: object = None, providers: object = None, **kwargs: object) -> object:
+        if providers is not None:
+            return real_session(path, sess_options=sess_options, providers=providers, **kwargs)
+        if fault == "build":
+            raise RuntimeError("the GPU could not compile the model")
+        return SimpleNamespace(get_inputs=lambda: [SimpleNamespace(name="input")], run=refuse)
+
+    monkeypatch.setattr(ort, "get_ep_devices", lambda: [_ep_device("OpenVINOExecutionProvider", "Intel", "GPU", {})])
+    monkeypatch.setattr(ort.SessionOptions, "add_provider_for_devices", lambda *_: None)
+    monkeypatch.setattr(ort, "InferenceSession", session)
+
+    with caplog.at_level(logging.WARNING, logger="printguard.server.inference"):
+        inference = Inference(Path("models"), runtime)
+    embedding = await inference.run(np.zeros((1, 3, 224, 224), dtype=np.float32))
+    inference.close()
+
+    reason = "could not compile the model" if fault == "build" else "ran out of memory"
+    assert inference.device in ("ONNX CPU", "LiteRT CPU" if runtime == "auto" else "ONNX CPU")
+    assert embedding.shape == (1024,)
+    assert [record.getMessage() for record in caplog.records] == [f"Intel GPU cannot run the model and is skipped: the GPU {reason}"]
+
+
+def test_a_windows_provider_that_cannot_be_installed_is_left_out(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Windows ML downloads its providers on first launch, and a failed download must not stop the app."""
+
+    def unreachable() -> None:
+        raise OSError("the Store could not be reached")
+
+    provider = SimpleNamespace(
+        name="OpenVINOExecutionProvider",
+        ready_state="absent",
+        ensure_ready_async=lambda: SimpleNamespace(get=unreachable),
+    )
+    catalogue = SimpleNamespace(find_all_providers=lambda: [provider])
+    modules = {
+        "winui3.microsoft.windows.applicationmodel.dynamicdependency.bootstrap": {"initialize": ExitStack},
+        "winui3.microsoft.windows.ai.machinelearning": {
+            "ExecutionProviderCatalog": SimpleNamespace(get_default=lambda: catalogue),
+            "ExecutionProviderReadyState": SimpleNamespace(READY="ready"),
+        },
+    }
+    for name, members in modules.items():
+        parts = name.split(".")
+        for depth in range(1, len(parts) + 1):
+            package = sys.modules.get(".".join(parts[:depth])) or ModuleType(".".join(parts[:depth]))
+            monkeypatch.setitem(sys.modules, package.__name__, package)
+            if depth > 1:
+                monkeypatch.setattr(sys.modules[".".join(parts[: depth - 1])], parts[depth - 1], package, raising=False)
+        for member, value in members.items():
+            monkeypatch.setattr(sys.modules[name], member, value, raising=False)
+    monkeypatch.setattr(sys, "getwindowsversion", lambda: SimpleNamespace(build=26100), raising=False)
+
+    with caplog.at_level(logging.WARNING, logger="printguard.server.inference"):
+        OnnxInference._register_windows_providers(SimpleNamespace(_resources=ExitStack()))
+
+    assert [record.getMessage() for record in caplog.records] == [
+        "execution provider OpenVINOExecutionProvider could not be installed: the Store could not be reached"
+    ]
+
+
 def test_measured_concurrency_tracks_scaling() -> None:
     """Workers follow throughput a runtime actually adds, not the host's core count.
 
@@ -277,6 +361,88 @@ def test_a_camera_that_will_not_open_keeps_its_password_out_of_the_error() -> No
 
     assert source.last_error and "127.0.0.1:9/video" in source.last_error
     assert "CAMPASS" not in source.last_error and "QUERYPASS" not in source.last_error
+
+
+class _MjpegPipe:
+    """A healthy MJPEG camera read as a byte stream, as a Bambu A1's is."""
+
+    opened = 0
+
+    def __init__(self) -> None:
+        type(self).opened += 1
+        codec = av.CodecContext.create("mjpeg", "w")
+        codec.width, codec.height, codec.pix_fmt, codec.time_base = 320, 240, "yuvj420p", Fraction(1, 30)
+        picture = av.VideoFrame.from_ndarray(np.zeros((240, 320, 3), dtype=np.uint8), format="rgb24")
+        encoded = codec.encode(picture.reformat(format="yuvj420p", threads=1)) + codec.encode(None)
+        self._jpeg = b"".join(bytes(packet) for packet in encoded)
+        self._unread = b""
+        self._closed = False
+
+    def read(self, size: int = -1) -> bytes:
+        if self._closed:
+            return b""
+        if not self._unread:
+            time.sleep(0.03)
+            self._unread = self._jpeg
+        out, self._unread = self._unread[:size], self._unread[size:]
+        return out
+
+    def close(self) -> None:
+        self._closed = True
+
+
+async def test_a_live_view_that_cannot_publish_leaves_detection_running(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """MediaMTX being down, or another program holding its port, costs the live view and nothing else."""
+    with socket.socket() as unused:
+        unused.bind(("127.0.0.1", 0))
+        refusing = f"rtsp://127.0.0.1:{unused.getsockname()[1]}/cam1"
+    publishes: list[str] = []
+    real_open = av.open
+
+    def spy(file: object, *args: object, **kwargs: object) -> object:
+        if file == refusing:
+            publishes.append(file)
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(av, "open", spy)
+    monkeypatch.setattr("printguard.server.platform.RECONNECT_DELAY_S", 0.3)
+    monkeypatch.setattr(_MjpegPipe, "opened", 0)
+
+    with caplog.at_level(logging.WARNING, logger="printguard.server.platform"):
+        source = AVSource(_MjpegPipe, refusing)
+        try:
+            deadline = time.monotonic() + 15
+            while len(publishes) < 3 and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            online = source.online
+            frame = await source.grab()
+        finally:
+            source.close()
+
+    assert len(publishes) >= 3, "the publish was not tried again"
+    assert _MjpegPipe.opened == 1, "retrying the publish restarted capture"
+    assert online and frame is not None and frame.seq > 10
+    assert source.last_error and source.last_error.startswith("live view unavailable: ")
+    assert len(caplog.records) == 1 and "detection carries on" in caplog.text
+
+
+def test_a_camera_without_mjpeg_is_opened_with_the_next_capture_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FFmpeg refuses a format a YUYV-only webcam lacks with EINVAL, which PyAV does not raise as an ``OSError``."""
+    tried: list[dict[str, str]] = []
+
+    def open_device(file: str, format: str, options: dict[str, str], timeout: float) -> str:
+        tried.append(options)
+        if options.get("input_format") == "mjpeg":
+            raise av.error.ArgumentError(errno.EINVAL, "Invalid argument", file)
+        return "opened"
+
+    monkeypatch.setattr(av, "open", open_device)
+    camera = SimpleNamespace(_source="/dev/video0", _container_format="v4l2", _open_options=V4L2_OPEN_OPTIONS)
+
+    assert AVSource._open(camera) == ("opened", None)
+    assert tried == list(V4L2_OPEN_OPTIONS[:3])
 
 
 async def test_a_plugin_socket_refuses_a_redirect_instead_of_following_it() -> None:

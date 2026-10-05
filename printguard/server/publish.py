@@ -123,13 +123,15 @@ class H264Push:
             self._push.mux(packet)
 
     def close(self) -> None:
-        """Flushes the encoder and closes the RTSP push."""
+        """Flushes the encoder and closes the RTSP push, so the next frame opens a new one."""
         if self._push is None:
             return
+        push, self._push = self._push, None
         try:
-            for packet in self._stream.encode(None):
-                self._push.mux(packet)
+            try:
+                for packet in self._stream.encode(None):
+                    push.mux(packet)
+            finally:
+                push.close()
         except Exception:
-            logger.debug("encoder flush failed on close", exc_info=True)
-        self._push.close()
-        self._push = None
+            logger.debug("push did not close cleanly", exc_info=True)

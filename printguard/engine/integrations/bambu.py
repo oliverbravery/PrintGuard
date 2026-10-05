@@ -67,7 +67,7 @@ _STATUS_MAP = {
     "pause": DeviceStatus.PAUSED,
     "idle": DeviceStatus.IDLE,
     "finish": DeviceStatus.IDLE,
-    "failed": DeviceStatus.ERROR,
+    "failed": DeviceStatus.IDLE,
 }
 
 _COMMANDS = {DeviceAction.PAUSE: "pause", DeviceAction.RESUME: "resume", DeviceAction.CANCEL: "stop"}
@@ -262,7 +262,10 @@ class BambuAdapter(IntegrationAdapter):
 
         The HTTP function is unused: Bambu speaks MQTT, not HTTP. The report's
         remaining time is in minutes. A printer with no full report on a live
-        connection is offline.
+        connection is offline. FAILED is how the printer reports a job that was
+        cancelled or gave up, and it holds that until the next job starts while
+        being as ready for one as after FINISH, so both read as idle. A fault
+        the printer stops for mid-job is reported as PAUSE.
         """
         loop = asyncio.get_running_loop()
         report = await asyncio.wait_for(loop.run_in_executor(None, self._pull_report, config), _DEADLINE_S)

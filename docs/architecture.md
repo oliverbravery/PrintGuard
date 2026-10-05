@@ -66,7 +66,7 @@ flowchart LR
 |---|---|
 | `/api/ws` | The engine socket the dashboard speaks the protocol over |
 | `/api/publish/{path}` | A second WebSocket taking a browser's camera recording, which [`server/publish.py`](../printguard/server/publish.py) remuxes into MediaMTX over RTSP |
-| `/hls/{path}` | A proxy to MediaMTX's LL-HLS, which also wakes a sleeping camera source for the viewer. A request with `Origin: null` is refused, so a plugin page cannot pull a feed |
+| `/hls/{path}` | A proxy to MediaMTX's LL-HLS, which also wakes a sleeping camera source for the viewer. A request from another origin is refused and MediaMTX's CORS headers are dropped, so neither a page on another site nor a plugin page can pull a feed |
 | `/api/health` | `{ok, version}`, used by the image's health check |
 | `/api/prints`, `/api/prints/inspect`, `/api/prints/{id}/gcode`, `/api/prints/{id}/thumbnail` | The dashboard's print library upload, pre-upload inspection, gcode viewer and previews |
 | `/plugins/{id}/{path}` | A plugin's own routes, answered from its sandbox |
@@ -99,7 +99,7 @@ for the hub:
 | `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list |
 | `open_camera(id, source)` | A `FrameSource`. MediaMTX pulls every URL that is not plain HTTP, so RTSP, RTMP and WHEP, and PyAV reads HTTP MJPEG and capture devices directly. A `path` source reads a stream already on MediaMTX, and a `bambu` source the A1 and P1 chamber camera |
 | `release_camera(id, source)` | Closes the source and removes its MediaMTX pull path |
-| `http(...)` | httpx. A redirect that would replay the request under another method, such as a POST answered with 301 or 302, raises |
+| `http(...)` | httpx. A redirect that would replay the request under another method, such as a POST answered with 301 or 302, raises. So does a body over `max_bytes`, which a plugin's request and a plugin install pass, counted as it is decompressed |
 | `open_socket(url, arrived)` | A `websockets` client connection held for a plugin, which refuses a redirect |
 | `encode_jpeg(rgb)` / `decode_jpeg(data)` | PyAV |
 | `load_state()` / `save_state(state)` | `data/state.json`, written atomically and readable only by its owner |
@@ -163,11 +163,11 @@ Events, engine to UI:
 | `state` | Full snapshot, on connect, after every command that can change it and on a 1 s ticker. `history.get`, `snapshot.get`, `review.get` and `camera.snapshot` only read, so they save nothing and answer with their own event alone. The fields are listed below |
 | `result` | One monitor's score, sampled at up to 5 Hz per monitor |
 | `alert` | A sustained defect, with the action taken |
-| `warning` | Watchdog conditions and their recovery, and an MQTT broker the bridge cannot reach |
+| `warning` | Watchdog conditions and their recovery, and an MQTT broker the bridge cannot reach, once when the outage starts and once when it ends |
 | `device` | A printer's status, progress, job, time left and heaters |
 | `print_started` | A file from the library has been sent to a printer and started |
 | `discovered`, `printer_test`, `notify_test` | Command responses |
-| `history`, `snapshot`, `review` | Risk history buckets, a kept frame's JPEG, and the frames kept from one print |
+| `history`, `snapshot`, `review` | Risk history buckets, a kept frame's JPEG, and the frames kept from one print, each delivered only to the transport that asked |
 | `review_sent` | How far a reviewed print's upload got, with the refusal code and retry time when it is queued |
 | `frame` | A camera's current picture as a JPEG, the answer to `camera.snapshot` |
 | `releases` | The changelog history the update dialog browses |
@@ -195,6 +195,16 @@ Events, engine to UI:
 Each socket gets its own queue in [`server/events.py`](../printguard/server/events.py). Ordered
 events and command responses leave first and are never dropped. A slow transport keeps only
 the newest ticker `state` and the newest `result` per monitor.
+
+The engine socket runs each command a tab sends as its own task, so a slow one such as
+registering a stream does not hold a pause behind it. A command that waits on nothing finishes
+before the next one starts, which covers every auto-saved update. A frame that is not a JSON
+object is answered with an `error` event.
+
+The message of every `warning` and `error` loses each stored credential in `emit()`, before it
+is logged or broadcast, because it often quotes an exception a library raised. A value shorter
+than 8 characters is only removed where it stands alone, so a short login does not break up
+ordinary words.
 
 ## Resources and monitors
 
@@ -274,7 +284,9 @@ dynamic:
    surplus flows to cameras that can use it.
 3. A free worker takes the most overdue camera and grabs its freshest frame at dispatch
    time. Frames carry a sequence identity, so the same frame is never inferred twice and
-   results always describe the present, not a backlog.
+   results always describe the present, not a backlog. With nothing due, the dispatcher
+   sleeps until the earliest idle camera's interval is up or any inference comes back, so a
+   camera capped to a low rate never sets the pace for a faster one beside it.
 
 ```mermaid
 flowchart LR
@@ -363,9 +375,13 @@ only the kept frames.
 [`engine/reviews.py`](../printguard/engine/reviews.py) keeps a few frames from every print a
 monitor watches, scaled to 512px and stored in the `files` store, with their records in the
 persisted state so they survive a restart. With `settings.feedback` set to `off` it keeps only
-the alert frames. A print runs from a monitor's first frame until its printer positively
-reports idle or error, or the monitor is disabled or removed, so a pause stays inside it. A
-monitor with no printer closes its print after a day.
+the alert frames, and switching it off dismisses every `ready` and `queued` print and deletes
+the other frames already held. A print runs from a monitor's first frame until its printer
+positively reports idle or error, or the monitor is disabled or removed, so a pause stays
+inside it. A print whose monitor has a defect response in flight stays open until that
+response has kept its alert frame, so a cancelled printer read idle while the notifiers are
+still answering can't close the print without it. A monitor with no printer closes its print
+after a day.
 
 | Kind | Kept | Chosen by |
 |---|---|---|
@@ -395,7 +411,7 @@ so frames only leave the hub when a person presses Send in the dashboard.
 The Worker is the only writer to a private R2 bucket and holds every limit in one Durable
 Object, so the hub only reports what it was told. A refused print keeps its frames and the
 engine's ticker sends the rest once `retry_at` passes, six hours on where the refusal named no
-time. A send cut short by a restart has no `retry_at` and is picked up on the next tick. A frame over 150 KB is re-encoded once at 384px and skipped if it is still too big, as is one whose file is missing or that the Worker rejects as `details`, `not_jpeg`, `too_large` or `length`, since it could never be sent. The hub's token is issued by the Worker
+time. A send cut short by a restart has no `retry_at` and is picked up on the next tick. A print dismissed while it uploads stops after the frame in flight. A frame over 150 KB is re-encoded once at 384px and skipped if it is still too big, as is one whose file is missing or that the Worker rejects as `details`, `not_jpeg`, `too_large` or `length`, since it could never be sent. The hub's token is issued by the Worker
 and persisted, and the `state` snapshot carries only its public half as `feedback_hub`.
 
 ## Failing safely
@@ -502,7 +518,7 @@ engine the UI talks to, so they add no logic of their own and cannot drift from 
 - [`server/api.py`](../printguard/server/api.py) is a FastAPI sub-app at `/api/v1`, each
   route tagged with the scope it requires. Every write goes through `engine.request()`. The history route does too. Other reads
   call the engine directly: the state, list and get routes use `state_event()` with printer,
-  notifier, MQTT and camera-source credentials stripped, and the alert snapshot, camera frame,
+  notifier, MQTT and camera-source credentials stripped and each plugin's store left out, and the alert snapshot, camera frame,
   classify and events routes use `monitor_snapshot()`, `snapshot()`, `classify()` and
   `recent_events()`. `recent_events()` is the newest 100 alert, warning, device and error
   events.
@@ -564,7 +580,7 @@ first. That check belongs at the sandbox edge: by the time a command reaches the
 indistinguishable from one the dashboard sent.
 
 A plugin's source never rides in the state snapshot, which broadcasts every second. It travels
-on request through `plugin.code`, like `snapshot.get` and `history.get`. That response reaches
+on request through `plugin.code`. That response reaches
 every connected client, so a tab ignores one whose `req_id` is not its own, or a second tab
 starts a duplicate sandbox.
 
@@ -582,7 +598,8 @@ them and [what each permission grants](plugins.md#permissions), and
 
 `update.check` refreshes the release status against GitHub
 ([`engine/updates.py`](../printguard/engine/updates.py)) and `update.releases` serves the
-changelog history the update dialog browses. The engine also checks at boot and every 24
+changelog history the update dialog browses, each release with the `files_url` its notes'
+relative links resolve against. The engine also checks at boot and every 24
 hours after it while `settings.update_check` is on. The `state` snapshot carries only the status,
 meaning version, latest and whether an update is available, because every release's notes
 together dwarf the rest of the snapshot and the history is wanted only while that dialog is
@@ -649,6 +666,7 @@ printguard/
     engine.py        the command handlers, events, state snapshot and background loops
     platform.py      the Platform, FrameSource, FileStore and PluginRuntime protocols
     registry.py      registered resources: cameras, printers, prints, tokens and plugins
+    bounds.py        the one clamp every sanitiser uses, refusing NaN and Infinity
     cameras.py       camera settings: defaults, clamps and WebRTC URL detection
     monitors.py      monitor config: a camera + printer pairing and its thresholds
     printers.py      registered-printer (integration connection) validation

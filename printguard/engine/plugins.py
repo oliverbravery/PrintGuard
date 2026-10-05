@@ -510,6 +510,25 @@ def asset_type(name: str) -> str | None:
     return ASSET_TYPES.get(extension) if _ASSET_PATTERN.match(name) else None
 
 
+def within_budget(name: str, size: int, held: int) -> int:
+    """Counts one more file towards what a plugin may ship.
+
+    Args:
+        name: The file, for the refusal.
+        size: How many bytes it is.
+        held: The bytes of the files counted before it.
+
+    Returns:
+        The running total with this file in it.
+
+    Raises:
+        ValueError: If the file is too large, or takes the plugin past its total.
+    """
+    if size > MAX_ASSET_BYTES or held + size > MAX_ASSETS_BYTES:
+        raise ValueError(f"{name} takes the plugin past {MAX_ASSETS_BYTES // 1024} KB of files")
+    return held + size
+
+
 def sanitise_assets(raw: dict[str, bytes]) -> dict[str, str]:
     """Checks a plugin's shipped files and encodes them for the record.
 
@@ -528,9 +547,7 @@ def sanitise_assets(raw: dict[str, bytes]) -> dict[str, str]:
         media = asset_type(name)
         if media is None:
             raise ValueError(f"{name} is not a kind of file a plugin may ship")
-        total += len(data)
-        if len(data) > MAX_ASSET_BYTES or total > MAX_ASSETS_BYTES:
-            raise ValueError(f"{name} takes the plugin past {MAX_ASSETS_BYTES // 1024} KB of files")
+        total = within_budget(name, len(data), total)
         starts = ASSET_MAGIC.get(media)
         if starts and not (data.startswith(starts) or (media == "video/mp4" and data[4:8] == b"ftyp")):
             raise ValueError(f"{name} is not really {media}")
@@ -816,7 +833,8 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
         path the manifest uses.
 
     Raises:
-        ValueError: If the zip is unreadable or carries no manifest.
+        ValueError: If the zip is unreadable, carries no manifest, or declares
+            more than a plugin may ship, which is refused before it is unpacked.
     """
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
@@ -838,17 +856,24 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
     manifest = json.loads(read(MANIFEST_FILE, MAX_SOURCE_BYTES))
     sources = {name: read(name, MAX_SOURCE_BYTES).decode("utf-8", "replace") for name in SOURCE_FILES if name in entries}
     declared = {str(name).strip().lower() for name in manifest.get("assets", []) if isinstance(manifest, dict)}
-    assets = {name: read(name, MAX_ASSET_BYTES) for name in sorted(declared) if name in entries}
+    assets: dict[str, bytes] = {}
+    total = 0
+    for name in sorted(declared & entries.keys()):
+        total = within_budget(name, archive.getinfo(entries[name]).file_size, total)
+        assets[name] = archive.read(entries[name])
     listed = [str(manifest.get("icon", "")).strip().lower(), README_FILE]
     listed += [str(shot).strip().lower() for shot in manifest.get("media", []) if isinstance(manifest, dict)]
     named = set(archive.namelist())
     page: dict[str, bytes] = {}
+    total = 0
     for path in listed:
         entry = f"{prefix}{path}"
-        if path and entry in named:
+        if path and path not in page and entry in named:
+            size = archive.getinfo(entry).file_size
             cap = MAX_README_BYTES if path == README_FILE else MAX_ASSET_BYTES
-            if archive.getinfo(entry).file_size <= cap:
+            if size <= cap and total + size <= MAX_ASSETS_BYTES:
                 page[path] = archive.read(entry)
+                total += size
     return manifest, sources, assets, page
 
 
@@ -891,7 +916,8 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
         resolved commit SHA.
 
     Raises:
-        ValueError: If the reference is unusable or the plugin is not there.
+        ValueError: If the reference is unusable, the plugin is not there, or
+            its assets pass what a plugin may ship, at the file that does it.
     """
     if not _REPO_PATTERN.match(repo):
         raise ValueError(f"{repo!r} is not an owner/name repository")
@@ -900,24 +926,34 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
         raise ValueError(f"{path!r} is not a usable path")
     sha = ref if _SHA_PATTERN.match(ref) else await _resolve_commit(http, repo, ref)
     prefix = f"{path}/" if path else ""
-    status, manifest = await http("GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{MANIFEST_FILE}"), timeout=TIMEOUT_S)
+    status, manifest = await http(
+        "GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{MANIFEST_FILE}"), timeout=TIMEOUT_S, max_bytes=MAX_SOURCE_BYTES
+    )
     if status != 200 or not isinstance(manifest, dict):
         raise ValueError(f"no {MANIFEST_FILE} at {repo}/{prefix} ({status})")
     sources: dict[str, str] = {}
     for name in SOURCE_FILES:
-        status, body = await http("GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"), timeout=TIMEOUT_S)
+        status, body = await http(
+            "GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"), timeout=TIMEOUT_S, max_bytes=MAX_SOURCE_BYTES
+        )
         if status == 200 and isinstance(body, str):
             sources[name] = body
     assets: dict[str, bytes] = {}
+    total = 0
     for name in sorted({str(a).strip().lower() for a in manifest.get("assets", [])}):
         if asset_type(name) is None:
             raise ValueError(f"{name} is not a kind of file a plugin may ship")
         status, body = await http(
-            "GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"), binary=True, timeout=TIMEOUT_S
+            "GET",
+            GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"),
+            binary=True,
+            timeout=TIMEOUT_S,
+            max_bytes=MAX_ASSET_BYTES,
         )
         if status != 200 or not isinstance(body, str):
             raise ValueError(f"no {name} at {repo}/{prefix} ({status})")
         assets[name] = base64.b64decode(body)
+        total = within_budget(name, len(assets[name]), total)
     return manifest, sources, assets, sha
 
 

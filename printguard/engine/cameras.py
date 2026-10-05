@@ -6,6 +6,8 @@ import hashlib
 from typing import Any
 from urllib.parse import urlsplit
 
+from .bounds import clamp
+
 _WEBRTC_SCHEMES = ("webrtc", "whep", "wheps", "whip", "whips")
 _WHEP_SCHEMES = ("whep", "wheps")
 _WEBRTC_PATH_SEGMENTS = frozenset({"webrtc", "whep", "whip"})
@@ -62,23 +64,15 @@ _CLAMP = {"brightness": (0.25, 2.0), "contrast": (0.25, 2.0), "sharpness": (0.0,
 _ROTATIONS = (0, 90, 180, 270)
 
 
-def _clamp(key: str, value: float) -> float:
-    low, high = _CLAMP[key]
-    return max(low, min(high, value))
-
-
 def _sanitise_crop(raw: Any) -> dict[str, float] | None:
     if raw is None:
         return None
     if not isinstance(raw, dict):
         return None
-    try:
-        x = max(0.0, min(1.0, float(raw.get("x", 0))))
-        y = max(0.0, min(1.0, float(raw.get("y", 0))))
-        w = max(0.01, min(1.0 - x, float(raw.get("w", 1))))
-        h = max(0.01, min(1.0 - y, float(raw.get("h", 1))))
-    except (TypeError, ValueError):
-        return None
+    x = clamp("crop x", raw.get("x", 0), 0.0, 1.0)
+    y = clamp("crop y", raw.get("y", 0), 0.0, 1.0)
+    w = clamp("crop w", raw.get("w", 1), 0.01, 1.0 - x)
+    h = clamp("crop h", raw.get("h", 1), 0.01, 1.0 - y)
     if x == 0 and y == 0 and w == 1 and h == 1:
         return None
     return {"x": x, "y": y, "w": w, "h": h}
@@ -102,14 +96,15 @@ def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] 
 
     Returns:
         A complete, validated camera settings record.
+
+    Raises:
+        ValueError: If a tuning value or a side of the crop is not a finite number.
     """
     record = {**(base or CAMERA_DEFAULTS), **patch, "id": camera_id}
     if "name" in patch or base:
         record["name"] = str(record.get("name", "Camera")).strip() or "Camera"
-    record["brightness"] = _clamp("brightness", float(record["brightness"]))
-    record["contrast"] = _clamp("contrast", float(record["contrast"]))
-    record["sharpness"] = _clamp("sharpness", float(record["sharpness"]))
+    for key in ("brightness", "contrast", "sharpness", "detect_fps"):
+        record[key] = clamp(key, record[key], *_CLAMP[key])
     record["crop"] = _sanitise_crop(record.get("crop"))
     record["rotation"] = _sanitise_rotation(record.get("rotation"))
-    record["detect_fps"] = _clamp("detect_fps", float(record["detect_fps"]))
     return record

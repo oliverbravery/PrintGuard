@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from .bounds import clamp
+
 if TYPE_CHECKING:
     from .registry import PrinterRegistry
 
@@ -44,11 +46,6 @@ def monitor_watching(monitor: dict[str, Any], printers: "PrinterRegistry") -> bo
     return printer is None or printer.reported_status not in STANDBY_STATUSES
 
 
-def _clamp(key: str, value: float) -> float:
-    low, high = _CLAMPS[key]
-    return max(low, min(high, value))
-
-
 def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any] | None = None) -> dict[str, Any]:
     """Merges a monitor patch over defaults or an existing record.
 
@@ -59,14 +56,17 @@ def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any
 
     Returns:
         A complete, validated monitor record.
+
+    Raises:
+        ValueError: If the threshold, streak or cooldown is not a finite number.
     """
     record = {**(base or MONITOR_DEFAULTS), **patch, "id": monitor_id}
     record["name"] = str(record["name"]).strip() or "Monitor"
     record["camera_id"] = str(record["camera_id"] or "")
     record["printer_id"] = str(record["printer_id"] or "")
-    record["threshold"] = _clamp("threshold", float(record["threshold"]))
-    record["consecutive"] = int(_clamp("consecutive", int(record["consecutive"])))
-    record["cooldown_s"] = int(_clamp("cooldown_s", int(record["cooldown_s"])))
+    record["threshold"] = clamp("threshold", record["threshold"], *_CLAMPS["threshold"])
+    record["consecutive"] = int(clamp("consecutive", record["consecutive"], *_CLAMPS["consecutive"]))
+    record["cooldown_s"] = int(clamp("cooldown_s", record["cooldown_s"], *_CLAMPS["cooldown_s"]))
     record["enabled"] = bool(record["enabled"])
     record["notify"] = bool(record["notify"])
     if record["on_defect"] not in ("none", "pause", "cancel"):

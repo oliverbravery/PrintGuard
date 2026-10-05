@@ -23,8 +23,7 @@ from .registry import Camera, CameraRegistry
 logger = logging.getLogger(__name__)
 
 LATENCY_SMOOTHING = 0.25
-IDLE_POLL_S = 0.05
-DISPATCH_POLL_S = 0.005
+IDLE_POLL_S = 0.25
 STALE_RETRY_S = 0.1
 ERROR_THROTTLE_S = 30.0
 
@@ -45,6 +44,7 @@ class Scheduler:
         self._jobs: set[asyncio.Task[None]] = set()
         self._camera_jobs: dict[str, asyncio.Task[None]] = {}
         self._slots = asyncio.Semaphore(platform.workers)
+        self._job_finished = asyncio.Event()
         self.infer_ms = 0.0
 
     def reset(self) -> None:
@@ -102,40 +102,47 @@ class Scheduler:
             task.cancel()
 
     async def dispatch(self) -> float:
-        """Hands the most overdue camera to a free worker.
+        """Hands the most overdue camera to a free worker, or waits for one to fall due.
+
+        A camera can be dispatched again once its interval has passed and its
+        last inference has come back. Only the first has a known time, so a
+        pass that finds nothing due sleeps until the earliest idle camera's
+        interval is up or any inference finishes, whichever comes first.
+        Sleeping on the idle cameras alone would hold a fast camera that is
+        mid-inference to the pace of a slow one beside it.
 
         Returns:
-            Seconds until another pass is worth making, which is none after a
-            camera was dispatched.
+            Seconds until another pass is worth making, which is always none.
         """
         async with self._dispatch_lock:
+            self._job_finished.clear()
             self.allocate()
             now = time.monotonic()
-            due = [c for c in self._registry.schedulable() if not c.inferring and now >= c.next_due]
-            if not due:
-                return self._sleep_until_due(now)
-            camera = min(due, key=lambda c: c.next_due)
-            await self._slots.acquire()
-            camera.inferring = True
-            camera.next_due = time.monotonic() + 1.0 / max(0.1, camera.target_fps or camera.effective_fps)
-            task = asyncio.create_task(self._job(camera))
-            self._jobs.add(task)
-            task.add_done_callback(self._jobs.discard)
-            self._camera_jobs[camera.id] = task
+            idle = [c for c in self._registry.schedulable() if not c.inferring]
+            due = [c for c in idle if now >= c.next_due]
+            if due:
+                camera = min(due, key=lambda c: c.next_due)
+                await self._slots.acquire()
+                camera.inferring = True
+                camera.next_due = time.monotonic() + 1.0 / max(0.1, camera.target_fps or camera.effective_fps)
+                task = asyncio.create_task(self._job(camera))
+                self._jobs.add(task)
+                task.add_done_callback(self._jobs.discard)
+                self._camera_jobs[camera.id] = task
 
-            def forget(done: asyncio.Task[None]) -> None:
-                if self._camera_jobs.get(camera.id) is done:
-                    self._camera_jobs.pop(camera.id)
+                def forget(done: asyncio.Task[None]) -> None:
+                    if self._camera_jobs.get(camera.id) is done:
+                        self._camera_jobs.pop(camera.id)
 
-            task.add_done_callback(forget)
-            return 0.0
-
-    def _sleep_until_due(self, now: float) -> float:
-        cameras = self._registry.schedulable()
-        if not cameras:
-            return IDLE_POLL_S
-        waits = [c.next_due - now for c in cameras if not c.inferring]
-        return min(max(min(waits, default=0.0), DISPATCH_POLL_S), 0.25)
+                task.add_done_callback(forget)
+                return 0.0
+            wait = min((c.next_due - now for c in idle), default=IDLE_POLL_S)
+        try:
+            async with asyncio.timeout(min(wait, IDLE_POLL_S)):
+                await self._job_finished.wait()
+        except TimeoutError:
+            pass
+        return 0.0
 
     async def _job(self, camera: Camera) -> None:
         try:
@@ -171,3 +178,4 @@ class Scheduler:
         finally:
             camera.inferring = False
             self._slots.release()
+            self._job_finished.set()

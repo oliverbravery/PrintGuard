@@ -47,6 +47,11 @@ def link(raw: Any) -> str:
     return url if parts.scheme in ("http", "https") and parts.netloc else ""
 
 
+def _fold(raw: str) -> str:
+    """Lowercases a pattern's scheme and host, the parts of an address that ignore case."""
+    return re.sub(r"^[^/]*//[^/]*", lambda origin: origin.group().lower(), raw.strip())
+
+
 def parse(raw: str) -> dict[str, str] | None:
     """Reads one pattern, or None if it is not one.
 
@@ -56,7 +61,7 @@ def parse(raw: str) -> dict[str, str] | None:
     Returns:
         Its scheme, host, port and path, or None when the pattern is malformed.
     """
-    match = PATTERN.match(raw.strip().lower())
+    match = PATTERN.match(_fold(raw))
     if not match:
         return None
     parts = match.groupdict()
@@ -72,7 +77,25 @@ def _matches_host(pattern: str, host: str) -> bool:
 
 
 def _matches_path(pattern: str, path: str) -> bool:
-    return re.fullmatch(".*?".join(re.escape(part) for part in pattern.split("*")), path) is not None
+    """Whether a path fits a pattern whose ``*`` each stand for any run of characters.
+
+    The literal pieces are looked for in order, each as early as it can sit, so
+    the work grows with the path and never with the number of wildcards.
+    """
+    first, *middle = pattern.split("*")
+    if not middle:
+        return path == first
+    last = middle.pop()
+    end = len(path) - len(last)
+    if not path.startswith(first) or end < len(first) or not path.endswith(last):
+        return False
+    at = len(first)
+    for piece in middle:
+        found = path.find(piece, at, end)
+        if found < 0:
+            return False
+        at = found + len(piece)
+    return True
 
 
 def _climbs(path: str) -> bool:
@@ -191,12 +214,12 @@ def sanitise(raw: Any) -> list[str]:
         raw: The manifest's ``urls`` field.
 
     Returns:
-        The patterns, lowercased and deduplicated.
+        The patterns, deduplicated, with scheme and host lowercased.
 
     Raises:
         ValueError: If any of them is not a match pattern.
     """
-    patterns = sorted({str(item).strip().lower() for item in raw or [] if str(item).strip()})
+    patterns = sorted({_fold(str(item)) for item in raw or [] if str(item).strip()})
     unreadable = [pattern for pattern in patterns if parse(pattern) is None]
     if unreadable:
         raise ValueError(f"not a URL match pattern: {', '.join(unreadable)}")

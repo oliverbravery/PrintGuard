@@ -61,7 +61,7 @@ class WebStaticFiles(StaticFiles):
 
 
 def origin_allowed(connection: HTTPConnection, allowed: set[str]) -> bool:
-    """Rejects cross-site WebSocket handshakes and uploads the auth proxy cannot screen.
+    """Rejects cross-site WebSocket handshakes, uploads and stream reads the auth proxy cannot screen.
 
     Proxies in front of the hub authenticate the session cookie, which the
     browser attaches to any socket a page opens or form it posts, so a
@@ -78,6 +78,22 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str]) -> bool:
         return True
     host = connection.headers.get("x-forwarded-host") or connection.headers.get("host")
     return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
+
+
+def parse_command(text: str | None) -> dict[str, Any] | None:
+    """Reads one engine socket frame as a command.
+
+    Args:
+        text: The frame's text, or None for a binary frame.
+
+    Returns:
+        The command, or None when the frame is not a JSON object.
+    """
+    try:
+        command = json.loads(text or "")
+    except ValueError:
+        return None
+    return command if isinstance(command, dict) else None
 
 
 def host_trusted(host: str, named: set[str]) -> bool:
@@ -344,7 +360,13 @@ def create_app() -> FastAPI:
 
     @app.websocket("/api/ws")
     async def engine_socket(websocket: WebSocket) -> None:
-        """Bridges one UI connection onto the engine protocol."""
+        """Bridges one UI connection onto the engine protocol.
+
+        Each command runs as its own task, so a slow one such as registering a
+        stream does not hold a pause from the same tab behind it. A command
+        that never waits on anything still finishes before the next one starts,
+        which keeps an auto-saved update ahead of whatever the tab sends after it.
+        """
         if not origin_allowed(websocket, allowed_origins):
             logger.warning("rejected cross-origin engine socket (origin=%s)", websocket.headers.get("origin"))
             await websocket.close(code=1008, reason="origin not allowed")
@@ -362,8 +384,16 @@ def create_app() -> FastAPI:
                 await websocket.send_text(json.dumps(await queue.get()))
 
         async def receive() -> None:
-            while True:
-                await engine.handle(json.loads(await websocket.receive_text()), queue.put)
+            async with asyncio.TaskGroup() as commands:
+                while True:
+                    frame = await websocket.receive()
+                    if frame["type"] == "websocket.disconnect":
+                        raise WebSocketDisconnect(frame.get("code", 1005))
+                    command = parse_command(frame.get("text"))
+                    if command is None:
+                        queue.put({"event": "error", "message": "a command must be a JSON object"})
+                    else:
+                        commands.create_task(engine.handle(command, queue.put))
 
         engine.add_sink(queue.put)
         tasks = [asyncio.ensure_future(pump()), asyncio.ensure_future(receive())]
@@ -371,7 +401,7 @@ def create_app() -> FastAPI:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 task.result()
-        except WebSocketDisconnect:
+        except* WebSocketDisconnect:
             pass
         finally:
             logger.info("UI disconnected")
@@ -390,12 +420,13 @@ def create_app() -> FastAPI:
         dashboard polls playlists every second, so letting the error escape
         would flood the log with one ASGI traceback per poll.
 
-        A request from an opaque origin is refused. Plugin pages are served into
-        one, and nothing else in a browser sends ``Origin: null``. Without this a
-        plugin could serve itself a page that pulls the live feed.
+        A request from another origin is refused, and whatever CORS headers
+        MediaMTX answers with are dropped, so a page elsewhere that knows the
+        hub's address cannot read a feed. That covers the opaque origin plugin
+        pages are served into, which sends ``Origin: null``.
         """
-        if request.headers.get("origin") == "null":
-            raise HTTPException(403, "camera streams are not served to sandboxed pages")
+        if not origin_allowed(request, allowed_origins):
+            raise HTTPException(403, "origin not allowed")
         await app.state.engine.platform.view_camera(path.split("/", 1)[0])
         client: httpx.AsyncClient = app.state.hls
         try:
@@ -408,7 +439,9 @@ def create_app() -> FastAPI:
                 logger.warning("HLS upstream unreachable: %s", exc)
             raise HTTPException(502, "stream engine unreachable") from exc
         hop_by_hop = {"connection", "keep-alive", "transfer-encoding", "content-length"}
-        headers = {k: v for k, v in upstream.headers.items() if k.lower() not in hop_by_hop}
+        headers = {
+            k: v for k, v in upstream.headers.items() if k.lower() not in hop_by_hop and not k.lower().startswith("access-control-")
+        }
         if headers.get("location", "").startswith("/"):
             headers["location"] = f"/hls{headers['location']}"
         return StreamingResponse(

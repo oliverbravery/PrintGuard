@@ -176,23 +176,26 @@ class ReviewLibrary:
         await self._keep(review, frame, {"ts": alert["ts"], "score": alert["score"], "kind": "alert", "action": alert["action"]})
         await self._drop(review, review.of_kind("alert")[:-ALERT_MAX])
 
-    def settle(self, monitors: dict[str, dict[str, Any]], printers: "PrinterRegistry", wanted: bool) -> bool:
+    def settle(self, monitors: dict[str, dict[str, Any]], printers: "PrinterRegistry", responding: set[str], wanted: bool) -> bool:
         """Ends the running review of every monitor whose print is over.
 
         A print is over once its printer positively reports it is idle or has
         failed, or the monitor is switched off. A pause is part of the same
-        print, and a printer that cannot be read keeps the review running.
+        print, and a printer that cannot be read keeps the review running. So
+        does a defect response still in flight, since the command that stops a
+        print is sent before the frame that fired it is kept.
 
         Args:
             monitors: Every monitor record by id.
             printers: The printer registry.
+            responding: Ids of the monitors with a defect response in flight.
             wanted: Whether finished prints should wait to be reviewed.
 
         Returns:
             Whether any review ended.
         """
         ended = False
-        for review in [review for review in self._reviews.values() if review.ended is None]:
+        for review in [review for review in self._reviews.values() if review.ended is None and review.monitor_id not in responding]:
             monitor = monitors.get(review.monitor_id)
             printer = printers.get(monitor.get("printer_id") or "") if monitor else None
             if monitor and monitor.get("enabled") and not (printer and printer.reported_status in ENDED_STATUSES):
@@ -241,6 +244,18 @@ class ReviewLibrary:
             raise ValueError("only a finished, unsent print can be dismissed")
         review.submission, review.status = None, "dismissed"
 
+    async def stop_asking(self) -> None:
+        """Dismisses every print waiting to be reviewed or sent, and keeps only alert frames.
+
+        The alert frames stay because the risk history shows them. A print
+        still running loses the frames kept so far and is dismissed when it
+        ends.
+        """
+        for review in list(self._reviews.values()):
+            if review.status in ("ready", "queued"):
+                review.submission, review.status = None, "dismissed"
+            await self._drop(review, [frame for frame in review.frames if frame["kind"] != "alert"])
+
     def due(self, now: float) -> list[Review]:
         """The queued reviews whose retry time has passed, or whose send was cut short before it set one."""
         return [review for review in self._reviews.values() if review.status == "queued" and (review.submission["retry_at"] or 0.0) <= now]
@@ -275,8 +290,9 @@ class ReviewLibrary:
         review.frames.append({"id": frame_id, **record, "size": size})
 
     async def _drop(self, review: Review, frames: list[dict[str, Any]]) -> None:
+        """Forgets frames before deleting their files, so two drops that overlap cannot trip over each other."""
+        review.frames = [kept for kept in review.frames if kept not in frames]
         for frame in frames:
-            review.frames.remove(frame)
             await self._platform.files.remove(frame_key(review.id, frame["id"]))
 
     async def _discard(self, review: Review) -> None:

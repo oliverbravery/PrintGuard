@@ -50,16 +50,27 @@ class NtfyNotifier(NotifierAdapter):
     }
 
     async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:
-        """Publishes via PUT with the snapshot as the attachment body."""
+        """Publishes via PUT with the snapshot as the attachment body, or as text without one.
+
+        A self-hosted server takes attachments only once ``attachment-cache-dir``
+        and ``base-url`` are set, and answers 400 until then, so an alert whose
+        snapshot is refused is sent again as text.
+
+        Raises:
+            RuntimeError: If ntfy rejects the alert, or takes it only without its snapshot.
+        """
         headers = {"Title": _header(title), "Priority": "urgent", "Tags": "rotating_light"}
         if config.get("token"):
             headers["Authorization"] = f"Bearer {config['token']}"
         url = str(config["url"]).strip()
+        refused = None
         if image:
-            headers["Filename"] = "snapshot.jpg"
-            headers["Message"] = _header(body)
-            status, _ = await http("PUT", url, headers=headers, data=image, timeout=15.0)
-        else:
-            status, _ = await http("POST", url, headers=headers, data=body.encode(), timeout=15.0)
+            attached = {**headers, "Filename": "snapshot.jpg", "Message": _header(body)}
+            refused, _ = await http("PUT", url, headers=attached, data=image, timeout=15.0)
+            if refused < 400:
+                return
+        status, _ = await http("POST", url, headers=headers, data=body.encode(), timeout=15.0)
         if status >= 400:
             raise RuntimeError(f"ntfy rejected the alert: HTTP {status}")
+        if refused:
+            raise RuntimeError(f"the server refused the snapshot with HTTP {refused}, so the alert was sent as text")

@@ -13,6 +13,8 @@ import logging
 from typing import Annotated, Any, Literal
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -89,7 +91,13 @@ class PrinterFields(BaseModel):
     config: dict[str, Any] | None = None
 
 
-class MonitorFields(BaseModel):
+class _FiniteNumbers(BaseModel):
+    """Base for the request bodies that carry a number, refusing NaN and Infinity."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+class MonitorFields(_FiniteNumbers):
     name: str | None = None
     camera_id: str | None = None
     printer_id: str | None = None
@@ -113,7 +121,7 @@ class CameraCreate(BaseModel):
     source: CameraSource
 
 
-class CameraPatch(BaseModel):
+class CameraPatch(_FiniteNumbers):
     name: str | None = None
     brightness: float | None = None
     contrast: float | None = None
@@ -139,7 +147,7 @@ class ActionBody(BaseModel):
     action: Literal["pause", "resume", "cancel"]
 
 
-class HeatBody(BaseModel):
+class HeatBody(_FiniteNumbers):
     nozzle: float | None = None
     bed: float | None = None
 
@@ -282,9 +290,12 @@ def public_state(engine: Engine) -> dict[str, Any]:
     report status without leaking the printer and notifier credentials those
     configs embed, nor the access codes a printer-exposed camera source carries.
     Redaction reuses the secret fields each adapter's schema already declares
-    rather than enumerating credentials here.
+    rather than enumerating credentials here. A plugin's store is left out
+    whatever the token's scope, since a plugin may keep a session or anything
+    else it was told in it, and nothing on this surface writes one.
     """
     state = engine.state_event()
+    state["plugins"] = [{key: value for key, value in plugin.items() if key != "config"} for plugin in state["plugins"]]
     state["printers"] = [_public_printer(printer) for printer in state["printers"]]
     state["cameras"] = [_public_camera(camera) for camera in state["cameras"]]
     notifiers = state["settings"].get("notifiers", {})
@@ -311,6 +322,12 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
     async def command_failed(request: Request, exc: RuntimeError) -> JSONResponse:
         """Maps a rejected engine command to a 400 instead of a bare 500."""
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @api.exception_handler(RequestValidationError)
+    async def body_refused(request: Request, exc: RequestValidationError) -> JSONResponse:
+        """Answers 422 without echoing the input, since a NaN in it cannot be written as JSON."""
+        errors = [{key: value for key, value in error.items() if key != "input"} for error in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
 
     @api.exception_handler(TimeoutError)
     async def command_timeout(request: Request, exc: TimeoutError) -> JSONResponse:

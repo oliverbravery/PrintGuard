@@ -115,6 +115,32 @@ async def test_ntfy_raises_on_rejection() -> None:
         await NOTIFIERS["ntfy"].send(RecordingHttp(status=403), {"url": "u"}, "T", "B", None)
 
 
+async def test_ntfy_sends_the_alert_as_text_when_the_server_takes_no_attachments() -> None:
+    """A self-hosted ntfy without attachment-cache-dir and base-url answers an upload with 400."""
+
+    class NoAttachments(RecordingHttp):
+        async def __call__(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            await super().__call__(method, url, **kwargs)
+            if "Filename" in kwargs["headers"]:
+                return 400, {"code": 40014, "http": 400, "error": "invalid request: attachments not allowed"}
+            return 200, {}
+
+    http = NoAttachments()
+    with pytest.raises(RuntimeError, match="refused the snapshot with HTTP 400, so the alert was sent as text"):
+        await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t", "token": "tk"}, "Title", "Body", JPEG)
+    attached, text = http.calls
+    assert (attached["method"], attached["data"]) == ("PUT", JPEG)
+    assert (text["method"], text["url"], text["data"]) == ("POST", "https://ntfy.sh/t", b"Body")
+    assert text["headers"] == {"Title": "Title", "Priority": "urgent", "Tags": "rotating_light", "Authorization": "Bearer tk"}
+
+
+async def test_ntfy_rejecting_the_text_too_is_a_rejection() -> None:
+    http = RecordingHttp(status=403)
+    with pytest.raises(RuntimeError, match="rejected the alert: HTTP 403"):
+        await NOTIFIERS["ntfy"].send(http, {"url": "u"}, "T", "B", JPEG)
+    assert [call["method"] for call in http.calls] == ["PUT", "POST"]
+
+
 async def test_telegram_sends_photo_as_multipart() -> None:
     http = RecordingHttp(body={"ok": True})
     await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "77"}, "T", "B", JPEG)
@@ -510,7 +536,7 @@ BAMBU_CONFIG = {"host": "192.168.1.70", "serial": "01S00A", "access_code": "1234
         ("PAUSE", DeviceStatus.PAUSED),
         ("IDLE", DeviceStatus.IDLE),
         ("FINISH", DeviceStatus.IDLE),
-        ("FAILED", DeviceStatus.ERROR),
+        ("FAILED", DeviceStatus.IDLE),
         ("", DeviceStatus.UNKNOWN),
     ],
 )

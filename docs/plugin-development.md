@@ -150,6 +150,12 @@ the way GitHub renders it, relative image paths included. For a repository insta
 are read from the repository at the pinned commit. A zip carries them inside it. Either way
 they add nothing to what runs, which is why an SVG is allowed here and not in `assets`.
 
+The README is shown as Markdown and little else. Headings, paragraphs, lists, links, images,
+code, tables and blockquotes are kept, with `align` on a table cell or paragraph and `width` and
+`height` on an image. Any other HTML is dropped and its text kept, so forms, `<details>`, video,
+inline SVG, `style`, `class` and task-list checkboxes do not render. Relative links and images
+resolve against the README's own folder.
+
 ### Surfaces
 
 | Surface | Where it puts you |
@@ -204,6 +210,10 @@ script renamed to `.png` is refused. SVG is not on the list, since it is markup.
 
 A `*` scheme covers http and https, and `ws`, `wss`, `rtsp` and `rtsps` are named in full. A
 missing port means any port. An IPv6 address goes in brackets, as `http://[fd00::1]/*`.
+
+The scheme and host match in any case. The path matches as written, so
+`https://api.telegram.org/bot*/sendMessage` does not cover `/bot1/sendmessage`. A `*` in a path
+stands for any run of characters, `/` and the query string included.
 
 A URL with a `.` or `..` segment in its path matches no pattern, percent-encoded or not.
 
@@ -524,10 +534,14 @@ it base64 encoded. The manifest needs `http` in `events`, or the answer never re
 A redirect is not followed. Its 3xx status arrives as the answer, so ask for the address the
 service finally answers on.
 
+A body over 256 KB fails the request, whether it is JSON, text or `binary`. The size is counted
+after decompression and before base64. Nothing is cut short, so no `http` event arrives and the
+dashboard shows an error naming the host.
+
 ### Sockets
 
 `ctx.socket` opens a WebSocket under a tag and `socket` events carry it, with `state` saying
-`open`, `message` or `closed`. PrintGuard drops it when the plugin is disabled, reinstalled or removed, or loses `net` or `net:local`. The manifest needs `socket` in `events` and a `ws` or `wss` pattern in `urls`.
+`open`, `message` or `closed`. PrintGuard drops it when the plugin is disabled, reinstalled or removed, is stopped for failing, or loses `net` or `net:local`. A socket still connecting at that moment is closed as soon as it opens. The manifest needs `socket` in `events` and a `ws` or `wss` pattern in `urls`.
 
 A redirect is not followed here either. The socket fails to open, so declare the address the
 service finally answers on.
@@ -702,7 +716,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | What | Limit |
 |---|---|
 | Source file | 256 KB each |
-| Asset | 4 MB each, 12 MB across a plugin |
+| Asset | 4 MB each, 12 MB across a plugin. An install is refused at the file that passes either |
 | README in a zip | 64 KB |
 | Media | 8 images |
 | Secrets | 8, each value 4 KB |
@@ -720,7 +734,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | `select` options | 60 |
 | `panel.html` height | 900px |
 | `ctx.http` | 60 requests a minute per plugin, 10 seconds each. A refused request gets no `http` event |
-| `ctx.http` answer | A string body is cut at 256 KB, a base64 one included |
+| `ctx.http` answer | 256 KB once decompressed, whatever its type. A larger one fails the request and no `http` event arrives |
 | Sockets | 4 open per plugin, 64 KB per text frame sent, 256 KB per frame received, 10 seconds to open |
 | Sandbox start | 8 seconds for `plugin.js` or `panel.html` to load |
 | OAuth sign-in | 10 minutes to finish it |

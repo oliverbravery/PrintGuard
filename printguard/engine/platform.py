@@ -187,16 +187,20 @@ class Platform(Protocol):
         binary: bool = False,
         timeout: float = 10.0,
         follow_redirects: bool = True,
+        max_bytes: int | None = None,
     ) -> tuple[int, Any]:
         """Performs an HTTP request and returns (status, parsed body).
 
         A plugin's request passes ``follow_redirects=False`` and gets the
         redirect itself back, since only the address it named was checked
-        against its grant.
+        against its grant. It passes ``max_bytes`` too, as does a plugin
+        install, since neither answer comes from anywhere PrintGuard trusts.
 
         Raises:
             RuntimeError: If following a redirect would send the request under
-                another method, so a command never arrives as a read.
+                another method, so a command never arrives as a read, or if
+                the body is larger than ``max_bytes`` once decompressed, which
+                is noticed while it arrives and not after.
         """
         ...
 

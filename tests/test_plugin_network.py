@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gzip
 import io
 import json
 import zipfile
@@ -16,7 +17,7 @@ import pytest
 from fakes import FakePlatform, FakeSocket, redirected_socket
 
 from printguard.engine import oauth, plugins, sockets
-from printguard.engine.engine import Engine
+from printguard.engine.engine import MAX_PLUGIN_BODY, Engine
 from printguard.server.platform import ServerPlatform
 
 API = "https://93.184.216.34"
@@ -67,8 +68,17 @@ async def start_sign_in(engine: Engine, origin: str = "http://hub.example.com:80
 
 
 def over_httpx(platform: FakePlatform, handler) -> None:
-    """Sends a fake platform's requests through the hub's real HTTP method."""
-    hub = SimpleNamespace(_client=httpx.AsyncClient(follow_redirects=True, transport=httpx.MockTransport(handler)))
+    """Sends a fake platform's requests through the hub's real HTTP method.
+
+    Each answer goes back as a stream, the way one off a socket does, since a
+    capped request reads its body as it arrives.
+    """
+
+    def streamed(request: httpx.Request) -> httpx.Response:
+        answer = handler(request)
+        return httpx.Response(answer.status_code, headers=answer.headers, stream=answer.stream)
+
+    hub = SimpleNamespace(_client=httpx.AsyncClient(follow_redirects=True, transport=httpx.MockTransport(streamed)))
     platform.http = lambda method, url, **kwargs: ServerPlatform.http(hub, method, url, **kwargs)
 
 
@@ -94,6 +104,65 @@ async def test_a_redirect_is_handed_back_to_the_plugin_and_never_followed() -> N
     assert [e["status"] for e in answer if e["event"] == "http"] == [302]
     assert asked == [(f"{API}/v1/hop", "s3cr3t")], "the plugin's request went on to an address it never declared"
     assert followed == (200, {"wifi_password": "hunter2"}), "an adapter's request stopped following redirects"
+
+
+@pytest.mark.parametrize("kind", ["application/json", "text/plain", "application/octet-stream"])
+@pytest.mark.parametrize("gzipped", [True, False])
+async def test_an_answer_over_the_cap_fails_the_request_whatever_it_holds(kind: str, gzipped: bool) -> None:
+    """A parsed JSON answer used to go to every dashboard whole, however large."""
+    body = b"[" + b"0," * MAX_PLUGIN_BODY + b"0]"
+    sent = gzip.compress(body) if gzipped else body
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=sent, headers={"Content-Type": kind, **({"Content-Encoding": "gzip"} if gzipped else {})})
+
+    platform = FakePlatform()
+    over_httpx(platform, serve)
+    async with engine_with(platform, manifest("net", urls=[f"{API}/v1/*"])) as engine:
+        with pytest.raises(RuntimeError, match=f"93.184.216.34 answered with more than {MAX_PLUGIN_BODY // 1024} KB"):
+            await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/feed", "binary": kind.endswith("stream")})
+
+
+@pytest.mark.parametrize("gzipped", [True, False])
+async def test_an_answer_at_the_cap_arrives_whole(gzipped: bool) -> None:
+    body = json.dumps("a" * (MAX_PLUGIN_BODY - 2)).encode()
+    asked: list[str] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/feed":
+            asked.append(request.headers["accept-encoding"])
+        return httpx.Response(200, content=gzip.compress(body) if gzipped else body, headers={"Content-Encoding": "gzip"} if gzipped else {})
+
+    platform = FakePlatform()
+    over_httpx(platform, serve)
+    async with engine_with(platform, manifest("net", urls=[f"{API}/v1/*"])) as engine:
+        answer = await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/feed", "headers": {"accept-encoding": "br"}})
+
+    assert next(e["body"] for e in answer if e["event"] == "http") == "a" * (MAX_PLUGIN_BODY - 2)
+    assert asked == ["gzip"], "the plugin asked for an encoding nothing here can count while it inflates"
+
+
+async def test_a_compressed_answer_is_refused_while_it_inflates() -> None:
+    """48 MB of zeros is 47 KB of gzip, and httpx inflates each chunk whole before handing it over."""
+    bomb = gzip.compress(bytes(48 * 1024 * 1024))
+    handed_over: list[int] = []
+
+    class Counted(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for at in range(0, len(bomb), 1024):
+                handed_over.append(at)
+                yield bomb[at : at + 1024]
+
+    hub = SimpleNamespace(
+        _client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, headers={"Content-Encoding": "gzip"}, stream=Counted())))
+    )
+
+    with pytest.raises(RuntimeError, match="answered with more than 256 KB"):
+        await ServerPlatform.http(hub, "GET", f"{API}/v1/feed", max_bytes=MAX_PLUGIN_BODY)
+    assert len(handed_over) == 1, "the answer was read on after it had passed the cap"
+    assert (await ServerPlatform.http(hub, "GET", f"{API}/v1/feed", binary=True))[1] == base64.b64encode(bytes(48 * 1024 * 1024)).decode(), (
+        "a printer's or notifier's request was capped too"
+    )
 
 
 async def test_a_socket_redirected_off_its_declared_address_is_refused() -> None:
@@ -268,6 +337,56 @@ async def test_a_plugin_that_loses_its_network_grant_loses_its_sockets() -> None
             await engine.request({"cmd": "plugin.socket", "id": "demo", "action": "send", "tag": "feed", "text": "still here"})
 
     assert platform.sockets[0].sent == []
+
+
+@pytest.mark.parametrize(
+    "stood_down",
+    [
+        {"cmd": "plugin.update", "id": "demo", "patch": {"enabled": False}},
+        {"cmd": "plugin.update", "id": "demo", "patch": {"granted": ["notify"]}},
+        {"cmd": "plugin.remove", "id": "demo"},
+    ],
+)
+async def test_a_socket_still_connecting_when_its_plugin_is_stood_down_is_closed_as_it_lands(stood_down: dict) -> None:
+    platform = SlowPlatform()
+    async with engine_with(platform, manifest("net", "notify", urls=["wss://93.184.216.34/*"])) as engine:
+        opening = asyncio.ensure_future(engine.request({"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "feed", "url": "wss://93.184.216.34/feed"}))
+        await asyncio.sleep(0.05)
+        await engine.request(stood_down)
+        platform.connect.set()
+        await opening
+
+        assert platform.sockets[0].closed, "a socket that was mid-handshake outlived the grant it was opened under"
+        with pytest.raises(RuntimeError):
+            await engine.request({"cmd": "plugin.socket", "id": "demo", "action": "send", "tag": "feed", "text": "still here"})
+
+    assert platform.sockets[0].sent == []
+
+
+async def test_a_plugin_that_fails_loses_its_sockets() -> None:
+    platform = FakePlatform()
+    async with engine_with(platform, manifest("net", urls=["wss://93.184.216.34/*"])) as engine:
+        await engine.request({"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "feed", "url": "wss://93.184.216.34/feed"})
+        engine.plugin_failed("demo", "ran out of fuel")
+
+        with pytest.raises(RuntimeError, match="may not reach the network"):
+            await engine.request({"cmd": "plugin.socket", "id": "demo", "action": "send", "tag": "feed", "text": "still here"})
+        await asyncio.sleep(0)
+        assert platform.sockets[0].closed and platform.sockets[0].sent == []
+
+
+async def test_a_socket_closing_late_does_not_cost_the_plugin_the_one_it_opened_since() -> None:
+    """A socket the broker has lost track of is one no later revocation can close."""
+    platform = FakePlatform()
+    async with engine_with(platform, manifest("net", urls=["wss://93.184.216.34/*"])) as engine:
+        feed = {"cmd": "plugin.socket", "id": "demo", "tag": "feed", "url": "wss://93.184.216.34/feed"}
+        await engine.request({**feed, "action": "open"})
+        await engine.request({**feed, "action": "close"})
+        await engine.request({**feed, "action": "open"})
+        platform.sockets[0].arrived("closed", "")
+        await engine.request({"cmd": "plugin.update", "id": "demo", "patch": {"enabled": False}})
+
+    assert platform.sockets[1].closed
 
 
 async def test_a_background_that_is_not_a_picture_clears_it() -> None:
