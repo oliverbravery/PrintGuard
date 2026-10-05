@@ -1940,7 +1940,8 @@ async def test_an_event_carrying_something_a_permission_covers_reaches_nobody_el
     assert plugins.project_event(still, ["state:read"]) is None
     assert plugins.project_event(history, ["history:read"]) is not None
     assert plugins.project_event(history, []) is None
-    assert plugins.project_event({"event": "alert", "monitor_id": "m1"}, []) is not None
+    assert plugins.project_event({"event": "alert", "monitor_id": "m1"}, ["state:read"]) is not None
+    assert plugins.project_event({"event": "alert", "monitor_id": "m1"}, []) is None
 
 
 async def test_a_plugin_draws_its_own_panel_and_ships_the_media_for_it() -> None:

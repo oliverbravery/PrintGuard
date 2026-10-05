@@ -65,11 +65,9 @@ const ctx = {
   background(image) { __effects.push({ kind: "background", image: String(image) }); },
   log(text) { __effects.push({ kind: "log", text: String(text) }); },
 };
-(function (plugin) {
-"""
-
-DRIVER = """
-})(plugin);
+delete globalThis.print;
+delete globalThis.console;
+new Function("plugin", '"use strict";' + __input.worker)(plugin);
 let __result = null;
 if (__input.kind === "event" || __input.kind === "tick") {
   const event = __input.event;
@@ -88,10 +86,18 @@ if (__input.kind === "event" || __input.kind === "tick") {
   __result = __hooks.gate(__input.request, ctx) === true;
 }
 __io.out.puts(JSON.stringify({ store: ctx.store, effects: __effects, result: __result }));
+__io.out.flush();
+__io.exit(0);
 """
-"""The worker runs inside a function, so its own ``import`` is a syntax error and
-QuickJS's std and os modules stay out of reach. Without that it could write to
-stdout, which is the sandbox's own answer channel."""
+"""What runs around a worker, which is handed over as text and compiled with
+``new Function``. A function made that way sees globals and nothing of this
+module, so the worker cannot name the std module or the bindings above, and its
+own ``import`` is a syntax error. The driver exits as soon as it has answered,
+before any job runs, so an ``import()`` never resolves either.
+
+None of that makes the answer trustworthy. A worker shares the globals the
+driver uses, so everything in an answer is treated as the worker's own word and
+checked against its grants."""
 
 
 class Sandbox:
@@ -102,7 +108,7 @@ class Sandbox:
         self._module = module
         self._linker = linker
         self.plugin = plugin
-        self.code = SHIM + plugin.sources["worker.js"] + DRIVER
+        self._worker = plugin.sources["worker.js"]
 
     def call(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Runs the worker once and returns its parsed output.
@@ -113,11 +119,11 @@ class Sandbox:
         """
         with tempfile.TemporaryDirectory() as work:
             paths = {name: Path(work) / name for name in ("in", "out", "err")}
-            paths["in"].write_text(json.dumps(payload))
+            paths["in"].write_text(json.dumps({**payload, "worker": self._worker}))
             paths["out"].touch()
             paths["err"].touch()
             wasi = wasmtime.WasiConfig()
-            wasi.argv = ["qjs", "-e", self.code]
+            wasi.argv = ["qjs", "-e", SHIM]
             wasi.stdin_file = str(paths["in"])
             wasi.stdout_file = str(paths["out"])
             wasi.stderr_file = str(paths["err"])
@@ -169,6 +175,7 @@ class WasmPluginRuntime:
         self._state: dict[str, Any] = {}
         self._ticker: asyncio.Task[None] | None = None
         self._busy: set[str] = set()
+        self._failed_gates: set[str] = set()
         self._lock = asyncio.Lock()
 
     def attach(self, request: Callable[..., Awaitable[Any]], failed: Callable[[str, str], None]) -> None:
@@ -198,9 +205,15 @@ class WasmPluginRuntime:
             if seen:
                 asyncio.ensure_future(self._invoke(sandbox, "event", event=seen))
 
-    async def reload(self, running: list[Plugin]) -> None:
-        """Starts sandboxes for plugins with a worker and drops the rest."""
+    async def reload(self, running: list[Plugin], failed_gates: set[str]) -> None:
+        """Starts sandboxes for plugins with a worker and drops the rest.
+
+        Args:
+            running: The enabled plugins.
+            failed_gates: Plugins holding ``gate`` that stopped on a failure.
+        """
         async with self._lock:
+            self._failed_gates = set(failed_gates)
             wanted = {p.id: p for p in running if "worker.js" in p.sources}
             self._sandboxes = {
                 plugin_id: Sandbox(self._engine, self._module, self._linker, plugin)
@@ -231,9 +244,12 @@ class WasmPluginRuntime:
     async def authorise(self, request: dict[str, Any]) -> bool | None:
         """Asks the gating plugin whether a request may proceed.
 
-        A gate that fails to answer refuses, so a broken plugin cannot open the
-        hub up. ``PRINTGUARD_PLUGINS=off`` is the way back in.
+        A gate that fails to answer refuses, and goes on refusing after it has
+        been disabled for it, so a broken plugin cannot open the hub up.
+        ``PRINTGUARD_PLUGINS=off`` is the way back in.
         """
+        if self._failed_gates:
+            return False
         gates = [s for s in self._sandboxes.values() if s.plugin.may("gate")]
         if not gates:
             return None
@@ -277,6 +293,8 @@ class WasmPluginRuntime:
             output = await asyncio.wait_for(asyncio.to_thread(sandbox.call, request), CALL_TIMEOUT_S)
         except Exception as exc:
             self._sandboxes.pop(plugin.id, None)
+            if plugin.may("gate"):
+                self._failed_gates.add(plugin.id)
             if self._failed:
                 self._failed(plugin.id, str(exc))
             logger.warning("plugin %s worker failed: %s", plugin.id, exc)

@@ -87,6 +87,31 @@ def test_worker_cannot_import_its_way_out(runtime: WasmPluginRuntime) -> None:
         call(runtime, "import * as std from 'qjs:std'; plugin.on('alert', () => std.out.puts('mine'));")
 
 
+def test_worker_cannot_name_the_sandbox_around_it(runtime: WasmPluginRuntime) -> None:
+    """The worker is compiled apart from the shim, so it sees globals and nothing else."""
+    names = ["__io", "__input", "__effects", "__hooks", "__assets", "ctx", "print", "console"]
+    output = call(
+        runtime,
+        f"const seen = {{}}; for (const name of {json.dumps(names)}) seen[name] = eval('typeof ' + name);"
+        "plugin.on('alert', (event, ctx) => { ctx.store = seen; });",
+    )
+
+    assert output["store"] == dict.fromkeys(names, "undefined")
+
+
+def test_a_dynamic_import_never_resolves(runtime: WasmPluginRuntime) -> None:
+    """``import()`` is an expression, so it parses. The driver exits before it can load anything."""
+    output = call(
+        runtime,
+        """
+        import('qjs:std').then((std) => { std.out.seek(0); std.out.puts('{"store":{"forged":true},"effects":[],"result":true}'); });
+        plugin.on('alert', (event, ctx) => { ctx.store.mine = true; });
+        """,
+    )
+
+    assert output == {"store": {"mine": True}, "effects": [], "result": None}
+
+
 def test_worker_has_no_filesystem_and_no_network(runtime: WasmPluginRuntime) -> None:
     output = call(
         runtime,
@@ -149,8 +174,8 @@ WORKER_MANIFEST = {
     "id": "guard",
     "name": "Guard",
     "version": "1.0.0",
-    "permissions": ["monitor:control", "routes", "gate"],
-    "reasons": {"monitor:control": "to retune", "routes": "to serve", "gate": "to authorise"},
+    "permissions": ["state:read", "monitor:control", "routes", "gate"],
+    "reasons": {"state:read": "to hear alerts", "monitor:control": "to retune", "routes": "to serve", "gate": "to authorise"},
     "events": ["alert"],
 }
 
@@ -226,6 +251,57 @@ async def test_a_plugin_that_fails_is_disabled_rather_than_left_running(runtime:
 
         plugin = engine.plugins.get("guard")
         assert plugin.enabled is False and plugin.failure
+
+
+GATE_REQUEST = {"method": "GET", "path": "/", "query": {}, "headers": {"cookie": "session=ok"}, "body": None}
+GATE = "plugin.gate((request) => request.headers.cookie.includes('session=ok'));"
+GATE_MANIFEST = {"id": "doorman", "version": "1.0.0", "permissions": ["gate"], "reasons": {"gate": "to sign you in"}}
+
+
+async def test_a_gate_that_fails_goes_on_refusing_until_somebody_deals_with_it(runtime: WasmPluginRuntime) -> None:
+    """Disabling a failed gate must not be the thing that opens the hub."""
+    platform = HostedPlatform(runtime)
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        await install_and_accept(engine, GATE_MANIFEST, GATE)
+        assert await runtime.authorise(GATE_REQUEST) is True
+        assert await runtime.authorise({**GATE_REQUEST, "headers": {}}) is False, "a gate that threw let the request through"
+        plugin = engine.plugins.get("doorman")
+        assert plugin.enabled is False and plugin.failure
+        assert await runtime.authorise(GATE_REQUEST) is False, "the hub opened once its gate had been disabled"
+    finally:
+        await engine.stop()
+
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        assert await runtime.authorise(GATE_REQUEST) is False, "a restart opened a hub whose gate had failed"
+        await restarted.handle({"cmd": "plugin.update", "id": "doorman", "patch": {"enabled": True}})
+        assert await runtime.authorise(GATE_REQUEST) is True
+        await runtime.authorise({**GATE_REQUEST, "headers": {}})
+        await restarted.handle({"cmd": "plugin.remove", "id": "doorman"})
+        assert await runtime.authorise(GATE_REQUEST) is None
+    finally:
+        await restarted.stop()
+
+
+async def test_a_worker_holding_nothing_hears_nothing_the_dashboard_shows(runtime: WasmPluginRuntime) -> None:
+    names = ["result", "device", "alert", "warning", "error"]
+    listener = {"id": "listener", "version": "1.0.0", "permissions": [], "events": names}
+    hears = f"for (const name of {json.dumps(names)}) plugin.on(name, (event, ctx) => {{ ctx.store[name] = event; }});"
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, listener, hears)
+        engine.emit({"event": "result", "monitor_id": "m1", "score": 0.93})
+        engine.emit({"event": "device", "printer_id": "p1", "job": "prototype_v7.gcode"})
+        engine.emit({"event": "error", "message": "ntfy notification failed"})
+        await asyncio.sleep(0.6)
+
+        assert engine.plugins.get("listener").config == {}
+    finally:
+        await engine.stop()
 
 
 async def test_a_worker_cannot_borrow_another_plugins_network_grant(runtime: WasmPluginRuntime) -> None:

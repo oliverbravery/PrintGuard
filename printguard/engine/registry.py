@@ -401,6 +401,7 @@ class Plugin:
             "secrets": self.secrets,
             "verified": self.verified,
             "enabled": self.enabled,
+            "failure": self.failure,
             "installed": self.installed,
         }
 

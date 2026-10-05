@@ -713,9 +713,12 @@ class ServerPlatform:
         data: bytes | None = None,
         binary: bool = False,
         timeout: float = 10.0,
+        follow_redirects: bool = True,
     ) -> tuple[int, Any]:
         """Performs an HTTP request with httpx, base64 encoding a binary reply."""
-        resp = await self._client.request(method, url, headers=headers, json=json, content=data, timeout=timeout)
+        resp = await self._client.request(
+            method, url, headers=headers, json=json, content=data, timeout=timeout, follow_redirects=follow_redirects
+        )
         if binary:
             return resp.status_code, base64.b64encode(resp.content).decode()
         try:

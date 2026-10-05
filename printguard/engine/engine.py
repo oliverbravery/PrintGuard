@@ -215,7 +215,7 @@ class Engine:
         if runtime is not None:
             runtime.attach(self.request, self.plugin_failed)
             self.add_sink(runtime.on_event)
-            await runtime.reload(self.plugins.running())
+            await self._reload_plugins()
         self._tasks = [
             asyncio.ensure_future(self.scheduler.run()),
             asyncio.ensure_future(self.watchdog.poll_devices()),
@@ -1182,6 +1182,7 @@ class Engine:
             "plugin %s v%s installed (%s, %s)",
             manifest["id"], manifest["version"], source["kind"], "verified" if entry else "unverified",
         )
+        await self.sockets.drop_for(manifest["id"])
         await self._reload_plugins()
 
     async def _cmd_plugin_remove(self, message: dict[str, Any]) -> None:
@@ -1191,6 +1192,9 @@ class Engine:
     async def _cmd_plugin_update(self, message: dict[str, Any]) -> None:
         """Applies a patch, refusing to run a plugin with unaccepted permissions.
 
+        A plugin that loses a network permission loses the sockets it opened
+        under it.
+
         Raises:
             PermissionError: If enabling one that asks for more than it holds.
         """
@@ -1199,7 +1203,10 @@ class Engine:
             raise KeyError(f"no plugin {message['id']}")
         patch = message.get("patch", {})
         if "granted" in patch:
+            held = set(plugin.granted)
             plugin.granted = [p for p in patch["granted"] if p in plugin.manifest["permissions"]]
+            if (held - set(plugin.granted)) & {"net", "net:local"}:
+                await self.sockets.drop_for(plugin.id)
         if "enabled" in patch:
             if patch["enabled"] and not plugins.consented(plugin.manifest, plugin.granted):
                 raise PermissionError(f"{plugin.id} asks for permissions that have not been accepted")
@@ -1278,12 +1285,19 @@ class Engine:
         Neither sandbox has a network, so this is the only way out, and it opens
         only for the patterns the manifest declares and the user granted. The
         answer comes back as an ``http`` event under the plugin's own tag.
+
+        The address is checked again once its secrets are filled in, and a
+        redirect is handed back as the answer, never followed, so neither can
+        take the request somewhere the plugin did not declare.
         """
-        plugin = await self._network_allows(message["id"], str(message.get("url", "")))
+        url = str(message.get("url", ""))
+        if plugins.addresses_a_secret(url):
+            raise PermissionError(f"plugin {message['id']} may only use a secret in the path of {url}")
+        plugin = await self._network_allows(message["id"], url)
         if not self._within_rate(plugin.id):
             raise PermissionError(f"plugin {plugin.id} is making requests faster than {PLUGIN_RATE_LIMIT} a minute")
         await self._refresh_sign_in(plugin)
-        request = {"url": str(message.get("url", "")), "headers": message.get("headers") or None, "json": message.get("json")}
+        request = {"url": url, "headers": message.get("headers") or None, "json": message.get("json")}
         blank = plugins.missing_secrets(request, plugin.secrets)
         if blank:
             raise ValueError(
@@ -1292,6 +1306,11 @@ class Engine:
                 else f"{plugin.id} needs {', '.join(sorted(blank))} filled in first"
             )
         filled = plugins.fill_secrets(request, plugin.secrets)
+        if filled["url"] != url:
+            try:
+                await self._network_allows(plugin.id, filled["url"])
+            except PermissionError:
+                raise PermissionError(f"plugin {plugin.id} did not declare where its secrets take {url}") from None
         status, body = await self.platform.http(
             str(message.get("method", "GET")).upper(),
             filled["url"],
@@ -1299,6 +1318,7 @@ class Engine:
             json=filled["json"],
             binary=message.get("binary") is True,
             timeout=PLUGIN_TIMEOUT_S,
+            follow_redirects=False,
         )
         self.emit(
             {
@@ -1390,6 +1410,9 @@ class Engine:
     def _provider(plugin: Plugin) -> dict[str, Any]:
         """A plugin's sign-in, with the client id of the app the user registered.
 
+        It carries whether the plugin may reach this network, which is what a
+        token endpoint that resolves here needs.
+
         Raises:
             PermissionError: If nobody has typed one in.
         """
@@ -1397,7 +1420,7 @@ class Engine:
         client_id = plugin.secrets.get(oauth.CLIENT_ID, "")
         if not client_id:
             raise PermissionError(f"{plugin.id} needs the client id of a {provider['label']} app you registered")
-        return {**provider, "client_id": client_id}
+        return {**provider, "client_id": client_id, "local": plugin.may("net:local")}
 
     async def _cmd_plugin_oauth(self, message: dict[str, Any]) -> None:
         """Starts a plugin's sign-in, or forgets what an earlier one returned."""
@@ -1426,6 +1449,7 @@ class Engine:
             return None
         plugin.secrets = {**plugin.secrets, **await self.oauth.finish(state, code, self._provider(plugin))}
         logger.info("plugin %s signed in", plugin.id)
+        self.save()
         self._broadcast(self.state_event())
         return plugin.manifest["name"]
 
@@ -1436,9 +1460,12 @@ class Engine:
         renewed = await self.oauth.refreshed(self._provider(plugin), plugin.secrets)
         if renewed is not None:
             plugin.secrets = renewed
+            self.save()
 
     async def _cmd_plugin_effect(self, message: dict[str, Any]) -> None:
         """Hands a plugin's effect to the dashboards that can perform it.
+
+        A background that is not a picture is handed on as none, which clears it.
 
         Raises:
             PermissionError: If the plugin was not granted what the effect needs,
@@ -1452,6 +1479,8 @@ class Engine:
             raise PermissionError(f"plugin {message.get('id')!r} may not ask a dashboard for {effect.get('kind')!r}")
         if len(plugins.canonical(effect)) > plugins.MAX_EFFECT_BYTES:
             raise ValueError(f"a plugin effect is {plugins.MAX_EFFECT_BYTES // 1024 // 1024} MB at most")
+        if effect["kind"] == "background":
+            effect = {**effect, "image": plugins.background_image(effect.get("image"))}
         self.emit({"event": "plugin_effect", "id": plugin.id, "effect": effect, "req_id": message.get("req_id")})
 
     async def _refresh_catalogue(self, quiet: bool = False) -> None:
@@ -1467,13 +1496,14 @@ class Engine:
 
         Sockets belong to the plugin that opened them, so anything no longer
         running loses its connections rather than keeping them open behind a
-        grant that has gone.
+        grant that has gone. A gate that failed is named too, so the runtime
+        keeps refusing for it until somebody enables, reinstalls or removes it.
         """
         running = self.plugins.running()
         await self.sockets.drop_all({plugin.id for plugin in running})
         runtime = self.platform.plugin_runtime
         if runtime is not None:
-            await runtime.reload(running)
+            await runtime.reload(running, {plugin.id for plugin in self.plugins.values() if plugin.failure and plugin.may("gate")})
 
     def plugin_failed(self, plugin_id: str, reason: str) -> None:
         """Disables a plugin its runtime could not keep running, and says why."""
