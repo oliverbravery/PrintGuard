@@ -71,7 +71,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| A panel says it is waiting for permissions | The plugin was installed without granting what it asks for | Tick them under Permissions, in the Plugins tab in Settings |
+| A plugin says it is waiting on permissions | It was installed, or updated to ask for more, and you haven't accepted what it asks for | Enable it in the Plugins tab in Settings and accept the list. [Plugins](plugins.md) |
 | A plugin stopped on its own, with a reason | Its sandbox failed, hung or ran out of memory. PrintGuard disables a plugin rather than letting it affect anything else | The reason is on the plugin in the Plugins tab in Settings and in the log. Re-enable it once its author has fixed it |
 | Installing from a repository fails | The path holds no `plugin.json`, the reference does not exist, or GitHub is rate-limiting an unauthenticated request | Check the path points at the plugin's own folder, and try again in a few minutes |
 | A plugin installs as third party rather than verified | The catalogue vouches for different bytes, or does not list it at all | Expected for anything unreviewed. If it should be verified, its catalogue entry needs re-pinning |

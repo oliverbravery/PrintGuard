@@ -46,7 +46,7 @@ in the acceleration runtime they bundle.
 | `latest-nvidia` | `amd64` | TensorRT RTX execution provider and the CUDA 12 runtime | You have an RTX 30 series or newer and the NVIDIA Container Toolkit |
 
 Versioned tags exist alongside them: `X.Y.Z`, `X.Y`, and the same three suffixes, for
-example `2.3.8-intel`. Pin `X.Y` if you want patch updates without surprises.
+example `2.5.1-intel`. Pin `X.Y` if you want patch updates without surprises.
 
 > [!NOTE]
 > The Intel GPU compute runtime is roughly 370 MB of compiler and driver libraries that do
@@ -71,7 +71,7 @@ carries the runtimes for its platform.
 
 ## Model runtimes
 
-Hub and desktop mode carry the model twice, once for each runtime, and pick between them:
+PrintGuard carries the model twice, once for each runtime, and picks between them:
 
 | Runtime | What it is | Path used |
 |---|---|---|

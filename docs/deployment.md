@@ -18,6 +18,8 @@ your trusted network.
 - [Origin checking](#origin-checking)
 - [Plugins](#plugins)
 - [Hardening checklist](#hardening-checklist)
+- [Environment variables](#environment-variables)
+- [Your data and backups](#your-data-and-backups)
 - [Staying up to date](#staying-up-to-date)
 
 > [!CAUTION]
@@ -152,8 +154,9 @@ host, list your public origin:
 
 ## Plugins
 
-Plugins run in a sandbox with no network and no reach into your credentials, cameras or
-tokens. Two permissions still change what an exposed hub looks like:
+Plugins run in a sandbox and reach only what you grant them, which
+[permissions](plugins.md#permissions) lists. Two permissions change what an exposed hub looks
+like:
 
 | Permission | What it means for an exposed hub |
 |---|---|
@@ -184,19 +187,44 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | Grant a plugin nothing you would not grant its author | Especially **Control printers** and **Authorise every request**. `PRINTGUARD_PLUGINS=off` is the way back from a lockout |
 | Keep the image current | `latest` moves on every release |
 
-## What the hub reaches out to
+## Environment variables
 
-| Host | When |
+Everything else is set from the dashboard. These are the ones a deployment sets.
+
+| Variable | Default | Does |
+|---|---|---|
+| `PRINTGUARD_ORIGINS` | Unset | Extra origins the hub accepts WebSockets from, comma-separated. See [origin checking](#origin-checking) |
+| `PRINTGUARD_PLUGINS` | On | `off` starts the hub with every plugin switched off |
+| `PRINTGUARD_CAMERAS` | `auto` in the image | `off` leaves [cameras passed into the container](cameras.md#cameras-plugged-into-the-hub) to be added by hand |
+| `PORT` | `8000` | The port the hub listens on |
+| `DATA_DIR` | `/data` in the image | Where state and print files are kept |
+| `LOG_LEVEL` | `INFO` | `DEBUG` adds command traces and exception tracebacks |
+| `LOG_FILE` | Unset in the image | Also writes a rotating log file at this path. The desktop app sets it |
+| `NVIDIA_VISIBLE_DEVICES` | Every GPU | Picks one card on the [`latest-nvidia`](hardware.md#nvidia-gpu) image |
+
+## Your data and backups
+
+Everything PrintGuard keeps is in its data directory.
+
+| Path | Holds |
 |---|---|
-| `api.github.com` | Once a day for the update check, and when you browse the plugin store |
-| `*.ingest.de.sentry.io` | Only when you send a bug report |
-| `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
-| Your printers, cameras, notification services and MQTT broker | As you configure them |
+| `state.json` | Cameras, printers, monitors, settings, themes and layout, with printer passwords, notifier keys and API token hashes. Readable only by the account running the hub |
+| `prints/` | The [print library](printers.md#sending-prints) |
+
+| Install | Data directory |
+|---|---|
+| Docker | The `/data` volume |
+| macOS app | `~/Library/Application Support/PrintGuard` |
+| Windows app | `%LOCALAPPDATA%\PrintGuard\PrintGuard` |
+
+To back up, copy that directory with the hub stopped. To move to another machine, put the copy
+in place before the first start. Risk history is held in memory and isn't part of it.
 
 ## Staying up to date
 
 The hub checks GitHub releases once a day and the header's version chip turns into an update
-badge. Open it to read the changelog for any release, then update:
+badge. Open it to read the changelog for any release, then update. The check sends nothing about
+you, and the **Updates** tab in Settings turns it off.
 
 ```bash
 docker compose pull && docker compose up -d --wait
