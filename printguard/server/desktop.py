@@ -198,6 +198,7 @@ def _run_webview(log_records: multiprocessing.Queue[logging.LogRecord], **conten
                 webbrowser.open(contents["url"])
                 return
         webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+        webview.settings["ALLOW_DOWNLOADS"] = True
         webview.settings["REMOTE_DEBUGGING_PORT"] = os.environ.get("PRINTGUARD_DEBUG_PORT")
         webview.create_window(APP_NAME, width=1280, height=820, **contents)
         webview.start(private_mode=False, storage_path=os.path.join(os.environ["DATA_DIR"], "webview"))
