@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type SettingsTabId, useStore } from "../store";
 import { applyTheme, beginPreview, endPreview, GLASS_DEFAULT, PALETTES } from "../theme";
 import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
+import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
 import { PluginsTab } from "./PluginsTab";
 import { SettingsFooter } from "./SettingsFooter";
@@ -22,6 +23,12 @@ function Swatch({ colors }: { colors: CustomTheme["colors"] }) {
       ))}
     </span>
   );
+}
+
+function leavePreview() {
+  endPreview();
+  const saved = useStore.getState().engine?.settings;
+  applyTheme(saved?.theme ?? "system", saved?.themes ?? [], saved?.glass, true);
 }
 
 export function SettingsDialog() {
@@ -62,9 +69,8 @@ export function SettingsDialog() {
   const newTheme = (base: ThemeBase) =>
     setEditing({ id: "t" + Date.now().toString(36), name: "", base, colors: { ...PALETTES[base] } });
   const cancelEdit = () => {
-    endPreview();
+    leavePreview();
     setEditing(null);
-    applyTheme(theme, themes, glass, true);
   };
   const saveTheme = () => {
     if (!editing) return;
@@ -86,6 +92,15 @@ export function SettingsDialog() {
     beginPreview();
     applyTheme(editing.id, upsertTheme(themes, editing), glass, true);
   }, [editing]);
+
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+  useEffect(
+    () => () => {
+      if (editingRef.current) leavePreview();
+    },
+    [],
+  );
 
   const desktopApp = "pywebview" in window;
   const channels = (engine?.notifiers ?? []).filter((n) => !n.desktop_only || desktopApp);
@@ -362,9 +377,7 @@ export function SettingsDialog() {
                 </span>
                 <div className="flex items-center gap-2">
                   <code className="mono text-[0.68rem] text-text-0 break-all flex-1">{createdToken.secret}</code>
-                  <button className="btn" onClick={() => navigator.clipboard?.writeText(createdToken.secret)}>
-                    Copy
-                  </button>
+                  <CopyButton text={createdToken.secret} />
                 </div>
               </div>
             )}

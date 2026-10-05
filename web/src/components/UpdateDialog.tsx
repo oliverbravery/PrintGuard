@@ -1,6 +1,7 @@
 import { renderMarkdown } from "../markdown";
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
+import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
 
 const PULL_COMMAND = "docker compose pull && docker compose up -d";
@@ -98,9 +99,7 @@ export function UpdateDialog() {
                 </p>
                 <div className="flex items-center gap-2">
                   <code className="mono text-[0.68rem] text-text-0 break-all flex-1">{PULL_COMMAND}</code>
-                  <button className="btn" onClick={() => navigator.clipboard?.writeText(PULL_COMMAND)}>
-                    Copy
-                  </button>
+                  <CopyButton text={PULL_COMMAND} />
                 </div>
               </>
             )}
