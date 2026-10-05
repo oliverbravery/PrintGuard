@@ -410,7 +410,7 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
     });
   const wear = (opacity: number, tone: number) =>
     page.evaluate(async (glass) => {
-      const { applyTheme } = await import("/src/theme.ts");
+      const { applyTheme } = await import("/src/theme.ts" as string);
       applyTheme("glass", [], glass);
     }, { opacity, tone });
 
