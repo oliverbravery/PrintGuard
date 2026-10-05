@@ -18,6 +18,8 @@ const BACKGROUND_IMAGE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+
 const DOWNLOAD_URL_LIFETIME_MS = 60_000;
 const MAX_NOTICE_CHARS = 200;
 const UPDATE_DEBOUNCE_MS = 250;
+const RECONNECT_DELAY_MS = 1500;
+const HUB_SILENCE_LIMIT_MS = 10_000;
 const updateTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
 type OptimisticKind = "camera" | "monitor" | "settings";
@@ -145,6 +147,7 @@ interface PgStore {
   openSettings(tab?: SettingsTabId): void;
   openDetail(id: string | null): void;
   openStats(id: string | null): void;
+  fetchHistory(monitorId: string): void;
   openReview(id: string | null): void;
   openPrint(id: string | null): void;
   stagePrints(files: File[]): void;
@@ -173,18 +176,34 @@ function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: () 
     const opening = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`);
     socket = opening;
     let connected = false;
-    opening.onopen = () => {
-      log("info", "hub socket connected");
-      connected = true;
-      onUp();
-    };
-    opening.onmessage = (msg) => onEvent(JSON.parse(msg.data));
-    opening.onclose = () => {
+    let silence: ReturnType<typeof setTimeout>;
+    const drop = () => {
+      clearTimeout(silence);
+      opening.onclose = opening.onmessage = null;
       if (closed) return;
       log("warn", "hub socket closed, reconnecting");
       if (connected) onDown();
-      setTimeout(open, 1500);
+      setTimeout(open, RECONNECT_DELAY_MS);
     };
+    const expectTick = () => {
+      clearTimeout(silence);
+      silence = setTimeout(() => {
+        log("warn", "hub socket went silent");
+        opening.close();
+        drop();
+      }, HUB_SILENCE_LIMIT_MS);
+    };
+    opening.onopen = () => {
+      log("info", "hub socket connected");
+      connected = true;
+      expectTick();
+      onUp();
+    };
+    opening.onmessage = (msg) => {
+      expectTick();
+      onEvent(JSON.parse(msg.data));
+    };
+    opening.onclose = drop;
   };
   open();
   return {
@@ -453,14 +472,19 @@ export const useStore = create<PgStore>((set, get) => {
           if (monitor.result) history = appendScore(history, monitor.id, monitor.result);
         }
         applyTheme(engine.settings?.theme ?? "system", engine.settings?.themes ?? [], engine.settings?.glass);
-        set({
+        const monitorIds = new Set(server.monitors.map((m) => m.id));
+        const present = (monitorId: string | null) => (monitorId !== null && monitorIds.has(monitorId) ? monitorId : null);
+        set((s) => ({
           engine,
           history,
           optimistic,
+          detailId: present(s.detailId),
+          statsMonitorId: present(s.statsMonitorId),
+          reviewId: server.reviews.some((r) => r.id === s.reviewId && monitorIds.has(r.monitor_id)) ? s.reviewId : null,
           phase: "ready",
           ...(cleared ? { savedAt: Date.now() } : {}),
           ...(firstRun ? { dialog: "intro" as const } : {}),
-        });
+        }));
         if (!resumed) {
           resumed = true;
           void resumePublishers(server.cameras, (reason) => get().toast("error", `publishing stopped: ${reason}`));
@@ -495,7 +519,6 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       case "result":
         set((s) => ({ history: appendScore(s.history, event.monitor_id, { ts: event.ts, score: event.score }) }));
-        if (get().statsMonitorId === event.monitor_id) get().send({ cmd: "history.get", monitor_id: event.monitor_id });
         break;
       case "alert": {
         const name = get().engine?.monitors.find((m) => m.id === event.monitor_id)?.name ?? "monitor";
@@ -702,6 +725,7 @@ export const useStore = create<PgStore>((set, get) => {
       const req_id = nextReqId();
       const cmdType = cmd.cmd as string;
       if (get().link?.send({ ...cmd, req_id })) set((s) => ({ pending: { ...s.pending, [cmdType]: { req_id, cmd: cmdType } } }));
+      else get().toast("error", "The hub is reconnecting, so that wasn't sent. Try again in a moment.");
       return req_id;
     },
 
@@ -770,7 +794,10 @@ export const useStore = create<PgStore>((set, get) => {
     openStats(statsMonitorId) {
       get().flushUpdates();
       set({ statsMonitorId });
-      if (statsMonitorId) get().send({ cmd: "history.get", monitor_id: statsMonitorId });
+    },
+
+    fetchHistory(monitorId) {
+      sendSilent({ cmd: "history.get", monitor_id: monitorId });
     },
 
     openReview(reviewId) {
@@ -798,7 +825,7 @@ export const useStore = create<PgStore>((set, get) => {
     uploadPrint(draft) {
       const id = ++uploadSeq;
       set((s) => ({ uploads: [...s.uploads, { id, name: draft.name || draft.file.name, progress: 0 }] }));
-      (draft.drawPreview ? withPreview(draft.file) : Promise.resolve(draft.file))
+      (draft.thumbnailFrom ? withPreview(draft.file, draft.thumbnailFrom).catch(() => draft.file) : Promise.resolve(draft.file))
         .then((body) =>
           sendPrint(draft, body, (progress) => set((s) => ({ uploads: s.uploads.map((u) => (u.id === id ? { ...u, progress } : u)) }))),
         )
@@ -808,7 +835,7 @@ export const useStore = create<PgStore>((set, get) => {
 
     fetchSnapshot(monitorId, id) {
       if (get().snapshotCache[id]) return;
-      get().send({ cmd: "snapshot.get", monitor_id: monitorId, id });
+      sendSilent({ cmd: "snapshot.get", monitor_id: monitorId, id });
     },
 
     clearCreatedToken() {

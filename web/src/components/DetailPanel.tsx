@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
 import { Sheet } from "./Dialog";
@@ -25,12 +24,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export function DetailPanel({ monitor }: { monitor: Monitor }) {
   const { engine, history, send, openDetail, openStats, openDialog, isPending, updateMonitor } = useStore();
   const settingsPanels = usePluginSurface("settings", monitor.id);
-  const removeRef = useRef(false);
   const removing = isPending("monitor.remove");
-
-  useEffect(() => {
-    if (removeRef.current && !removing) close();
-  }, [removing]);
 
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
@@ -174,10 +168,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
         <button
           className="btn btn-danger"
           disabled={removing}
-          onClick={() => {
-            removeRef.current = true;
-            send({ cmd: "monitor.remove", id: monitor.id });
-          }}
+          onClick={() => send({ cmd: "monitor.remove", id: monitor.id })}
         >
           {removing ? "Deleting…" : "Delete"}
         </button>

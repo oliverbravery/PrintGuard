@@ -20,7 +20,7 @@ export interface UrlPattern {
 }
 
 export function parse(raw: string): UrlPattern | null {
-  const match = PATTERN.exec(raw.trim().toLowerCase());
+  const match = PATTERN.exec(raw.trim().replace(/^[^/]*\/\/[^/]*/, (origin) => origin.toLowerCase()));
   return match ? { scheme: match[1], host: match[2], port: match[3] ?? "*", path: match[4] } : null;
 }
 
@@ -31,8 +31,18 @@ function matchesHost(pattern: string, host: string): boolean {
 }
 
 function matchesPath(pattern: string, path: string): boolean {
-  const escaped = pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return new RegExp(`^${escaped.join(".*?")}$`).test(path);
+  const [first, ...middle] = pattern.split("*");
+  const last = middle.pop();
+  if (last === undefined) return path === first;
+  const end = path.length - last.length;
+  if (!path.startsWith(first) || end < first.length || !path.endsWith(last)) return false;
+  let at = first.length;
+  for (const piece of middle) {
+    const found = path.indexOf(piece, at);
+    if (found < 0 || found + piece.length > end) return false;
+    at = found + piece.length;
+  }
+  return true;
 }
 
 export function matches(pattern: string, url: string): boolean {

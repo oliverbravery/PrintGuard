@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { groupBuckets, PERIODS, type Period } from "../history";
+import { groupBuckets, HISTORY_BUCKET_MS, PERIODS, type Period } from "../history";
 import { statusText } from "../review";
 import { useStore } from "../store";
 import type { Monitor, Snapshot } from "../types";
@@ -62,14 +62,23 @@ function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId:
 }
 
 export function StatsPage({ monitor }: { monitor: Monitor }) {
-  const { engine, historyData, openStats, openReview } = useStore();
-  const prints = (engine?.reviews ?? []).filter((review) => review.monitor_id === monitor.id && review.status !== "running").reverse();
+  const { engine, historyData, history: scores, reconnecting, openStats, openReview, fetchHistory } = useStore();
+  const reviews = (engine?.reviews ?? []).filter((review) => review.monitor_id === monitor.id);
+  const prints = reviews.filter((review) => review.status !== "running").reverse();
+  const alertsKept = reviews.reduce((kept, review) => kept + review.alerts, 0);
   const [period, setPeriod] = useState<Period>("1h");
   const [sortByScore, setSortByScore] = useState(false);
   const [enlarged, setEnlarged] = useState<Snapshot | null>(null);
   const enlargedUrl = useStore((s) => (enlarged ? s.snapshotCache[enlarged.id] : undefined));
   const history = historyData[monitor.id];
   const close = () => openStats(null);
+
+  useEffect(() => {
+    if (reconnecting) return;
+    fetchHistory(monitor.id);
+    const refresh = setInterval(() => fetchHistory(monitor.id), HISTORY_BUCKET_MS);
+    return () => clearInterval(refresh);
+  }, [monitor.id, reconnecting, alertsKept]);
 
   const grouped = useMemo(() => (history ? groupBuckets(history.buckets, period, history.now) : []), [history, period]);
   const stats = history?.stats ?? {};
@@ -84,7 +93,7 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
       <div className="px-5 py-4 border-b border-line-0">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="row-span-2 flex items-center justify-center">
-            <RiskGauge score={stats.current ?? 0} threshold={monitor.threshold} size={92} />
+            <RiskGauge score={scores[monitor.id]?.at(-1)?.score ?? stats.current ?? 0} threshold={monitor.threshold} size={92} />
           </div>
           <StatTile label="average" value={pct(stats.avg)} />
           <StatTile label="peak" value={pct(stats.max)} />

@@ -67,7 +67,7 @@ export function UpdateDialog() {
             </div>
             <div
               className="changelog max-h-[40dvh] overflow-y-auto pr-1"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(release.notes || "_No release notes._") }}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(release.notes || "_No release notes._", { base: release.files_url }) }}
             />
             <a
               href={update?.releases_url ?? release.url}

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { hlsUrl, playHls } from "./stream";
 import type { Camera } from "./types";
 
@@ -6,24 +6,29 @@ export function useVideoStream(
   videoRef: React.RefObject<HTMLVideoElement | null>,
   camera: Camera | undefined,
   active = true,
-): void {
+): boolean {
+  const [streaming, setStreaming] = useState(false);
+
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !camera || !active) return;
-    const path = camera.source.kind === "path" ? camera.source.path! : camera.id;
-    let stop: (() => void) | undefined;
-    const onVisibility = () => {
-      stop?.();
-      stop = undefined;
-      if (!document.hidden) stop = playHls(video, hlsUrl(path));
-    };
-    onVisibility();
-    document.addEventListener("visibilitychange", onVisibility);
+    if (!video) return;
+    const sync = () => setStreaming(document.pictureInPictureElement === video || (active && !document.hidden));
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    video.addEventListener("leavepictureinpicture", sync);
     return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      stop?.();
+      document.removeEventListener("visibilitychange", sync);
+      video.removeEventListener("leavepictureinpicture", sync);
     };
-  }, [videoRef, camera?.id, camera?.online, active]);
+  }, [videoRef, active]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !camera || !streaming) return;
+    return playHls(video, hlsUrl(camera.source.kind === "path" ? camera.source.path! : camera.id));
+  }, [videoRef, camera?.id, camera?.online, streaming]);
+
+  return streaming;
 }
 
 export function adjust(data: ImageData, brightness: number, contrast: number, sharpness: number): void {

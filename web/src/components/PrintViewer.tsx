@@ -4,13 +4,16 @@ import type { PrintFile } from "../types";
 import { Sheet } from "./Dialog";
 import { PrintStats } from "./PrintStats";
 import { SendToPrinter } from "./SendToPrinter";
+import { tooLargeToDraw, type ToolpathSource } from "../toolpath";
 import { Toolpath } from "./Toolpath";
 
-async function storedGcode(print: PrintFile): Promise<string | null> {
+async function storedGcode(print: PrintFile): Promise<ToolpathSource | null> {
   const response = await fetch(`api/prints/${print.id}/gcode`);
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.text();
+  const source = { size: Number(response.headers.get("Content-Length")), text: () => response.text() };
+  if (tooLargeToDraw(source)) void response.body!.cancel();
+  return source;
 }
 
 export function PrintViewer({ print }: { print: PrintFile }) {

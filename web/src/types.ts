@@ -371,6 +371,7 @@ export interface UpdateRelease {
   name: string;
   notes: string;
   url: string;
+  files_url: string;
   published_at: string | null;
 }
 

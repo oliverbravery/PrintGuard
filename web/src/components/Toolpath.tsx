@@ -1,29 +1,52 @@
 import { useEffect, useRef, useState } from "react";
 import type { WebGLPreview } from "gcode-preview";
-import { drawToolpath } from "../toolpath";
+import { drawToolpath, tooLargeToDraw, TOOLPATH_MAX_MB, type ParsedToolpath, type ToolpathSource } from "../toolpath";
 import { Slider } from "./Slider";
 
 function token(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-export function Toolpath({ label, load }: { label: string; load: () => Promise<string | null> }) {
+type Status = "loading" | "ready" | "none" | "large" | "failed";
+
+const UNDRAWN: Record<Exclude<Status, "ready">, string> = {
+  loading: "reading gcode",
+  none: "binary gcode has no toolpath to draw",
+  large: `files over ${TOOLPATH_MAX_MB} MB are not drawn`,
+  failed: "could not draw this file",
+};
+
+export function Toolpath({
+  label,
+  load,
+  onSettled,
+}: {
+  label: string;
+  load: () => Promise<ToolpathSource | null>;
+  onSettled?: (parsed: ParsedToolpath | null) => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<WebGLPreview | null>(null);
   const [layers, setLayers] = useState(0);
   const [layer, setLayer] = useState(0);
-  const [status, setStatus] = useState<"loading" | "ready" | "none" | "failed">("loading");
+  const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
     const canvas = canvasRef.current!;
     let disposed = false;
     let preview: WebGLPreview | null = null;
     const observer = new ResizeObserver(() => preview?.resize());
-    (async () => {
-      const gcode = await load();
+    const settle = (outcome: Status, parsed: ParsedToolpath | null = null) => {
       if (disposed) return;
-      if (gcode === null) return setStatus("none");
-      preview = await drawToolpath(canvas, gcode, {
+      setStatus(outcome);
+      onSettled?.(parsed);
+    };
+    (async () => {
+      const source = await load();
+      if (disposed) return;
+      if (source === null) return settle("none");
+      if (tooLargeToDraw(source)) return settle("large");
+      preview = await drawToolpath(canvas, await source.text(), {
         backgroundColor: token("--color-ink-0"),
         extrusionColor: token("--color-text-1"),
         topLayerColor: token("--color-accent"),
@@ -35,9 +58,9 @@ export function Toolpath({ label, load }: { label: string; load: () => Promise<s
       const count = preview.maxLayerIndex + 1;
       setLayers(count);
       setLayer(count);
-      setStatus("ready");
+      settle("ready", preview.parser);
       observer.observe(canvas.parentElement!);
-    })().catch(() => !disposed && setStatus("failed"));
+    })().catch(() => settle("failed"));
     return () => {
       disposed = true;
       observer.disconnect();
@@ -60,7 +83,7 @@ export function Toolpath({ label, load }: { label: string; load: () => Promise<s
         {status !== "ready" && (
           <div className="absolute inset-0 grid place-items-center">
             <span className={`mono text-[0.68rem] uppercase tracking-[0.2em] text-text-2 ${status === "loading" ? "boot-cursor" : ""}`}>
-              {status === "loading" ? "reading gcode" : status === "none" ? "binary gcode has no toolpath to draw" : "could not draw this file"}
+              {UNDRAWN[status]}
             </span>
           </div>
         )}

@@ -22,14 +22,14 @@ export function Feed({
   const rotation = camera?.rotation ?? 0;
   const useCanvas = sharpness > 0 || crop !== null || brightness !== 1 || contrast !== 1 || rotation !== 0;
 
-  useVideoStream(videoRef, camera, active);
+  const streaming = useVideoStream(videoRef, camera, active);
 
   useEffect(() => {
     const video = videoRef.current;
     return video && camera ? registerFeed(camera.id, video) : undefined;
   }, [camera?.id]);
 
-  useEffect(() => setPlaying(false), [camera?.id, active]);
+  useEffect(() => setPlaying(false), [camera?.id, streaming]);
 
   useEffect(() => {
     if (!useCanvas) return;

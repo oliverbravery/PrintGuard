@@ -5,6 +5,7 @@ import { Sheet } from "./Dialog";
 import { HEATER_MAX, HEATERS, type HeaterName } from "./PrinterControls";
 import { PrinterTags } from "./PrinterTags";
 import { PrintStats } from "./PrintStats";
+import type { ParsedToolpath } from "../toolpath";
 import { Toolpath } from "./Toolpath";
 
 function stem(filename: string): string {
@@ -47,6 +48,7 @@ function StagedPrintForm({
   const ext = extOf(file.name);
   const [toolpath] = useState(() => toolpathOf(file));
   const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [drawn, setDrawn] = useState<ParsedToolpath | null>();
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState(stem(file.name));
   const [drafts, setDrafts] = useState<Record<HeaterName, string>>({ nozzle: "", bed: "" });
@@ -68,7 +70,7 @@ function StagedPrintForm({
   }, []);
 
   const temperatures: Temperatures = {};
-  let valid = inspection !== null;
+  let valid = inspection !== null && drawn !== undefined;
   for (const heater of HEATERS) {
     const sliced = inspection?.meta[heater];
     const target = Number(drafts[heater]);
@@ -83,14 +85,14 @@ function StagedPrintForm({
       name: name.trim(),
       printerIds,
       temperatures,
-      drawPreview: isText(file.name) && !inspection!.thumbnail,
+      thumbnailFrom: isText(file.name) && !inspection!.thumbnail ? drawn! : null,
     });
     onDone();
   };
 
   return (
     <>
-      <Toolpath label={file.name} load={() => toolpath.then((path) => path && path.text())} />
+      <Toolpath label={file.name} load={() => toolpath} onSettled={setDrawn} />
 
       <div className="flex-1 space-y-4 px-5 py-4">
         <PrintStats meta={inspection?.meta ?? null} />
@@ -129,7 +131,7 @@ function StagedPrintForm({
           Discard
         </button>
         <button className="btn btn-primary" disabled={!valid} onClick={upload}>
-          {inspection || error ? "Upload" : "Reading…"}
+          {(inspection && drawn !== undefined) || error ? "Upload" : "Reading…"}
         </button>
       </div>
     </>

@@ -1,4 +1,5 @@
 import type { HeaterName } from "./components/PrinterControls";
+import type { ParsedToolpath } from "./toolpath";
 import type { EngineState, PrintFile, PrintMeta, Printer } from "./types";
 
 export const FORMATS = ["gcode", "gco", "g", "bgcode", "3mf"];
@@ -15,7 +16,7 @@ export interface PrintDraft {
   name: string;
   printerIds: string[];
   temperatures: Temperatures;
-  drawPreview: boolean;
+  thumbnailFrom: ParsedToolpath | null;
 }
 
 export interface Inspection {
