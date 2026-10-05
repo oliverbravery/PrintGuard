@@ -115,12 +115,12 @@ A plugin needs at least one of the three source files.
 | Key | Rule |
 |---|---|
 | `id` | Required. 3 to 40 lowercase letters, digits or hyphens, starting and ending with a letter or digit |
-| `version` | Required. Up to 32 letters, digits, dots, hyphens or plus signs |
+| `version` | Required. Up to 32 letters, digits, underscores, dots, hyphens or plus signs |
 | `name` | Falls back to the id |
 | `description` | Cut at 400 characters |
 | `author` | Cut at 80 characters |
 | `homepage` | An `http` or `https` link |
-| `icon`, `media` | Image paths inside the folder, as `png`, `jpg`, `webp`, `gif` or `svg`. 8 media at most |
+| `icon`, `media` | Image paths inside the folder, as `png`, `jpg`, `jpeg`, `webp`, `gif` or `svg`. 8 media at most |
 | `permissions` | Names from the [permissions table](plugins.md#permissions) |
 | `reasons` | One line for every permission asked for, cut at 200 characters |
 | `surfaces` | `panel`, `monitor` or `settings`. Leaving it out means `panel` |
@@ -211,7 +211,9 @@ it resolves to, so a public name pointing somewhere private is caught.
 
 ## The three halves
 
-Each source file is one half of a plugin, and all three share one store.
+Each source file is one half of a plugin, and all three share one store. A `panel.html` reads
+the store as it was when the panel opened, so it doesn't see what the other two write after
+that.
 
 | | `plugin.js` | `panel.html` | `worker.js` |
 |---|---|---|---|
@@ -350,7 +352,8 @@ are on `pg`, checked against the same permissions.
 | `printer:manage` | `integrations`, the printer integrations and their config forms |
 | `settings` | `notifiers`, the alert channels and their config forms |
 
-`ctx.state.version` is always there. [`plugin.d.ts`](../plugins/plugin.d.ts) has every field.
+`ctx.state.version` is always there. [`plugin.d.ts`](../plugins/plugin.d.ts) types the fields, apart from the `integrations` and
+`notifiers` lists that `printer:manage` and `settings` add.
 
 A plugin runs and returns, so nothing on `ctx` hands an answer back on the spot. A call that
 has one names it with a `tag`, and the answer arrives later as an event carrying that tag.
@@ -431,7 +434,8 @@ streak, so this will be twitchier. Count consecutive hits in `ctx.store` to matc
 A `false` or `null` child is dropped, which is how a node appears only once something else is
 switched on. A node of any other type is dropped too.
 
-A `button` press or a `select` change calls `action` with the node's `action` name and `arg`.
+A `button` press calls `action` with the node's `action` name and `arg`, and a `select` change
+calls it with the option chosen.
 An `input` commits on blur or Enter, and a `toggle` hands you `true` or `false`. An `input` and
 a `select` draw their `label` above the field, so give them one.
 
@@ -504,8 +508,7 @@ it base64 encoded. The manifest needs `http` in `events`, or the answer never re
 ### Sockets
 
 `ctx.socket` opens a WebSocket under a tag and `socket` events carry it, with `state` saying
-`open`, `message` or `closed`. PrintGuard drops it when the plugin is disabled, reinstalled or
-removed. The manifest needs `socket` in `events` and a `ws` or `wss` pattern in `urls`.
+`open`, `message` or `closed`. PrintGuard drops it when the plugin is disabled or removed. The manifest needs `socket` in `events` and a `ws` or `wss` pattern in `urls`.
 
 ```js
 plugin.on("tick", (event, ctx) => ctx.socket({ url: "wss://hub.local:8123/api/websocket", tag: "hub" }));
@@ -527,14 +530,15 @@ are.
 `ctx.sound` takes a list of tones or the name of an audio asset.
 
 ```js
-plugin.render((ctx) => {
+plugin.on("alert", (event, ctx) => {
   ctx.sound([
     { hz: 880, ms: 1400 },
     { hz: 1320, ms: 1100, together: true },
   ]);
-  return null;
 });
 ```
+
+Call it from an event, since `render` runs again every second.
 
 Each tone follows the one before unless it says `together`, and `shape` picks `sine`, `square`,
 `sawtooth` or `triangle`. It stays quiet until the user has pressed something in the page.
@@ -659,7 +663,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 
 | Gate rule | |
 |---|---|
-| What refuses | Anything but `true`, and a gate that fails to answer. The request gets a 403 |
+| What refuses | Anything but `true`, and a gate that fails to answer. The request gets a 403. A gate that fails is then disabled like any other plugin, which leaves the hub ungated |
 | What it sees | The same request shape a route gets, with no body. WebSocket handshakes are asked about too, as a `GET` |
 | What stays open | `/api/health` and the gating plugin's own pages, so uptime checks keep working and it can serve its own sign-in page |
 | Caching | An approval is cached for 10 seconds per cookie, authorization header, method and path. A refusal is never cached, so signing in takes effect at once |
@@ -677,7 +681,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | Channels | 8 in `provides`, 16 in `consumes` |
 | Store | 16 KB |
 | Body of a call, answer or publish | 16 KB |
-| `tick_s` | 5 to 86400 seconds |
+| `tick_s` | 5 to 86400 seconds, fired on a 5 second clock, so 7 means 10 |
 | Effects | 32 per call. The rest are dropped |
 | `plugin.js` call | 4 seconds, then the plugin is stopped |
 | Worker call | 5 seconds, 96 MB of memory and 400 million units of wasmtime fuel, then the plugin is disabled |
@@ -686,15 +690,17 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | Node text | `label` 80 characters, `action` 60, `placeholder` 60 |
 | `select` options | 60 |
 | `panel.html` height | 900px |
-| `ctx.http` | 60 requests a minute per plugin, 10 seconds each |
+| `ctx.http` | 60 requests a minute per plugin, 10 seconds each. A refused request gets no `http` event |
 | `ctx.http` answer | A string body is cut at 256 KB, a base64 one included |
-| Sockets | 4 open per plugin, 64 KB per text frame sent |
+| Sockets | 4 open per plugin, 64 KB per text frame sent, 256 KB per frame received, 10 seconds to open |
+| Sandbox start | 8 seconds for `plugin.js` or `panel.html` to load |
+| OAuth sign-in | 10 minutes to finish it |
 | `ctx.notify` | Cut at 200 characters |
 | `ctx.log` from a worker | Cut at 400 characters |
 | `ctx.sound` | 24 tones, 4 seconds, 20 to 12000 Hz |
 | `ctx.background` | 3 MB |
 | Route request body | Cut at 64 KB |
-| Unanswered `ctx.call` | Expires after 30 seconds |
+| Unanswered `ctx.call` | Expires after 30 seconds, checked when the next call is made |
 
 ## Editor setup
 
@@ -709,7 +715,8 @@ curl -O https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/
 curl -O https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/jsconfig.json
 ```
 
-[`plugin.d.ts`](../plugins/plugin.d.ts) documents every member, so the hover is the reference.
+[`plugin.d.ts`](../plugins/plugin.d.ts) documents the members, so the hover is the reference.
+It doesn't yet type `binary` on `ctx.http`.
 Without a `jsconfig.json`, `// @ts-check` at the top of a file does the same for that file.
 
 ## The shipped plugins

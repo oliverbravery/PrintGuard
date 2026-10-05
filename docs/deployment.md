@@ -211,7 +211,7 @@ Everything else is set from the dashboard. These are the ones a deployment sets.
 |---|---|---|
 | `PRINTGUARD_ORIGINS` | Unset | Extra origins the hub accepts WebSockets and print uploads from, comma-separated. See [origin checking](#origin-checking) |
 | `PRINTGUARD_PLUGINS` | On | `off` starts the hub with every plugin switched off |
-| `PRINTGUARD_CAMERAS` | `auto` in the image | `off` leaves [cameras passed into the container](cameras.md#cameras-plugged-into-the-hub) to be added by hand |
+| `PRINTGUARD_CAMERAS` | `auto` in the image | Anything else, such as `off`, leaves [cameras passed into the container](cameras.md#cameras-plugged-into-the-hub) to be added by hand |
 | `PORT` | `8000` | The port the hub listens on |
 | `DATA_DIR` | `/data` in the image | Where state and print files are kept |
 | `LOG_LEVEL` | `INFO` | `DEBUG` adds command traces and exception tracebacks |

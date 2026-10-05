@@ -84,6 +84,7 @@ pull request, and delete anything the change makes wrong or redundant.
 | If you change | Update |
 |---|---|
 | Install steps, ports, image tags, headline features | [README.md](README.md), and the landing page in `web/site/Home.tsx` |
+| A supported printer service, camera source or alert channel | The lists in [README.md](README.md), `web/site/Home.tsx` and `web/src/guide.tsx` |
 | The engine protocol, an event, the platform contract, the scheduler, logging, repo layout | [docs/architecture.md](docs/architecture.md) |
 | A printer integration or its setup steps, the print library, temperatures | [docs/printers.md](docs/printers.md) |
 | A camera source | [docs/cameras.md](docs/cameras.md) |
@@ -91,7 +92,7 @@ pull request, and delete anything the change makes wrong or redundant.
 | The frames kept from a print, what's sent for training, the Worker's limits | [docs/feedback.md](docs/feedback.md) |
 | A notifier, or when a notice is sent | [docs/notifications.md](docs/notifications.md) |
 | Model runtimes, execution providers, image variants, GPU setup | [docs/hardware.md](docs/hardware.md) |
-| Exposure, proxies, origin checks, ports, hardening, an environment variable | [docs/deployment.md](docs/deployment.md) |
+| Exposure, proxies, origin checks, ports, hardening, an environment variable, the data directory | [docs/deployment.md](docs/deployment.md) |
 | A REST endpoint, MCP tool, scope, response shape or Home Assistant entity | [docs/api.md](docs/api.md) |
 | Installing plugins, a permission, what a plugin can reach | [docs/plugins.md](docs/plugins.md) |
 | The plugin API, a manifest field, a limit, either sandbox, the catalogue | [docs/plugin-development.md](docs/plugin-development.md) |
@@ -230,14 +231,16 @@ with the ones it does, and declares the network hosts you would expect.
 - Keep the engine's own logic free of I/O. It never imports from `server/`, and a feature that
   needs a runtime service gets it through the `Platform` protocol, implemented in
   `server/platform.py` and in the test fake. An adapter built on a vendor's client library is
-  the one exception.
+  the main exception, and [the architecture page](docs/architecture.md#the-platform-contract)
+  lists the rest.
 - Fail loudly. Anything on the alert path that can fail must emit an `error` or `warning`
   event, so no bare `except: pass` where a user would want to know.
 - Keep it minimal. Prefer consolidating existing code over adding parallel variants, and leave
   out speculative abstractions and defensive defaults.
 - Write no comments in the UI. The TypeScript and React code carries none, since names document
-  intent. [plugins/plugin.d.ts](plugins/plugin.d.ts) is the exception, where TSDoc on every
-  member is what a plugin author reads on hover. Python modules, classes and public methods get docstrings, but inline comments only
+  intent. Everything under [`plugins/`](plugins) is the exception. [plugin.d.ts](plugins/plugin.d.ts)
+  carries TSDoc on every member for the hover, and the shipped plugins are commented to work as
+  examples. Python modules, classes and public methods get docstrings, but inline comments only
   where the why is genuinely non-obvious.
 - Write docstrings in Google style, with `Args:`, `Returns:` and `Raises:` whenever a function
   takes arguments, gives something back or fails. Types belong in the signature, so a docstring
@@ -279,11 +282,11 @@ Five checks are required. A pull request into a release branch runs **tests**, *
 
 | Check | Enforces |
 |---|---|
-| **tests** | Everything under `tests/`, with `uv run pytest` |
+| **tests** | Everything under `tests/`, with `uv run pytest`, and the feedback Worker's tests |
 | **audit** | `uv audit` and `npm audit` find no known vulnerability in `uv.lock` or either `package-lock.json`. A new advisory fails every open pull request until the dependency is bumped |
 | **image** | Every production image variant builds, which also type-checks and builds the UI, so a change that breaks an image can never reach `main` |
 | **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |
-| **version** | The version is past the last release and has a matching `CHANGELOG.md` section, dated the day it merges into `main` in London time. Re-publishing an existing tag is refused |
+| **version** | The version has no release tag yet and has a matching `CHANGELOG.md` section, dated the day it merges into `main` in London time. Re-publishing an existing tag is refused |
 
 On merge, the [release workflow](.github/workflows/release.yml):
 

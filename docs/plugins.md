@@ -68,14 +68,14 @@ Verified means the manifest and every file hash to what the catalogue pins at a 
 are the ones I have reviewed. Anything else is third party, so read it first. Both run under
 the same restrictions.
 
-Before you enable one, PrintGuard reads its code and shows where the code and the manifest
-disagree.
+When you enable one, PrintGuard reads its code and shows in the same dialog where the code and
+the manifest disagree.
 
 | It says | Meaning |
 |---|---|
-| Asks for something it never uses | The manifest is wider than the code needs |
-| Uses something it never asked for | The sandbox refuses it anyway, so this is early notice |
-| Builds a command or an address as it runs | Its reach cannot be read from the code |
+| Asks for a permission but never uses it | The manifest is wider than the code needs |
+| Uses a permission without asking. PrintGuard will refuse it | The sandbox refuses it anyway, so this is early notice |
+| Uses something, so its reach cannot be read from the code | It builds a command, an address or a channel as it runs |
 
 It says what it found, it does not pass a verdict. A plugin that builds a URL as it runs is not
 a bad plugin, and the check that stops anything is the one at the sandbox edge.
@@ -160,7 +160,7 @@ A plugin has up to three files, and each runs in a sandbox.
 | Attack | What stops it |
 |---|---|
 | Take your credentials somewhere | Neither sandbox has sockets. The browser files' policy is `connect-src 'none'`, and the hub file has no WASI network and no filesystem. The only way out is a request through PrintGuard, to addresses the plugin declared |
-| Read your credentials at all | State is cut down to the fields a permission names. Printer configuration, notifier settings, MQTT credentials and API tokens are in no permission |
+| Read your credentials at all | State is cut down to the fields a permission names. Printer configuration, notifier settings, MQTT credentials and API tokens are in no permission. The exceptions are `routes` and `gate`, which see the cookie and authorisation headers of the requests they answer |
 | Read your camera frames | A camera in a plugin's panel is a placeholder PrintGuard fills with its own player, and the video never enters the sandbox. Reading the picture itself is `camera:frames`, which is its own thing to agree to, and a plugin's own pages are refused the live stream |
 | Hang or exhaust the hub | The worker runs against a memory cap, a CPU budget and a 5 second limit per call. A plugin that fails is disabled and reported |
 | Do something it was not granted | Every command maps to a permission, checked at the sandbox edge before it goes anywhere |
@@ -173,7 +173,7 @@ A plugin can set a credential and never read one back. Printer passwords, notifi
 tokens go in and do not come out.
 
 Its own credentials work the same way. A plugin that needs a key shows a field for it on its
-card in the Plugins tab. Paste the value there and PrintGuard holds it and fills it in as the
+page in the Plugins tab, once it's enabled. Paste the value there and PrintGuard holds it and fills it in as the
 plugin's requests leave.
 
 Be clear on what that buys. The value never enters the sandbox, the plugin's stored data, the
@@ -186,9 +186,9 @@ A plugin that signs you in to a service, such as Spotify, needs an app of your o
 service. No plugin carries one, since a shared app is what providers hand out quota and terms
 against.
 
-1. Open the plugin's card and follow **Create one** to the service's developer page.
-2. Register an app there, giving it the redirect URI the card shows.
-3. Paste the app's client id into the card.
+1. Open the plugin's page and follow **Create one** to the service's developer page.
+2. Register an app there, giving it the redirect URI the page shows.
+3. Paste the app's client id into the page.
 4. Press **Connect** and sign in.
 
 The redirect URI is the address you opened PrintGuard at with `/oauth/callback` on the end,

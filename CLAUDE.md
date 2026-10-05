@@ -20,9 +20,10 @@ cd web && npm run typecheck               # strict TypeScript over the UI
 cd web && npm run test:sandbox            # the browser plugin sandbox in Playwright, chromium and webkit
 cd web && npm run build                   # production UI build
 cd web && npm run site                    # the GitHub Pages landing page (web/site), hot-reload
+cd feedback-worker && npm ci && npm test  # the training inbox Worker
 ```
 
-There is no Python lint step. CI runs `uv run pytest` and type-checks the UI only as part of
+There is no Python lint step. CI runs `uv run pytest` and the feedback Worker's tests, and type-checks the UI only as part of
 building the image, so run `npm run typecheck`, and `npm run test:sandbox` after touching the
 plugin sandbox, yourself before pushing.
 
@@ -59,9 +60,9 @@ essentials a change must respect:
   `NotifierAdapter` in their package's `base.py`, which share
   [`engine/adapters.py`](printguard/engine/adapters.py). They reach HTTP services through
   `platform.http` so the tests can pin every request, and are registered in their package
-  `__init__.py`. A service with no HTTP API (Bambu, Elegoo Centauri, PrusaLink's digest client,
-  the native notifier) uses its vendor's client library directly, which is the one place engine
-  code does its own I/O, and its tests monkeypatch the adapter's private connection functions.
+  `__init__.py`. An adapter built on a vendor's client library (Bambu, Elegoo Centauri, PrusaLink,
+  the native notifier) opens its own connections, the main place engine code does its own I/O
+  ([docs/architecture.md](docs/architecture.md#the-platform-contract) lists them all), and its tests monkeypatch the adapter's private connection functions.
   Adding one needs no other code change - the config form, connection test, polling and
   actions all follow from the adapter. CONTRIBUTING.md has the step-by-step.
 
@@ -175,7 +176,7 @@ someone deciding whether to pull the new image, not about the implementation.
 
 Five checks are required: **tests** (`uv run pytest`), **audit** (`uv audit` and `npm audit`
 over the lockfiles), the production **image** build (which
-also type-checks and builds the UI), **version** (past the last release with a matching
+also type-checks and builds the UI), **version** (not yet tagged, with a matching
 changelog section) and, on pull requests into `main` only, **launch** (the container and both
 desktop apps start and catch a failing print) plus the changelog date, which must be the day it
 merges into `main` in London time. PrintGuard is distributed as the Docker image and the macOS

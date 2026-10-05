@@ -96,7 +96,7 @@ for the hub:
 | `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count |
 | `infer(rgb)` | `vision.preprocess`, the selected LiteRT or ONNX Runtime model, then `vision.classify` |
 | `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list |
-| `open_camera(id, source)` | A `FrameSource`. MediaMTX pulls every URL that is not plain HTTP, so RTSP, RTMP and WHEP, and PyAV reads HTTP MJPEG and capture devices directly |
+| `open_camera(id, source)` | A `FrameSource`. MediaMTX pulls every URL that is not plain HTTP, so RTSP, RTMP and WHEP, and PyAV reads HTTP MJPEG and capture devices directly. A `path` source reads a stream already on MediaMTX, and a `bambu` source the A1 and P1 chamber camera |
 | `release_camera(id, source)` | Closes the source and removes its MediaMTX pull path |
 | `http(...)` | httpx |
 | `open_socket(url, arrived)` | A `websockets` client connection held for a plugin |
@@ -128,7 +128,7 @@ built on a vendor's client library open their own connections:
 | Module | Reaches outside `Platform` through |
 |---|---|
 | [`integrations/bambu.py`](../printguard/engine/integrations/bambu.py) | paho MQTT, `ftplib` over TLS and raw sockets |
-| [`integrations/elegoo.py`](../printguard/engine/integrations/elegoo.py) | pycentauri, which holds its own connection, and a DNS lookup |
+| [`integrations/elegoo.py`](../printguard/engine/integrations/elegoo.py) | pycentauri, which holds its own connection, a DNS lookup and a temporary file for an upload |
 | [`integrations/prusa.py`](../printguard/engine/integrations/prusa.py) | pyprusalink with its own httpx client |
 | [`notifiers/native.py`](../printguard/engine/notifiers/native.py) | desktop-notifier and a temporary snapshot file |
 | [`urls.py`](../printguard/engine/urls.py) | A DNS lookup, to tell whether a plugin's URL lands on a private address |
@@ -186,7 +186,7 @@ Events, engine to UI:
 | `cameras`, `printers`, `prints`, `tokens`, `plugins` | The public record of everything in each registry |
 | `monitors` | Each monitor with `watching` and its latest `result` |
 | `reviews`, `feedback_hub` | A count of the frames kept from each print with its review status, and the public half of the hub's training inbox token |
-| `settings` | Notifier configs, MQTT, theme, layout, inference runtime, catalogue URL, grace period and preheat presets |
+| `settings` | Notifier configs, MQTT, theme, custom themes, glass, layout, inference runtime, catalogue URL, grace period, preheat presets, and whether to check for updates and ask for print reviews |
 | `stats` | `inference_device`, `infer_ms` and `capacity_fps` from the scheduler |
 | `integrations`, `notifiers` | Adapter metadata the config forms are drawn from |
 | `plugin_permissions`, `plugin_events`, `plugin_event_permissions`, `plugin_oauth_callback`, `plugin_platforms`, `plugin_assets` | The plugin policy both sandboxes apply |
@@ -245,44 +245,6 @@ A deployment can declare video devices the same way. The Docker image sets
 boot under a deterministic id through `Camera.declared`. A declared camera keeps the name and
 tuning it was given across restarts, cannot be removed on its own, and goes when the
 deployment stops passing it in.
-
-### Print reviews
-
-[`engine/reviews.py`](../printguard/engine/reviews.py) keeps a few frames from every print a
-monitor watches, scaled to 512px and stored in the `files` store, with their records in the
-persisted state so they survive a restart. A print runs from a monitor's first frame until its
-printer positively reports idle or error, so a pause stays inside it, and a monitor with no
-printer closes its print after a day.
-
-| Kind | Kept | Chosen by |
-|---|---|---|
-| `alert` | The last 40 | The frame that fired each alert, which is what the risk history gallery shows |
-| `near` | The top 5 | The highest scores under the threshold, at least a minute apart |
-| `spaced` | Up to 19 | One per interval, and every other one is dropped and the interval doubled at 20, so a long print keeps no more than a short one |
-
-The hub holds the last 20 prints or 200 MB and drops the oldest finished print first. The
-`state` snapshot carries only a count per print, and `review.get` returns one print's frames.
-
-A finished print can be [sent as training data](feedback.md). `review.send` records which
-frames show a failure and which were left out, and
-[`engine/feedback.py`](../printguard/engine/feedback.py) uploads the rest through
-`platform.http` to the Worker in [`feedback-worker/`](../feedback-worker), one frame per
-request. The upload runs as a background task and its progress rides in the `state` snapshot.
-It is deliberately absent from the REST API, the MCP server and the plugin permission table,
-so frames only leave the hub when a person presses Send in the dashboard.
-
-| `status` | Meaning |
-|---|---|
-| `running` | The print is still being watched |
-| `ready` | It has ended and waits to be reviewed |
-| `dismissed` | Nobody wants to review it, or `settings.feedback` is `off` |
-| `queued` | It was reviewed and frames are uploading, or wait on a refusal's `retry_at` |
-| `sent` | Every chosen frame is in the inbox |
-
-The Worker is the only writer to a private R2 bucket and holds every limit in one Durable
-Object, so the hub only reports what it was told. A refused print keeps its frames and the
-engine's ticker sends the rest once `retry_at` passes. The hub's token is issued by the Worker
-and persisted, and the `state` snapshot carries only its public half as `feedback_hub`.
 
 ## Scheduling inference
 
@@ -375,6 +337,46 @@ An alert starts the monitor's `cooldown_s`, and no second response fires inside 
 notifications have their own 30 s floor per monitor. A printer action is tried 3 times, 1 s
 apart, then reported as failed in the alert, the UI error feed and the push notification.
 
+### Print reviews
+
+[`engine/reviews.py`](../printguard/engine/reviews.py) keeps a few frames from every print a
+monitor watches, scaled to 512px and stored in the `files` store, with their records in the
+persisted state so they survive a restart. With `settings.feedback` set to `off` it keeps only
+the alert frames. A print runs from a monitor's first frame until its printer positively
+reports idle or error, or the monitor is disabled or removed, so a pause stays inside it. A
+monitor with no printer closes its print after a day.
+
+| Kind | Kept | Chosen by |
+|---|---|---|
+| `alert` | The last 40 | The frame that fired each alert, which is what the risk history gallery shows |
+| `near` | The top 5 | The highest scores under the threshold, at least a minute apart |
+| `spaced` | Up to 19 | One per interval, and every other one is dropped and the interval doubled at 20, so a long print keeps no more than a short one |
+
+The hub holds the last 20 prints or 200 MB and drops the oldest finished print first. The
+`state` snapshot carries only a count per print, and `review.get` returns one print's frames.
+
+A finished print can be [sent as training data](feedback.md). `review.send` records which
+frames show a failure and which were left out, and
+[`engine/feedback.py`](../printguard/engine/feedback.py) uploads the rest through
+`platform.http` to the Worker in [`feedback-worker/`](../feedback-worker), one frame per
+request. The upload runs as a background task and its progress rides in the `state` snapshot.
+It is deliberately absent from the REST API, the MCP server and the plugin permission table,
+so frames only leave the hub when a person presses Send in the dashboard.
+
+| `status` | Meaning |
+|---|---|
+| `running` | The print is still being watched |
+| `ready` | It has ended and waits to be reviewed |
+| `dismissed` | Nobody wants to review it, or `settings.feedback` is `off` |
+| `queued` | It was reviewed and frames are uploading, or wait on a refusal's `retry_at` |
+| `sent` | Every chosen frame is in the inbox |
+
+The Worker is the only writer to a private R2 bucket and holds every limit in one Durable
+Object, so the hub only reports what it was told. A refused print keeps its frames and the
+engine's ticker sends the rest once `retry_at` passes, six hours on where the refusal named no
+time. A frame over 150 KB is re-encoded once at 384px and skipped if it is still too big. The hub's token is issued by the Worker
+and persisted, and the `state` snapshot carries only its public half as `feedback_hub`.
+
 ## Failing safely
 
 A monitor's watching state gates inference
@@ -392,8 +394,8 @@ Only a positive "not printing" stands inference down, and only a positive "print
 it again ([`Printer.observe`](../printguard/engine/registry.py) keeps the last status the
 service could report, and it is saved with the printer so a restart keeps it too). A command sent from PrintGuard, such as a pause or starting a print
 from the library, re-reads the printer and re-gates straight away. The watchdog loop then keeps the
-pipeline honest. A condition has to hold for the grace period before it is announced, so a
-brief outage passes unremarked, and it is then repeated every thirty minutes for as long as
+pipeline honest. A condition has to hold for the grace period before it is announced, apart from the
+coverage warning below, so a brief outage passes unremarked, and it is then repeated every thirty minutes for as long as
 it lasts. Recovery is announced once health has held.
 
 ```mermaid
@@ -416,7 +418,7 @@ stateDiagram-v2
 
 The four watchdog conditions are a watched camera going offline, a watched camera staying
 online but producing no fresh frames, since a frozen RTSP feed must not pass for monitoring,
-a watched camera that delivered frames for under 90% of the last ten minutes, and a linked
+a watched camera that was online for under 90% of the last ten minutes, and a linked
 printer whose state cannot be read, whether it is unreachable or reporting something the
 adapter does not recognise. The last one only counts while the monitor is watching, where it
 means a defect could not pause the print. A printer switched off after a print leaves its
@@ -465,15 +467,16 @@ engine the UI talks to, so they add no logic of their own and cannot drift from 
   request and response by correlating a `req_id`, and `engine.snapshot()` encodes a camera's
   freshest frame as JPEG.
 - [`server/api.py`](../printguard/server/api.py) is a FastAPI sub-app at `/api/v1`, each
-  route tagged with the scope it requires. Every write goes through `engine.request()`. Reads
+  route tagged with the scope it requires. Every write goes through `engine.request()`. The history route does too. Other reads
   call the engine directly: the state, list and get routes use `state_event()` with printer,
   notifier, MQTT and camera-source credentials stripped, and the alert snapshot, camera frame,
   classify and events routes use `monitor_snapshot()`, `snapshot()`, `classify()` and
   `recent_events()`. `recent_events()` is the newest 100 alert, warning, device and error
   events.
 - [`server/mcp.py`](../printguard/server/mcp.py) derives its tools from that app with
-  `FastMCP.from_fastapi`, leaving out the routes with a binary body: the camera frame,
-  classify, and the print file download and upload. It adds two tools of its own,
+  `FastMCP.from_fastapi`, leaving out the camera frame,
+  classify, and the print file download and upload, which carry a binary body. The alert
+  snapshot route is derived like the rest, so its tool can't return the picture. It adds two tools of its own,
   `get_camera_frame` returning native image content and `classify_frame` taking a base64
   image, and enforces the route scope tags so a caller only sees the tools its token may use.
 - [`server/mqtt.py`](../printguard/server/mqtt.py) bridges the engine to Home Assistant. It
