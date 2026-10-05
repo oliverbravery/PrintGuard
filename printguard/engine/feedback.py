@@ -12,7 +12,7 @@ from typing import Any
 
 from .adapters import HttpFn
 
-ENDPOINT = "https://printguard-feedback.oliverbravery.workers.dev"
+ENDPOINT = "https://printguard-feedback.oliverbravery.uk"
 FRAME_BYTES_MAX = 150 * 1024
 TIMEOUT_S = 20.0
 

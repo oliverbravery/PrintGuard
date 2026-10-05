@@ -190,7 +190,7 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 |---|---|
 | `api.github.com` | Once a day for the update check, and when you browse the plugin store |
 | `*.ingest.de.sentry.io` | Only when you send a bug report |
-| `printguard-feedback.oliverbravery.workers.dev` | Only when you [send a print's frames](feedback.md) |
+| `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
 | Your printers, cameras, notification services and MQTT broker | As you configure them |
 
 ## Staying up to date
