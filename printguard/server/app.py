@@ -135,7 +135,10 @@ class HostGuard:
         if unknown not in self._refused:
             self._refused.add(unknown)
             logger.warning(message)
-        await PlainTextResponse(message, status_code=403)(scope, receive, send)
+        if scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1008, "reason": "host not allowed"})
+        else:
+            await PlainTextResponse(message, status_code=403)(scope, receive, send)
 
 
 GATE_EXEMPT_PREFIXES = ("/api/health",)

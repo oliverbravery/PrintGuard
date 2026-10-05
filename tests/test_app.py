@@ -72,8 +72,8 @@ async def named_hub(monkeypatch):
         yield app, client, told
 
 
-async def handshake_status(app, path: str, headers: dict[str, str]) -> int:
-    """Opens a WebSocket against the app and returns the HTTP status that refused it."""
+async def handshake_answer(app, path: str, headers: dict[str, str]) -> str:
+    """Opens a WebSocket against the app and returns the kind of message that answered it."""
     sent: list[dict] = []
 
     async def receive() -> dict:
@@ -91,10 +91,9 @@ async def handshake_status(app, path: str, headers: dict[str, str]) -> int:
         "query_string": b"",
         "headers": [(name.encode(), value.encode()) for name, value in headers.items()],
         "subprotocols": [],
-        "extensions": {"websocket.http.response": {}},
     }
     await app(scope, receive, send)
-    return sent[0]["status"]
+    return sent[0]["type"]
 
 
 async def test_a_rebinding_page_is_refused_whatever_it_asks_for(monkeypatch) -> None:
@@ -107,8 +106,8 @@ async def test_a_rebinding_page_is_refused_whatever_it_asks_for(monkeypatch) -> 
         assert "PRINTGUARD_ORIGINS=http://evil.example:8000" in read.text
         assert (await client.get("/api/v1/state", headers=rebound)).status_code == 403
         assert (await client.post("/api/prints?filename=a.gcode", content=b"G28", headers=rebound)).status_code == 403
-        assert await handshake_status(app, "/api/ws", rebound) == 403
-        assert await handshake_status(app, "/api/publish/cam", rebound) == 403
+        assert await handshake_answer(app, "/api/ws", rebound) == "websocket.close"
+        assert await handshake_answer(app, "/api/publish/cam", rebound) == "websocket.close"
         assert (await client.get("/api/health", headers=forged)).status_code == 403
 
     assert len(told) == 2, "one line a name, however many requests it sends"
