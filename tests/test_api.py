@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -410,7 +411,9 @@ async def test_credentials_inside_urls_reach_neither_the_read_surface_nor_a_bug_
         state = (await client.get("/state", headers={"Authorization": f"Bearer {tokens['read']}"})).text
         assert not [leak for leak in LEAKS if leak in state]
         assert "http://192.168.1.50/videostream.cgi?user=[redacted]&pwd=[redacted]" in state
-        assert "http://octopi.local" in state and "https://ntfy.example/topic" in state
+        redacted = json.loads(state)
+        assert redacted["printers"][0]["config"]["base_url"] == "http://octopi.local"
+        assert redacted["settings"]["notifiers"]["ntfy"]["url"] == "https://ntfy.example/topic"
 
         failure = "GET http://192.168.1.50/videostream.cgi?user=admin&pwd=QUERYPASS refused, as was https://ntfyuser:NTFYPASS@ntfy.example/topic"
         monkeypatch.setattr(reports.logs, "recent", lambda: [failure])
