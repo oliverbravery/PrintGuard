@@ -53,7 +53,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - The API and MCP server show the query values of a camera, printer or notifier address as
   `[redacted]`, so `?action=stream` reads back as `?action=[redacted]`.
 - A bug report takes 10 MB of attachments in total, down from 20 MB.
-- A printer can't be registered with a required field left blank.
+- A printer can't be registered with a required field left blank, and an alert channel can't be
+  saved or tested with one.
 - An MQTT port outside 1 to 65535 is refused.
 - The test alert carries a picture, so a channel that can't take one shows up at setup.
 - Sliced files over 32 MB upload without the 3D toolpath or a drawn preview.
@@ -74,7 +75,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - The bug report dialog says it sends the dashboard's address, your browser's user agent and
   window size.
 - A stored secret is cleared over the REST API by sending `null`.
-- `POST /classify` refuses a frame over 32 MB.
+- `POST /classify` and the MCP `classify_frame` tool refuse a frame over 32 MB.
+- PrusaLink takes a **Username**, for a Raspberry Pi set up with one other than `maker`.
 - The consecutive detections slider goes up to 30, matching the API.
 - Empty values in the dashboard read "none".
 
@@ -109,6 +111,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - Bambu H2C, H2D and H2S printers start an uploaded print.
 - An Elegoo Centauri Carbon command the printer refuses is reported as failed.
 - An Elegoo Centauri Carbon that stops reporting shows as offline.
+- A paused Centauri Carbon whose connection drops is found again, so it can be resumed.
+- A file OctoPrint stores but doesn't start is reported as a failed print.
+- A desktop notification the system refuses is reported as failed.
 - A Klipper print that uploads but doesn't start is reported as failed, on an Elegoo Neptune 4
   or OrangeStorm too.
 - OctoPrint's webcam is found when OctoPrint is registered on port 5000. Press **Refresh** under
@@ -127,7 +132,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - Updating a plugin installed from a branch, as `owner/repo@branch`, follows that branch.
 - A USB camera missing when the container starts stays under **Cameras** as offline and keeps its
   name, crop and tuning. Remove it there if it's gone for good.
-- Home Assistant shows the hub as unavailable after it stops.
+- Home Assistant shows the hub as unavailable after it stops, and a broker that has gone quiet
+  no longer holds the hub's shutdown up.
 - The MQTT bridge recovers from a bad setting.
 - Two hubs on one MQTT broker no longer disconnect each other.
 - An unrecognised MQTT payload no longer disables a monitor.
@@ -272,6 +278,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A camera published from a browser stops capturing when it's removed from another device.
 - A feed the browser won't autoplay, such as on an iPhone in Low Power Mode, shows "Tap to play".
 - An edit made just before closing the tab is saved.
+- A dashboard left open through an update reloads itself onto the new version.
+- A setting changed while another is still saving no longer sends the first one again.
+- The introduction scrolls on a short screen, where it covered its own buttons.
 - The **Register printer** form keeps what you typed when the registration fails.
 - Camera labels no longer show part of a password that contains `@` or `/`.
 - The history chart leaves a gap between prints and says when it's still loading.
