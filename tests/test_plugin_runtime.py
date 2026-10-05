@@ -21,6 +21,7 @@ from printguard.engine.engine import Engine
 
 OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
 from printguard.engine.registry import Camera, Plugin
+from printguard.server import plugins as server_plugins
 from printguard.server.plugins import Sandbox, WasmPluginRuntime
 
 CALL = {"kind": "event", "event": {"event": "alert", "score": 0.9}, "request": {}, "state": {}, "store": {}}
@@ -284,6 +285,63 @@ async def test_a_gate_that_fails_goes_on_refusing_until_somebody_deals_with_it(r
         assert await runtime.authorise(GATE_REQUEST) is None
     finally:
         await restarted.stop()
+
+
+async def test_a_flood_of_requests_cannot_disable_a_healthy_gate(
+    runtime: WasmPluginRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Waiting for a thread is the hub's delay, not the gate's, so it is not a failure."""
+    monkeypatch.setattr(server_plugins, "QUEUE_TIMEOUT_S", 0.02)
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, GATE_MANIFEST, GATE)
+        verdicts = await asyncio.gather(*(runtime.authorise(GATE_REQUEST) for _ in range(600)))
+        plugin = engine.plugins.get("doorman")
+        after = await runtime.authorise(GATE_REQUEST)
+    finally:
+        await engine.stop()
+
+    assert False in verdicts, "nothing queued long enough to be dropped, so this tested nothing"
+    assert plugin.enabled and not plugin.failure, "requests queueing behind each other disabled the gate"
+    assert after is True, "the hub stayed locked once the flood had passed"
+
+
+def test_a_worker_writing_too_much_is_cut_off_before_the_hub_holds_it(
+    runtime: WasmPluginRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held: list[int] = []
+    take = server_plugins.Capped.__call__
+
+    def watched(self: server_plugins.Capped, chunk: bytes) -> int | None:
+        verdict = take(self, chunk)
+        held.append(len(self.data))
+        return verdict
+
+    monkeypatch.setattr(server_plugins.Capped, "__call__", watched)
+
+    with pytest.raises(RuntimeError, match="more than 512 KB"):
+        call(runtime, "plugin.on('alert', (event, ctx) => { ctx.store.big = 'x'.repeat(2 * 1024 * 1024); });")
+
+    assert 0 < max(held) <= server_plugins.MAX_OUTPUT_BYTES, "the hub buffered more than a worker may return"
+
+
+async def test_a_link_effect_reaches_only_the_commands_that_talk_to_plugins(runtime: WasmPluginRuntime) -> None:
+    """The action names the command, so anything else would reach every ``plugin.*`` one."""
+    performed: list[dict] = []
+    runtime.attach(lambda command: _record(performed, command), lambda plugin_id, reason: None)
+    plugin = make_plugin("", granted=["link:consume"], permissions=["link:consume"])
+
+    await runtime._perform(
+        plugin,
+        [
+            {"kind": "link", "action": "remove", "request": {}},
+            {"kind": "link", "action": "update", "request": {"to": "demo"}},
+            {"kind": "link", "action": "call", "request": {"to": "other", "channel": "now"}},
+        ],
+    )
+
+    assert [c["cmd"] for c in performed] == ["plugin.call"], "a link effect ran a command that is not a link"
 
 
 async def test_a_worker_holding_nothing_hears_nothing_the_dashboard_shows(runtime: WasmPluginRuntime) -> None:

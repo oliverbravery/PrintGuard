@@ -596,7 +596,8 @@ against. Whoever installs it [registers their own](plugins.md#credentials), and 
 them the redirect URI to give the provider and links `register_url`.
 
 `authorize_url` and `token_url` are each one `https` address with no wildcards. A `token_url`
-on this machine or the network around it needs `net:local`.
+on this machine or the network around it needs `net:local`. An update that changes either one
+signs its users out and has to be accepted again.
 
 ## Talking to other plugins
 
@@ -677,8 +678,9 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 
 | Gate rule | |
 |---|---|
-| What refuses | Anything but `true`, and a gate that fails to answer. The request gets a 403. A gate that fails is then disabled like any other plugin, and every request is refused until it is enabled again, reinstalled or removed, or the hub starts with `PRINTGUARD_PLUGINS=off` |
+| What refuses | Anything but `true`, and a gate that throws or runs out of fuel or memory. The request gets a 403. A gate that fails is then disabled like any other plugin, and every request is refused until it is enabled again, reinstalled or removed, or the hub starts with `PRINTGUARD_PLUGINS=off` |
 | What it sees | The same request shape a route gets, with no body. WebSocket handshakes are asked about too, as a `GET` |
+| Under load | A request that waits more than 5 seconds for the gate to be free is refused on its own. The gate is not disabled for it |
 | What stays open | `/api/health` and the gating plugin's own pages, so uptime checks keep working and it can serve its own sign-in page |
 | Caching | An approval is cached for 10 seconds per cookie, authorization header, method and path. A refusal is never cached, so signing in takes effect at once |
 
@@ -698,8 +700,8 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | `tick_s` | 5 to 86400 seconds, fired on a 5 second clock, so 7 means 10 |
 | Effects | 32 per call. The rest are dropped |
 | `plugin.js` call | 4 seconds, then the plugin is stopped |
-| Worker call | 5 seconds, 96 MB of memory and 400 million units of wasmtime fuel, then the plugin is disabled |
-| Worker output | 512 KB per call, the store and effects together |
+| Worker call | 96 MB of memory and 400 million units of wasmtime fuel, then the plugin is disabled. A call that waits more than 5 seconds to start is dropped |
+| Worker output | 512 KB per call, the store and effects together, then the plugin is disabled |
 | Node tree | 400 nodes |
 | Node text | `label` 80 characters, `action` 60, `placeholder` 60 |
 | `select` options | 60 |
