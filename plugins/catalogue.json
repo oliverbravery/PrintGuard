@@ -101,7 +101,7 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/spotify",
-      "ref": "8130da16252383ed647ebd62356b06a0d1cca1bd",
+      "ref": "abf6cca00b5838ff97f965a2a42528ffaef9dd37",
       "digests": {
         "plugin.json": "6531ffe400068aca00c600db15dbb2c31d5c88dd04f5f3452380af582cebe61f",
         "panel.html": "56a644a5b66ddc48b265f88bea41a22649126ac49827bdb48be82a372c628ed4"
