@@ -3,7 +3,7 @@
   "name": "printguard-feedback",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-05",
-  "observability": { "enabled": true },
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   "workers_dev": false,
   "preview_urls": false,
   "routes": [{ "pattern": "printguard-feedback.oliverbravery.uk", "custom_domain": true }],

@@ -1,7 +1,8 @@
-import { createScheduledController } from "cloudflare:test";
+import { createScheduledController, runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import worker, { expiresSoon, networkOf, reminders } from "../src";
+import type { Reservation } from "../src/gate";
 import {
   DAY_MS,
   EXPIRY_DAYS,
@@ -51,6 +52,8 @@ const upload = (token: string, address: string, frame: string, body: Uint8Array 
     body,
   });
 
+const NEW = { bytes: 10, uploads: 1 };
+
 const code = async (response: Response) => ((await response.json()) as { code: string }).code;
 
 describe("registration", () => {
@@ -75,6 +78,19 @@ describe("registration", () => {
     expect(networkOf("2001:db8:1::")).toBe(networkOf("2001:db8:1:2::1"));
     expect(networkOf("2001:db8:2:2::1")).not.toBe(networkOf("2001:db8:1:2::1"));
     expect(networkOf("198.51.100.7")).toBe("198.51.100.7");
+  });
+
+  it("counts a network under a keyed hash, so no address is stored", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    expect((await register("203.0.113.77")).status).toBe(201);
+    expect((await upload(token, "2001:db8:77:1::1", frameId(77))).status).toBe(201);
+    const keys = await runInDurableObject(env.GATE.getByName("gate"), (_gate, state) =>
+      state.storage.sql.exec<{ scope: string; key: string }>("SELECT scope, key FROM counts").toArray(),
+    );
+    const networks = keys.filter(({ scope }) => scope === "registrations" || scope === "network").map(({ key }) => key);
+    expect(networks.length).toBeGreaterThan(1);
+    expect(networks.every((key) => /^[0-9a-f]{64}$/.test(key))).toBe(true);
+    expect(JSON.stringify(keys)).not.toMatch(/203\.0\.113|2001:db8/);
   });
 
   it("turns away a request a web page could send from a visitor's browser, without counting it", async () => {
@@ -139,6 +155,15 @@ describe("uploading a frame", () => {
     expect(await gate.storedBytes()).toBe(afterFirst + 2);
   });
 
+  it("lets a hub at its daily limit send a frame again", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    for (let sent = 0; sent < UPLOADS_PER_HUB - 1; sent += 1) await upload(token, "203.0.113.14", frameId(3000 + sent));
+    for (let resent = 0; resent < 3; resent += 1) expect((await upload(token, "203.0.113.14", frameId(3000))).status).toBe(201);
+    expect((await upload(token, "203.0.113.14", frameId(3998))).status).toBe(201);
+    expect(await code(await upload(token, "203.0.113.14", frameId(3999)))).toBe("hub_daily");
+    expect((await upload(token, "203.0.113.14", frameId(3000))).status).toBe(201);
+  });
+
   it("answers closed when collection is switched off", async () => {
     const response = await worker.fetch(new Request(`${ORIGIN}/register`, { method: "POST" }), { ...env, ACCEPTING: "false" });
     expect(response.status).toBe(503);
@@ -149,28 +174,40 @@ describe("uploading a frame", () => {
 describe("the gate", () => {
   it("stops one network at its daily limit however many hubs it uses", async () => {
     const gate = env.GATE.getByName("network-limit");
-    for (let sent = 0; sent < UPLOADS_PER_NETWORK; sent += 1) expect(await gate.reserve(`hub-${sent}`, "198.51.100.1", 10)).toBeNull();
-    expect(await gate.reserve("another-hub", "198.51.100.1", 10)).toMatchObject({ status: 429, code: "network_daily" });
-    expect(await gate.reserve("another-hub", "198.51.100.2", 10)).toBeNull();
+    for (let sent = 0; sent < UPLOADS_PER_NETWORK; sent += 1) expect(await gate.reserve(`hub-${sent}`, "198.51.100.1", `frame-${sent}`, 10, 0)).toEqual(NEW);
+    expect(await gate.reserve("another-hub", "198.51.100.1", "frame", 10, 0)).toMatchObject({ status: 429, code: "network_daily" });
+    expect(await gate.reserve("another-hub", "198.51.100.2", "frame", 10, 0)).toEqual(NEW);
   });
 
   it("stops everyone at the global daily limit", async () => {
     const gate = env.GATE.getByName("global-limit");
-    for (let sent = 0; sent < UPLOADS_PER_DAY; sent += 1) expect(await gate.reserve(`hub-${sent}`, `network-${sent}`, 10)).toBeNull();
-    expect(await gate.reserve("late-hub", "late-network", 10)).toMatchObject({ status: 429, code: "global_daily" });
+    for (let sent = 0; sent < UPLOADS_PER_DAY; sent += 1) expect(await gate.reserve(`hub-${sent}`, `network-${sent}`, `frame-${sent}`, 10, 0)).toEqual(NEW);
+    expect(await gate.reserve("late-hub", "late-network", "frame", 10, 0)).toMatchObject({ status: 429, code: "global_daily" });
+  });
+
+  it("counts one frame once when two requests for it both find the bucket empty", async () => {
+    const gate = env.GATE.getByName("same-frame");
+    expect(await gate.reserve("hub", "network", "frame", 10, 0)).toEqual(NEW);
+    expect(await gate.reserve("hub", "network", "frame", 10, 0)).toEqual({ bytes: 0, uploads: 0 });
+    expect(await gate.storedBytes()).toBe(10);
+    expect(await gate.reserve("hub", "network", "frame", 12, 0)).toEqual({ bytes: 2, uploads: 0 });
+
+    await gate.release("hub", "network", "other", (await gate.reserve("hub", "network", "other", 30, 0)) as Reservation);
+    expect(await gate.storedBytes()).toBe(12);
+    expect(await gate.reserve("hub", "network", "other", 30, 0)).toEqual({ bytes: 30, uploads: 1 });
   });
 
   it("never lets the stored bytes pass the cap, and frees room when a write is released or the bucket is recounted", async () => {
     const gate = env.GATE.getByName("storage-cap");
     await gate.recount(STORED_BYTES_MAX - 100);
-    expect(await gate.reserve("hub", "network", 100)).toBeNull();
+    const filling = (await gate.reserve("hub", "network", "first", 100, 0)) as Reservation;
     expect(await gate.storedBytes()).toBe(STORED_BYTES_MAX);
-    expect(await gate.reserve("hub", "network", 1)).toEqual({ status: 507, code: "storage_full" });
+    expect(await gate.reserve("hub", "network", "second", 1, 0)).toEqual({ status: 507, code: "storage_full" });
 
-    await gate.release("hub", "network", 100);
-    expect(await gate.reserve("hub", "network", 100)).toBeNull();
+    await gate.release("hub", "network", "first", filling);
+    expect(await gate.reserve("hub", "network", "first", 100, 0)).toEqual({ bytes: 100, uploads: 1 });
     await gate.recount(0);
-    expect(await gate.reserve("hub", "network", FRAME_BYTES_MAX)).toBeNull();
+    expect(await gate.reserve("hub", "network", "third", FRAME_BYTES_MAX, 0)).toEqual({ bytes: FRAME_BYTES_MAX, uploads: 1 });
   });
 });
 
@@ -190,9 +227,9 @@ describe("the daily recount", () => {
 
   it("keeps the bytes that arrive while the bucket is being listed", async () => {
     const gate = env.GATE.getByName("recount-race");
-    await gate.reserve("hub", "network", 300);
+    await gate.reserve("hub", "network", "before", 300, 0);
     await gate.beginRecount();
-    await gate.reserve("hub", "network", 50);
+    await gate.reserve("hub", "network", "during", 50, 0);
     await gate.recount(300);
     expect(await gate.storedBytes()).toBe(350);
 

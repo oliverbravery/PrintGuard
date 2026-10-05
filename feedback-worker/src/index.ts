@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Gate, type Refusal } from "./gate";
 import { DAY_MS, EXPIRY_DAYS, EXPIRY_WARN_DAYS, FRAME_BYTES_MAX, STORED_BYTES_MAX, STORED_BYTES_WARN } from "./limits";
-import { hubOf, issueToken } from "./token";
+import { hubOf, issueToken, keyed } from "./token";
 
 export { Gate };
 
@@ -35,7 +35,8 @@ export function networkOf(address: string): string {
   return groups.slice(0, 3).map((group) => parseInt(group, 16).toString(16)).join(":");
 }
 
-const callerNetwork = (request: Request) => networkOf(request.headers.get("CF-Connecting-IP") ?? "unknown");
+const callerNetwork = (request: Request, env: Env) =>
+  keyed(networkOf(request.headers.get("CF-Connecting-IP") ?? "unknown"), env.TOKEN_SECRET);
 
 const parseDetails = (header: string | null) => {
   try {
@@ -50,7 +51,7 @@ const sentByABrowser = (request: Request) =>
 
 async function register(request: Request, env: Env): Promise<Response> {
   if (sentByABrowser(request)) return refuse({ status: 403, code: "browser" });
-  const refusal = await env.GATE.getByName("gate").register(callerNetwork(request));
+  const refusal = await env.GATE.getByName("gate").register(await callerNetwork(request, env));
   if (refusal) return refuse(refusal);
   return Response.json({ token: await issueToken(env.TOKEN_SECRET) }, { status: 201 });
 }
@@ -68,19 +69,18 @@ async function storeFrame(request: Request, env: Env): Promise<Response> {
   if (jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || jpeg[2] !== 0xff) return refuse({ status: 415, code: "not_jpeg" });
 
   const gate = env.GATE.getByName("gate");
-  const network = callerNetwork(request);
+  const network = await callerNetwork(request, env);
   const { print, frame, ...labels } = details.data;
   const key = `${hub}/${print}/${frame}.jpg`;
-  const addedBytes = jpeg.byteLength - ((await env.FRAMES.head(key))?.size ?? 0);
-  const refusal = await gate.reserve(hub, network, addedBytes);
-  if (refusal) return refuse(refusal);
+  const reserved = await gate.reserve(hub, network, key, jpeg.byteLength, (await env.FRAMES.head(key))?.size ?? 0);
+  if ("code" in reserved) return refuse(reserved);
   try {
     await env.FRAMES.put(key, jpeg, {
       httpMetadata: { contentType: "image/jpeg" },
       customMetadata: Object.fromEntries(Object.entries(labels).map(([name, value]) => [name, String(value)])),
     });
   } catch (error) {
-    await gate.release(hub, network, addedBytes);
+    await gate.release(hub, network, key, reserved);
     throw error;
   }
   return Response.json({}, { status: 201 });

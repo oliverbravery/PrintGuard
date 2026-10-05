@@ -22,6 +22,7 @@ import argparse
 import io
 import json
 import os
+from email.header import decode_header, make_header
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -54,6 +55,11 @@ def sanitised(raw: bytes) -> bytes | None:
     return clean.getvalue()
 
 
+def labels(metadata: dict[str, str]) -> dict[str, str]:
+    """Decodes an object's labels, which R2 hands back RFC 2047 encoded when they are not ASCII."""
+    return {name: str(make_header(decode_header(value))) for name, value in metadata.items()}
+
+
 def inbox(client: Any) -> Iterator[str]:
     """Yields the key of every object waiting in the bucket."""
     for page in client.get_paginator("list_objects_v2").paginate(Bucket=BUCKET):
@@ -84,7 +90,7 @@ def pull(client: Any, out: Path) -> tuple[int, int]:
                 target = out / hub / print_id / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(clean)
-                row = {"hub": hub, "print": print_id, "file": str(target.relative_to(out)), "uploaded": stored["LastModified"].isoformat(), **stored["Metadata"]}
+                row = {"hub": hub, "print": print_id, "file": str(target.relative_to(out)), "uploaded": stored["LastModified"].isoformat(), **labels(stored["Metadata"])}
                 rows.write(json.dumps(row) + "\n")
                 rows.flush()
                 kept += 1

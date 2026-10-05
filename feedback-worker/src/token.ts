@@ -7,9 +7,12 @@ const toHex = (bytes: ArrayBuffer) => [...new Uint8Array(bytes)].map((byte) => b
 
 const fromHex = (hex: string) => Uint8Array.from(hex.match(/../g) ?? [], (pair) => parseInt(pair, 16));
 
+export const keyed = async (value: string, secret: string) =>
+  toHex(await crypto.subtle.sign("HMAC", await signingKey(secret), encoder.encode(value)));
+
 export async function issueToken(secret: string): Promise<string> {
   const hub = crypto.randomUUID().replaceAll("-", "");
-  return `${hub}.${toHex(await crypto.subtle.sign("HMAC", await signingKey(secret), encoder.encode(hub)))}`;
+  return `${hub}.${await keyed(hub, secret)}`;
 }
 
 export async function hubOf(token: string, secret: string): Promise<string | null> {
