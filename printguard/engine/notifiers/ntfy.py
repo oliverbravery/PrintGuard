@@ -6,9 +6,22 @@ Subscribing on a phone (how alerts are received): https://docs.ntfy.sh/subscribe
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from .base import HttpFn, NotifierAdapter
+
+
+def _header(text: str) -> str:
+    """Encodes a header value as an RFC 2047 word unless it is printable ASCII.
+
+    HTTP clients send header values as ASCII, and ntfy decodes RFC 2047 in
+    every header, so a name with an accent or a message with a line break
+    travels this way.
+    """
+    if text.isascii() and text.isprintable():
+        return text
+    return f"=?UTF-8?B?{base64.b64encode(text.encode()).decode()}?="
 
 
 class NtfyNotifier(NotifierAdapter):
@@ -38,13 +51,13 @@ class NtfyNotifier(NotifierAdapter):
 
     async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:
         """Publishes via PUT with the snapshot as the attachment body."""
-        headers = {"Title": title, "Priority": "urgent", "Tags": "rotating_light"}
+        headers = {"Title": _header(title), "Priority": "urgent", "Tags": "rotating_light"}
         if config.get("token"):
             headers["Authorization"] = f"Bearer {config['token']}"
         url = str(config["url"]).strip()
         if image:
             headers["Filename"] = "snapshot.jpg"
-            headers["Message"] = body
+            headers["Message"] = _header(body)
             status, _ = await http("PUT", url, headers=headers, data=image, timeout=15.0)
         else:
             status, _ = await http("POST", url, headers=headers, data=body.encode(), timeout=15.0)
