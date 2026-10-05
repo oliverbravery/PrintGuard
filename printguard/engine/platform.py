@@ -103,8 +103,14 @@ class PluginRuntime(Protocol):
         """Accepts an engine event for delivery to the running plugins."""
         ...
 
-    async def reload(self, running: "list[Plugin]") -> None:
-        """Replaces the running set, starting and stopping sandboxes to match."""
+    async def reload(self, running: "list[Plugin]", failed_gates: set[str]) -> None:
+        """Replaces the running set, starting and stopping sandboxes to match.
+
+        Args:
+            running: The enabled plugins.
+            failed_gates: Plugins holding ``gate`` that stopped on a failure.
+                Every request is refused while there is one.
+        """
         ...
 
     async def serve(self, plugin_id: str, request: dict[str, Any]) -> dict[str, Any] | None:
@@ -112,7 +118,9 @@ class PluginRuntime(Protocol):
         ...
 
     async def authorise(self, request: dict[str, Any]) -> bool | None:
-        """Asks any gating plugin to allow a request, returning None when none gates."""
+        """Asks any gating plugin to allow a request, returning None when none gates.
+
+        A gate that has failed refuses."""
         ...
 
     def gate_paths(self) -> tuple[str, ...]:
@@ -178,8 +186,14 @@ class Platform(Protocol):
         data: bytes | None = None,
         binary: bool = False,
         timeout: float = 10.0,
+        follow_redirects: bool = True,
     ) -> tuple[int, Any]:
-        """Performs an HTTP request and returns (status, parsed body)."""
+        """Performs an HTTP request and returns (status, parsed body).
+
+        A plugin's request passes ``follow_redirects=False`` and gets the
+        redirect itself back, since only the address it named was checked
+        against its grant.
+        """
         ...
 
     async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> sockets.Socket:

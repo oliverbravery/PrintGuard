@@ -27,6 +27,7 @@ from printguard.server.inference import (
 from printguard.server.platform import (
     V4L2_CAP_DEVICE_CAPS,
     V4L2_CAP_VIDEO_CAPTURE,
+    AVSource,
     ServerPlatform,
     _v4l2_card,
     _video_devices,
@@ -180,6 +181,45 @@ def test_the_state_file_is_readable_only_by_whoever_runs_the_hub(tmp_path) -> No
 
     assert oct((tmp_path / "state.json").stat().st_mode)[-3:] == "600"
     assert not (tmp_path / "state.tmp").exists(), "the temporary file was left behind"
+
+
+def test_the_state_file_reaches_the_disk_before_it_takes_the_name(tmp_path, monkeypatch) -> None:
+    """A rename without a sync can survive a power cut pointing at an empty file."""
+    synced: list[int] = []
+    monkeypatch.setattr("printguard.server.platform.os.fsync", lambda descriptor: synced.append((tmp_path / "state.tmp").stat().st_size))
+    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
+    ServerPlatform.save_state(holder, {"printers": []})
+
+    assert synced == [(tmp_path / "state.json").stat().st_size]
+
+
+def test_a_damaged_state_file_is_kept_rather_than_overwritten(tmp_path, caplog) -> None:
+    """Starting empty in silence loses every printer and reopens anonymous reads of the API."""
+    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
+    assert ServerPlatform.load_state(holder) == {}
+    assert not caplog.records, "a first boot has no state file and nothing to say about it"
+
+    (tmp_path / "state.json").write_text('{"printers": [{"id": "p1"')
+    assert ServerPlatform.load_state(holder) == {}
+    ServerPlatform.save_state(holder, {})
+
+    assert (tmp_path / "state.json.corrupt").read_text() == '{"printers": [{"id": "p1"'
+    assert [record.levelname for record in caplog.records] == ["ERROR"]
+    assert "state.json.corrupt" in caplog.text
+
+
+def test_a_camera_that_will_not_open_keeps_its_password_out_of_the_error() -> None:
+    """PyAV quotes the address it failed on, and that text becomes an error event."""
+    source = AVSource("http://admin:CAMPASS@127.0.0.1:9/video?user=admin&pwd=QUERYPASS", None)
+    try:
+        deadline = time.monotonic() + 15
+        while source.last_error is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        source.close()
+
+    assert source.last_error and "127.0.0.1:9/video" in source.last_error
+    assert "CAMPASS" not in source.last_error and "QUERYPASS" not in source.last_error
 
 
 def _capability(card: bytes, device_caps: int) -> bytes:

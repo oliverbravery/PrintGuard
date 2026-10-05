@@ -3,9 +3,9 @@ import { currentLayout } from "./layout";
 import { log } from "./log";
 import type { Finding } from "./lint";
 import { PluginPanelHost } from "./panel";
-import { commandAllowed, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
+import { commandAllowed, LINK_ACTIONS, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
 import { play, playFile } from "./sound";
-import { resumePublishers } from "./stream";
+import { resumePublishers, stopPublishing } from "./stream";
 import { applyTheme, measureCover } from "./theme";
 import { openExternally } from "./urls";
 import { extOf, FORMATS, sendPrint, type PrintDraft } from "./prints";
@@ -14,6 +14,8 @@ import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Lay
 
 const HISTORY_LIMIT = 240;
 const MAX_BACKGROUND_CHARS = 3 * 1024 * 1024;
+const BACKGROUND_IMAGE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
+const DOWNLOAD_URL_LIFETIME_MS = 60_000;
 const MAX_NOTICE_CHARS = 200;
 const UPDATE_DEBOUNCE_MS = 250;
 const updateTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -24,7 +26,7 @@ interface OptimisticEntry {
   kind: OptimisticKind;
   id?: string;
   patch: Record<string, unknown>;
-  reqId: number | null;
+  reqId: string | null;
 }
 
 function applyOptimistic(engine: EngineState, overlay: Record<string, OptimisticEntry>): EngineState {
@@ -56,7 +58,7 @@ function saveBase64(filename: string, base64: string, type: string) {
   anchor.href = url;
   anchor.download = filename;
   anchor.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_LIFETIME_MS);
 }
 
 const INTRO_SEEN_KEY = "pg.intro.seen";
@@ -84,18 +86,19 @@ export type SettingsTabId = "appearance" | "alerts" | "plugins" | "mqtt" | "upda
 interface PgStore {
   phase: "booting" | "ready";
   bootMsg: string;
+  reconnecting: boolean;
   link: EngineLink | null;
   engine: EngineState | null;
   history: Record<string, ScorePoint[]>;
   discovered: CameraSource[] | null;
   discovering: boolean;
-  printerTest: { ok: boolean; status?: string; error?: string } | null;
-  testing: boolean;
+  printerTest: { target: string; ok: boolean; status?: string; error?: string } | null;
+  testing: string | null;
   notifyTest: { provider: string; ok: boolean; error?: string } | null;
   testingNotifier: string | null;
   reportResult: { ok: boolean; error?: string } | null;
   releases: UpdateRelease[];
-  pending: Record<string, { req_id: number; cmd: string }>;
+  pending: Record<string, { req_id: string; cmd: string }>;
   toasts: Toast[];
   detailId: string | null;
   statsMonitorId: string | null;
@@ -131,7 +134,7 @@ interface PgStore {
   setCustomising(on: boolean): void;
   mutateLayout(key: keyof Layout, fn: (section: LayoutSection) => LayoutSection): void;
   resetLayout(): void;
-  send(cmd: Record<string, unknown>): number;
+  send(cmd: Record<string, unknown>): string;
   isPending(cmd: string): boolean;
   updateCamera(id: string, patch: Record<string, unknown>): void;
   updateMonitor(id: string, patch: Record<string, unknown>): void;
@@ -149,34 +152,47 @@ interface PgStore {
   uploadPrint(draft: PrintDraft): void;
   fetchSnapshot(monitorId: string, id: string): void;
   clearCreatedToken(): void;
-  testPrinter(provider: string, config: Record<string, string>): void;
+  testPrinter(target: string, provider: string, config: Record<string, string>): void;
+  addPublishedCamera(name: string, path: string): void;
   testNotifier(provider: string, config: Record<string, string>): void;
   toast(kind: Toast["kind"], text: string): void;
 }
 
 let toastSeq = 0;
 let reqSeq = 0;
+const TAB_ID = crypto.getRandomValues(new Uint32Array(1))[0].toString(36);
+const nextReqId = () => `${TAB_ID}-${++reqSeq}`;
+const issuedHere = (reqId: unknown) => typeof reqId === "string" && reqId.startsWith(`${TAB_ID}-`);
 let uploadSeq = 0;
 let resumed = false;
 
-function connectHub(onEvent: (event: any) => void, onDown: () => void): EngineLink {
+function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: () => void): EngineLink {
   let socket: WebSocket;
   let closed = false;
   const open = () => {
-    socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`);
-    socket.onopen = () => log("info", "hub socket connected");
-    socket.onmessage = (msg) => onEvent(JSON.parse(msg.data));
-    socket.onclose = () => {
-      if (!closed) {
-        log("warn", "hub socket closed, reconnecting");
-        onDown();
-        setTimeout(open, 1500);
-      }
+    const opening = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`);
+    socket = opening;
+    let connected = false;
+    opening.onopen = () => {
+      log("info", "hub socket connected");
+      connected = true;
+      onUp();
+    };
+    opening.onmessage = (msg) => onEvent(JSON.parse(msg.data));
+    opening.onclose = () => {
+      if (closed) return;
+      log("warn", "hub socket closed, reconnecting");
+      if (connected) onDown();
+      setTimeout(open, 1500);
     };
   };
   open();
   return {
-    send: (cmd) => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(cmd)),
+    send: (cmd) => {
+      if (socket.readyState !== WebSocket.OPEN) return false;
+      socket.send(JSON.stringify(cmd));
+      return true;
+    },
     close: () => {
       closed = true;
       socket.close();
@@ -185,7 +201,7 @@ function connectHub(onEvent: (event: any) => void, onDown: () => void): EngineLi
 }
 
 export const useStore = create<PgStore>((set, get) => {
-  const clearPending = (reqId?: number) => {
+  const clearPending = (reqId?: string) => {
     if (reqId == null) return;
     set((s) => {
       const next = { ...s.pending };
@@ -196,8 +212,8 @@ export const useStore = create<PgStore>((set, get) => {
     });
   };
 
-  const sendSilent = (cmd: Record<string, unknown>): number => {
-    const req_id = ++reqSeq;
+  const sendSilent = (cmd: Record<string, unknown>): string => {
+    const req_id = nextReqId();
     get().link?.send({ ...cmd, req_id });
     return req_id;
   };
@@ -227,7 +243,27 @@ export const useStore = create<PgStore>((set, get) => {
   };
 
   const hosts = new Map<string, PluginHost>();
-  const codeRequests = new Map<number, string>();
+  const codeRequests = new Map<string, string>();
+  const publishRequests = new Map<string, string>();
+
+  const dropInFlight = () => {
+    codeRequests.clear();
+    set((s) => ({
+      pending: {},
+      discovering: false,
+      testing: null,
+      testingNotifier: null,
+      reportResult: "report.send" in s.pending ? { ok: false, error: "the connection to the hub dropped" } : s.reportResult,
+      optimistic: Object.fromEntries(Object.entries(s.optimistic).map(([key, entry]) => [key, { ...entry, reqId: null }])),
+    }));
+  };
+
+  const resendUnsaved = () => {
+    for (const key of Object.keys(get().optimistic)) {
+      clearTimeout(updateTimers[key]);
+      flushKey(key);
+    }
+  };
   const savedConfigs = new Map<string, string>();
   const writingConfigs = new Map<string, string>();
 
@@ -256,7 +292,7 @@ export const useStore = create<PgStore>((set, get) => {
         sendSilent(outboundRequest(id, effect.request));
       } else if (effect.kind === "socket" && effect.request) {
         sendSilent(outboundSocket(id, String(effect.action), effect.request));
-      } else if (effect.kind === "link" && effect.request) {
+      } else if (effect.kind === "link" && effect.request && LINK_ACTIONS.includes(String(effect.action))) {
         sendSilent(outboundLink(id, String(effect.action), effect.request));
       } else if (effect.kind === "notify") {
         if (plugin.granted.includes("notify")) {
@@ -269,8 +305,8 @@ export const useStore = create<PgStore>((set, get) => {
         else play(effect.tones ?? []);
       } else if (effect.kind === "background") {
         if (!plugin.granted.includes("background")) continue;
-        const image = String(effect.image ?? "").slice(0, MAX_BACKGROUND_CHARS);
-        showBackground(image.startsWith("data:image/") ? { id, image } : null);
+        const image = String(effect.image ?? "");
+        showBackground(image.length <= MAX_BACKGROUND_CHARS && BACKGROUND_IMAGE.test(image) ? { id, image } : null);
       } else if (effect.kind === "log") {
         log("info", `plugin ${id}:`, effect.text);
       }
@@ -402,6 +438,7 @@ export const useStore = create<PgStore>((set, get) => {
     switch (event.event) {
       case "state": {
         clearPending(event.req_id);
+        publishRequests.delete(event.req_id);
         const server = event as EngineState;
         let optimistic = get().optimistic;
         const had = Object.keys(optimistic).length > 0;
@@ -445,7 +482,7 @@ export const useStore = create<PgStore>((set, get) => {
       }
       case "plugin_oauth": {
         clearPending(event.req_id);
-        openExternally(event.url);
+        if (issuedHere(event.req_id)) openExternally(event.url);
         break;
       }
       case "plugin_effect":
@@ -507,13 +544,13 @@ export const useStore = create<PgStore>((set, get) => {
         set({ discovered: event.sources, discovering: false });
         break;
       case "printer_test":
-        set({ printerTest: event, testing: false });
+        if (issuedHere(event.req_id)) set((s) => ({ printerTest: { ...event, target: s.testing ?? "" }, testing: null }));
         break;
       case "notify_test":
         set({ notifyTest: event, testingNotifier: null });
         break;
       case "report_sent":
-        set({ reportResult: event });
+        if (issuedHere(event.req_id)) set({ reportResult: event });
         break;
       case "releases":
         clearPending(event.req_id);
@@ -521,6 +558,7 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       case "report_bundle":
         clearPending(event.req_id);
+        if (!issuedHere(event.req_id)) break;
         saveBase64(event.filename, event.zip, "application/zip");
         get().toast("info", `Diagnostics saved as ${event.filename}`);
         break;
@@ -533,9 +571,13 @@ export const useStore = create<PgStore>((set, get) => {
       case "error":
         get().toast("error", event.message);
         clearPending(event.req_id);
+        if (publishRequests.has(event.req_id)) {
+          stopPublishing(publishRequests.get(event.req_id)!);
+          publishRequests.delete(event.req_id);
+        }
         set((s) => ({
           discovering: false,
-          testing: false,
+          testing: null,
           testingNotifier: null,
           optimistic:
             event.req_id != null
@@ -551,13 +593,25 @@ export const useStore = create<PgStore>((set, get) => {
   return {
     phase: "booting",
     bootMsg: "Connecting to hub",
-    link: connectHub(onEvent, () => set({ bootMsg: "Reconnecting" })),
+    reconnecting: false,
+    link: connectHub(
+      onEvent,
+      () => {
+        dropInFlight();
+        set({ reconnecting: false });
+        resendUnsaved();
+      },
+      () => {
+        dropInFlight();
+        set({ bootMsg: "Reconnecting", reconnecting: true });
+      },
+    ),
     engine: null,
     history: {},
     discovered: null,
     discovering: false,
     printerTest: null,
-    testing: false,
+    testing: null,
     notifyTest: null,
     testingNotifier: null,
     reportResult: null,
@@ -645,10 +699,9 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     send(cmd) {
-      const req_id = ++reqSeq;
+      const req_id = nextReqId();
       const cmdType = cmd.cmd as string;
-      set((s) => ({ pending: { ...s.pending, [cmdType]: { req_id, cmd: cmdType } } }));
-      get().link?.send({ ...cmd, req_id });
+      if (get().link?.send({ ...cmd, req_id })) set((s) => ({ pending: { ...s.pending, [cmdType]: { req_id, cmd: cmdType } } }));
       return req_id;
     },
 
@@ -762,9 +815,13 @@ export const useStore = create<PgStore>((set, get) => {
       set({ createdToken: null });
     },
 
-    testPrinter(provider, config) {
-      set({ printerTest: null, testing: true });
+    testPrinter(target, provider, config) {
+      set({ printerTest: null, testing: target });
       get().send({ cmd: "printer.test", provider, config });
+    },
+
+    addPublishedCamera(name, path) {
+      publishRequests.set(get().send({ cmd: "camera.add", name, source: { kind: "path", path } }), path);
     },
 
     testNotifier(provider, config) {

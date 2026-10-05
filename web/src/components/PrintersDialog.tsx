@@ -6,24 +6,28 @@ import { DeviceChip } from "./MonitorTile";
 import { SchemaForm } from "./SchemaForm";
 import { TestRow } from "./TestRow";
 
+const NEW_PRINTER = "new";
+
 function providerLabel(integrations: AdapterMeta[], id: string): string {
   return integrations.find((i) => i.id === id)?.label ?? id;
 }
 
-function PrinterTest({ provider, config }: { provider: string; config: Record<string, string> }) {
+function PrinterTest({ target, provider, config }: { target: string; provider: string; config: Record<string, string> }) {
   const { printerTest, testing, testPrinter } = useStore();
   return (
     <TestRow
       label="Test connection"
       busyLabel="Testing…"
-      busy={testing}
-      disabled={!provider || testing}
-      onTest={() => testPrinter(provider, config)}
+      busy={testing === target}
+      disabled={!provider || testing !== null}
+      onTest={() => testPrinter(target, provider, config)}
       result={
-        printerTest && {
-          ok: printerTest.ok,
-          message: printerTest.ok ? `ok, ${printerTest.status}` : printerTest.error || printerTest.status || "failed",
-        }
+        printerTest?.target === target
+          ? {
+              ok: printerTest.ok,
+              message: printerTest.ok ? `ok, ${printerTest.status}` : printerTest.error || printerTest.status || "failed",
+            }
+          : null
       }
     />
   );
@@ -70,7 +74,7 @@ function PrinterRow({ printer }: { printer: Printer }) {
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
           <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
-          <PrinterTest provider={printer.provider} config={config} />
+          <PrinterTest target={printer.id} provider={printer.provider} config={config} />
           <button
             className="btn btn-primary w-full !py-1.5"
             disabled={!dirty || isPending("printer.update")}
@@ -114,7 +118,7 @@ function RegisterPrinter() {
         <>
           <input className="field" placeholder={`Name (e.g. ${meta.label} Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
-          <PrinterTest provider={provider} config={config} />
+          <PrinterTest target={NEW_PRINTER} provider={provider} config={config} />
           <button
             className="btn btn-primary w-full"
             disabled={busy}

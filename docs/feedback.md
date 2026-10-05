@@ -85,6 +85,9 @@ Your hub ID is in **Settings**, under **Advanced**, once you've sent a print. As
 [raising an issue on GitHub](https://github.com/oliverbravery/PrintGuard/issues/new) with that
 ID and I'll delete every frame sent under it. The ID is random and says nothing about you.
 
+Your hub gets a new ID if I ever replace the key the inbox signs IDs with. Frames sent under the
+old ID can't be traced to your hub after that, so I couldn't find them to delete.
+
 ## Switching it off
 
 Turn off **Ask me to review frames after a print** in **Settings**, under **Advanced**. The hub

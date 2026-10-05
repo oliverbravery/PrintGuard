@@ -15,7 +15,7 @@ your trusted network.
 - [Option 1: Tailscale](#option-1-tailscale)
 - [Option 2: Cloudflare Tunnel and Access](#option-2-cloudflare-tunnel-and-access)
 - [Option 3: oauth2-proxy on your own domain](#option-3-oauth2-proxy-on-your-own-domain)
-- [Origin checking](#origin-checking)
+- [Host and origin checking](#host-and-origin-checking)
 - [Plugins](#plugins)
 - [Hardening checklist](#hardening-checklist)
 - [What the hub reaches out to](#what-the-hub-reaches-out-to)
@@ -55,6 +55,9 @@ flowchart LR
 Cameras that PrintGuard pulls from, and printers it talks to, need no published ports at
 all. The compose file publishes `8000` and `8554`, so add `"1935:1935"` for an RTMP push.
 
+Ports `8554` and `1935` take no login. Anyone who can reach them can read any camera's stream
+by its id and publish a stream of their own, because cameras push to the hub that way. Remove `"8554:8554"` from the compose file if no camera pushes to the hub.
+
 The desktop app listens on the same three ports on every interface of the computer it runs on,
 so the same rule applies to it on a network you don't trust.
 
@@ -85,7 +88,13 @@ authentication is your tailnet identity.
    sudo tailscale serve --bg --https=443 8000
    ```
 
-   Then open `https://<hub-machine-name>.<tailnet>.ts.net`.
+   Then open `https://<hub-machine-name>.<tailnet>.ts.net`, after
+   [naming it to the hub](#host-and-origin-checking):
+
+   ```yaml
+       environment:
+         PRINTGUARD_ORIGINS: "https://<hub-machine-name>.<tailnet>.ts.net"
+   ```
 
 ## Option 2: Cloudflare Tunnel and Access
 
@@ -103,7 +112,8 @@ pass a Cloudflare Access policy first.
    ```
 
 2. Give the tunnel a public hostname, for example `hub.example.com`, pointing at
-   `http://printguard:8000`.
+   `http://printguard:8000`, and [name it to the hub](#host-and-origin-checking) with
+   `PRINTGUARD_ORIGINS: "https://hub.example.com"` in the `printguard` service's environment.
 3. In Zero Trust, under Access and then Applications, add a self-hosted application for that
    hostname, with a policy that allows the emails of the people you trust. Visitors now authenticate
    before anything reaches PrintGuard.
@@ -138,24 +148,41 @@ GitHub, Google or any OIDC provider and proxies everything, WebSockets included:
 ```
 
 Terminate TLS in front with Caddy, nginx or a Cloudflare Tunnel pointed at `:4180`, and bind
-PrintGuard's own port to localhost so the proxy is the only way in.
+PrintGuard's own port to localhost so the proxy is the only way in. Then
+[name the public address to the hub](#host-and-origin-checking) with
+`PRINTGUARD_ORIGINS: "https://hub.example.com"`.
 
-## Origin checking
+## Host and origin checking
 
-The hub rejects any WebSocket or print upload a browser sends from an `Origin` that is not its
-own. A request with no `Origin`, which is what a script sends, is let through. This matters because an auth
-proxy checks the session cookie, and the browser attaches that cookie to sockets opened by
-other sites too, so origin checking is what stops a logged-in user's unrelated tabs from
-driving the engine.
+The hub only answers requests addressed to a name it knows. Without that, a web page you visit
+could point its own domain at your hub's address and read it as if it were the same site, which
+is called DNS rebinding.
 
-The hub recognises the dashboard automatically when the proxy preserves `Host` or sends
-`X-Forwarded-Host`. Tailscale, Cloudflare and oauth2-proxy all do. If yours rewrites the
-host, list your public origin:
+| You open the hub as | Setup |
+|---|---|
+| An IP address, such as `http://192.168.1.20:8000` | None |
+| `localhost`, which is what the desktop app uses | None |
+| A name with no dot in it, such as `http://tower:8000` or a Tailscale machine name | None |
+| A name ending `.local`, `.lan`, `.home`, `.internal` or `.localhost` | None |
+| Any other name, such as `hub.example.com` or `<machine>.<tailnet>.ts.net` | List it in `PRINTGUARD_ORIGINS` |
 
 ```yaml
     environment:
       PRINTGUARD_ORIGINS: "https://hub.example.com"   # comma-separate several
 ```
+
+Every request for a name that isn't covered gets a `403` that says which line to add, and the
+hub logs the same line once for each name. That includes the REST API, the MCP server and
+`/api/health`, so point an uptime check at the hub's address or list the name it uses.
+
+The check reads both `Host` and `X-Forwarded-Host`, so it works whether your proxy keeps the
+host or forwards it. Tailscale, Cloudflare and oauth2-proxy all do one or the other.
+
+The hub also rejects any WebSocket or print upload a browser sends from an `Origin` that is not
+the address the request was for or one listed in `PRINTGUARD_ORIGINS`. A request with no
+`Origin`, which is what a script sends, is let through. An auth proxy checks the session cookie,
+and the browser attaches that cookie to sockets opened by other sites too, so this is what stops
+a signed-in user's other tabs from driving the engine.
 
 ## Plugins
 
@@ -166,9 +193,9 @@ like:
 | Permission | What it means for an exposed hub |
 |---|---|
 | **Serve its own pages** | The plugin answers requests under `/plugins/<id>/`. Those responses go out through your proxy like anything else, so whatever it serves is as exposed as the dashboard. It is served into a sandboxed origin, so it can never act as the dashboard |
-| **Authorise every request** | The plugin sees every request to the hub except `/api/health` and its own pages, with its cookie and authorisation headers, and can refuse it. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out |
+| **Authorise every request** | The plugin sees every request to the hub except `/api/health` and its own pages, with its cookie and authorisation headers, and can refuse it. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out. One that fails is disabled and every request is refused until you deal with it |
 
-To start the hub with every plugin switched off, add this and then remove the plugin:
+To start the hub with every plugin switched off, add this and then remove the plugin or enable it again:
 
 ```yaml
     environment:
@@ -187,7 +214,8 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | Only admit people you would hand the printer to | There are no per-user roles, so anyone who authenticates sees every camera and controls every printer |
 | Bind ports to `127.0.0.1:…` when a proxy on the same host is the only client | Keeps the app unreachable except through the proxy |
 | Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback inside the container, and the hub proxies HLS out through `:8000` |
-| Set `PRINTGUARD_ORIGINS` only if your proxy rewrites the host header | Otherwise the automatic origin check already covers you |
+| List in `PRINTGUARD_ORIGINS` only the addresses you open the hub at | Every name in it is one a web page may reach the hub under. See [host and origin checking](#host-and-origin-checking) |
+| Publish `8554` and `1935` only to a network you trust, or not at all | The streaming server takes no login. Anyone who can reach those ports can watch any camera's stream and publish one of their own. A hub that only pulls from its cameras needs neither port published |
 | Serve over HTTPS if you issue API tokens | Bearer tokens must never travel in clear. See [API & MCP](api.md) |
 | Grant a plugin nothing you would not grant its author | Especially **Control printers** and **Authorise every request**. `PRINTGUARD_PLUGINS=off` is the way back from a lockout |
 | Keep the image current | `latest` moves on every release |
@@ -201,7 +229,7 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | `*.ingest.de.sentry.io` | Only when you send a bug report |
 | `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
 | Your printers, cameras, notification services and MQTT broker | As you configure them |
-| The addresses a plugin's manifest lists | Only for a plugin you granted [the network](plugins.md#permissions) |
+| The addresses a plugin's manifest lists, and the service it signs you in to | Only for a plugin you granted [`net` or `oauth`](plugins.md#permissions). A redirect from one of them is not followed |
 
 ## Environment variables
 
@@ -209,7 +237,7 @@ Everything else is set from the dashboard. These are the ones a deployment sets.
 
 | Variable | Default | Does |
 |---|---|---|
-| `PRINTGUARD_ORIGINS` | Unset | Extra origins the hub accepts WebSockets and print uploads from, comma-separated. See [origin checking](#origin-checking) |
+| `PRINTGUARD_ORIGINS` | Unset | The addresses you open the hub at when they are not an IP address or a local name, comma-separated, such as `https://hub.example.com`. See [host and origin checking](#host-and-origin-checking) |
 | `PRINTGUARD_PLUGINS` | On | `off` starts the hub with every plugin switched off |
 | `PRINTGUARD_CAMERAS` | `auto` in the image | Anything else, such as `off`, leaves [cameras passed into the container](cameras.md#cameras-plugged-into-the-hub) to be added by hand |
 | `PORT` | `8000` | The port the hub listens on |
@@ -225,6 +253,7 @@ Everything PrintGuard keeps is in its data directory.
 | Path | Holds |
 |---|---|
 | `state.json` | Cameras, printers, monitors, settings, themes, layout, installed plugins and the record of each print's kept frames, with printer passwords, notifier keys, plugin credentials and API token hashes. Written readable only by the account running the hub |
+| `state.json.corrupt` | A `state.json` the hub could not read at start, [kept so you can recover it](troubleshooting.md#starting-up). It's only there after that has happened |
 | `prints/` | The [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub) |
 
 | Install | Data directory |

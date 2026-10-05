@@ -2,9 +2,10 @@
 
 The tool set is derived from the REST API with FastMCP.from_fastapi, so agents
 and developers share one definition that always tracks the engine protocol. The
-two image tools are hand-written because a binary body cannot be derived: the
-camera frame returns a JPEG as native MCP image content, and classify takes an
-image the caller supplies (base64) and returns the model's verdict. A single
+three image tools are hand-written because a binary body cannot be derived: the
+camera frame and a monitor's alert snapshot return a JPEG as native MCP image
+content, and classify takes an image the caller supplies (base64) and returns
+the model's verdict. A single
 authorization check resolves the caller's bearer token against the live,
 UI-managed token set through the same ApiAuth the REST layer uses, hiding and
 blocking any tool the caller's scope does not cover.
@@ -44,7 +45,7 @@ def build_mcp(
     auth: ApiAuth,
     internal_token: str,
 ) -> FastMCP:
-    """Derives the MCP server from the REST app and adds the frame tool.
+    """Derives the MCP server from the REST app and adds the image tools.
 
     Each call resolves the caller's bearer token against the engine's current
     token set. With none issued the server is open to whatever fronts it but
@@ -67,6 +68,7 @@ def build_mcp(
         instructions=INSTRUCTIONS,
         route_maps=[
             RouteMap(methods="*", pattern=r".*/frame$", mcp_type=MCPType.EXCLUDE),
+            RouteMap(methods="*", pattern=r".*/snapshots/[^/]+$", mcp_type=MCPType.EXCLUDE),
             RouteMap(methods="*", pattern=r".*/classify$", mcp_type=MCPType.EXCLUDE),
             RouteMap(methods="*", pattern=r".*/file$", mcp_type=MCPType.EXCLUDE),
             RouteMap(methods=["POST"], pattern=r".*/prints$", mcp_type=MCPType.EXCLUDE),
@@ -82,6 +84,14 @@ def build_mcp(
         jpeg = await get_engine().snapshot(camera_id)
         if jpeg is None:
             raise ToolError(f"no frame available for camera {camera_id!r}")
+        return Image(data=jpeg, format="jpeg")
+
+    @mcp.tool(name="get_monitor_snapshot", tags={"read"})
+    async def get_monitor_snapshot(monitor_id: str, snap_id: str) -> Image:
+        """Returns a snapshot from a monitor's history as an image, by the id the history lists it under."""
+        jpeg = await get_engine().monitor_snapshot(monitor_id, snap_id)
+        if jpeg is None:
+            raise ToolError(f"no snapshot {snap_id!r} for monitor {monitor_id!r}")
         return Image(data=jpeg, format="jpeg")
 
     @mcp.tool(name="classify_frame", tags={"read"})

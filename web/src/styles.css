@@ -458,6 +458,17 @@ body {
   border-left: 1px solid var(--painted-edge, var(--color-line-0));
 }
 
+@supports not (anchor-name: --theme-chip) {
+  .tuner {
+    top: 3.25rem;
+    left: 1rem;
+  }
+
+  .tuner::after {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tuner {
     transition: none;

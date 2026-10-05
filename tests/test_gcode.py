@@ -212,6 +212,30 @@ def test_binary_gcode_without_checksums_and_a_wrong_magic() -> None:
         gcode.inspect(b"G1 X1\n", "bgcode")
 
 
+def test_binary_gcode_cut_short_or_damaged_is_refused_as_any_other_bad_file() -> None:
+    cut_in_a_thumbnail = bgcode(block(5, struct.pack("<HHH", 0, 16, 16), b"SMALL"))[:20]
+    not_deflate = bgcode(struct.pack("<HHII", 4, 1, 8, 8) + struct.pack("<H", 0) + b"\xff" * 8)
+    for damaged in (gcode.BGCODE_MAGIC, gcode.BGCODE_MAGIC + b"\x01\x00\x00\x00\x01", cut_in_a_thumbnail, not_deflate):
+        with pytest.raises(ValueError, match="cut short or damaged"):
+            gcode.inspect(damaged, "bgcode")
+
+
+def test_a_file_that_unpacks_past_the_cap_is_refused_before_it_is_unpacked(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gcode, "MAX_MEMBER_BYTES", 1024)
+    monkeypatch.setattr(gcode, "MAX_BLOCK_BYTES", 1024)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("Metadata/plate_1.gcode", b"G1 X1\n" * 1024)
+    bomb = bgcode(block(4, struct.pack("<H", 0), b"a=" + b"0" * 4096, compression=1))
+
+    with pytest.raises(ValueError, match="unpacks to more than"):
+        gcode.inspect(buffer.getvalue(), "3mf")
+    with pytest.raises(ValueError, match="unpacks to more than"):
+        gcode.retemper(buffer.getvalue(), "3mf", {"nozzle": 210.0})
+    with pytest.raises(ValueError, match="inflates to more than"):
+        gcode.inspect(bomb, "bgcode")
+
+
 def test_temperatures_move_together_and_leave_probing_alone() -> None:
     assert gcode.inspect(PRUSA_HEATED, "gcode").meta.items() >= {"nozzle": 215.0, "bed": 60.0}.items()
     moved = gcode.retemper(PRUSA_HEATED, "gcode", {"nozzle": 230, "bed": 70})

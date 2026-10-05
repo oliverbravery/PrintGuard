@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
-from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app
+from printguard.server import app as app_module
+from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app, host_trusted
 from printguard.server.events import ConflatedEventQueue
 
 
@@ -44,6 +46,82 @@ async def test_health_reports_ready_version_without_caching() -> None:
     assert response.status_code == 200
     assert response.json() == {"ok": True, "version": "2.3.7"}
     assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["192.168.1.20:8000", "203.0.113.7", "[fd00::1]:8000", "localhost:8000", "printguard.local", "tower:8000", "hub.lan", "HUB.example.com"],
+)
+def test_a_hub_answers_to_addresses_and_local_names_with_no_setup(host: str) -> None:
+    assert host_trusted(host, {"hub.example.com"})
+
+
+@pytest.mark.parametrize("host", ["evil.example:8000", "hub.example.com.evil.example", "localhost.evil.example", "192.168.1.20.nip.io"])
+def test_a_hub_does_not_answer_to_a_public_name_nobody_listed(host: str) -> None:
+    assert not host_trusted(host, {"hub.example.com"})
+
+
+@asynccontextmanager
+async def named_hub(monkeypatch):
+    """Yields a hub that lists one proxied name, a client for it and the warnings it logs."""
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", "https://hub.example.com")
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.5.1", plugin_runtime=None))
+    told: list[str] = []
+    monkeypatch.setattr("printguard.server.app.logger.warning", lambda message, *args: told.append(message % args))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        yield app, client, told
+
+
+async def handshake_answer(app, path: str, headers: dict[str, str]) -> str:
+    """Opens a WebSocket against the app and returns the kind of message that answered it."""
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        return {"type": "websocket.connect"}
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "websocket",
+        "scheme": "ws",
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": "",
+        "query_string": b"",
+        "headers": [(name.encode(), value.encode()) for name, value in headers.items()],
+        "subprotocols": [],
+    }
+    await app(scope, receive, send)
+    return sent[0]["type"]
+
+
+async def test_a_rebinding_page_is_refused_whatever_it_asks_for(monkeypatch) -> None:
+    """Its origin and host agree, so only knowing the host is not the hub's stops it."""
+    rebound = {"host": "evil.example:8000", "origin": "http://evil.example:8000"}
+    forged = {"host": "192.168.1.20:8000", "x-forwarded-host": "evil.example", "origin": "http://evil.example"}
+    async with named_hub(monkeypatch) as (app, client, told):
+        read = await client.get("/api/health", headers={"host": "evil.example:8000"})
+        assert read.status_code == 403
+        assert "PRINTGUARD_ORIGINS=http://evil.example:8000" in read.text
+        assert (await client.get("/api/v1/state", headers=rebound)).status_code == 403
+        assert (await client.post("/api/prints?filename=a.gcode", content=b"G28", headers=rebound)).status_code == 403
+        assert await handshake_answer(app, "/api/ws", rebound) == "websocket.close"
+        assert await handshake_answer(app, "/api/publish/cam", rebound) == "websocket.close"
+        assert (await client.get("/api/health", headers=forged)).status_code == 403
+
+    assert len(told) == 2, "one line a name, however many requests it sends"
+    assert "PRINTGUARD_ORIGINS=http://evil.example:8000" in told[0]
+
+
+async def test_a_proxied_hub_answers_to_the_name_in_printguard_origins(monkeypatch) -> None:
+    proxied = {"host": "printguard:8000", "x-forwarded-host": "hub.example.com", "x-forwarded-proto": "https"}
+    async with named_hub(monkeypatch) as (_app, client, _told):
+        assert (await client.get("/api/health", headers=proxied)).status_code == 200
+        assert (await client.get("/api/health", headers={"host": "hub.example.com"})).status_code == 200
+        unlisted = await client.get("/api/health", headers={**proxied, "x-forwarded-host": "other.example.com"})
+        assert unlisted.status_code == 403 and "PRINTGUARD_ORIGINS=https://other.example.com" in unlisted.text
 
 
 async def test_event_queue_conflates_telemetry_without_dropping_ordered_events() -> None:
@@ -192,6 +270,21 @@ async def test_a_gating_plugin_can_refuse_a_request_but_never_its_own_routes() -
     assert health.status_code == 200, "readiness is never gated, so an uptime check still works"
 
 
+async def test_a_flood_of_made_up_cookies_cannot_grow_the_gate_cache(monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "GATE_CACHE_ENTRIES", 2)
+    runtime = StubRuntime(verdict=True)
+    app = app_with(runtime)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        for session in ("a", "b", "c"):
+            await client.get("/", headers={"cookie": f"s={session}"})
+        asked = len(runtime.seen)
+        await client.get("/", headers={"cookie": "s=c"})
+        await client.get("/", headers={"cookie": "s=a"})
+
+    assert len(runtime.seen) == asked + 1, "the newest answer should still be cached and the oldest pushed out"
+
+
 async def test_the_dashboard_inspects_a_sample_before_uploading(monkeypatch) -> None:
     from test_gcode import CURA, PRUSA
 
@@ -254,3 +347,8 @@ async def test_dashboard_upload_is_same_origin_and_feeds_the_viewer(tmp_path) ->
             assert (await client.get("/api/prints/nope/gcode")).status_code == 404
     finally:
         await engine.stop()
+
+
+
+def test_a_host_that_cannot_be_read_is_not_trusted() -> None:
+    assert not host_trusted("[::1", set())

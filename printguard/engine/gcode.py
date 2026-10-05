@@ -22,6 +22,10 @@ from typing import Any, Callable, Iterator
 
 HEAD_BYTES = 4 * 1024 * 1024
 TAIL_BYTES = 512 * 1024
+MAX_MEMBER_BYTES = 512 * 1024 * 1024
+"""How large one file inside a 3mf may unpack to, which is what an upload itself is capped at."""
+MAX_BLOCK_BYTES = 16 * 1024 * 1024
+"""How large one metadata or thumbnail block of binary gcode may inflate to."""
 PLATE_GCODE = re.compile(r"^Metadata/plate_(\d+)\.gcode$")
 PLATE_GCODE_NAME = "Metadata/plate_{plate}.gcode"
 PLATE_IMAGE = "Metadata/plate_{plate}.png"
@@ -96,7 +100,8 @@ def inspect(data: bytes, ext: str) -> Sliced:
         What the file says about itself.
 
     Raises:
-        ValueError: If a 3mf carries no sliced plate, or a bgcode file is not one.
+        ValueError: If a 3mf carries no sliced plate, a bgcode file is not one or
+            is cut short, or either unpacks to more than a sliced file should.
     """
     if ext == "3mf":
         plate, gcode = plate_gcode(data)
@@ -154,7 +159,7 @@ def plate_gcode(data: bytes) -> tuple[int, bytes]:
 
     Raises:
         ValueError: If the file is not a zip or holds no plate gcode, which is
-            what an unsliced project looks like.
+            what an unsliced project looks like, or the plate is too large.
     """
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
@@ -162,9 +167,16 @@ def plate_gcode(data: bytes) -> tuple[int, bytes]:
             if not plates:
                 raise ValueError("this 3mf has not been sliced, export it from Bambu Studio or Orca with the gcode included")
             plate, name = plates[0]
-            return plate, archive.read(name)
+            return plate, _unpacked(archive, name)
     except zipfile.BadZipFile as exc:
         raise ValueError("this 3mf is not a zip archive") from exc
+
+
+def _unpacked(archive: zipfile.ZipFile, name: str) -> bytes:
+    """Reads one file out of a 3mf, refusing one that would unpack past the cap."""
+    if archive.getinfo(name).file_size > MAX_MEMBER_BYTES:
+        raise ValueError(f"{name} in this 3mf unpacks to more than {MAX_MEMBER_BYTES // 1024 // 1024} MB")
+    return archive.read(name)
 
 
 def _replace_plate(data: bytes, rewrite: Callable[[bytes], bytes]) -> bytes:
@@ -180,14 +192,14 @@ def _replace_plate(data: bytes, rewrite: Callable[[bytes], bytes]) -> bytes:
             elif member.filename == f"{name}.md5":
                 body = hashlib.md5(gcode).hexdigest().upper().encode()
             else:
-                body = source.read(member)
+                body = _unpacked(source, member.filename)
             target.writestr(member, body)
     return output.getvalue()
 
 
 def _member(data: bytes, name: str) -> bytes | None:
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        return archive.read(name) if name in archive.namelist() else None
+        return _unpacked(archive, name) if name in archive.namelist() else None
 
 
 def _text(data: bytes) -> Sliced:
@@ -293,9 +305,20 @@ def _binary(data: bytes) -> Sliced:
     Blocks come in a fixed order with the gcode last, so reading stops there.
     Metadata is INI text, compressed with deflate at most; anything packed
     with heatshrink is skipped rather than decoded.
+
+    Raises:
+        ValueError: If the file is not binary gcode, is cut short or damaged,
+            or a block inflates past the cap.
     """
     if data[:4] != BGCODE_MAGIC:
         raise ValueError("this is not a binary gcode file")
+    try:
+        return _blocks(data)
+    except (struct.error, zlib.error) as exc:
+        raise ValueError("this binary gcode file is cut short or damaged") from exc
+
+
+def _blocks(data: bytes) -> Sliced:
     checksum = struct.unpack_from("<H", data, 8)[0]
     offset = 10
     found: dict[str, str] = {}
@@ -313,7 +336,10 @@ def _binary(data: bytes) -> Sliced:
         body = data[offset + params : offset + params + size]
         offset += params + size + (4 if checksum else 0)
         if compression == _BGCODE_DEFLATE:
-            body = zlib.decompress(body)
+            inflater = zlib.decompressobj()
+            body = inflater.decompress(body, MAX_BLOCK_BYTES)
+            if inflater.unconsumed_tail:
+                raise ValueError(f"a block of this binary gcode inflates to more than {MAX_BLOCK_BYTES // 1024 // 1024} MB")
         elif compression:
             continue
         if kind == _BGCODE_THUMBNAIL:

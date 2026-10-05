@@ -32,7 +32,7 @@ export function networkOf(address: string): string {
   const leading = head.split(":").filter(Boolean);
   const trailing = tail.split(":").filter(Boolean);
   const groups = [...leading, ...Array<string>(8 - leading.length - trailing.length).fill("0"), ...trailing];
-  return groups.slice(0, 4).map((group) => parseInt(group, 16).toString(16)).join(":");
+  return groups.slice(0, 3).map((group) => parseInt(group, 16).toString(16)).join(":");
 }
 
 const callerNetwork = (request: Request) => networkOf(request.headers.get("CF-Connecting-IP") ?? "unknown");
@@ -45,7 +45,11 @@ const parseDetails = (header: string | null) => {
   }
 };
 
+const sentByABrowser = (request: Request) =>
+  request.headers.has("Origin") || request.headers.get("Content-Type") !== "application/json";
+
 async function register(request: Request, env: Env): Promise<Response> {
+  if (sentByABrowser(request)) return refuse({ status: 403, code: "browser" });
   const refusal = await env.GATE.getByName("gate").register(callerNetwork(request));
   if (refusal) return refuse(refusal);
   return Response.json({ token: await issueToken(env.TOKEN_SECRET) }, { status: 201 });
@@ -65,16 +69,18 @@ async function storeFrame(request: Request, env: Env): Promise<Response> {
 
   const gate = env.GATE.getByName("gate");
   const network = callerNetwork(request);
-  const refusal = await gate.reserve(hub, network, jpeg.byteLength);
-  if (refusal) return refuse(refusal);
   const { print, frame, ...labels } = details.data;
+  const key = `${hub}/${print}/${frame}.jpg`;
+  const addedBytes = jpeg.byteLength - ((await env.FRAMES.head(key))?.size ?? 0);
+  const refusal = await gate.reserve(hub, network, addedBytes);
+  if (refusal) return refuse(refusal);
   try {
-    await env.FRAMES.put(`${hub}/${print}/${frame}.jpg`, jpeg, {
+    await env.FRAMES.put(key, jpeg, {
       httpMetadata: { contentType: "image/jpeg" },
       customMetadata: Object.fromEntries(Object.entries(labels).map(([name, value]) => [name, String(value)])),
     });
   } catch (error) {
-    await gate.release(hub, network, jpeg.byteLength);
+    await gate.release(hub, network, addedBytes);
     throw error;
   }
   return Response.json({}, { status: 201 });
@@ -87,19 +93,24 @@ export function reminders(inbox: { bytes: number; expiring: number }): string[] 
   return lines;
 }
 
+export const expiresSoon = (uploaded: Date, now: number) =>
+  uploaded.getTime() <= now - (EXPIRY_DAYS - EXPIRY_WARN_DAYS) * DAY_MS;
+
 async function recountAndRemind(env: Env): Promise<void> {
-  const expiresSoon = Date.now() - (EXPIRY_DAYS - EXPIRY_WARN_DAYS) * DAY_MS;
+  const gate = env.GATE.getByName("gate");
+  const now = Date.now();
   const inbox = { bytes: 0, expiring: 0 };
+  await gate.beginRecount();
   let cursor: string | undefined;
   do {
     const page = await env.FRAMES.list({ cursor });
     for (const object of page.objects) {
       inbox.bytes += object.size;
-      if (object.uploaded.getTime() <= expiresSoon) inbox.expiring += 1;
+      if (expiresSoon(object.uploaded, now)) inbox.expiring += 1;
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
-  await env.GATE.getByName("gate").recount(inbox.bytes);
+  await gate.recount(inbox.bytes);
   const lines = reminders(inbox);
   if (lines.length === 0) return;
   await env.EMAIL.send({

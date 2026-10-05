@@ -52,20 +52,69 @@ def envelope_endpoint(dsn: str) -> str:
     return f"{parts.scheme}://{parts.hostname}/api/{parts.path.strip('/')}/envelope/?sentry_version=7&sentry_key={parts.username}"
 
 
-def strip_userinfo(url: str) -> str:
-    """Removes embedded credentials (user:pass@) from a URL."""
+def scrub_url(url: str) -> str:
+    """Removes the credentials a URL can carry.
+
+    Args:
+        url: A camera, printer or notifier address as the user entered it.
+
+    Returns:
+        The address without its ``user:pass@`` part and with every query value
+        replaced, since ``?user=admin&pwd=...`` is how many cameras take a login.
+    """
     parts = urlsplit(url)
-    if parts.username is None and parts.password is None:
-        return url
-    host = parts.hostname or ""
-    if parts.port:
-        host = f"{host}:{parts.port}"
-    return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
+    query = "&".join(f"{pair.partition('=')[0]}={REDACTED}" if "=" in pair else pair for pair in parts.query.split("&"))
+    return urlunsplit(parts._replace(netloc=parts.netloc.rpartition("@")[2], query=query))
+
+
+def url_secrets(url: str) -> set[str]:
+    """The credential values a URL carries, for scrubbing freeform text.
+
+    Args:
+        url: A camera, printer or notifier address as the user entered it.
+
+    Returns:
+        Its username and password, and each query value with its key, since a
+        value such as ``stream`` on its own is an ordinary word.
+    """
+    parts = urlsplit(url)
+    secrets = {part for part in (parts.username, parts.password) if part}
+    for pair in parts.query.split("&"):
+        if pair.partition("=")[2]:
+            secrets.add(pair)
+    return secrets
+
+
+def is_url(value: Any) -> bool:
+    """Whether a config value is an address that could carry credentials."""
+    return isinstance(value, str) and "://" in value
+
+
+def scrub_urls(config: dict[str, Any]) -> dict[str, Any]:
+    """Scrubs every URL among a config's values, leaving the rest alone."""
+    return {key: scrub_url(value) if is_url(value) else value for key, value in config.items()}
+
+
+def config_secrets(config: dict[str, Any], keys: set[str]) -> set[str]:
+    """The credential values in one adapter config.
+
+    Args:
+        config: A printer's or notifier's stored config.
+        keys: The fields its schema marks secret.
+
+    Returns:
+        The secret fields' values and the credentials inside any URL field.
+    """
+    secrets = {str(config[key]) for key in keys if config.get(key)}
+    for value in config.values():
+        if is_url(value):
+            secrets |= url_secrets(value)
+    return secrets
 
 
 def redact(config: dict[str, Any], secrets: set[str]) -> dict[str, Any]:
-    """Replaces the named keys' values with a redaction marker."""
-    return {key: REDACTED if key in secrets else value for key, value in config.items()}
+    """Replaces the named keys' values with a redaction marker and scrubs URLs."""
+    return {key: REDACTED if key in secrets else value for key, value in scrub_urls(config).items()}
 
 
 def public_source(source: dict[str, Any]) -> dict[str, Any]:
@@ -73,11 +122,11 @@ def public_source(source: dict[str, Any]) -> dict[str, Any]:
 
     Sources are adapter-defined dicts that may carry credentials outright
     (the Bambu access code) or inside a URL, so only known-safe keys pass
-    and URLs lose their userinfo.
+    and URLs lose their credentials.
     """
     slim = {key: source[key] for key in SOURCE_KEYS if key in source}
     if "url" in source:
-        slim["url"] = strip_userinfo(str(source["url"]))
+        slim["url"] = scrub_url(str(source["url"]))
     return slim
 
 
@@ -96,19 +145,16 @@ def collect_secrets(engine: "Engine") -> set[str]:
     secrets: set[str] = set()
     for printer in engine.printers.values():
         adapter = INTEGRATIONS.get(printer.provider)
-        keys = adapter.secret_keys() if adapter else set(printer.config)
-        secrets |= {str(printer.config[key]) for key in keys if printer.config.get(key)}
+        secrets |= config_secrets(printer.config, adapter.secret_keys() if adapter else set(printer.config))
     for provider, config in engine.settings.get("notifiers", {}).items():
         adapter = NOTIFIERS.get(provider)
-        keys = adapter.secret_keys() if adapter else set(config)
-        secrets |= {str(config[key]) for key in keys if config.get(key)}
+        secrets |= config_secrets(config, adapter.secret_keys() if adapter else set(config))
     if (engine.settings.get("mqtt") or {}).get("password"):
         secrets.add(str(engine.settings["mqtt"]["password"]))
     for camera in engine.cameras.values():
         if camera.source.get("access_code"):
             secrets.add(str(camera.source["access_code"]))
-        parts = urlsplit(str(camera.source.get("url") or ""))
-        secrets |= {part for part in (parts.username, parts.password) if part}
+        secrets |= url_secrets(str(camera.source.get("url") or ""))
     for plugin in engine.plugins.values():
         secrets |= {value for value in plugin.secrets.values() if value}
     return secrets

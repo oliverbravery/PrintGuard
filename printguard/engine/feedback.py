@@ -48,7 +48,7 @@ async def register(http: HttpFn) -> str:
     Raises:
         Refused: If the network has registered too many hubs today, or the inbox is unreachable.
     """
-    return str((await _call(http, "POST", "/register"))["token"])
+    return str((await _call(http, "POST", "/register", json={}))["token"])
 
 
 async def put_frame(http: HttpFn, token: str, jpeg: bytes, details: dict[str, Any]) -> None:

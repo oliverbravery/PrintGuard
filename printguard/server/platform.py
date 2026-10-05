@@ -28,6 +28,7 @@ import websockets
 from av.video.reformatter import VideoReformatter
 from ..engine import vision
 from ..engine.platform import Frame
+from ..engine.reports import scrub_url
 from .bambu_camera import open_bambu_jpeg_stream
 from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
@@ -408,8 +409,8 @@ class AVSource:
                     push = H264Push(self._publish_url, int(rate) if rate and 0 < rate <= 60 else 15)
                 self._decode(container, stream, push)
             except Exception as exc:
-                self.last_error = str(exc)
-                logger.debug("camera source %r read failed: %s", self._source, exc)
+                self.last_error = self._without_credentials(str(exc))
+                logger.debug("camera source read failed: %s", self.last_error)
             finally:
                 if container is not None:
                     container.close()
@@ -420,6 +421,12 @@ class AVSource:
             self.online = False
             if not self._stop and self._demanded():
                 time.sleep(RECONNECT_DELAY_S)
+
+    def _without_credentials(self, message: str) -> str:
+        """Scrubs the source address out of an error PyAV raised, which quotes it in full."""
+        if not isinstance(self._source, str):
+            return message
+        return message.replace(self._source, scrub_url(self._source))
 
     def _decode(self, container: Any, stream: Any, push: H264Push | None) -> None:
         """Keeps the freshest frame until the source ends, transcoding if asked.
@@ -713,9 +720,12 @@ class ServerPlatform:
         data: bytes | None = None,
         binary: bool = False,
         timeout: float = 10.0,
+        follow_redirects: bool = True,
     ) -> tuple[int, Any]:
         """Performs an HTTP request with httpx, base64 encoding a binary reply."""
-        resp = await self._client.request(method, url, headers=headers, json=json, content=data, timeout=timeout)
+        resp = await self._client.request(
+            method, url, headers=headers, json=json, content=data, timeout=timeout, follow_redirects=follow_redirects
+        )
         if binary:
             return resp.status_code, base64.b64encode(resp.content).decode()
         try:
@@ -759,10 +769,21 @@ class ServerPlatform:
             return None
 
     def load_state(self) -> dict[str, Any]:
-        """Reads persisted engine state from the data directory."""
+        """Reads persisted engine state from the data directory.
+
+        Returns:
+            The saved state, or nothing on a first boot. A file that will not
+            parse is moved aside before the hub starts empty, so the next save
+            cannot overwrite what is left of it.
+        """
         try:
             return json.loads(self._state_path.read_text())
-        except (OSError, ValueError):
+        except FileNotFoundError:
+            return {}
+        except ValueError as exc:
+            kept = self._state_path.with_suffix(".json.corrupt")
+            self._state_path.replace(kept)
+            logger.error("%s is damaged (%s), so the hub is starting empty. The file is kept as %s", self._state_path, exc, kept)
             return {}
 
     def save_state(self, state: dict[str, Any]) -> None:
@@ -771,9 +792,14 @@ class ServerPlatform:
         It holds printer passwords, notifier keys, API token hashes and whatever
         credentials plugins have been given, so the mode is set on the temporary
         file before the rename rather than after: anything else leaves a window
-        where the finished file is readable by everybody on the host.
+        where the finished file is readable by everybody on the host. It is
+        synced to disk before the rename too, or a power cut can leave the new
+        name pointing at a file with nothing in it.
         """
         tmp = self._state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, indent=2))
+        with tmp.open("w") as handle:
+            handle.write(json.dumps(state, indent=2))
+            handle.flush()
+            os.fsync(handle.fileno())
         tmp.chmod(0o600)
         tmp.replace(self._state_path)

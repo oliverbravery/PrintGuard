@@ -7,11 +7,10 @@ Authorization (trusted_clients, API keys): https://moonraker.readthedocs.io/en/l
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from ..adapters import multipart_form
 from ..cameras import webrtc_endpoint, whep_endpoint
-from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, webcam_url
 
 _UPLOAD_TIMEOUT_S = 180.0
 _HEATERS = {"nozzle": "extruder", "bed": "heater_bed"}
@@ -103,9 +102,14 @@ class KlipperAdapter(IntegrationAdapter):
             raise RuntimeError(f"Moonraker rejected the {heater} target: HTTP {status}")
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
-        """Uploads into the gcodes root through /server/files/upload and starts it."""
+        """Uploads into the gcodes root through /server/files/upload and starts it.
+
+        Moonraker answers 201 for a file it stored whether or not Klipper then
+        started it, and says which in ``print_started``. This reply is the one
+        Moonraker does not wrap in ``result``.
+        """
         headers, body = multipart_form({"root": "gcodes", "print": "true"}, "file", filename, data, "application/octet-stream")
-        status, _ = await http(
+        status, reply = await http(
             "POST",
             f"{config['base_url'].rstrip('/')}/server/files/upload",
             headers={**self._headers(config), **headers},
@@ -114,12 +118,14 @@ class KlipperAdapter(IntegrationAdapter):
         )
         if status >= 400:
             raise RuntimeError(f"Moonraker rejected {filename}: HTTP {status}")
+        if not reply["print_started"]:
+            raise RuntimeError(f"Moonraker stored {filename} but did not start printing it")
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Lists Moonraker's registered webcams via /server/webcams/list.
 
         Each webcam's stream_url may be relative, resolved against the host's web
-        port (see ``_resolve``); its stable uid keys the registered camera.
+        port (see ``webcam_url``); its stable uid keys the registered camera.
         Webcams whose service advertises proprietary WebRTC signalling -
         camera-streamer, the Crowsnest V5 default - are redirected to their
         MJPEG endpoint. WHEP endpoints pass through to the hub's MediaMTX client.
@@ -140,25 +146,10 @@ class KlipperAdapter(IntegrationAdapter):
                 {
                     "key": str(webcam.get("uid") or webcam.get("name") or len(found)),
                     "name": webcam.get("name") or "Webcam",
-                    "source": {"kind": "url", "url": _resolve(config["base_url"], stream)},
+                    "source": {"kind": "url", "url": webcam_url(config["base_url"], stream, 7125)},
                 }
             )
         return found
-
-
-def _resolve(base_url: str, stream: str) -> str:
-    """Resolves a webcam URL against the Moonraker host.
-
-    Moonraker reports a relative path (e.g. ``/webcam/?action=stream``) as served
-    on its host's web port, not the API port carried by the base URL - its own
-    documented example resolves ``/webcam/…`` to port 80. The API port (7125)
-    routes no webcam paths, so a relative URL is joined to the bare host; an
-    absolute URL is honoured verbatim.
-    """
-    if urlsplit(stream).scheme:
-        return stream
-    host = urlsplit(base_url)
-    return urljoin(urlunsplit((host.scheme, host.hostname or "", "", "", "")), stream)
 
 
 def _mjpeg_endpoint(webcam: dict[str, Any]) -> str:

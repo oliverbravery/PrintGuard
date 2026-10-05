@@ -10,6 +10,7 @@ token is kept.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import logging
@@ -17,8 +18,9 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
+from . import urls
 from .adapters import HttpFn
 
 logger = logging.getLogger(__name__)
@@ -76,17 +78,20 @@ class OAuthFlows:
             plugin_id: Whose sign-in it is.
             provider: The manifest's ``oauth`` block.
             origin: Where the hub is being reached, which is where the provider
-                sends the user back to. A loopback name becomes the address it
+                sends the user back to. ``localhost`` becomes the address it
                 stands for, since RFC 8252 asks for the literal and providers
                 have started refusing anything else over plain HTTP.
 
         Returns:
             The authorize URL to open.
         """
-        self._pending = {key: waiting for key, waiting in self._pending.items() if time.monotonic() - waiting.started < PENDING_TTL_S}
+        self._forget_stale()
         verifier = _urlsafe(secrets.token_bytes(48))
         state = _urlsafe(secrets.token_bytes(24))
-        redirect_uri = f"{origin.rstrip('/').replace('//localhost', '//127.0.0.1')}{CALLBACK_PATH}"
+        hub = urlsplit(origin.rstrip("/"))
+        if hub.hostname == "localhost":
+            hub = hub._replace(netloc=hub.netloc.replace("localhost", "127.0.0.1"))
+        redirect_uri = f"{hub.geturl()}{CALLBACK_PATH}"
         self._pending[state] = Pending(plugin_id, verifier, redirect_uri)
         query = {
             "response_type": "code",
@@ -100,8 +105,13 @@ class OAuthFlows:
             query["scope"] = " ".join(provider["scopes"])
         return f"{provider['authorize_url']}?{urlencode(query)}"
 
+    def _forget_stale(self) -> None:
+        now = time.monotonic()
+        self._pending = {key: waiting for key, waiting in self._pending.items() if now - waiting.started < PENDING_TTL_S}
+
     def waiting_for(self, state: str) -> str | None:
         """Which plugin a returning user belongs to, or None for a stale state."""
+        self._forget_stale()
         pending = self._pending.get(state)
         return pending.plugin_id if pending else None
 
@@ -119,9 +129,11 @@ class OAuthFlows:
 
         Raises:
             PermissionError: If the state is unknown or has expired, which is
-                what stands in the way of a callback nobody asked for.
+                what stands in the way of a callback nobody asked for, or the
+                token endpoint is on this network and the plugin may not reach it.
             RuntimeError: If the provider refused the exchange.
         """
+        self._forget_stale()
         pending = self._pending.pop(state, None)
         if pending is None:
             raise PermissionError("no sign-in is waiting for that answer")
@@ -154,11 +166,14 @@ class OAuthFlows:
         return {**held, **renewed}
 
     async def _tokens(self, provider: dict[str, Any], form: dict[str, str]) -> dict[str, str]:
+        if not provider["local"] and await asyncio.to_thread(urls.resolves_local, provider["token_url"]):
+            raise PermissionError(f"{provider['label']} signs in on this network, which needs the net:local permission")
         status, body = await self._http(
             "POST",
             provider["token_url"],
             headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
             data=urlencode(form).encode(),
+            follow_redirects=False,
         )
         if status >= 400 or not isinstance(body, dict) or not body.get("access_token"):
             raise RuntimeError(f"{provider['label']} refused the sign-in ({status})")

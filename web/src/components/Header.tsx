@@ -69,7 +69,7 @@ function ThemeToggle() {
           const next = nextScheme(theme);
           applyTheme(next, themes, stored);
           updateSettings({ theme: next });
-          if (next === GLASS) document.getElementById(GLASS_TUNER)?.showPopover();
+          if (next === GLASS) document.getElementById(GLASS_TUNER)?.showPopover?.();
         }}
       >
         {glyph}
@@ -141,12 +141,13 @@ function MoreChip() {
 }
 
 export function Header() {
-  const { engine, openSettings } = useStore();
+  const { engine, openSettings, reconnecting } = useStore();
   const stats = engine?.stats;
   return (
     <header className="sticky top-0 z-30 border-b border-line-0 bg-ink-0/90 backdrop-blur-sm">
       <div className="mx-auto flex max-w-[1500px] items-center gap-x-3 px-4 py-3 sm:px-6">
         <Wordmark />
+        <span role="status">{reconnecting && <span className="chip chip-warn boot-cursor">reconnecting</span>}</span>
         <div className="hidden sm:contents">
           <VersionChip />
           <ThemeToggle />

@@ -18,7 +18,7 @@ const series = (fn: (i: number) => number, n = 48): ScorePoint[] =>
 
 const camera = (id: string, name: string, source: Camera["source"], inferring = false): Camera => ({
   id, name, source, printer_id: null, max_fps: 30, detect_fps: 60, brightness: 1, contrast: 1, sharpness: 0,
-  crop: null, rotation: 0, target_fps: 30, achieved_fps: 29.8, inferring, in_use: true, online: true, last_result: null,
+  crop: null, rotation: 0, target_fps: 30, achieved_fps: 29.8, inferring, in_use: true, standby: false, online: true, last_result: null,
 });
 
 const idle: DeviceState = { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: { actual: 24.3, target: 0 }, bed: { actual: 23.1, target: 0 } };
@@ -79,10 +79,11 @@ function engine(): EngineState {
       monitor("m2", "Ender 3 V3", "c2", "p2", true),
       monitor("m3", "Bambu X1C", "c3", ""),
     ],
-    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {}, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask" },
+    settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], glass: { opacity: 0, tone: 0 }, inference_runtime: "auto", catalogue_url: "", fault_grace_s: 120, preheat: PREHEAT, feedback: "ask" },
     tokens: [], stats: { inference_device: "CPU", infer_ms: 18, capacity_fps: 1783 }, integrations: INTEGRATIONS, notifiers: [],
     plugins: [], plugin_permissions: PERMISSIONS, plugin_events: {}, plugin_platforms: PLATFORMS,
     plugin_event_permissions: { state: "state:read", frame: "camera:frames", history: "history:read" },
+    plugin_oauth_callback: "", plugin_assets: {},
   };
 }
 
@@ -239,7 +240,7 @@ const REVIEW = {
 async function openReview(page: Page): Promise<void> {
   await page.evaluate(
     ({ review, frames, pictures }) => {
-      (window as { __pg: { setState: (s: unknown) => void } }).__pg.setState({
+      (window as unknown as { __pg: { setState: (s: unknown) => void } }).__pg.setState({
         reviewId: review.id,
         reviewData: { [review.id]: { ...review, frames } },
         snapshotCache: Object.fromEntries(frames.map((frame) => [frame.id, frame.score > 0.5 ? pictures.defect : pictures.healthy])),
@@ -491,7 +492,7 @@ async function stage(browser: Browser, scene: Scene): Promise<{ page: Page; clos
     ({ state, theme }) => {
       document.documentElement.dataset.theme = theme;
       document.documentElement.style.colorScheme = theme;
-      (window as { __pg: { setState: (s: unknown) => void } }).__pg.setState(state);
+      (window as unknown as { __pg: { setState: (s: unknown) => void } }).__pg.setState(state);
     },
     {
       theme: scene.theme,

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import html
+import ipaddress
 import json
 import logging
 import os
 import re
 import secrets
-import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from string import Template
@@ -18,17 +18,20 @@ from urllib.parse import urlsplit
 
 import httpx
 import uvicorn
+from cachetools import TTLCache
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
+from starlette.datastructures import Headers
 from starlette.requests import HTTPConnection
-from starlette.types import Scope
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 import printguard
 
 from ..engine import logs, oauth
 from ..engine.engine import Engine
+from ..engine.urls import LOCAL_HOSTNAMES, LOCAL_SUFFIXES
 from .api import ApiAuth, build_api_app
 from .events import ConflatedEventQueue
 from .mcp import build_mcp_app
@@ -62,9 +65,10 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str]) -> bool:
     Proxies in front of the hub authenticate the session cookie, which the
     browser attaches to any socket a page opens or form it posts, so a
     logged-in user's other tabs could otherwise drive the engine and read its
-    secrets. The browser sets Origin and the forwarded host itself and forbids
-    pages from forging them, so a same-origin (or explicitly allow-listed)
-    Origin is the gate.
+    secrets. The browser sets Origin itself and forbids pages from forging it,
+    so a same-origin (or explicitly allow-listed) Origin is the gate. Same-origin
+    only means something because ``HostGuard`` has already refused a host the hub
+    does not answer to.
     """
     origin = connection.headers.get("origin")
     if not origin:
@@ -75,8 +79,75 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str]) -> bool:
     return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
 
 
+def host_trusted(host: str, named: set[str]) -> bool:
+    """Whether a request's host is one a hostile page cannot have chosen.
+
+    A DNS rebinding page reaches the hub under a public name its author points
+    at a private address, and the browser sends that name as the host. It cannot
+    make the browser send an address, ``localhost``, a name with no dot in it or
+    a name under a suffix public DNS never answers for, so those need no setup.
+
+    Args:
+        host: A Host or X-Forwarded-Host value, with or without a port.
+        named: The hostnames listed in ``PRINTGUARD_ORIGINS``.
+
+    Returns:
+        True when the hub answers to that host.
+    """
+    try:
+        name = (urlsplit(f"//{host}").hostname or "").lower()
+    except ValueError:
+        return False
+    try:
+        ipaddress.ip_address(name)
+    except ValueError:
+        return "." not in name or name in LOCAL_HOSTNAMES or name.endswith(LOCAL_SUFFIXES) or name in named
+    return True
+
+
+class HostGuard:
+    """Refuses every request addressed to a name the hub does not answer to.
+
+    This is what stops DNS rebinding. The origin checks compare a page's origin
+    with the host it asked for, and a rebinding page makes the two agree, so the
+    host itself has to be one the hub knows. A forwarded host is held to the
+    same rule, since a page can set that header on a request to its own origin.
+    """
+
+    def __init__(self, app: ASGIApp, named: set[str]) -> None:
+        self._app = app
+        self._named = named
+        self._refused: set[str] = set()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Passes a request on, or answers 403 naming the setting that allows its host."""
+        if scope["type"] not in ("http", "websocket"):
+            await self._app(scope, receive, send)
+            return
+        headers = Headers(scope=scope)
+        hosts = [headers.get("host", ""), *headers.get("x-forwarded-host", "").split(",")]
+        unknown = next((host.strip() for host in hosts if not host_trusted(host.strip(), self._named)), None)
+        if unknown is None:
+            await self._app(scope, receive, send)
+            return
+        secure = scope["scheme"] in ("https", "wss") or headers.get("x-forwarded-proto", "").startswith("https")
+        message = (
+            f"PrintGuard refused a request for {unknown} because it does not know that name. "
+            f"To reach the hub there, add PRINTGUARD_ORIGINS={'https' if secure else 'http'}://{unknown} to its environment and restart it."
+        )
+        if unknown not in self._refused and len(self._refused) < REFUSED_HOSTS_LOGGED:
+            self._refused.add(unknown)
+            logger.warning(message)
+        if scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1008, "reason": "host not allowed"})
+        else:
+            await PlainTextResponse(message, status_code=403)(scope, receive, send)
+
+
+REFUSED_HOSTS_LOGGED = 32
 GATE_EXEMPT_PREFIXES = ("/api/health",)
 GATE_CACHE_TTL_S = 10.0
+GATE_CACHE_ENTRIES = 4096
 PLUGIN_REQUEST_HEADERS = ("cookie", "authorization", "accept", "content-type", "x-forwarded-for", "user-agent")
 PLUGIN_RESPONSE_HEADERS = ("set-cookie", "location", "cache-control")
 PLUGIN_BODY_LIMIT = 64 * 1024
@@ -164,24 +235,27 @@ def create_app() -> FastAPI:
             logger.info("hub shutting down")
 
     app = FastAPI(title="PrintGuard", lifespan=lifespan)
-    gate_cache: dict[tuple[str, ...], float] = {}
+    app.add_middleware(HostGuard, named={urlsplit(origin).hostname or "" for origin in allowed_origins})
+    gate_cache: TTLCache[tuple[str, ...], bool] = TTLCache(GATE_CACHE_ENTRIES, GATE_CACHE_TTL_S)
 
     async def gate_allows(request: Request) -> bool:
         """Asks a gating plugin whether a request may proceed.
 
         Answers are cached per credential and path for a few seconds so a
         dashboard polling HLS does not wake the sandbox on every segment.
-        Refusals are never cached, so signing in takes effect at once.
+        Refusals are never cached, so signing in takes effect at once. The
+        cache holds a fixed number of answers, so a flood of made-up cookies
+        cannot grow it.
         """
         runtime = app.state.engine.platform.plugin_runtime
         if runtime is None or request.url.path.startswith(GATE_EXEMPT_PREFIXES + runtime.gate_paths()):
             return True
         key = (request.headers.get("cookie", ""), request.headers.get("authorization", ""), request.method, request.url.path)
-        if gate_cache.get(key, 0.0) > time.monotonic():
+        if key in gate_cache:
             return True
         verdict = await runtime.authorise(plugin_request(request, request.method))
         if verdict is None or verdict:
-            gate_cache[key] = time.monotonic() + GATE_CACHE_TTL_S
+            gate_cache[key] = True
             return True
         return False
 

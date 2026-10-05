@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { applyLayout, section, tiles, withOrder } from "../layout";
 import { useStore } from "../store";
 import { CameraRail } from "./CameraRail";
 import { CamerasDialog } from "./CamerasDialog";
 import { CustomiseBar } from "./CustomiseBar";
 import { DetailPanel } from "./DetailPanel";
+import { useTopModal } from "./Dialog";
 import { GettingStarted } from "./GettingStarted";
 import { GuideDialog } from "./GuideDialog";
 import { IntroDialog } from "./IntroDialog";
@@ -29,6 +31,7 @@ function Toasts() {
   const toasts = useStore((s) => s.toasts);
   const ref = useRef<HTMLDivElement>(null);
   const prevLen = useRef(0);
+  const modal = useTopModal();
 
   // Promote the toast layer into the top layer so defect alerts stay visible above an open
   // <dialog>; re-show on each new toast to re-stack above a dialog opened after it.
@@ -43,9 +46,9 @@ function Toasts() {
       if (el.matches(":popover-open")) el.hidePopover();
       el.showPopover();
     }
-  }, [toasts.length]);
+  }, [toasts.length, modal]);
 
-  return (
+  const layer = (
     <div
       ref={ref}
       popover="manual"
@@ -65,6 +68,7 @@ function Toasts() {
       ))}
     </div>
   );
+  return modal ? createPortal(layer, modal) : layer;
 }
 
 export function Dashboard() {

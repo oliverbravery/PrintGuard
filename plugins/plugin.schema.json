@@ -226,12 +226,14 @@
         "authorize_url": {
           "type": "string",
           "format": "uri",
-          "description": "Where the user is sent to sign in."
+          "pattern": "^https://[^*]+$",
+          "description": "Where the user is sent to sign in. One https address."
         },
         "token_url": {
           "type": "string",
           "format": "uri",
-          "description": "Where the code is exchanged for tokens."
+          "pattern": "^https://[^*]+$",
+          "description": "Where the code is exchanged for tokens. One https address, and one on your own network needs net:local."
         },
         "register_url": {
           "type": "string",

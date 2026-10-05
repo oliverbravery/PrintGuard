@@ -4,6 +4,7 @@ hand-written camera frame tool returning native image content."""
 from __future__ import annotations
 
 import base64
+from unittest.mock import AsyncMock
 
 import mcp.types as mt
 import pytest
@@ -78,6 +79,21 @@ async def test_frame_tool_returns_image_content() -> None:
             result = await client.call_tool("get_camera_frame", {"camera_id": camera_id})
         images = [block for block in result.content if isinstance(block, mt.ImageContent)]
         assert images and images[0].mimeType == "image/jpeg"
+    finally:
+        await engine.stop()
+
+
+async def test_snapshot_tool_returns_image_content(monkeypatch) -> None:
+    """Derived from the REST route it would hand an agent a JPEG as text."""
+    engine, mcp, _ = await _server()
+    monkeypatch.setattr(engine, "monitor_snapshot", AsyncMock(side_effect=lambda monitor_id, snap_id: b"\xff\xd8jpeg" if snap_id == "s1" else None))
+    try:
+        async with Client(mcp) as client:
+            result = await client.call_tool("get_monitor_snapshot", {"monitor_id": "m1", "snap_id": "s1"})
+            with pytest.raises(Exception):
+                await client.call_tool("get_monitor_snapshot", {"monitor_id": "m1", "snap_id": "gone"})
+        assert [block.mimeType for block in result.content] == ["image/jpeg"]
+        assert isinstance(result.content[0], mt.ImageContent)
     finally:
         await engine.stop()
 

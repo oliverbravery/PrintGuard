@@ -76,7 +76,7 @@ Authorization: Bearer pg_Zr8...agent
 | Token state | Behaviour |
 |---|---|
 | No tokens issued, the default | The surface is read-only and trusts whatever fronts it. Control and management stay closed |
-| Any token issued | A valid bearer is required for every request, and its scope decides what it reaches. MCP additionally **hides** tools a token cannot use |
+| Any token issued | A valid bearer is required for every request, and its scope decides what it reaches. MCP additionally **hides** tools a token cannot use. The schema at `/api/v1/docs` and `/api/v1/openapi.json` describes the API and holds nothing from your hub, so it stays open |
 
 > [!IMPORTANT]
 > Only a hash is stored, so a lost token cannot be recovered. Revoke it and issue another.
@@ -90,8 +90,11 @@ Base path `/api/v1`. JSON in and out, except the camera frame and alert snapshot
 `image/jpeg`, the print file download, and the frame and print file you upload as a raw body.
 Adding or removing a camera, printer or monitor returns the collection, and every other change
 returns the one thing it changed. A rejected command is a `400`, a timeout a `504`, and a
-missing or under-scoped token a `401` or `403`. The interactive OpenAPI schema is served
-at `/api/v1/docs`.
+missing or under-scoped token a `401` or `403`. Adding a camera waits up to 40 seconds for
+its first frame. The interactive OpenAPI schema is served at `/api/v1/docs`.
+
+A hub opened at a domain name answers `403` to every request, this API included, until that
+name is in [`PRINTGUARD_ORIGINS`](deployment.md#host-and-origin-checking).
 
 <details open>
 <summary><b>Read</b></summary>
@@ -136,7 +139,7 @@ at `/api/v1/docs`.
 | `PATCH` | `/monitors/{id}` | Update a monitor |
 | `DELETE` | `/monitors/{id}` | Remove a monitor |
 | `POST` | `/printers` | Register a printer |
-| `PATCH` | `/printers/{id}` | Update a printer |
+| `PATCH` | `/printers/{id}` | Update a printer. `config` replaces the stored one, [keeping the secrets a read left out](#the-resource-model) |
 | `DELETE` | `/printers/{id}` | Remove a printer |
 | `POST` | `/printers/test` | `{"provider", "config"}`, reachability only |
 | `POST` | `/cameras` | Add a camera |
@@ -147,7 +150,7 @@ at `/api/v1/docs`.
 | `POST` | `/prints?filename=` | Upload a sliced file as the raw request body. `name`, a comma-separated `printer_ids` and first layer `nozzle` and `bed` temperatures are optional |
 | `PATCH` | `/prints/{id}` | Rename a print file or change the printers it is tagged for |
 | `DELETE` | `/prints/{id}` | Remove a print file |
-| `PATCH` | `/settings` | Update settings, for example notifiers |
+| `PATCH` | `/settings` | Update `notifiers`, `mqtt`, `inference_runtime` or `preheat`. Each one you send replaces the stored one, [keeping the secrets a read left out](#the-resource-model) |
 | `POST` | `/notifiers/test` | `{"provider", "config"}`, sends a test alert |
 
 </details>
@@ -188,14 +191,12 @@ filtered to the scopes its token holds.
 | Scope | Tools |
 |---|---|
 | `read` | `get_state`, `list_monitors`, `get_monitor`, `get_monitor_history`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `list_prints`, `get_print`, `recent_events` |
-| `read` | `get_camera_frame`, which returns the frame as image content an agent can look at |
+| `read` | `get_camera_frame` and `get_monitor_snapshot`, which return the picture as image content an agent can look at |
 | `read` | `classify_frame`, which scores an image the agent supplies as base64 and needs no registered camera |
 | `control` | `control_printer`, `heat_printer`, `start_print` |
 | `manage` | `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_print`, `remove_print`, `update_settings`, `test_notifier` |
 
-Uploading and downloading a print file carry a binary body, so they are REST only. An alert
-snapshot is best fetched over REST too, since only `get_camera_frame` returns an image an agent
-can look at.
+Uploading and downloading a print file carry a binary body, so they are REST only.
 
 Point a client at the endpoint with the token as a bearer header:
 
@@ -245,11 +246,15 @@ Leave the port blank for `1883`, or `8883` with TLS.
 
 Control is two-way, so an automation can arm a monitor or stop a print. A defect or a change in
 printer status is published at once, while the score, progress and temperatures are published in
-steps of 5, so a monitor never floods Home Assistant's history. The hub sets a last will, so
-every entity shows as unavailable if it goes offline.
+steps of 5, so a monitor never floods Home Assistant's history. Every entity shows as
+unavailable while the hub is stopped, the bridge is switched off or the connection is lost.
 
 The base topic defaults to `printguard` and the discovery prefix to `homeassistant`. Change
-either in the same tab if your broker is shared.
+either in the same tab if your broker is shared. Give each hub its own base topic if you run two
+on one broker, or stopping one marks the other's entities unavailable too.
+
+An **Enabled** command is `on`, `true` or `1` to arm a monitor and `off`, `false` or `0` to
+disarm it. Anything else is ignored.
 
 > [!WARNING]
 > Anyone who can publish to the broker can pause and cancel your prints, so treat broker access
@@ -270,8 +275,13 @@ did not say, and `thumbnail` is the media type of its preview or `null`.
 > [!NOTE]
 > Credentials are redacted from this surface. Any printer or notifier config field its
 > adapter marks secret, such as API keys, access codes and bot tokens, is stripped from
-> every REST and MCP response. Only the dashboard's own WebSocket, behind your proxy,
-> receives them.
+> every REST and MCP response, and any address in a config or a camera source loses its
+> `user:pass@` and has its query values replaced with `[redacted]`. Only the dashboard's own
+> WebSocket, behind your proxy, receives them.
+>
+> You can send a config back as you read it. A secret field you leave out or blank, and an
+> address you send back unchanged, keep the stored value. To clear an optional secret, remove
+> that notifier or printer and add it again.
 
 Every integration is normalised to one shape, so a printer reads and controls the same way
 regardless of its service:

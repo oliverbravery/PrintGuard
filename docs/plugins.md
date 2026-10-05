@@ -94,7 +94,8 @@ A repository install pins the commit it resolved to. **Update** re-resolves the 
 installed from, or the default branch if it had none, and re-checks the hashes.
 
 An update that asks for more stands the plugin down until you accept the wider list. More means
-a permission, an address or another plugin it calls.
+a permission, an address, another plugin it calls or a different sign-in address. A different
+sign-in address also signs the plugin out.
 
 | Installed over | Grants, stored data and credentials |
 |---|---|
@@ -105,7 +106,7 @@ a permission, an address or another plugin it calls.
 
 | Permission | Lets the plugin |
 |---|---|
-| `state:read` | Read monitor names, scores and alerts, and camera and printer status |
+| `state:read` | Read monitor names, scores and alerts, and camera and printer status, and hear each score, alert, warning, printer update and error as it happens |
 | `camera:view` | Put a live feed in its own panel |
 | `sound` | Sound a short alert through the speakers |
 | `monitor:control` | Enable, disable and retune any monitor |
@@ -159,10 +160,11 @@ A plugin has up to three files, and each runs in a sandbox.
 
 | Attack | What stops it |
 |---|---|
-| Take your credentials somewhere | Neither sandbox has sockets. The browser files' policy is `connect-src 'none'`, and the hub file has no WASI network and no filesystem. The only way out is a request through PrintGuard, to addresses the plugin declared |
+| Take your credentials somewhere | Neither sandbox has sockets. The browser files' policy is `connect-src 'none'`, and the hub file has no WASI network and no filesystem. The only way out is a request through PrintGuard, to addresses the plugin declared. A redirect is handed back to the plugin and never followed |
 | Read your credentials at all | State is cut down to the fields a permission names. Printer configuration, notifier settings, MQTT credentials and API tokens are in no permission. The exceptions are `routes` and `gate`, which see the cookie and authorisation headers of the requests they answer |
 | Read your camera frames | A camera in a plugin's panel is a placeholder PrintGuard fills with its own player, and the video never enters the sandbox. Reading the picture itself is `camera:frames`, which is its own thing to agree to, and a plugin's own pages are refused the live stream |
 | Hang or exhaust the hub | The worker runs against a memory cap, a CPU budget and a 5 second limit per call. A plugin that fails is disabled and reported |
+| Open the hub by breaking its own gate | A plugin holding `gate` that fails refuses every request until you enable it again, reinstall it or remove it |
 | Do something it was not granted | Every command maps to a permission, checked at the sandbox edge before it goes anywhere |
 | Pretend to be PrintGuard | A `plugin.js` has no styling and no markup of its own, and PrintGuard draws what it describes with its own components. A `panel.html` does draw itself, inside a panel carrying the plugin's name. A plugin's own pages are served into a sandboxed origin that is not the dashboard's |
 | Change after review | The manifest and every source file are pinned by SHA-256 at a commit |
@@ -198,9 +200,10 @@ and keeps the client id.
 
 ## Switching plugins off at boot
 
-A plugin holding **Authorise every request** can lock you out.
+A plugin holding **Authorise every request** can lock you out. One that fails locks everyone out,
+since a hub with a broken gate refuses every request.
 
-To start the hub with plugins off, add `PRINTGUARD_PLUGINS=off` to its environment, then remove the plugin.
+To start the hub with plugins off, add `PRINTGUARD_PLUGINS=off` to its environment, then remove the plugin or enable it again.
 
 [Deployment](deployment.md#plugins) has the compose snippet and what the `routes` and `gate`
 permissions mean for an exposed hub.

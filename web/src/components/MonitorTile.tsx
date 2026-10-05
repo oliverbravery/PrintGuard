@@ -27,7 +27,8 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
   const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   const device = printer?.device_state;
-  const score = history[monitor.id]?.at(-1)?.score ?? 0;
+  const live = Boolean(camera?.online);
+  const score = live ? (history[monitor.id]?.at(-1)?.score ?? 0) : null;
   const alerting = Boolean(monitor.alert);
   const pinned = section(engine?.settings.layout, "monitors").pinned.includes(monitor.id);
   const tools = usePluginSurface("monitor", monitor.id);
@@ -76,7 +77,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
         ) : (
           <>
             <DeviceChip state={printer?.device_state ?? undefined} />
-            {!monitor.watching && <span className="chip">standby</span>}
+            {!monitor.watching && <span className="chip">{camera ? "standby" : "no camera"}</span>}
             {tools.map(({ plugin, node }) => (
               <span key={plugin.id} className="relative z-[3]">
                 <PluginNodeView plugin={plugin} node={node} />
@@ -89,7 +90,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
         {activeJob(device) && <ProgressBar state={device} className="absolute inset-x-0 bottom-0 z-[3] h-[3px]" />}
       </Feed>
       {alerting && (
-        <div className="absolute inset-x-0 top-[calc(50%-14px)] z-[4] flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 top-[calc(50%-14px)] z-[4] flex justify-center">
           <span className="display bg-bad text-on-accent text-xs font-bold tracking-[0.3em] px-4 py-1.5">
             DEFECT DETECTED
           </span>
@@ -100,7 +101,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
         <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-1">
           <div>
             <div className="mono text-[0.8rem]">
-              {camera ? `${camera.achieved_fps.toFixed(1)}/${camera.target_fps.toFixed(1)}` : "—"}
+              {camera && live ? `${camera.achieved_fps.toFixed(1)}/${camera.target_fps.toFixed(1)}` : "—"}
             </div>
             <div className="label">infer fps</div>
           </div>

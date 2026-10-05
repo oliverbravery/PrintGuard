@@ -73,6 +73,8 @@ export function outboundSocket(id: string, action: string, request: Record<strin
   };
 }
 
+export const LINK_ACTIONS = ["call", "answer", "publish"];
+
 export function outboundLink(id: string, action: string, request: Record<string, unknown> | undefined): Record<string, unknown> {
   const fields = request ?? {};
   return {

@@ -15,6 +15,7 @@ in a host call where neither the fuel budget nor an epoch deadline can reach it.
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import logging
 import tempfile
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 QJS_WASM = Path(__file__).parent / "runtime" / "qjs.wasm"
 FUEL = 400_000_000
 MEMORY_BYTES = 96 * 1024 * 1024
-CALL_TIMEOUT_S = 5.0
+QUEUE_TIMEOUT_S = 5.0
 MAX_OUTPUT_BYTES = 512 * 1024
 MAX_EFFECTS = 32
 ENOTSUP = 58
@@ -65,11 +66,9 @@ const ctx = {
   background(image) { __effects.push({ kind: "background", image: String(image) }); },
   log(text) { __effects.push({ kind: "log", text: String(text) }); },
 };
-(function (plugin) {
-"""
-
-DRIVER = """
-})(plugin);
+delete globalThis.print;
+delete globalThis.console;
+new Function("plugin", '"use strict";' + __input.worker)(plugin);
 let __result = null;
 if (__input.kind === "event" || __input.kind === "tick") {
   const event = __input.event;
@@ -88,10 +87,42 @@ if (__input.kind === "event" || __input.kind === "tick") {
   __result = __hooks.gate(__input.request, ctx) === true;
 }
 __io.out.puts(JSON.stringify({ store: ctx.store, effects: __effects, result: __result }));
+__io.out.flush();
+__io.exit(0);
 """
-"""The worker runs inside a function, so its own ``import`` is a syntax error and
-QuickJS's std and os modules stay out of reach. Without that it could write to
-stdout, which is the sandbox's own answer channel."""
+"""What runs around a worker, which is handed over as text and compiled with
+``new Function``. A function made that way sees globals and nothing of this
+module, so the worker cannot name the std module or the bindings above, and its
+own ``import`` is a syntax error. The driver exits as soon as it has answered,
+before any job runs, so an ``import()`` never resolves either.
+
+None of that makes the answer trustworthy. A worker shares the globals the
+driver uses, so everything in an answer is treated as the worker's own word and
+checked against its grants."""
+
+
+class Busy(Exception):
+    """A call waited too long for a thread to run on, and was never started."""
+
+
+class Capped:
+    """Collects what a worker writes, refusing whatever would pass a cap.
+
+    A stream is handed over a write at a time, so nothing a worker prints is
+    held past ``MAX_OUTPUT_BYTES`` however much of it there is.
+    """
+
+    def __init__(self) -> None:
+        self.data = bytearray()
+        self.overflowed = False
+
+    def __call__(self, chunk: bytes) -> int | None:
+        """Takes one write, or fails it once the cap is reached."""
+        if len(self.data) + len(chunk) > MAX_OUTPUT_BYTES:
+            self.overflowed = True
+            return -errno.EFBIG
+        self.data += chunk
+        return None
 
 
 class Sandbox:
@@ -102,7 +133,7 @@ class Sandbox:
         self._module = module
         self._linker = linker
         self.plugin = plugin
-        self.code = SHIM + plugin.sources["worker.js"] + DRIVER
+        self._worker = plugin.sources["worker.js"]
 
     def call(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Runs the worker once and returns its parsed output.
@@ -111,16 +142,15 @@ class Sandbox:
             RuntimeError: If the sandbox trapped, timed out or wrote nothing
                 a caller can read.
         """
+        out, err = Capped(), Capped()
         with tempfile.TemporaryDirectory() as work:
-            paths = {name: Path(work) / name for name in ("in", "out", "err")}
-            paths["in"].write_text(json.dumps(payload))
-            paths["out"].touch()
-            paths["err"].touch()
+            stdin = Path(work) / "in"
+            stdin.write_text(json.dumps({**payload, "worker": self._worker}))
             wasi = wasmtime.WasiConfig()
-            wasi.argv = ["qjs", "-e", self.code]
-            wasi.stdin_file = str(paths["in"])
-            wasi.stdout_file = str(paths["out"])
-            wasi.stderr_file = str(paths["err"])
+            wasi.argv = ["qjs", "-e", SHIM]
+            wasi.stdin_file = str(stdin)
+            wasi.stdout_custom = out
+            wasi.stderr_custom = err
             store = wasmtime.Store(self._engine)
             store.set_wasi(wasi)
             store.set_fuel(FUEL)
@@ -128,21 +158,22 @@ class Sandbox:
             try:
                 self._linker.instantiate(store, self._module).exports(store)["_start"](store)
             except wasmtime.Trap as exc:
-                raise RuntimeError(self._diagnose(paths["err"], exc)) from exc
+                raise RuntimeError(self._diagnose(out, err, exc)) from exc
             except wasmtime.ExitTrap as exc:
                 if exc.code:
-                    raise RuntimeError(self._diagnose(paths["err"], exc)) from exc
-            output = paths["out"].read_bytes()
-        if len(output) > MAX_OUTPUT_BYTES:
-            raise RuntimeError(f"worker returned more than {MAX_OUTPUT_BYTES // 1024} KB")
+                    raise RuntimeError(self._diagnose(out, err, exc)) from exc
+        if out.overflowed:
+            raise RuntimeError(self._diagnose(out, err, None))
         try:
-            return json.loads(output)
+            return json.loads(out.data)
         except ValueError as exc:
             raise RuntimeError("worker returned nothing usable") from exc
 
     @staticmethod
-    def _diagnose(err: Path, exc: Exception) -> str:
-        detail = err.read_text().strip().splitlines()
+    def _diagnose(out: Capped, err: Capped, exc: Exception | None) -> str:
+        if out.overflowed:
+            return f"worker returned more than {MAX_OUTPUT_BYTES // 1024} KB"
+        detail = err.data.decode(errors="replace").strip().splitlines()
         if detail:
             return detail[0][:200]
         return "ran out of time or memory" if isinstance(exc, wasmtime.Trap) else str(exc)[:200]
@@ -169,6 +200,7 @@ class WasmPluginRuntime:
         self._state: dict[str, Any] = {}
         self._ticker: asyncio.Task[None] | None = None
         self._busy: set[str] = set()
+        self._failed_gates: set[str] = set()
         self._lock = asyncio.Lock()
 
     def attach(self, request: Callable[..., Awaitable[Any]], failed: Callable[[str, str], None]) -> None:
@@ -198,9 +230,15 @@ class WasmPluginRuntime:
             if seen:
                 asyncio.ensure_future(self._invoke(sandbox, "event", event=seen))
 
-    async def reload(self, running: list[Plugin]) -> None:
-        """Starts sandboxes for plugins with a worker and drops the rest."""
+    async def reload(self, running: list[Plugin], failed_gates: set[str]) -> None:
+        """Starts sandboxes for plugins with a worker and drops the rest.
+
+        Args:
+            running: The enabled plugins.
+            failed_gates: Plugins holding ``gate`` that stopped on a failure.
+        """
         async with self._lock:
+            self._failed_gates = set(failed_gates)
             wanted = {p.id: p for p in running if "worker.js" in p.sources}
             self._sandboxes = {
                 plugin_id: Sandbox(self._engine, self._module, self._linker, plugin)
@@ -231,9 +269,13 @@ class WasmPluginRuntime:
     async def authorise(self, request: dict[str, Any]) -> bool | None:
         """Asks the gating plugin whether a request may proceed.
 
-        A gate that fails to answer refuses, so a broken plugin cannot open the
-        hub up. ``PRINTGUARD_PLUGINS=off`` is the way back in.
+        A gate that fails refuses, and goes on refusing after it has been
+        disabled for it, so a broken plugin cannot open the hub up.
+        ``PRINTGUARD_PLUGINS=off`` is the way back in. A request the gate was
+        too busy to be asked about is refused on its own.
         """
+        if self._failed_gates:
+            return False
         gates = [s for s in self._sandboxes.values() if s.plugin.may("gate")]
         if not gates:
             return None
@@ -261,8 +303,26 @@ class WasmPluginRuntime:
                     last[sandbox.plugin.id] = now
                     await self._invoke(sandbox, "tick", event={"event": "tick"})
 
+    @staticmethod
+    def _run(sandbox: Sandbox, request: dict[str, Any], queued: float) -> dict[str, Any]:
+        """Runs a call on the thread it was given, unless it got there too late.
+
+        Raises:
+            Busy: If the call sat in the queue past ``QUEUE_TIMEOUT_S``.
+        """
+        if time.monotonic() - queued > QUEUE_TIMEOUT_S:
+            raise Busy
+        return sandbox.call(request)
+
     async def _invoke(self, sandbox: Sandbox, kind: str, **payload: Any) -> Any:
-        """Runs a worker off the event loop, then performs what it asked for."""
+        """Runs a worker off the event loop, then performs what it asked for.
+
+        A worker's budget is its fuel and memory, which only its own code can
+        spend. Time spent waiting for a thread belongs to whatever else the hub
+        is doing, so a call that waits too long is dropped without the plugin
+        being blamed for it. Otherwise a flood of requests could disable a
+        healthy gate and lock everybody out.
+        """
         plugin = sandbox.plugin
         request = {
             "kind": kind,
@@ -274,9 +334,14 @@ class WasmPluginRuntime:
         }
         self._busy.add(plugin.id)
         try:
-            output = await asyncio.wait_for(asyncio.to_thread(sandbox.call, request), CALL_TIMEOUT_S)
+            output = await asyncio.to_thread(self._run, sandbox, request, time.monotonic())
+        except Busy:
+            logger.warning("plugin %s was not reached in time, so one %s call was dropped", plugin.id, kind)
+            return None
         except Exception as exc:
             self._sandboxes.pop(plugin.id, None)
+            if plugin.may("gate"):
+                self._failed_gates.add(plugin.id)
             if self._failed:
                 self._failed(plugin.id, str(exc))
             logger.warning("plugin %s worker failed: %s", plugin.id, exc)
@@ -298,10 +363,10 @@ class WasmPluginRuntime:
     async def _perform(self, plugin: Plugin, effects: list[Any]) -> None:
         """Carries out a worker's effects, refusing any it was not granted.
 
-    Anything a dashboard has to perform, a notification, a sound or the
-    background, goes to the engine to be handed on, since nothing here has
-    speakers or a screen.
-    """
+        Anything a dashboard has to perform, a notification, a sound or the
+        background, goes to the engine to be handed on, since nothing here has
+        speakers or a screen.
+        """
         if self._request is None:
             return
         for effect in effects[:MAX_EFFECTS]:

@@ -12,9 +12,11 @@ import numpy as np
 import pytest
 
 from fakes import FakePlatform
+from printguard.engine import reports
 from printguard.engine.engine import Engine
 from printguard.engine.registry import Camera
 from printguard.server.api import ApiAuth, build_api_app
+from printguard.server.platform import OPEN_WAIT_S
 
 OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
 
@@ -391,6 +393,85 @@ async def test_heat_route_needs_control_and_returns_the_printer() -> None:
         ]
         assert (await client.post(f"/printers/{printer_id}/heat", json={}, headers=control)).status_code == 400
         assert (await client.post("/printers/nope/heat", json={"bed": 60}, headers=control)).status_code == 404
+
+
+QUERY_CAMERA = "http://192.168.1.50/videostream.cgi?user=admin&pwd=QUERYPASS"
+BASIC_PRINTER = {"base_url": "http://opuser:BASICPASS@octopi.local", "api_key": "octo-secret"}
+BASIC_NTFY = {"url": "https://ntfyuser:NTFYPASS@ntfy.example/topic", "token": "tk_secret"}
+LEAKS = ("QUERYPASS", "BASICPASS", "NTFYPASS", "octo-secret", "tk_secret", "opuser", "ntfyuser")
+
+
+async def test_credentials_inside_urls_reach_neither_the_read_surface_nor_a_bug_report(monkeypatch) -> None:
+    async with api(("read",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        engine.cameras.add(Camera(id="ip", name="IP cam", source={"kind": "url", "url": QUERY_CAMERA}, max_fps=5.0))
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": BASIC_PRINTER}})
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": BASIC_NTFY}}})
+
+        state = (await client.get("/state", headers={"Authorization": f"Bearer {tokens['read']}"})).text
+        assert not [leak for leak in LEAKS if leak in state]
+        assert "http://192.168.1.50/videostream.cgi?user=[redacted]&pwd=[redacted]" in state
+        assert "http://octopi.local" in state and "https://ntfy.example/topic" in state
+
+        failure = "GET http://192.168.1.50/videostream.cgi?user=admin&pwd=QUERYPASS refused, as was https://ntfyuser:NTFYPASS@ntfy.example/topic"
+        monkeypatch.setattr(reports.logs, "recent", lambda: [failure])
+        files = reports.report_files(diag=reports.diagnostics(engine), ui_logs=[failure], secrets=reports.collect_secrets(engine))
+        for name, _content_type, payload in files:
+            assert not [leak for leak in LEAKS if leak in payload.decode()], name
+
+
+def test_a_query_value_is_scrubbed_from_a_log_only_beside_its_key() -> None:
+    """A value such as ``stream`` or ``5`` is an ordinary word, so blanking it everywhere would leave nothing to read."""
+    found = reports.url_secrets("http://cam/?action=stream&fps=5&pwd=abc")
+    assert found == {"action=stream", "fps=5", "pwd=abc"}
+    assert reports.scrub("5 frames, stream stalled at http://cam/?fps=5&pwd=abc", found) == "5 frames, stream stalled at http://cam/?[redacted]&[redacted]"
+
+
+async def test_a_bearer_that_is_not_ascii_is_refused_rather_than_crashing() -> None:
+    async with api(("read",)) as (client, _engine, _platform, _monitor_id, _printer_id, _camera_id, _tokens):
+        refused = await client.get("/state", headers={"Authorization": "Bearer pässwörd".encode()})
+        assert refused.status_code == 401
+
+
+async def test_the_schema_is_served_without_a_token() -> None:
+    """It describes the API and holds nothing of the hub's, so a client can read it before it has a token."""
+    async with api(("read",)) as (client, _engine, _platform, _monitor_id, _printer_id, _camera_id, _tokens):
+        assert (await client.get("/openapi.json")).status_code == 200
+        assert (await client.get("/docs")).status_code == 200
+        assert (await client.get("/state")).status_code == 401
+
+
+async def test_sending_back_what_was_read_keeps_the_secrets_a_read_leaves_out() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": BASIC_PRINTER}})
+        await engine.handle(
+            {"cmd": "settings.update", "patch": {"notifiers": {"ntfy": BASIC_NTFY}, "mqtt": {"host": "broker", "password": "mq-secret"}}}
+        )
+
+        settings = (await client.get("/state", headers=manage)).json()["settings"]
+        settings["mqtt"]["host"] = "other-broker"
+        patched = await client.patch("/settings", json={"notifiers": settings["notifiers"], "mqtt": settings["mqtt"]}, headers=manage)
+        assert patched.status_code == 200, patched.text
+        assert engine.settings["notifiers"]["ntfy"] == BASIC_NTFY
+        assert engine.settings["mqtt"] == {"host": "other-broker", "password": "mq-secret"}
+
+        printer = (await client.get(f"/printers/{printer_id}", headers=manage)).json()
+        renamed = await client.patch(f"/printers/{printer_id}", json={"name": "Renamed", "config": printer["config"]}, headers=manage)
+        assert renamed.status_code == 200, renamed.text
+        assert engine.printers.get(printer_id).config == BASIC_PRINTER
+
+        replaced = {"url": "https://ntfy.example/other", "token": "tk_new"}
+        await client.patch("/settings", json={"notifiers": {"ntfy": replaced}}, headers=manage)
+        assert engine.settings["notifiers"]["ntfy"] == replaced
+
+
+async def test_adding_a_camera_waits_as_long_as_a_camera_takes_to_open(monkeypatch) -> None:
+    """A healthy camera can take most of OPEN_WAIT_S to give a first frame."""
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        request = AsyncMock(return_value=[])
+        monkeypatch.setattr(engine, "request", request)
+        await client.post("/cameras", json={"source": {"kind": "fake"}}, headers={"Authorization": f"Bearer {tokens['manage']}"})
+        assert request.await_args.kwargs["timeout"] > OPEN_WAIT_S
 
 
 async def test_rejected_command_is_400() -> None:

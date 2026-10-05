@@ -16,7 +16,7 @@ import ipaddress
 import re
 import socket
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 SCHEMES = ("http", "https", "ws", "wss", "rtsp", "rtsps")
 WILDCARD_SCHEMES = ("http", "https")
@@ -75,6 +75,15 @@ def _matches_path(pattern: str, path: str) -> bool:
     return re.fullmatch(".*?".join(re.escape(part) for part in pattern.split("*")), path) is not None
 
 
+def _climbs(path: str) -> bool:
+    """Whether a path has a ``.`` or ``..`` segment, written out or percent-encoded.
+
+    An HTTP client collapses those before it sends, so the path that was matched
+    would not be the path that was asked for.
+    """
+    return any(unquote(segment) in (".", "..") for segment in path.replace("\\", "/").split("/"))
+
+
 def matches(pattern: str, url: str) -> bool:
     """Whether a URL falls inside one pattern.
 
@@ -85,7 +94,8 @@ def matches(pattern: str, url: str) -> bool:
     Returns:
         True when scheme, host, port and path all match. The query string is
         matched as part of the path, as a browser does, so a pattern ending in
-        ``*`` covers a URL's parameters.
+        ``*`` covers a URL's parameters. A path with a ``.`` or ``..`` segment
+        matches nothing.
     """
     rule = parse(pattern)
     if rule is None:
@@ -97,7 +107,9 @@ def matches(pattern: str, url: str) -> bool:
     if rule["port"] != "*" and int(rule["port"]) != (parsed.port or DEFAULT_PORTS.get(scheme, 0)):
         return False
     path = parsed.path or "/"
-    return _matches_host(rule["host"], host) and _matches_path(rule["path"], f"{path}?{parsed.query}" if parsed.query else path)
+    if _climbs(path):
+        return False
+    return _matches_host(rule["host"].strip("[]"), host) and _matches_path(rule["path"], f"{path}?{parsed.query}" if parsed.query else path)
 
 
 def allowed(url: str, patterns: list[str]) -> bool:

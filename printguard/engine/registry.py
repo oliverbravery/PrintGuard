@@ -64,10 +64,11 @@ class Camera:
         printer_id: Owning printer when the camera was exposed by a printer
             integration, else None. Such cameras are managed by their printer:
             they cannot be removed on their own and are dropped with it.
-        declared: Whether the deployment declared this device rather than a user
+        declared: Whether the deployment declares this device rather than a user
             registering it, as the Docker image does for every camera passed
-            into the container. Such cameras are managed by the deployment: they
-            cannot be removed on their own and go when it stops declaring them.
+            into the container. Such cameras are managed by the deployment and
+            cannot be removed on their own. One whose device is missing at boot
+            stops being declared until the device is back, so it can be removed.
         max_fps: Native frame rate measured when the camera was registered.
         detect_fps: Most inferences a second the user wants spent on this
             camera, to hold down the load on a shared host.
@@ -401,6 +402,7 @@ class Plugin:
             "secrets": self.secrets,
             "verified": self.verified,
             "enabled": self.enabled,
+            "failure": self.failure,
             "installed": self.installed,
         }
 

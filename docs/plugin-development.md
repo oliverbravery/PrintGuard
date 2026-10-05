@@ -203,7 +203,9 @@ script renamed to `.png` is refused. SVG is not on the list, since it is markup.
 | `*://*/*` | Anywhere at all, which is the widest thing you can ask for |
 
 A `*` scheme covers http and https, and `ws`, `wss`, `rtsp` and `rtsps` are named in full. A
-missing port means any port.
+missing port means any port. An IPv6 address goes in brackets, as `http://[fd00::1]/*`.
+
+A URL with a `.` or `..` segment in its path matches no pattern, percent-encoded or not.
 
 A pattern on this machine or the network around it needs `net:local` as well as `net`. A
 wildcard host counts, since it covers both. PrintGuard resolves the name and checks the address
@@ -321,6 +323,10 @@ That needs `alert` in `events` and a `tick_s`.
 A worker still busy with the last event is skipped, so a slow plugin drops events instead of
 falling behind. One that fails or runs past its limits is disabled and reported.
 
+A worker has `plugin` and the JavaScript built-ins in scope and nothing else. There is no
+`console` or `print`, so log with `ctx.log`. A call ends when your handler returns, so a promise
+or an `import()` never resolves.
+
 ## The ctx API
 
 Every handler in `plugin.js` and `worker.js` gets a `ctx`. In a `panel.html` the same calls
@@ -386,11 +392,11 @@ manifest's `events` names it. `tick` is the exception. It is the worker's own ti
 | `call` | Another plugin asking on a channel you offer | `from`, `channel`, `body`, `call_id` | `link:provide` |
 | `answer` | The answer to one of your own `ctx.call`s | `tag`, `from`, `channel`, `body` | `link:consume` |
 | `message` | Something a plugin you named published | `from`, `channel`, `body` | `link:consume` |
-| `result` | Every inference on a watched monitor, capped at 5 per second per monitor | `monitor_id`, `camera_id`, `score`, `prediction`, `margin`, `ms`, `ts` | |
-| `alert` | A defect held long enough to act on | `monitor_id`, `score`, `action`, `ts` | |
-| `warning` | A watchdog condition, and its recovery | `monitor_id`, `message`, `recovered` | |
-| `device` | A printer's status changed | `printer_id`, `status`, `progress`, `job`, `remaining_s`, `nozzle`, `bed` | |
-| `error` | Anything that failed | `message` | |
+| `result` | Every inference on a watched monitor, capped at 5 per second per monitor | `monitor_id`, `camera_id`, `score`, `prediction`, `margin`, `ms`, `ts` | `state:read` |
+| `alert` | A defect held long enough to act on | `monitor_id`, `score`, `action`, `ts` | `state:read` |
+| `warning` | A watchdog condition, and its recovery | `monitor_id`, `message`, `recovered` | `state:read` |
+| `device` | A printer's status changed | `printer_id`, `status`, `progress`, `job`, `remaining_s`, `nozzle`, `bed` | `state:read` |
+| `error` | Anything that failed | `message` | `state:read` |
 | `state` | The full snapshot, once a second | Everything your permissions allow | `state:read` |
 | `tick` | Your worker's own timer | Nothing | A `tick_s` |
 
@@ -505,10 +511,13 @@ plugin.on("http", (event, ctx) => {
 A JSON answer arrives parsed. Anything else arrives as a string, and `binary: true` asks for
 it base64 encoded. The manifest needs `http` in `events`, or the answer never reaches you.
 
+A redirect is not followed. Its 3xx status arrives as the answer, so ask for the address the
+service finally answers on.
+
 ### Sockets
 
 `ctx.socket` opens a WebSocket under a tag and `socket` events carry it, with `state` saying
-`open`, `message` or `closed`. PrintGuard drops it when the plugin is disabled or removed. The manifest needs `socket` in `events` and a `ws` or `wss` pattern in `urls`.
+`open`, `message` or `closed`. PrintGuard drops it when the plugin is disabled, reinstalled or removed, or loses `net` or `net:local`. The manifest needs `socket` in `events` and a `ws` or `wss` pattern in `urls`.
 
 ```js
 plugin.on("tick", (event, ctx) => ctx.socket({ url: "wss://hub.local:8123/api/websocket", tag: "hub" }));
@@ -543,8 +552,8 @@ Call it from an event, since `render` runs again every second.
 Each tone follows the one before unless it says `together`, and `shape` picks `sine`, `square`,
 `sawtooth` or `triangle`. It stays quiet until the user has pressed something in the page.
 
-`ctx.background` takes a `data:image/` URL and clears when passed anything else. The Glass
-theme frosts the panels over it.
+`ctx.background` takes a base64 `data:` URL of a PNG, JPEG, WebP or GIF and clears when passed
+anything else. The Glass theme frosts the panels over it.
 
 ## Credentials
 
@@ -561,8 +570,10 @@ in as your requests leave.
 ctx.http({ url: "https://api.example.com/v1/me", headers: { Authorization: "Bearer {{secret.api_key}}" }, tag: "me" });
 ```
 
-The reference is all your code holds, in the URL, a header or a JSON body. A request naming a
-secret the user has not filled in is refused.
+The reference is all your code holds, in a header, a JSON body or the URL's path and query. A
+request naming a secret the user has not filled in is refused, and so is one with a reference
+in the URL's scheme, user or host. The URL is checked against your patterns again once it is
+filled in.
 
 For a service with a sign-in, declare `oauth` and PrintGuard runs the authorisation code flow
 with PKCE and no client secret. The access token arrives as `{{secret.oauth}}` and is refreshed
@@ -583,6 +594,10 @@ No client id goes in there, and one written in is dropped at install. A shipped 
 app shared by everyone who installs the plugin, which is what providers hand out quota and terms
 against. Whoever installs it [registers their own](plugins.md#credentials), and PrintGuard shows
 them the redirect URI to give the provider and links `register_url`.
+
+`authorize_url` and `token_url` are each one `https` address with no wildcards. A `token_url`
+on this machine or the network around it needs `net:local`. An update that changes either one
+signs its users out and has to be accepted again.
 
 ## Talking to other plugins
 
@@ -663,8 +678,9 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 
 | Gate rule | |
 |---|---|
-| What refuses | Anything but `true`, and a gate that fails to answer. The request gets a 403. A gate that fails is then disabled like any other plugin, which leaves the hub ungated |
+| What refuses | Anything but `true`, and a gate that throws or runs out of fuel or memory. The request gets a 403. A gate that fails is then disabled like any other plugin, and every request is refused until it is enabled again, reinstalled or removed, or the hub starts with `PRINTGUARD_PLUGINS=off` |
 | What it sees | The same request shape a route gets, with no body. WebSocket handshakes are asked about too, as a `GET` |
+| Under load | A request that waits more than 5 seconds for the gate to be free is refused on its own. The gate is not disabled for it |
 | What stays open | `/api/health` and the gating plugin's own pages, so uptime checks keep working and it can serve its own sign-in page |
 | Caching | An approval is cached for 10 seconds per cookie, authorization header, method and path. A refusal is never cached, so signing in takes effect at once |
 
@@ -684,8 +700,8 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | `tick_s` | 5 to 86400 seconds, fired on a 5 second clock, so 7 means 10 |
 | Effects | 32 per call. The rest are dropped |
 | `plugin.js` call | 4 seconds, then the plugin is stopped |
-| Worker call | 5 seconds, 96 MB of memory and 400 million units of wasmtime fuel, then the plugin is disabled |
-| Worker output | 512 KB per call, the store and effects together |
+| Worker call | 96 MB of memory and 400 million units of wasmtime fuel, then the plugin is disabled. A call that waits more than 5 seconds to start is dropped |
+| Worker output | 512 KB per call, the store and effects together, then the plugin is disabled |
 | Node tree | 400 nodes |
 | Node text | `label` 80 characters, `action` 60, `placeholder` 60 |
 | `select` options | 60 |

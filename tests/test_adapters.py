@@ -3,17 +3,25 @@ multipart encoding, printer sanitisation and the vision score maths."""
 
 from __future__ import annotations
 
+import asyncio
 import json as jsonlib
+from email.header import decode_header, make_header
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import numpy as np
 import pytest
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
 
 from printguard.engine import vision
 from printguard.engine.cameras import webrtc_endpoint, whep_endpoint
 from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
+from printguard.engine.integrations import bambu
+from printguard.engine.integrations.bambu import BambuAdapter
+from printguard.engine.integrations.base import webcam_url
 from printguard.engine.integrations.elegoo import ElegooAdapter
 from printguard.engine.monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor
 from printguard.engine.notifiers import NOTIFIERS
@@ -89,6 +97,17 @@ async def test_ntfy_posts_text_without_snapshot() -> None:
     assert call["method"] == "POST"
     assert call["data"] == b"Body"
     assert "Authorization" not in call["headers"]
+
+
+@pytest.mark.parametrize("image", [JPEG, None])
+async def test_ntfy_headers_carry_names_outside_ascii(image: bytes | None) -> None:
+    http = RecordingHttp()
+    title, body = "PrintGuard: Küche № 2 defect (87%)", "Camera 'Küche' is offline,\nso it is not watched"
+    await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, title, body, image)
+    sent = httpx.Request(http.last["method"], http.last["url"], headers=http.last["headers"], content=http.last["data"])
+    received = {name: str(make_header(decode_header(value))) for name, value in sent.headers.items()}
+    assert received["title"] == title
+    assert (received["message"] if image else sent.content.decode()) == body
 
 
 async def test_ntfy_raises_on_rejection() -> None:
@@ -277,8 +296,8 @@ async def test_octoprint_exposes_webcam_stream() -> None:
     assert http.last["url"] == "http://op:5000/api/settings"
     assert http.last["headers"] == {"X-Api-Key": "k"}
     assert cams == [
-        {"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": "http://op:5000/webcam/?action=stream"}}
-    ]
+        {"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": "http://op/webcam/?action=stream"}}
+    ], "a relative stream is served on the host's web port, not the API port"
 
 
 async def test_octoprint_reads_19_plus_classicwebcam_location() -> None:
@@ -541,6 +560,200 @@ async def test_bambu_command_payloads(monkeypatch) -> None:
         assert published[-1] == {"print": {"sequence_id": "0", "command": command, "param": ""}}
 
 
+BAMBU_FULL_REPORT = {"command": "push_status", "gcode_state": "RUNNING", "mc_percent": 5, "nozzle_temper": 220.0}
+
+
+class FakeBambuPrinter:
+    """paho client stand-in that answers the way a printer's broker does, on the calling thread."""
+
+    answer = "Success"
+    acknowledges = True
+    full_report: dict[str, Any] | None = BAMBU_FULL_REPORT
+    version_modules: list[dict[str, Any]] = [{"name": "ota", "product_name": "Bambu Lab P1S"}]
+    verdict: dict[str, Any] | None = {"result": "success", "reason": ""}
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.requests: list[dict[str, Any]] = []
+        self.subscriptions: list[str] = []
+        self.connected = False
+        self.printers.append(self)
+
+    def username_pw_set(self, username: str, password: str) -> None:
+        self.credentials = (username, password)
+
+    def tls_set_context(self, context: Any) -> None:
+        pass
+
+    def connect(self, host: str, port: int, keepalive: int) -> None:
+        self.address = (host, port)
+
+    def loop_start(self) -> None:
+        answer = ReasonCode(PacketTypes.CONNACK, self.answer)
+        self.connected = not answer.is_failure
+        self.on_connect(self, None, None, answer, None)
+
+    def is_connected(self) -> bool:
+        return self.connected
+
+    def subscribe(self, topic: str) -> None:
+        self.subscriptions.append(topic)
+
+    def report(self, payload: dict[str, Any]) -> None:
+        self.on_message(self, None, SimpleNamespace(payload=jsonlib.dumps(payload).encode()))
+
+    def publish(self, topic: str, payload: str, qos: int = 0) -> Any:
+        request = jsonlib.loads(payload)
+        self.requests.append(request)
+        ((kind, body),) = request.items()
+        if body["command"] == "pushall" and self.full_report:
+            self.report({"print": self.full_report})
+        elif body["command"] == "get_version":
+            self.report({"info": {"command": "get_version", "sequence_id": "0", "module": self.version_modules}})
+        elif kind == "print" and self.verdict:
+            self.report({"print": {**body, "result": "failed", "reason": "someone else's command", "sequence_id": "0"}})
+            self.report({"print": {**body, **self.verdict}})
+        return SimpleNamespace(wait_for_publish=lambda timeout: None, is_published=lambda: self.acknowledges)
+
+    def disconnect(self) -> None:
+        self.connected = False
+
+    def loop_stop(self) -> None:
+        pass
+
+
+@pytest.fixture
+def bambu_printers(monkeypatch) -> list[FakeBambuPrinter]:
+    printers: list[FakeBambuPrinter] = []
+    monkeypatch.setattr(FakeBambuPrinter, "printers", printers, raising=False)
+    monkeypatch.setattr(bambu.mqtt, "Client", FakeBambuPrinter)
+    monkeypatch.setattr(bambu, "_REPLY_TIMEOUT_S", 0.01)
+    return printers
+
+
+def _commands(printer: FakeBambuPrinter) -> list[str]:
+    return [body["command"] for request in printer.requests for body in request.values()]
+
+
+async def test_bambu_holds_one_connection_and_merges_what_changed(bambu_printers) -> None:
+    adapter = BambuAdapter()
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).progress == 5.0
+    (printer,) = bambu_printers
+    printer.report({"print": {"command": "push_status", "mc_percent": 50}})
+    state = await adapter.fetch_state(None, BAMBU_CONFIG)
+    assert (state.status, state.progress) == (DeviceStatus.PRINTING, 50.0), "a P1 report carries only what changed"
+    assert state.public()["nozzle"] == {"actual": 220.0, "target": 0.0}
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    assert len(bambu_printers) == 1, "polls and commands share the connection"
+    assert printer.subscriptions == ["device/01S00A/report"]
+    assert _commands(printer) == ["get_version", "pushall", "pause"], "the full report is asked for once"
+    await adapter.close(BAMBU_CONFIG)
+    assert not printer.connected
+
+
+async def test_bambu_printer_that_goes_silent_is_reconnected_not_believed(bambu_printers, monkeypatch) -> None:
+    adapter = BambuAdapter()
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.PRINTING
+    monkeypatch.setattr(FakeBambuPrinter, "full_report", None)
+    monkeypatch.setattr(bambu, "_SILENCE_LIMIT_S", -1.0)
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.OFFLINE
+    silent, reconnected = bambu_printers[:2]
+    assert not silent.connected and reconnected.connected
+    await adapter.close()
+
+
+async def test_bambu_dropped_connection_is_offline_until_a_full_report(bambu_printers, monkeypatch) -> None:
+    adapter = BambuAdapter()
+    await adapter.fetch_state(None, BAMBU_CONFIG)
+    monkeypatch.setattr(FakeBambuPrinter, "full_report", None)
+    bambu_printers[0].connected = False
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.OFFLINE
+    bambu_printers[1].report({"print": {"command": "push_status", "mc_percent": 60}})
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.OFFLINE, "a change without the full report says nothing of the state"
+    bambu_printers[1].report({"print": {**BAMBU_FULL_REPORT, "gcode_state": "FINISH"}})
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.IDLE
+    await adapter.close()
+
+
+async def test_bambu_refused_connection_raises(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "answer", "Not authorized")
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="refused the connection: Not authorized"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    with pytest.raises(RuntimeError, match="refused the connection"):
+        await adapter.fetch_state(None, BAMBU_CONFIG)
+    assert all("pause" not in _commands(printer) for printer in bambu_printers)
+
+
+async def test_bambu_unacknowledged_command_raises(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "acknowledges", False)
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="did not acknowledge pause"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    await adapter.close()
+
+
+async def test_bambu_command_that_fails_is_never_left_for_the_connection_to_replay(bambu_printers, monkeypatch) -> None:
+    """paho resends a queued QoS 1 publish, so a pause reported as failed must lose its session."""
+    adapter = BambuAdapter()
+    await adapter.fetch_state(None, BAMBU_CONFIG)
+    monkeypatch.setattr(FakeBambuPrinter, "acknowledges", False)
+    with pytest.raises(RuntimeError, match="did not acknowledge pause"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    (failed,) = bambu_printers
+    assert not failed.connected, "the session holding an unacknowledged pause stayed open to resend it"
+
+    monkeypatch.setattr(FakeBambuPrinter, "acknowledges", True)
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    retried = bambu_printers[1]
+    assert _commands(failed).count("pause") == 1 and "pause" in _commands(retried), "the next command reused the dropped session"
+
+    retried.connected = False
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.RESUME)
+    assert "resume" not in _commands(retried), "a command was queued on a connection already lost"
+    assert "resume" in _commands(bambu_printers[2])
+    await adapter.close()
+
+
+async def test_bambu_command_the_printer_fails_raises(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "verdict", {"result": "failed", "reason": "mqtt message verify failed", "err_code": 84033543})
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="refused pause: mqtt message verify failed"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    with pytest.raises(RuntimeError, match="refused gcode_line"):
+        await adapter.heat(None, BAMBU_CONFIG, "bed", 60.0)
+    await adapter.close()
+
+
+async def test_bambu_command_without_a_verdict_stands_on_the_acknowledgement(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "verdict", None)
+    adapter = BambuAdapter()
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    (pause,) = [body for request in bambu_printers[0].requests for body in request.values() if body["command"] == "pause"]
+    assert pause["sequence_id"] != "0", "a number of its own tells this command's answer from another client's"
+    await adapter.close()
+
+
+@pytest.mark.parametrize(
+    ("product", "url"),
+    [
+        ("Bambu Lab P1S", "file:///sdcard/benchy.3mf"),
+        ("Bambu Lab H2D", "ftp:///benchy.3mf"),
+        ("Bambu Lab H2S", "ftp:///benchy.3mf"),
+        ("Bambu Lab H2C", "ftp:///benchy.3mf"),
+        ("", "file:///sdcard/benchy.3mf"),
+    ],
+)
+async def test_bambu_hands_the_h2_series_an_ftp_url(bambu_printers, monkeypatch, product: str, url: str) -> None:
+    from test_gcode import sliced_3mf
+
+    monkeypatch.setattr(FakeBambuPrinter, "version_modules", [{"name": "esp32", "product_name": ""}, {"name": "ota", "product_name": product}])
+    adapter = BambuAdapter()
+    monkeypatch.setattr(adapter, "_upload", lambda config, filename, data: None)
+    await adapter.print_file(None, BAMBU_CONFIG, "benchy.3mf", sliced_3mf(plate=1))
+    assert bambu_printers[0].requests[-1]["print"]["url"] == url
+    await adapter.close()
+
+
 async def test_bambu_exposes_rtsps_camera_for_x1_h2(monkeypatch) -> None:
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_rtsps_fingerprint", lambda host: "ABCDEF")
     cams = await INTEGRATIONS["bambu"].cameras(None, BAMBU_CONFIG)
@@ -583,7 +796,8 @@ ELEGOO_MOONRAKER_CONFIG = {"family": "moonraker", "host": "192.168.1.91", "api_k
 class FakeCentauri:
     """pycentauri client stand-in for adapter contract tests."""
 
-    def __init__(self, print_status: int = 13, camera_port: int = 3031) -> None:
+    def __init__(self, print_status: int = 13, camera_port: int = 3031, ack: int = 0) -> None:
+        self.ack = ack
         self.state = SimpleNamespace(
             print_status=print_status,
             progress=42,
@@ -601,20 +815,27 @@ class FakeCentauri:
         self._closed = False
         self.mainboard_id = "mainboard-id"
 
+    def answer(self) -> Any:
+        return SimpleNamespace(inner={"Cmd": 0, "Data": {"Ack": self.ack}})
+
     async def status(self) -> Any:
-        return self.state
+        return SimpleNamespace(**vars(self.state))
 
-    async def set_temperatures(self, **targets: float) -> None:
+    async def set_temperatures(self, **targets: float) -> Any:
         self.targets.append(targets)
+        return self.answer()
 
-    async def pause(self) -> None:
+    async def pause(self) -> Any:
         self.actions.append("pause")
+        return self.answer()
 
-    async def resume(self) -> None:
+    async def resume(self) -> Any:
         self.actions.append("resume")
+        return self.answer()
 
-    async def stop(self) -> None:
+    async def stop(self) -> Any:
         self.actions.append("stop")
+        return self.answer()
 
     async def close(self) -> None:
         self.closed = True
@@ -668,6 +889,63 @@ async def test_elegoo_centauri_actions_enable_control(monkeypatch) -> None:
     for action in (DeviceAction.PAUSE, DeviceAction.RESUME, DeviceAction.CANCEL):
         await INTEGRATIONS["elegoo"].send(None, ELEGOO_CENTAURI_CONFIG, action)
     assert client.actions == ["pause", "resume", "stop"]
+
+
+async def test_elegoo_centauri_refused_commands_raise(monkeypatch) -> None:
+    client = FakeCentauri(ack=1)
+
+    async def start_print(filename, *, storage="local"):
+        return client.answer()
+
+    async def upload_file(path, *, remote_name=None):
+        return remote_name
+
+    client.start_print, client.upload_file = start_print, upload_file
+    monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
+    with pytest.raises(RuntimeError, match="refused pause: Ack 1"):
+        await INTEGRATIONS["elegoo"].send(None, ELEGOO_CENTAURI_CONFIG, DeviceAction.PAUSE)
+    with pytest.raises(RuntimeError, match="refused the bed target"):
+        await INTEGRATIONS["elegoo"].heat(None, ELEGOO_CENTAURI_CONFIG, "bed", 60.0)
+    with pytest.raises(RuntimeError, match="refused to print benchy.gcode"):
+        await INTEGRATIONS["elegoo"].print_file(None, ELEGOO_CENTAURI_CONFIG, "benchy.gcode", b"G1 X1\n")
+
+
+class RepeatingCentauri(FakeCentauri):
+    """A Centauri Carbon 1 client, which answers status() with its last push for ever."""
+
+    def __init__(self, pushes: list[Any]) -> None:
+        super().__init__(print_status=0)
+        self.pushes = pushes
+
+    async def status(self) -> Any:
+        return self.state
+
+    async def watch(self) -> Any:
+        yield self.state
+        for push in self.pushes:
+            self.state = push
+            yield push
+        await asyncio.Event().wait()
+
+
+async def test_elegoo_centauri_waits_out_a_status_it_has_already_read(monkeypatch) -> None:
+    adapter = ElegooAdapter()
+    printing = SimpleNamespace(**{**vars(FakeCentauri().state), "print_status": 13})
+    client = RepeatingCentauri([printing])
+    monkeypatch.setattr(adapter, "_connect_centauri", _fake_centauri(client))
+    assert (await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)).status is DeviceStatus.IDLE
+    assert (await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)).status is DeviceStatus.PRINTING
+
+
+async def test_elegoo_centauri_that_stops_reporting_fails_the_poll(monkeypatch) -> None:
+    adapter = ElegooAdapter()
+    client = RepeatingCentauri([])
+    adapter._connections[adapter._connection_key(ELEGOO_CENTAURI_CONFIG)] = client
+    monkeypatch.setattr("printguard.engine.integrations.elegoo._FRESH_STATUS_TIMEOUT_S", 0.01)
+    assert (await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)).status is DeviceStatus.IDLE
+    with pytest.raises(RuntimeError, match="stopped reporting"):
+        await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    assert client.closed, "the poll that fails drops the connection, so the next one starts again"
 
 
 @pytest.mark.parametrize(
@@ -994,8 +1272,17 @@ async def test_octoprint_uploads_selected_and_printing() -> None:
         await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=415), {"base_url": "http://op", "api_key": "k"}, "x.gcode", b"")
 
 
+MOONRAKER_UPLOADED = {"item": {"path": "benchy.gcode", "root": "gcodes"}, "print_started": True, "print_queued": False, "action": "create_file"}
+
+
+async def test_klipper_upload_that_does_not_start_the_print_raises() -> None:
+    stored = {**MOONRAKER_UPLOADED, "print_started": False}
+    with pytest.raises(RuntimeError, match="did not start printing"):
+        await INTEGRATIONS["klipper"].print_file(RecordingHttp(status=201, body=stored), {"base_url": "http://mr:7125"}, "benchy.gcode", b"G1 X1\n")
+
+
 async def test_klipper_uploads_into_gcodes_and_prints() -> None:
-    http = RecordingHttp(status=201)
+    http = RecordingHttp(status=201, body=MOONRAKER_UPLOADED)
     await INTEGRATIONS["klipper"].print_file(http, {"base_url": "http://mr:7125", "api_key": "s"}, "benchy.gcode", b"G1 X1\n")
     call = http.last
     assert (call["method"], call["url"]) == ("POST", "http://mr:7125/server/files/upload")
@@ -1006,14 +1293,18 @@ async def test_klipper_uploads_into_gcodes_and_prints() -> None:
         await INTEGRATIONS["klipper"].print_file(RecordingHttp(status=400), {"base_url": "http://mr:7125"}, "x.gcode", b"")
 
 
-async def test_prusa_puts_onto_the_first_available_storage_and_prints_after_upload(monkeypatch) -> None:
+async def test_prusa_puts_onto_the_first_writable_storage_and_prints_after_upload(monkeypatch) -> None:
     from contextlib import asynccontextmanager
 
     uploads: list[tuple[str, dict[str, str], bytes]] = []
 
     class FakeLink:
         async def get_storage(self):
-            return [{"path": "/local", "available": False}, {"path": "/usb", "available": True}]
+            return [
+                {"path": "/local", "available": False},
+                {"path": "/sdcard", "available": True, "read_only": True},
+                {"path": "/usb", "available": True, "read_only": False},
+            ]
 
     @asynccontextmanager
     async def link(config):
@@ -1056,6 +1347,7 @@ async def test_bambu_uploads_over_ftps_then_prints_the_plate(monkeypatch) -> Non
     steps: list[Any] = []
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_upload", lambda config, filename, data: steps.append(("upload", filename, data)))
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_publish", lambda config, payload: steps.append(("publish", payload)))
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_product", lambda config: "Bambu Lab P1S")
     data = sliced_3mf(plate=3)
     await INTEGRATIONS["bambu"].print_file(None, BAMBU_CONFIG, "benchy.3mf", data)
     assert steps[0] == ("upload", "benchy.3mf", data), "the file is on the SD card before the print is asked for"
@@ -1111,6 +1403,7 @@ async def test_elegoo_centauri_uploads_then_starts(monkeypatch) -> None:
 
     async def start_print(filename, *, storage="local"):
         steps.append(("start", filename, storage))
+        return client.answer()
 
     client.upload_file = upload_file
     client.start_print = start_print
@@ -1121,7 +1414,15 @@ async def test_elegoo_centauri_uploads_then_starts(monkeypatch) -> None:
 
 
 async def test_elegoo_moonraker_family_uploads_through_moonraker() -> None:
-    http = RecordingHttp(status=201)
+    http = RecordingHttp(status=201, body=MOONRAKER_UPLOADED)
     await INTEGRATIONS["elegoo"].print_file(http, ELEGOO_MOONRAKER_CONFIG, "benchy.gcode", b"G1\n")
     assert http.last["url"] == "http://192.168.1.91:7125/server/files/upload"
     assert http.last["headers"]["X-Api-Key"] == "secret"
+
+
+
+def test_a_relative_webcam_url_keeps_a_port_that_is_not_the_api_port() -> None:
+    """OctoPrint behind a proxy on 8080 serves its webcam there, while one on its own 5000 serves it on the web port."""
+    assert webcam_url("http://nas.lan:8080", "/webcam/?action=stream", 5000) == "http://nas.lan:8080/webcam/?action=stream"
+    assert webcam_url("http://nas.lan:5000", "/webcam/?action=stream", 5000) == "http://nas.lan/webcam/?action=stream"
+    assert webcam_url("http://nas.lan:5000", "http://cam.lan/stream", 5000) == "http://cam.lan/stream"

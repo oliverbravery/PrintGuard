@@ -145,15 +145,15 @@ declare global {
       alerts: { ts: number; score: number; action: string }[];
       stats: { current: number; avg: number; min: number; max: number; inferences: number; defect_frames: number };
     };
-    /** Every inference on a watched monitor, capped at 5 a second per monitor, before any threshold or streak logic. */
+    /** Every inference on a watched monitor, capped at 5 a second per monitor, before any threshold or streak logic. Needs `state:read`. */
     result: { event: "result"; monitor_id: string; camera_id: string; score: number; prediction: "failure" | "success"; margin: number; ms: number; ts: number };
-    /** A defect held long enough to act on. `action` is what PrintGuard did to the printer. */
+    /** A defect held long enough to act on. `action` is what PrintGuard did to the printer. Needs `state:read`. */
     alert: { event: "alert"; monitor_id: string; score: number; action: string; ts: number };
-    /** A watchdog condition, and again with `recovered` when it clears. */
+    /** A watchdog condition, and again with `recovered` when it clears. Needs `state:read`. */
     warning: { event: "warning"; monitor_id?: string; message: string; recovered: boolean };
-    /** A printer's status changed, carrying everything its `device_state` does. */
+    /** A printer's status changed, carrying everything its `device_state` does. Needs `state:read`. */
     device: { event: "device"; printer_id: string } & PluginDeviceState;
-    /** Anything that failed. */
+    /** Anything that failed. Needs `state:read`. */
     error: { event: "error"; message: string };
     /** The snapshot your permissions allow, once a second. */
     state: { event: "state" } & PluginState;
@@ -205,7 +205,8 @@ declare global {
     command(cmd: { cmd: string; [field: string]: unknown }): void;
     /**
      * Makes an HTTP request for you. Needs `net` and a URL your patterns cover.
-     * The answer arrives as an `http` event under the same `tag`.
+     * The answer arrives as an `http` event under the same `tag`. A redirect is
+     * not followed, so its 3xx status is the answer.
      */
     http(request: { method?: string; url: string; headers?: Record<string, string>; json?: unknown; tag?: string }): void;
     /** Opens a WebSocket PrintGuard holds for you, answering on `tag`. Needs `net` and a `ws` or `wss` pattern covering the URL. */
@@ -225,8 +226,8 @@ declare global {
     /** Plays an audio file you shipped, named as it appears in the manifest's `assets`. Needs `sound`. */
     sound(asset: string): void;
     /**
-     * Puts a picture behind the dashboard. Needs `background`, takes a `data:` URL,
-     * and clears when passed nothing.
+     * Puts a picture behind the dashboard. Needs `background`, takes a base64 `data:` URL
+     * of a PNG, JPEG, WebP or GIF, and clears when passed anything else.
      */
     background(image: string): void;
     /**

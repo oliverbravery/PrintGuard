@@ -18,6 +18,18 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   press Send, and **Settings**, under **Advanced**, switches the prompt off.
   [What's sent](docs/feedback.md). Thanks to @eikaramba.
 
+### Changed
+
+- The hub only answers to IP addresses, `localhost`, local names such as `printguard.local` and
+  the addresses in `PRINTGUARD_ORIGINS`, which stops a DNS rebinding page reaching it. If you open
+  PrintGuard at a domain, through a tunnel or a proxy, add that address to `PRINTGUARD_ORIGINS`
+  before updating. [Host and origin checking](docs/deployment.md#host-and-origin-checking).
+- Live scores, alerts, warnings, printer status and errors only reach a plugin granted
+  **Read the dashboard**.
+- A plugin's request doesn't follow redirects, and its sign-in endpoints must be https.
+- Bug report attachments are capped at 10 MB.
+- An update that changes where a plugin signs in signs it out and has to be accepted again.
+
 ### Fixed
 
 - The Windows desktop app opens its window when the zip was downloaded in a browser and
@@ -37,6 +49,48 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - `PRINTGUARD_PLUGINS=off` switches off every plugin, including the half that runs in your
   dashboard. It used to stop only the half on the hub.
 - A new API token's secret is only sent to the dashboard tab that created it, where every open tab used to receive it.
+- A full data volume no longer stops defect detection, printer pauses or push notifications.
+- A failed printer poll or health check is reported and retried, where it used to end monitoring
+  until a restart.
+- A monitor whose camera is missing warns that it has no camera and no longer reads as watching.
+  A USB or printer camera that disappears and comes back is watched again without re-binding.
+- A printer's camera follows the printer to a new address or access code.
+- A Bambu pause, cancel, heater target or print start the printer rejects is reported as failed,
+  including with Developer Mode off or a wrong access code.
+- PrintGuard holds one connection to a Bambu printer, where it used to reconnect and ask for a
+  full report every 5 seconds.
+- Bambu H2C, H2D and H2S printers start an uploaded print.
+- An Elegoo Centauri Carbon command the printer refuses is reported as failed, and one that stops
+  reporting shows offline.
+- A Klipper print that uploads but doesn't start is reported as failed.
+- OctoPrint's webcam is found when OctoPrint is registered on port 5000, and Prusa uploads skip
+  read-only storage.
+- ntfy alerts send when a monitor name has accents or other non-ASCII characters.
+- A cooldown of zero no longer repeats the pause or cancel command on every defect frame, and
+  switching a monitor off resets its defect streak.
+- A plugin that gates the hub and then fails refuses every request until you enable or remove it,
+  where it used to leave the hub open.
+- A plugin sign-in survives a restart straight after connecting.
+- A flood of requests can no longer disable a healthy gate plugin and lock you out.
+- A USB camera missing when the container starts stays under **Cameras** as offline and keeps its
+  name, crop and tuning. Remove it there if it's gone for good.
+- Home Assistant shows the hub as unavailable after it stops, the MQTT bridge recovers from a bad
+  setting, two hubs can share a broker and an unrecognised payload no longer disables a monitor.
+- A damaged `state.json` is kept as `state.json.corrupt`, where it used to be overwritten with an
+  empty hub.
+- Passwords in camera, printer and notifier addresses no longer appear in errors, the API or bug
+  reports.
+- Editing settings or a printer over REST no longer wipes its secrets, adding a slow camera over
+  REST or MCP no longer times out at 15 seconds and MCP returns alert snapshots as images.
+- The dashboard shows when it has lost the hub and re-sends unsaved changes once it reconnects.
+- Downloading diagnostics or signing a plugin in no longer fires in every open dashboard.
+- Closing Settings while editing a custom theme no longer leaves the theme controls dead, and
+  selecting text and releasing outside a dialog no longer closes it.
+- Copy buttons work when the hub is reached over plain http, and Download logs saves the file in
+  the desktop app.
+- Clicking the defect banner on a tile opens the monitor, and a tile whose camera is offline no
+  longer shows its last inference rate and risk as current.
+- Reviewed frames interrupted by a restart are sent afterwards.
 
 ## [2.5.0] - 2026-09-21
 

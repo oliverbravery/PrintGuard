@@ -74,14 +74,19 @@ the same camera after a reboot renumbers the devices, and map each one in.
 ```
 
 A camera arrives named after itself, so rename it in the registry. There's no Remove button on
-it, since the compose file is what decides it exists. Drop the `devices:` entry and restart to
-remove it.
+it while the container has the device, since the compose file is what decides it exists.
+
+A camera whose device is missing when the container starts stays registered and reads as
+offline, and its monitor warns that it is not being monitored. It keeps its name, crop and
+tuning, so plugging it back in and restarting is all it needs. To remove one for good, drop its
+`devices:` entry, restart and use the Remove button it now has.
 
 Docker can't hand a running container a camera plugged in after it started, so a new camera
 means another `devices:` entry and `docker compose up -d`.
 
 To leave passed-in cameras unregistered and add them by hand, add `PRINTGUARD_CAMERAS=off` to
-the environment. Cameras it had already registered go at the next start.
+the environment. Cameras it had already registered go at the next start, unless their device was
+missing at the time.
 
 ## This browser
 

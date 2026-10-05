@@ -22,9 +22,10 @@ Discovery format: https://www.home-assistant.io/integrations/mqtt/#device-discov
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
-import os
+import secrets
 import ssl
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -45,6 +46,7 @@ CONTINUOUS_FIELDS = ("score", "progress", "nozzle_temp", "bed_temp")
 MANUFACTURER = "PrintGuard"
 MODEL = "Print monitor"
 SUPPORT_URL = "https://github.com/oliverbravery/PrintGuard"
+ENABLED_PAYLOADS = {"on": True, "true": True, "1": True, "off": False, "false": False, "0": False}
 
 
 def bridge_enabled(config: dict[str, Any]) -> bool:
@@ -260,8 +262,8 @@ def route_command(topic: str, payload: str, monitors: list[dict[str, Any]]) -> d
     if monitor is None:
         return None
     value = payload.strip().lower()
-    if field == "enabled":
-        return {"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": value in ("on", "true", "1")}}
+    if field == "enabled" and value in ENABLED_PAYLOADS:
+        return {"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": ENABLED_PAYLOADS[value]}}
     if field == "printer_action" and value in ("pause", "resume", "cancel") and monitor.get("printer_id"):
         return {"cmd": "printer.action", "id": monitor["printer_id"], "action": value}
     return None
@@ -292,6 +294,11 @@ class MqttBridge:
     through a queue so the synchronous sink never blocks the engine, and keeps
     one ``aiomqtt`` session alive while the bridge is enabled, reconnecting on
     failure and on a settings change.
+
+    The broker only publishes the last will when a connection drops, so a
+    session the bridge ends itself says ``offline`` first. The client id is
+    random per bridge because a broker gives a session to the newest client
+    using an id, and a process id is 1 in every container.
     """
 
     def __init__(self, engine: "Engine", get_config: Callable[[], dict[str, Any]]) -> None:
@@ -303,13 +310,14 @@ class MqttBridge:
         self._devices: set[str] = set()
         self._state: dict[str, Any] = {}
         self._task: asyncio.Task | None = None
+        self._client_id = f"printguard-{secrets.token_hex(4)}"
 
     def start(self) -> None:
         """Launches the connection loop, which idles until the bridge is configured."""
         self._task = asyncio.ensure_future(self._run())
 
     async def stop(self) -> None:
-        """Cancels the connection loop and any in-flight session."""
+        """Cancels the connection loop, marking the hub offline on the way out of a live session."""
         if self._task:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
@@ -327,7 +335,7 @@ class MqttBridge:
                 await self._session(config)
             except _Reconnect:
                 continue
-            except aiomqtt.MqttError as exc:
+            except Exception as exc:
                 self._engine.emit({"event": "warning", "message": f"Home Assistant MQTT unavailable: {exc}", "recovered": False})
                 await asyncio.sleep(RECONNECT_DELAY_S)
 
@@ -341,7 +349,7 @@ class MqttBridge:
             port=int(config.get("port") or (8883 if config.get("tls") else 1883)),
             username=str(config.get("username") or "") or None,
             password=str(config.get("password") or "") or None,
-            identifier=f"printguard-{os.getpid()}",
+            identifier=self._client_id,
             tls_context=tls_context,
             will=aiomqtt.Will(status_topic(base), "offline", qos=1, retain=True),
             keepalive=KEEPALIVE_S,
@@ -362,6 +370,10 @@ class MqttBridge:
                 done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
                 for task in done:
                     task.result()
+            except (_Reconnect, asyncio.CancelledError):
+                with contextlib.suppress(aiomqtt.MqttError):
+                    await client.publish(status_topic(base), "offline", qos=1, retain=True)
+                raise
             finally:
                 self._engine.remove_sink(self._sink)
                 for task in tasks:

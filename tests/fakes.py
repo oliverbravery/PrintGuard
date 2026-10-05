@@ -120,6 +120,8 @@ class FakePlatform:
         return list(self.devices)
 
     async def open_camera(self, camera_id: str, source: dict[str, Any]) -> FakeSource:
+        if source["kind"] == "device" and source["device_id"] not in [device["device_id"] for device in self.devices]:
+            raise OSError(f"no device at {source['device_id']}")
         return FakeSource(float(source.get("fps", 15.0)))
 
     async def release_camera(self, camera_id: str, source: dict[str, Any]) -> None:
