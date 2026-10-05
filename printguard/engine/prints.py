@@ -3,7 +3,8 @@
 A print file is a registered resource like a camera or a printer. It can be
 tagged with the printers it was sliced for, and a tag is checked both when it
 is set and when the file is sent, so a file never starts on a printer it was
-not meant for.
+not meant for. Removing a printer leaves its tags on the files that carry them,
+since dropping the last one would free the file to start anywhere.
 """
 
 from __future__ import annotations

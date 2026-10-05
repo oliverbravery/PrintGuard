@@ -15,11 +15,13 @@ import time
 from collections import deque
 from typing import TYPE_CHECKING, Any, Coroutine
 
+from . import logs
 from .bounds import clamp
 from .integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus
 from .monitors import monitor_watching
 from .notifiers import NOTIFIERS
 from .platform import Frame
+from .reviews import ENDED_STATUSES
 
 if TYPE_CHECKING:
     from .engine import Engine
@@ -44,6 +46,7 @@ COVERAGE_SAMPLES = int(COVERAGE_WINDOW_S / WATCH_TICK_S)
 COVERAGE_MIN = 0.9
 ACT_ATTEMPTS = 3
 ACT_RETRY_S = 1.0
+ACT_FAILED_COOLDOWN_S = 30.0
 
 
 def clamp_grace(seconds: Any) -> float:
@@ -74,7 +77,7 @@ class Watchdog:
         self._streaks: dict[str, int] = {}
         self.responding: set[str] = set()
         self._cooldown_until: dict[str, float] = {}
-        self._last_notified: dict[str, float] = {}
+        self._last_notified: dict[tuple[str, str], float] = {}
         self._down_since: dict[str, float] = {}
         self._healthy_since: dict[str, float] = {}
         self._flaps: dict[str, int] = {}
@@ -106,21 +109,17 @@ class Watchdog:
     async def poll_devices(self) -> float:
         """Refreshes every registered printer's state.
 
-        A change in the status a printer last reported is saved, so a hub
-        restarted while the printer is switched off still knows it was idle.
-        A printer removed while an earlier one was answering is not read, since
-        reading it would open the connection its removal just closed.
+        They are read together, so one that does not answer holds up nobody
+        else's state. A change in the status a printer last reported is saved,
+        so a hub restarted while the printer is switched off still knows it was
+        idle.
 
         Returns:
             Seconds until the next poll.
         """
-        reported = [printer.reported_status for printer in self._engine.printers.values()]
-        changed = [
-            await self._read(printer)
-            for printer in self._engine.printers.values()
-            if self._engine.printers.get(printer.id) is printer
-        ]
-        if any(changed):
+        printers = self._engine.printers.values()
+        reported = [printer.reported_status for printer in printers]
+        if any(await asyncio.gather(*(self._read(printer) for printer in printers))):
             self.follow_printers()
         if reported != [printer.reported_status for printer in self._engine.printers.values()]:
             self._engine.save()
@@ -129,16 +128,22 @@ class Watchdog:
     async def _read(self, printer: "Printer") -> bool:
         """Reads a printer's state, taking a service that cannot be reached as offline.
 
+        A printer removed by the time its turn comes is not read, since
+        reading it would open the connection its removal just closed, and one
+        removed while it was answering has its answer dropped.
+
         Returns:
             Whether the state changed.
         """
         adapter = INTEGRATIONS.get(printer.provider)
-        if not adapter:
+        if not adapter or self._engine.printers.get(printer.id) is not printer:
             return False
         try:
             snapshot = (await adapter.fetch_state(self._engine.platform.http, printer.config)).public()
         except Exception:
             snapshot = DeviceState(DeviceStatus.OFFLINE).public()
+        if self._engine.printers.get(printer.id) is not printer:
+            return False
         changed = printer.observe(snapshot)
         if changed:
             self._engine.emit({"event": "device", "printer_id": printer.id, **snapshot})
@@ -148,12 +153,18 @@ class Watchdog:
         """Re-syncs which cameras are scheduled after a printer's state changed.
 
         Inference stops while a printer is idle or paused and resumes when it
-        prints, and a monitor that stands down drops its defect streak.
+        prints, and a monitor that stands down drops its defect streak. The
+        cooldown belongs to the print that set it, so it ends once the printer
+        reports that print over. A pause keeps it, so a print resumed after a
+        false alarm is not paused again at once.
         """
         self._engine.cameras.sync_in_use(self._engine.monitors, self._engine.printers)
         for monitor in self._engine.monitors.values():
             if not monitor_watching(monitor, self._engine.printers):
                 self.drop_streak(monitor["id"])
+            printer = self._engine.printers.get(monitor.get("printer_id") or "")
+            if printer and printer.reported_status in ENDED_STATUSES:
+                self._cooldown_until.pop(monitor["id"], None)
         if self._engine.settle_reviews():
             self._engine.save()
 
@@ -176,12 +187,14 @@ class Watchdog:
         stalled - frozen feeds must not pass for monitoring. A stall lasts
         until an inference completes again, so the watchdog's own re-attach of
         the camera neither restarts its grace period nor reads as recovery.
-        One that keeps dropping and returning clears the grace period every
-        time yet is only watching part of the print, so the share of the last
-        COVERAGE_WINDOW_S it delivered frames for is warned on separately. A
-        printer that reports nothing usable only counts while its monitor is
-        watching, since one switched off after a print leaves its monitor in
-        standby.
+        A stall is not announced while its camera is offline, and an announced
+        outage takes over from it, so a feed that froze and then dropped is
+        reported as one fault. One that keeps dropping or freezing and
+        returning clears the grace period every time yet is only watching part
+        of the print, so the share of the last COVERAGE_WINDOW_S it delivered
+        frames for is warned on separately. A printer that reports nothing
+        usable only counts while its monitor is watching, since one switched
+        off after a print leaves its monitor in standby.
 
         A watching monitor whose camera is not registered is as unwatched as
         one whose camera is offline, and is warned about the same way. A
@@ -243,23 +256,26 @@ class Watchdog:
             )
             if not camera.online and self._due_restart(offline_key, now):
                 await self._engine.restart_camera(camera)
+            if not camera.online and offline_key in self._warned:
+                self._forget(stall_key)
             progressing = (
                 camera.online and self._down_since[stall_key] < camera.last_done > now - STALL_GRACE_S
                 if stall_key in self._down_since
                 else not camera.online or now - max(camera.last_done, self._online_since.get(mid, now)) < STALL_GRACE_S
             )
-            await self._edge(
-                stall_key,
-                progressing,
-                now,
-                grace,
-                monitor,
-                f"Camera '{camera.name}' feed has stalled, so '{monitor['name']}' is NOT being monitored",
-                f"Camera '{camera.name}' feed recovered, so '{monitor['name']}' is monitored again",
-            )
+            if camera.online or stall_key in self._warned:
+                await self._edge(
+                    stall_key,
+                    progressing,
+                    now,
+                    grace,
+                    monitor,
+                    f"Camera '{camera.name}' feed has stalled, so '{monitor['name']}' is NOT being monitored",
+                    f"Camera '{camera.name}' feed recovered, so '{monitor['name']}' is monitored again",
+                )
             if camera.online and not progressing and self._due_restart(stall_key, now):
                 await self._engine.restart_camera(camera)
-            await self._cover(monitor, camera, offline_key, camera.online and progressing, now)
+            await self._cover(monitor, camera, offline_key in self._warned or stall_key in self._warned, camera.online and progressing, now)
         return WATCH_TICK_S
 
     def _forget(self, key: str) -> None:
@@ -269,33 +285,34 @@ class Watchdog:
         self._last_warned.pop(key, None)
         self._warned.discard(key)
 
-    async def _cover(self, monitor: dict[str, Any], camera: "Camera", offline_key: str, delivering: bool, now: float) -> None:
-        """Warns when a camera has been up for too little of the recent window.
+    async def _cover(self, monitor: dict[str, Any], camera: "Camera", announced: bool, delivering: bool, now: float) -> None:
+        """Warns when a camera has delivered frames for too little of the recent window.
 
-        A camera that drops for a minute every few minutes never holds a fault
+        A camera that drops for a minute every few minutes, or freezes and
+        gives one frame each time it is attached again, never holds a fault
         long enough to be announced, yet leaves the print unwatched for a real
         share of its run. Sampling how much of the last COVERAGE_WINDOW_S it
         delivered frames for catches that as one warning about an unreliable
         feed rather than one per drop. A window that has not filled yet says
-        nothing, and an announced outage empties it and takes over from an
-        unreliable feed already warned about, so this only ever speaks about
-        drops that were too short to announce on their own. A feed is only
+        nothing, and an announced outage or stall empties it and takes over
+        from an unreliable feed already warned about, so this only ever speaks
+        about gaps that were too short to announce on their own. A feed is only
         called steady again while its camera is delivering frames.
 
         Args:
             monitor: The monitor the camera is bound to.
             camera: The camera being sampled.
-            offline_key: Watch key for that camera's outage condition.
+            announced: Whether the camera's outage or stall has itself been warned about.
             delivering: Whether the camera is online and its feed has not stalled.
             now: Current monotonic time.
         """
         key = f"unstable:{monitor['id']}"
         samples = self._coverage.setdefault(monitor["id"], deque(maxlen=COVERAGE_SAMPLES))
-        if offline_key in self._warned:
+        if announced:
             samples.clear()
             self._forget(key)
             return
-        samples.append(camera.online)
+        samples.append(delivering)
         covered = sum(samples) / len(samples)
         steady = len(samples) < samples.maxlen or covered >= COVERAGE_MIN
         await self._edge(
@@ -420,6 +437,12 @@ class Watchdog:
         for as long as its monitor is responding, so a printer read idle while
         the notifiers are still answering cannot close it before the frame
         that stopped the print is kept, and it is settled once that is done.
+
+        The alert stays on the monitor unless a clean frame arrived while the
+        printer was answering. A monitor stood down meanwhile keeps it, since
+        the pause that stood it down is the one being announced. A command the
+        printer did not take is tried again after ACT_FAILED_COOLDOWN_S at the
+        latest, whatever the monitor's own cooldown.
         """
         mid = monitor["id"]
         try:
@@ -427,8 +450,10 @@ class Watchdog:
             monitor = self._engine.monitors.get(mid)
             if monitor is None:
                 return
+            if action == "failed":
+                self._cooldown_until[mid] = min(self._cooldown_until.get(mid, 0.0), time.monotonic() + ACT_FAILED_COOLDOWN_S)
             alert = {"score": round(score, 3), "action": action, "ts": time.time()}
-            if self._streaks.get(mid, 0):
+            if self._streaks.get(mid) != 0:
                 monitor["alert"] = alert
             self._engine.emit({"event": "alert", "monitor_id": mid, **alert})
             await self._notify(monitor, score, action, await self._engine.platform.encode_jpeg(frame.rgb))
@@ -438,6 +463,7 @@ class Watchdog:
                 printer = self._engine.printers.get(monitor["printer_id"])
                 if action not in ("none", "failed") and printer and await self._read(printer):
                     self.follow_printers()
+                    self._engine.save()
         finally:
             self.responding.discard(mid)
             if self._engine.settle_reviews():
@@ -459,15 +485,21 @@ class Watchdog:
                 last_error = exc
                 await asyncio.sleep(ACT_RETRY_S)
         logger.debug("printer action traceback for '%s'", monitor["name"], exc_info=last_error)
-        self._engine.emit({"event": "error", "message": f"{monitor['name']}: automatic {wanted} failed: {last_error}"})
+        self._engine.emit({"event": "error", "message": f"{monitor['name']}: automatic {wanted} failed: {logs.describe(last_error)}"})
         return "failed"
 
     async def _notify(self, monitor: dict[str, Any], score: float, action: str, image: bytes | None) -> None:
+        """Pushes an alert, unless the same outcome was pushed in the last NOTIFY_COOLDOWN_S.
+
+        The floor is kept per outcome, so a pause that worked is still
+        announced straight after one that failed, and the reverse.
+        """
         if not monitor.get("notify"):
             return
-        if time.monotonic() - self._last_notified.get(monitor["id"], 0.0) < NOTIFY_COOLDOWN_S:
+        outcome = (monitor["id"], action)
+        if time.monotonic() - self._last_notified.get(outcome, 0.0) < NOTIFY_COOLDOWN_S:
             return
-        self._last_notified[monitor["id"]] = time.monotonic()
+        self._last_notified[outcome] = time.monotonic()
         title = f"PrintGuard: {monitor['name']} defect ({score * 100:.0f}%)"
         if action == "failed":
             body = f"AUTOMATIC {monitor['on_defect'].upper()} FAILED, check the printer"

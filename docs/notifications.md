@@ -30,7 +30,7 @@ Every enabled channel gets every notice, so there's no routing to set up. A moni
 
 | Channel | You need | Notes |
 |---|---|---|
-| [ntfy](https://ntfy.sh) | A topic URL, on ntfy.sh or your own server | No account needed. Use a hard-to-guess topic, or a protected one with an access token. Every notice is sent at urgent priority. Your own server takes snapshots once [attachments](https://docs.ntfy.sh/config/#attachments) are on, which needs `attachment-cache-dir` and `base-url` set |
+| [ntfy](https://ntfy.sh) | A topic URL, on ntfy.sh or your own server | No account needed. Use a hard-to-guess topic, or a protected one with an access token. Anyone with an open topic's URL can read it, so the URL is kept out of bug reports and the API like a password. Every notice is sent at urgent priority. Your own server takes snapshots once [attachments](https://docs.ntfy.sh/config/#attachments) are on, which needs `attachment-cache-dir` and `base-url` set |
 | [Pushover](https://pushover.net) | An application token from [pushover.net/apps/build](https://pushover.net/apps/build) and your user key | A one-off app purchase. Priority covers every notice and defaults to High, which bypasses the quiet hours set on the device |
 | [Telegram](https://telegram.org) | A bot token from @BotFather and your chat ID | |
 | [Discord](https://discord.com) | A webhook URL, from Server Settings, Integrations, then Webhooks | |
@@ -52,8 +52,12 @@ A monitor set to **Alert only** says so in the alert, so you know the print is s
 pause or cancel is tried three times before it's reported as failed.
 
 A monitor's [cooldown](monitoring.md#monitor-settings) holds back its whole response to the next
-defect, the pause or cancel included. Defect pushes are also at least 30 seconds apart for each
-monitor, whatever the cooldown.
+defect, the pause or cancel included. Pushes with the same outcome are also at least 30 seconds
+apart for each monitor, whatever the cooldown, so a pause that worked is still pushed straight
+after one that failed.
+
+Channels are sent to together and each gets 30 seconds to answer. One that doesn't is reported as
+failed and holds up neither the others nor the monitor.
 
 A channel that fails to deliver raises an error on the dashboard. It isn't retried. An ntfy server
 that refuses the snapshot is sent the alert again as text, and the dashboard error says the

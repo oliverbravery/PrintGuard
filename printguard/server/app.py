@@ -11,6 +11,7 @@ import os
 import re
 import secrets
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from string import Template
@@ -39,7 +40,7 @@ from .mcp import build_mcp_app
 from .mediamtx import EmbeddedMediaMTX
 from .mqtt import MqttBridge
 from .platform import ServerPlatform
-from .prints import PrintUpload, gcode_response, inspect_sample, receive_print, thumbnail_response
+from .prints import PrintUpload, gcode_response, inspect_sample, receive_print, sweep_orphans, thumbnail_response
 from .publish import ChunkStream, remux
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ class WebStaticFiles(StaticFiles):
         return response
 
 
-def origin_allowed(connection: HTTPConnection, allowed: set[str]) -> bool:
+def origin_allowed(connection: HTTPConnection, allowed: set[str], *, required: bool = False) -> bool:
     """Rejects cross-site WebSocket handshakes, uploads and stream reads the auth proxy cannot screen.
 
     Proxies in front of the hub authenticate the session cookie, which the
@@ -70,10 +71,18 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str]) -> bool:
     so a same-origin (or explicitly allow-listed) Origin is the gate. Same-origin
     only means something because ``HostGuard`` has already refused a host the hub
     does not answer to.
+
+    Args:
+        connection: The request or handshake.
+        allowed: The origins listed in ``PRINTGUARD_ORIGINS``.
+        required: Whether a request that names no origin is refused. A script
+            uploading a file sends none, but every browser names one on a
+            WebSocket handshake, so the two sockets only a dashboard opens ask
+            for it.
     """
     origin = connection.headers.get("origin")
     if not origin:
-        return True
+        return not required
     if origin.rstrip("/") in allowed:
         return True
     host = connection.headers.get("x-forwarded-host") or connection.headers.get("host")
@@ -168,7 +177,11 @@ GATE_CACHE_ENTRIES = 4096
 PLUGIN_REQUEST_HEADERS = ("cookie", "authorization", "accept", "content-type", "x-forwarded-for", "user-agent")
 PLUGIN_RESPONSE_HEADERS = ("set-cookie", "location", "cache-control")
 PLUGIN_BODY_LIMIT = 64 * 1024
-PLUGIN_PAGE_CSP = "sandbox allow-forms allow-scripts; frame-ancestors 'none'"
+SOCKET_COMMANDS_IN_FLIGHT = 16
+PLUGIN_PAGE_CSP = (
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; "
+    "font-src data:; connect-src 'none'; form-action 'self'; base-uri 'none'; sandbox allow-forms allow-scripts; frame-ancestors 'none'"
+)
 SIGN_IN_PAGE = Template("""<!doctype html>
 <meta charset="utf-8">
 <title>PrintGuard</title>
@@ -229,19 +242,22 @@ def create_app() -> FastAPI:
         """
         logger.info("hub starting (data=%s, models=%s, static=%s)", data_dir, model_dir, static_dir)
         async with AsyncExitStack() as resources:
-            mediamtx_login = None
-            if mediamtx_binary and Path(mediamtx_binary).exists():
-                mediamtx_login = ("printguard", secrets.token_urlsafe(32))
-                streamer = EmbeddedMediaMTX(mediamtx_binary, mediamtx_config, mediamtx_api, mediamtx_login)
+            bundled = bool(mediamtx_binary) and Path(mediamtx_binary).exists()
+            mediamtx_login = ("printguard", secrets.token_urlsafe(32)) if bundled else None
+            platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset, mediamtx_login)
+            resources.push_async_callback(platform.close)
+            if bundled:
+                streamer = EmbeddedMediaMTX(
+                    mediamtx_binary, mediamtx_config, mediamtx_api, mediamtx_login, platform.mediamtx.restore_paths
+                )
                 await streamer.start()
                 resources.push_async_callback(streamer.stop)
             else:
                 logger.warning("no bundled MediaMTX binary (%r), expecting an external MediaMTX at %s", mediamtx_binary, mediamtx_api)
-            platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset, mediamtx_login)
-            resources.push_async_callback(platform.close)
             engine = Engine(platform)
             await engine.start()
             resources.push_async_callback(engine.stop)
+            await sweep_orphans(engine, unnamed=not (data_dir / "state.json.corrupt").exists())
             app.state.engine = engine
             api_app.state.engine = engine
             app.state.hls = httpx.AsyncClient(base_url=mediamtx_hls, timeout=httpx.Timeout(10.0, read=60.0))
@@ -254,7 +270,6 @@ def create_app() -> FastAPI:
             logger.info("hub shutting down")
 
     app = FastAPI(title="PrintGuard", lifespan=lifespan)
-    app.add_middleware(HostGuard, named={urlsplit(origin).hostname or "" for origin in allowed_origins})
     gate_cache: TTLCache[tuple[str, ...], bool] = TTLCache(GATE_CACHE_ENTRIES, GATE_CACHE_TTL_S)
 
     async def gate_allows(request: Request) -> bool:
@@ -296,14 +311,21 @@ def create_app() -> FastAPI:
             return await call_next(request)
         return Response("refused by a plugin", status_code=403)
 
+    app.add_middleware(HostGuard, named={urlsplit(origin).hostname or "" for origin in allowed_origins})
+
     @app.api_route("/plugins/{plugin_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
     async def plugin_route(plugin_id: str, path: str, request: Request) -> Response:
         """Serves a plugin's own pages and endpoints from its sandbox."""
         runtime = app.state.engine.platform.plugin_runtime
         if runtime is None:
             raise HTTPException(404, "plugins are not running")
-        body = (await request.body())[:PLUGIN_BODY_LIMIT].decode("utf-8", "replace")
-        answer = await runtime.serve(plugin_id, plugin_request(request, request.method, body))
+        body = bytearray()
+        async for chunk in request.stream():
+            body += chunk
+            if len(body) >= PLUGIN_BODY_LIMIT:
+                break
+        text = bytes(body[:PLUGIN_BODY_LIMIT]).decode("utf-8", "replace")
+        answer = await runtime.serve(plugin_id, plugin_request(request, request.method, text))
         if answer is None:
             raise HTTPException(404, f"plugin {plugin_id!r} serves no routes")
         headers = {k: str(v) for k, v in (answer.get("headers") or {}).items() if k.lower() in PLUGIN_RESPONSE_HEADERS}
@@ -366,8 +388,10 @@ def create_app() -> FastAPI:
         stream does not hold a pause from the same tab behind it. A command
         that never waits on anything still finishes before the next one starts,
         which keeps an auto-saved update ahead of whatever the tab sends after it.
+        A tab with ``SOCKET_COMMANDS_IN_FLIGHT`` commands running is not read
+        from until one finishes, so one socket cannot pile up tasks without end.
         """
-        if not origin_allowed(websocket, allowed_origins):
+        if not origin_allowed(websocket, allowed_origins, required=True):
             logger.warning("rejected cross-origin engine socket (origin=%s)", websocket.headers.get("origin"))
             await websocket.close(code=1008, reason="origin not allowed")
             return
@@ -384,16 +408,19 @@ def create_app() -> FastAPI:
                 await websocket.send_text(json.dumps(await queue.get()))
 
         async def receive() -> None:
+            slots = asyncio.Semaphore(SOCKET_COMMANDS_IN_FLIGHT)
             async with asyncio.TaskGroup() as commands:
                 while True:
+                    await slots.acquire()
                     frame = await websocket.receive()
                     if frame["type"] == "websocket.disconnect":
                         raise WebSocketDisconnect(frame.get("code", 1005))
                     command = parse_command(frame.get("text"))
                     if command is None:
                         queue.put({"event": "error", "message": "a command must be a JSON object"})
+                        slots.release()
                     else:
-                        commands.create_task(engine.handle(command, queue.put))
+                        commands.create_task(engine.handle(command, queue.put)).add_done_callback(lambda _: slots.release())
 
         engine.add_sink(queue.put)
         tasks = [asyncio.ensure_future(pump()), asyncio.ensure_future(receive())]
@@ -414,7 +441,7 @@ def create_app() -> FastAPI:
 
     @app.get("/hls/{path:path}")
     async def hls_proxy(path: str, request: Request) -> StreamingResponse:
-        """Streams LL-HLS playlists and segments from MediaMTX through the hub's own port.
+        """Streams HLS playlists and segments from MediaMTX through the hub's own port.
 
         An unreachable MediaMTX answers 502 with a throttled warning - the
         dashboard polls playlists every second, so letting the error escape
@@ -451,19 +478,31 @@ def create_app() -> FastAPI:
 
     @app.websocket("/api/publish/{path}")
     async def publish_socket(websocket: WebSocket, path: str) -> None:
-        """Receives a browser camera recording and republishes it over RTSP."""
-        if not re.fullmatch(r"[\w-]+", path) or not origin_allowed(websocket, allowed_origins) or not await socket_allowed(websocket):
+        """Receives a browser camera recording and republishes it over RTSP.
+
+        The remux lasts as long as the camera publishes, so it gets a thread of
+        its own and leaves the shared pool to the work that comes and goes.
+        """
+        if not re.fullmatch(r"[\w-]+", path) or not origin_allowed(websocket, allowed_origins, required=True) or not await socket_allowed(websocket):
             logger.warning("rejected publish socket (path=%r, origin=%s)", path, websocket.headers.get("origin"))
             await websocket.close(code=1008, reason="invalid request")
             return
         await websocket.accept()
         logger.info("camera publish started: %s", path)
         source = ChunkStream()
-        pusher = asyncio.create_task(asyncio.to_thread(remux, source, f"{mediamtx_rtsp}/{path}"))
+        publisher = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"publish-{path}")
+        pusher = asyncio.get_running_loop().run_in_executor(publisher, remux, source, f"{mediamtx_rtsp}/{path}")
+        publisher.shutdown(wait=False)
         connected = True
         try:
             while not pusher.done():
-                source.feed(await websocket.receive_bytes())
+                frame = await websocket.receive()
+                if frame["type"] == "websocket.disconnect":
+                    raise WebSocketDisconnect(frame.get("code", 1005))
+                if frame.get("bytes") is None:
+                    await websocket.close(code=1003, reason="a recording is sent as binary frames")
+                    raise WebSocketDisconnect(1003)
+                source.feed(frame["bytes"])
         except WebSocketDisconnect:
             connected = False
         finally:

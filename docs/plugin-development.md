@@ -218,7 +218,8 @@ stands for any run of characters, `/` and the query string included.
 A URL with a `.` or `..` segment in its path matches no pattern, percent-encoded or not.
 
 A pattern on this machine or the network around it needs `net:local` as well as `net`. A
-wildcard host counts, since it covers both. PrintGuard resolves the name and checks the address
+wildcard host counts, since it covers both. So does an address in any spelling a browser takes,
+such as `127.1` or `2130706433`. PrintGuard resolves the name and checks the address
 it resolves to, so a public name pointing somewhere private is caught.
 
 ## The three halves
@@ -535,7 +536,8 @@ A redirect is not followed. Its 3xx status arrives as the answer, so ask for the
 service finally answers on.
 
 A body over 256 KB fails the request, whether it is JSON, text or `binary`. The size is counted
-after decompression and before base64. Nothing is cut short, so no `http` event arrives and the
+after decompression and before base64. PrintGuard asks for gzip or nothing, and an answer in any
+other encoding fails the same way. Nothing is cut short, so no `http` event arrives and the
 dashboard shows an error naming the host.
 
 ### Sockets
@@ -622,7 +624,8 @@ app shared by everyone who installs the plugin, which is what providers hand out
 against. Whoever installs it [registers their own](plugins.md#credentials), and PrintGuard shows
 them the redirect URI to give the provider and links `register_url`.
 
-`authorize_url` and `token_url` are each one `https` address with no wildcards. A `token_url`
+`authorize_url` and `token_url` are each one `https` address with no wildcards. An
+`authorize_url` may carry a query of its own, which is kept. A `token_url`
 on this machine or the network around it needs `net:local`. An update that changes either one
 signs its users out and has to be accepted again.
 
@@ -693,9 +696,17 @@ plugin.route((request, ctx) => ({
 | `body` | A string |
 | `headers` | `set-cookie`, `location` and `cache-control`. Anything else is dropped |
 
-Every response goes out under a content security policy of `sandbox allow-forms allow-scripts`
-and `frame-ancestors 'none'`. The page gets an opaque origin, so it can render, script itself and
-post a form, but it cannot act as the dashboard or be framed by it.
+Every response goes out under a content security policy with `sandbox allow-forms allow-scripts`
+and `frame-ancestors 'none'`. The page gets an opaque origin, so it cannot act as the dashboard or
+be framed by it. The same policy keeps the page to what its own response carries.
+
+| A page | |
+|---|---|
+| Scripts and styles | Inline only. A `<script src>` or a stylesheet link is refused, your own routes included |
+| Images, audio, video and fonts | `data:` addresses, and `blob:` for all but fonts |
+| `fetch`, `XMLHttpRequest`, `WebSocket`, `sendBeacon` | Refused. A page talks to its worker by posting a form or following a link |
+| Forms | Post to the hub only, so to your own routes |
+| Links and `location` | Go anywhere. The browser does not stop a tab leaving |
 
 `plugin.gate` sees every other request to the hub and needs `gate`.
 

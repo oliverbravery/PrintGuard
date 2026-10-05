@@ -28,7 +28,7 @@ import numpy as np
 import websockets
 from av.video.reformatter import VideoReformatter
 from ..engine import vision
-from ..engine.platform import Frame
+from ..engine.platform import Frame, Notice
 from ..engine.reports import scrub_url
 from .bambu_camera import open_bambu_jpeg_stream
 from .inference import Inference
@@ -37,6 +37,11 @@ from .plugins import WasmPluginRuntime
 from .publish import H264Push
 
 FPS_SAMPLE_FRAMES = 25
+FPS_SAMPLE_S = 5.0
+READER_STOP_WAIT_S = 6.0
+"""How long a closed source's reader is given to end before its camera is
+opened again: a read that times out and the pause before a reconnect."""
+
 MEASURE_WARMUP_S = 1.0
 OPEN_WAIT_S = 25.0
 CAMERA_CONSENT_WAIT_S = 60.0
@@ -149,19 +154,35 @@ def _video_devices() -> list[tuple[str, str]]:
 
     Screens are excluded - a capture of the host's own display is never a
     printer camera. Listing needs no camera permission; only opening a device
-    does. A device is opened by the name it is listed under, on macOS and
-    Windows alike.
+    does. DirectShow gives every device a path of its own beside the name it
+    shows, and opens it by either, so on Windows the path is the id and two
+    cameras of one model stay two cameras. AVFoundation's only other name is a
+    position in the list, which moves whenever a camera is plugged in, so on
+    macOS a device is still opened by the name it shows.
     """
     if sys.platform.startswith("linux"):
         return _v4l2_devices()
+    backend = "avfoundation" if sys.platform == "darwin" else "dshow"
     try:
-        devices = av.device.enumerate_input_devices("avfoundation" if sys.platform == "darwin" else "dshow")
-    except av.error.FFmpegError:
+        devices = av.device.enumerate_input_devices(backend)
+    except av.error.FFmpegError as exc:
+        logger.debug("%s could not list its devices: %s", backend, exc)
         return []
-    return [
-        (device.description, device.description)
+    logger.debug("%s lists %s", backend, [(device.name, device.description, device.media_types) for device in devices])
+    cameras = [
+        device
         for device in devices
         if "video" in device.media_types and not device.description.startswith("Capture screen")
+    ]
+    shown = [device.description for device in cameras]
+    return [
+        (
+            device.description if backend == "avfoundation" else device.name,
+            f"{device.description} ({shown[:position].count(device.description) + 1})"
+            if shown.count(device.description) > 1
+            else device.description,
+        )
+        for position, device in enumerate(cameras)
     ]
 
 
@@ -288,7 +309,14 @@ class AVSource:
     each decoded frame is also transcoded to H.264 and pushed there, so sources
     MediaMTX cannot pull itself reach viewers as HLS. A push that fails costs
     the live view alone: capture carries on feeding detection, the failure is
-    reported once, and the push is tried again every RECONNECT_DELAY_S.
+    reported once through ``report``, and the push is tried again every
+    RECONNECT_DELAY_S.
+
+    A container's declared rate is taken for a network stream or a device and
+    measured for a byte stream, whose raw MJPEG demuxer answers 25 whatever the
+    camera sends. Measuring ends after FPS_SAMPLE_FRAMES frames or FPS_SAMPLE_S
+    seconds, whichever comes first, so a camera sending one frame a second is
+    not waited on for half a minute.
 
     Frames are converted to RGB through one reused single-threaded scaler,
     for the reason H264Push documents, and one conversion at a time: a scaler
@@ -302,8 +330,10 @@ class AVSource:
         publish_url: str | None = None,
         container_format: str | None = None,
         open_options: tuple[dict[str, str], ...] | None = None,
+        report: Callable[[str, bool], None] = lambda message, recovered: None,
     ) -> None:
         self._source = source
+        self._report = report
         self._publish_url = publish_url
         self._container_format = container_format
         self._open_options = open_options or DEVICE_OPEN_OPTIONS
@@ -387,7 +417,7 @@ class AVSource:
                 container, pipe = self._open()
                 stream = container.streams.video[0]
                 declared = float(stream.average_rate or 0)
-                if not self.fps and 0 < declared <= 240:
+                if isinstance(self._source, str) and not self.fps and 0 < declared <= 240:
                     self.fps = min(60.0, declared)
                 if self._publish_url:
                     rate = stream.guessed_rate or stream.average_rate
@@ -435,7 +465,8 @@ class AVSource:
                         self._publish(push, frame)
                     if not self.fps and time.monotonic() >= warmup_until:
                         samples.append(time.monotonic())
-                        if len(samples) == FPS_SAMPLE_FRAMES and samples[-1] > samples[0]:
+                        measured_for = samples[-1] - samples[0]
+                        if measured_for > 0 and (len(samples) == FPS_SAMPLE_FRAMES or measured_for >= FPS_SAMPLE_S):
                             self.fps = max(1.0, min(60.0, (len(samples) - 1) / (samples[-1] - samples[0])))
                 return
             except av.error.BlockingIOError:
@@ -453,16 +484,21 @@ class AVSource:
             if not self._publish_failed:
                 self._publish_failed = True
                 self.last_error = f"live view unavailable: {exc}"
-                logger.warning("camera %s, detection carries on without it", self.last_error)
+                self._report(f"{self.last_error}. Detection carries on without it", False)
             return
         if self._publish_failed:
             self._publish_failed = False
-            logger.info("camera live view restored")
+            self._report("live view restored", True)
 
     async def grab(self) -> Frame | None:
-        """Converts and returns the freshest decoded frame."""
+        """Converts and returns the freshest decoded frame.
+
+        Returns:
+            The frame, or None while capture is on standby or reconnecting: the
+            last frame it decoded before then is no longer what the camera sees.
+        """
         latest = self._latest
-        if latest is None:
+        if latest is None or not self.online:
             return None
         frame, seq, ts = latest
         async with self._converting:
@@ -478,10 +514,20 @@ class AVSource:
         return self._reformatter.reformat(frame, format="rgb24", threads=1).to_ndarray()
 
     def close(self) -> None:
-        """Stops the reader thread."""
+        """Asks the reader thread to stop."""
         self._stop = True
         self.online = False
         self._wake.set()
+
+    def stopped(self, timeout: float) -> bool:
+        """Waits for the reader thread to end, reporting whether it has.
+
+        A read inside libavdevice cannot be interrupted, so a device that
+        opens and never delivers a frame holds its thread and its capture
+        session for good.
+        """
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
 
 
 class ConnectWithoutRedirects(websockets.connect):
@@ -503,9 +549,13 @@ async def _read_within(resp: httpx.Response, max_bytes: int) -> bytes:
         The body, inflated if it came as gzip.
 
     Raises:
-        RuntimeError: If the body is larger, raised while it is still arriving.
+        RuntimeError: If the body is larger, raised while it is still arriving,
+            or came in an encoding the request did not ask for.
     """
-    inflate = zlib.decompressobj(zlib.MAX_WBITS | 16) if resp.headers.get("Content-Encoding", "").lower() == "gzip" else None
+    encoding = resp.headers.get("Content-Encoding", "identity").lower()
+    if encoding not in ("gzip", "identity"):
+        raise RuntimeError(f"{resp.url.host} answered in {encoding}, which was not asked for")
+    inflate = zlib.decompressobj(zlib.MAX_WBITS | 16) if encoding == "gzip" else None
     body = bytearray()
     async for chunk in resp.aiter_raw():
         body += inflate.decompress(chunk, max_bytes + 1 - len(body)) if inflate else chunk
@@ -584,13 +634,17 @@ class DiskFileStore:
         return self.root / key
 
     async def store(self, key: str, chunks: AsyncIterable[bytes]) -> int:
-        """Writes a file from its chunks, replacing any under that key."""
+        """Writes a file from its chunks, replacing any under that key.
+
+        Each write runs on a worker thread: an upload can be hundreds of
+        megabytes onto an SD card, and the event loop also carries detection.
+        """
         partial = self.path(f"{key}.part")
         size = 0
         try:
-            with partial.open("wb") as handle:
+            with await asyncio.to_thread(partial.open, "wb") as handle:
                 async for chunk in chunks:
-                    handle.write(chunk)
+                    await asyncio.to_thread(handle.write, chunk)
                     size += len(chunk)
             partial.replace(self.path(key))
         except BaseException:
@@ -636,6 +690,8 @@ class ServerPlatform:
         self._client = httpx.AsyncClient(follow_redirects=True)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client, mediamtx_login)
         self._sources: dict[str, AVSource] = {}
+        self._closing: dict[str, AVSource] = {}
+        self._notices: list[Notice] = []
         self._declares_devices = os.environ.get("PRINTGUARD_CAMERAS") == "auto"
         self.plugin_runtime = None if os.environ.get("PRINTGUARD_PLUGINS") == "off" else WasmPluginRuntime()
         self.files = DiskFileStore(data_dir / "prints")
@@ -652,6 +708,7 @@ class ServerPlatform:
         self.inference_device = inference.device
         if previous is not None:
             previous.close()
+        self._notices += [Notice(message) for message in inference.skipped]
         logger.info(
             "inference ready: %s via %s (%d workers, %.0f fps)",
             self.inference_device,
@@ -665,6 +722,11 @@ class ServerPlatform:
         await self._client.aclose()
         if self._inference is not None:
             self._inference.close()
+
+    def take_notices(self) -> list[Notice]:
+        """Hands over what the hub has had to work around since the last call."""
+        notices, self._notices = self._notices, []
+        return notices
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
         """Runs the model through the selected hardware provider."""
@@ -705,6 +767,12 @@ class ServerPlatform:
         join and - when the container declares no rate - measuring the fps.
         Together those approach twenty seconds; sources that are truly dead
         just take this long to report.
+
+        Raises:
+            RuntimeError: If no frame arrives in time, or if the reader this
+                source was last opened with is still inside a read it cannot
+                be called back from. Opening another beside it would add a
+                thread and a capture session on every retry.
         """
         publish_url: str | None = None
         container_format: str | None = None
@@ -730,7 +798,21 @@ class ServerPlatform:
             publish_url = self.mediamtx.rtsp_url(camera_id)
         else:
             raise ValueError(f"cannot open source kind {source['kind']!r}")
-        av_source = AVSource(target, publish_url, container_format, open_options)
+        reader = source.get("device_id", camera_id)
+        closing = self._closing.pop(reader, None)
+        if closing is not None and not await asyncio.to_thread(closing.stopped, READER_STOP_WAIT_S):
+            self._closing[reader] = closing
+            raise RuntimeError(
+                "this camera's last capture stopped answering and cannot be closed, so it is not opened again. "
+                "Restart PrintGuard to free it"
+            )
+        av_source = AVSource(
+            target,
+            publish_url,
+            container_format,
+            open_options,
+            lambda message, recovered: self._notices.append(Notice(message, recovered, camera_id)),
+        )
         self._sources[camera_id] = av_source
         try:
             deadline = time.monotonic() + OPEN_WAIT_S
@@ -759,11 +841,17 @@ class ServerPlatform:
         source.view()
 
     async def release_camera(self, camera_id: str, source: dict[str, Any]) -> None:
-        """Closes the source and removes any MediaMTX pull path."""
+        """Closes the source and removes any MediaMTX pull path.
+
+        The path is removed for every URL camera without asking how its address
+        would be opened today: a printer can change its webcam to one that can
+        no longer be pulled, and the path was added for the address before.
+        """
         av_source = self._sources.pop(camera_id, None)
         if av_source:
             av_source.close()
-        if source["kind"] == "url" and pull_source(source["url"]) is not None:
+            self._closing[source.get("device_id", camera_id)] = av_source
+        if source["kind"] == "url":
             try:
                 await self.mediamtx.remove_path(camera_id)
             except Exception:
@@ -791,7 +879,7 @@ class ServerPlatform:
             RuntimeError: If a redirect made httpx replay the request under
                 another method, as it does a POST answered with 301 or 302,
                 so the request itself was never delivered, or if the body
-                passes ``max_bytes``.
+                passes ``max_bytes`` or is neither gzip nor plain.
         """
         if max_bytes is not None:
             headers = httpx.Headers(headers)
@@ -828,6 +916,7 @@ class ServerPlatform:
             codec.width, codec.height = frame.width, frame.height
             codec.pix_fmt = "yuvj420p"
             codec.time_base = Fraction(1, 30)
+            codec.thread_count = 1
             packets = codec.encode(frame.reformat(format="yuvj420p", threads=1)) + codec.encode(None)
             return b"".join(bytes(p) for p in packets)
 
@@ -869,16 +958,18 @@ class ServerPlatform:
         """Atomically writes engine state to the data directory, owner-readable only.
 
         It holds printer passwords, notifier keys, API token hashes and whatever
-        credentials plugins have been given, so the mode is set on the temporary
-        file before the rename rather than after: anything else leaves a window
-        where the finished file is readable by everybody on the host. It is
-        synced to disk before the rename too, or a power cut can leave the new
-        name pointing at a file with nothing in it.
+        credentials plugins have been given, so the temporary file is created
+        with that mode and held to it before anything is written: anything else
+        leaves a window where it is readable by everybody on the host. One left
+        behind by a hub that was killed mid-write keeps the mode it had, which
+        is why creating it that way is not enough. It is synced to disk before
+        the rename too, or a power cut can leave the new name pointing at a
+        file with nothing in it.
         """
         tmp = self._state_path.with_suffix(".tmp")
-        with tmp.open("w") as handle:
+        with open(tmp, "w", opener=partial(os.open, mode=0o600)) as handle:
+            tmp.chmod(0o600)
             handle.write(json.dumps(state, indent=2))
             handle.flush()
             os.fsync(handle.fileno())
-        tmp.chmod(0o600)
         tmp.replace(self._state_path)

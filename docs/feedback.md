@@ -37,14 +37,15 @@ with no printer has no way to know a print ended, so it closes one every 24 hour
 ## Reviewing a print
 
 When a print ends its monitor shows a button to review the frames from the last print. Older prints are
-listed under **Prints** on the monitor's detailed history page.
+listed under **Prints** on the monitor's detailed history page. A print with no frames kept
+isn't offered for review.
 
 ![The review sheet with a failed print's frames labelled good, failure and real failure](assets/review.png)
 
 1. Answer whether the print finished fine.
 2. Press any frame to change its label. An alert frame is a real failure or a false alarm, and
    any other frame is good or a failure.
-3. Use the × on a frame to leave it out.
+3. Use the × on a frame to leave it out, and **Undo** to put it back.
 4. Add your printer model if you like, then press **Send**.
 
 ## What's sent
@@ -53,14 +54,25 @@ listed under **Prints** on the monitor's detailed history page.
 - Each frame's risk score, time and which of the three kinds above it is.
 - A random ID for the print and for each frame.
 - The monitor's alert threshold.
-- The type of printer connection, such as `moonraker`, and the printer model if you typed one.
+- The type of printer connection, such as `klipper`, and the printer model if you typed one.
 - The PrintGuard version.
 - A random ID for your hub, issued the first time you send.
 
-No names, addresses, camera URLs or credentials are sent. Frames go to a private Cloudflare R2
+No names, camera URLs or credentials are sent. Frames go to a private Cloudflare R2
 bucket in the EU through [a small Worker](../feedback-worker) you can read. I download them,
 re-encode them and delete them from the bucket, and anything I haven't collected is deleted
 after 30 days. They are used only to train PrintGuard's detection model.
+
+Your hub doesn't send its address, but the Worker sees the public IP address every request
+comes from, as any server does. It uses it only for the per-network limit below.
+
+| What the Worker holds | For how long | Why |
+|---|---|---|
+| A keyed hash of your IPv4 address, or of the /48 of your IPv6 address, with a count of today's frames and new hubs | Until 03:00 UTC the next day | The per-network daily limit |
+| Your hub ID with a count of today's frames, and the ID and size of each frame sent today | Until 03:00 UTC the next day | The per-hub daily limit, and counting a frame sent twice once |
+
+The address itself is never stored, and the hash can't be turned back into one without the
+Worker's secret key. The Worker's request logs are switched off.
 
 ## Limits
 
@@ -77,7 +89,11 @@ what it takes. A frame that hits a limit stays on your hub and sends by itself o
 | One frame | 150 KB | Nothing. The hub shrinks the frame once and skips it if it's still too big |
 
 Daily limits reset at midnight UTC, and the review sheet shows that time in your own time zone.
-A print that is waiting has **Try now** and **Cancel sending** on its sheet.
+A print that is waiting has **Try now** and **Cancel sending** on its sheet. A frame the hub
+skips isn't counted as sent, and sending a frame again doesn't count twice.
+
+The limit for everyone is shared, so a handful of busy networks can use it up for the day.
+Your frames wait on your hub until it resets.
 
 ## Having your frames deleted
 

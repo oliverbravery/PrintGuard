@@ -17,6 +17,7 @@ import logging
 import logging.handlers
 import multiprocessing
 import os
+import plistlib
 import signal
 import socket
 import sys
@@ -69,16 +70,22 @@ dealt with. If the log does not explain it, report it with the log attached at
 <pre>$log_tail</pre>
 """)
 
-PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-\t<key>Label</key><string>{label}</string>
-\t<key>ProgramArguments</key><array>{args}</array>
-\t<key>RunAtLoad</key><true/>
-</dict>
-</plist>
-"""
+STARTING_PAGE = Template("""<!doctype html>
+<meta charset="utf-8">
+<title>PrintGuard</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.6 -apple-system, "Segoe UI", system-ui, sans-serif; margin: 0; padding: 40px 44px; }
+  h1 { font-size: 19px; margin: 0 0 14px; }
+  p { margin: 0 0 14px; max-width: 62ch; }
+  code { font-size: 13px; }
+</style>
+<h1>PrintGuard is still starting</h1>
+<p>Its server is taking longer than usual to come up, which a first launch can do while it sets up
+the graphics card. This window opens the dashboard as soon as it answers.</p>
+<p>If it stays here for more than a few minutes, the reason is at the end of the log at
+<code>$log</code>.</p>
+""")
 
 
 def _configure_environment() -> None:
@@ -159,11 +166,15 @@ def _enable_wkwebview_media() -> None:
             decision_handler(1)
 
 
-def _run_webview(log_records: multiprocessing.Queue[logging.LogRecord], **contents: Any) -> None:
+def _run_webview(
+    log_records: multiprocessing.Queue[logging.LogRecord], awaiting: int | None = None, **contents: Any
+) -> None:
     """Child-process entry point that shows the hub, or why it is not there, in a native window.
 
     Args:
         log_records: Where this process's log records go, for the tray process to write.
+        awaiting: The port of a hub that is still starting, whose dashboard replaces
+            the window's contents once it answers.
         **contents: What the window shows, a ``url`` or a page of ``html``.
 
     The window owns its process's main thread, so it never contends with the
@@ -200,14 +211,33 @@ def _run_webview(log_records: multiprocessing.Queue[logging.LogRecord], **conten
         webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
         webview.settings["ALLOW_DOWNLOADS"] = True
         webview.settings["REMOTE_DEBUGGING_PORT"] = os.environ.get("PRINTGUARD_DEBUG_PORT")
-        webview.create_window(APP_NAME, width=1280, height=820, **contents)
-        webview.start(private_mode=False, storage_path=os.path.join(os.environ["DATA_DIR"], "webview"))
+        window = webview.create_window(APP_NAME, width=1280, height=820, **contents)
+        follow_up = (_open_when_serving, (window, awaiting)) if awaiting else ()
+        webview.start(*follow_up, private_mode=False, storage_path=os.path.join(os.environ["DATA_DIR"], "webview"))
     except Exception:
         logger.exception("the window could not open")
 
 
 def _webview_url(port: int) -> str:
     return f"http://localhost:{port}/?v={metadata.version('printguard')}"
+
+
+def _starting_page() -> str:
+    """The page shown while the hub's server is still coming up."""
+    return STARTING_PAGE.substitute(log=html.escape(os.environ["LOG_FILE"]))
+
+
+def _open_when_serving(window: webview.Window, port: int) -> None:
+    """Swaps the starting page for the dashboard once the hub answers, giving up when the window closes."""
+    closed = threading.Event()
+    window.events.closed += closed.set
+    while not closed.wait(1.0):
+        try:
+            httpx.get(f"http://localhost:{port}/api/health", trust_env=False)
+        except httpx.HTTPError:
+            continue
+        window.load_url(_webview_url(port))
+        return
 
 
 def _failure_page() -> str:
@@ -299,18 +329,26 @@ class _Server:
             return False
         return health == {"ok": True, "version": metadata.version("printguard")}
 
-    def start(self) -> bool:
-        """Starts serving, blocks until startup completes, and reports whether it did.
+    def start(self) -> bool | None:
+        """Starts serving and waits for startup to complete.
 
         A startup that fails ends the serving thread, so the wait stops there
         instead of running the timeout out: what the window shows next depends on
         the answer, and the user should not sit in front of a blank one until then.
+
+        Returns:
+            True once the hub is serving, False if its startup failed, and None
+            if it is still starting when the wait ends, as a first launch that
+            downloads a graphics provider can be.
         """
         self._thread.start()
         deadline = time.monotonic() + READY_TIMEOUT_S
         while time.monotonic() < deadline and self._thread.is_alive() and not self._server.started:
             time.sleep(0.1)
         if not self._server.started:
+            if self._thread.is_alive():
+                logger.warning("hub server is still starting on :%d after %ds", self._port, READY_TIMEOUT_S)
+                return None
             logger.error("hub server did not start on :%d", self._port)
             return False
         if not self._answers():
@@ -339,7 +377,11 @@ def _macos_plist() -> Path:
 
 
 def _autostart_enabled() -> bool:
-    """Whether the app is registered to launch at login on this platform."""
+    """Whether an app is registered to launch at login on this platform.
+
+    The entry names a path, which can be a copy that has since been moved or
+    replaced, so ``main`` writes it again for the copy that is running.
+    """
     if sys.platform == "darwin":
         return _macos_plist().exists()
     if sys.platform == "win32":
@@ -359,9 +401,10 @@ def _set_autostart(enabled: bool) -> None:
     if sys.platform == "darwin":
         path = _macos_plist()
         if enabled:
-            args = "".join(f"<string>{arg}</string>" for arg in _autostart_args())
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(PLIST_TEMPLATE.format(label=BUNDLE_ID, args=args))
+            path.write_bytes(
+                plistlib.dumps({"Label": BUNDLE_ID, "ProgramArguments": _autostart_args(), "RunAtLoad": True})
+            )
         else:
             path.unlink(missing_ok=True)
     elif sys.platform == "win32":
@@ -460,9 +503,15 @@ def main() -> None:
     _set_windows_app_id()
     logs.setup_from_env()
     logger.info("desktop app starting (frozen=%s, data=%s)", getattr(sys, "frozen", False), os.environ["DATA_DIR"])
+    if _autostart_enabled():
+        _set_autostart(True)
     port = int(os.environ.get("PORT", "8000"))
     server = _Server(port)
-    window = _Window(url=_webview_url(port)) if server.start() else _Window(html=_failure_page())
+    started = server.start()
+    if started is None:
+        window = _Window(html=_starting_page(), awaiting=port)
+    else:
+        window = _Window(url=_webview_url(port)) if started else _Window(html=_failure_page())
     window.open()
     if sys.platform == "darwin":
         _watch_termination(window, server)

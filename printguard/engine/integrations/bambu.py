@@ -306,9 +306,9 @@ class BambuAdapter(IntegrationAdapter):
 
         The print carries the settings sliced into the file. Bed levelling is
         left on and the flow and vibration calibrations off, and the filament
-        comes from the external spool or the first AMS slot, since a file says
-        nothing about the AMS it was sliced against. The H2 series is handed
-        the file as an FTP URL and every other model as a path on the SD card.
+        comes from the external spool, since a file says nothing about the AMS
+        it was sliced against. The H2 series is handed the file as an FTP URL
+        and every other model as a path on the SD card.
         """
         plate, _ = plate_gcode(data)
         loop = asyncio.get_running_loop()
@@ -393,6 +393,19 @@ class BambuAdapter(IntegrationAdapter):
                 conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
                 return context.wrap_socket(conn, server_hostname=self.host, session=self.sock.session), size
 
+            def storbinary(self, cmd: str, fp: Any, blocksize: int = 8192, callback: Any = None, rest: Any = None) -> str:
+                """Stores a file, closing the data channel without waiting on its TLS shutdown.
+
+                ftplib unwraps TLS first, which the printer does not answer, so
+                the wait times out after the file is stored. ha-bambulab and
+                bambulabs_api both close the socket instead.
+                """
+                self.voidcmd("TYPE I")
+                with self.transfercmd(cmd, rest) as conn:
+                    while chunk := fp.read(blocksize):
+                        conn.sendall(chunk)
+                return self.voidresp()
+
         ftps = ImplicitFtps(context=context, timeout=_CONNECT_TIMEOUT_S)
         ftps.connect(str(config["host"]), _FTP_PORT)
         try:
@@ -402,40 +415,70 @@ class BambuAdapter(IntegrationAdapter):
         finally:
             ftps.close()
 
-    def _session_key(self, config: dict[str, Any]) -> tuple[str, str, str]:
+    def connection_key(self, config: dict[str, Any]) -> tuple[str, str, str]:
+        """A session is one printer's serial at one host under one access code."""
         return str(config.get("host")), str(config.get("serial")), str(config.get("access_code", ""))
 
     def _session(self, config: dict[str, Any]) -> _Session:
-        key = self._session_key(config)
-        with self._session_locks.setdefault(key, threading.Lock()):
+        """Returns the printer's session, opening one when there is none or it was lost.
+
+        Raises:
+            RuntimeError: If another caller has been opening the session for
+                the connect timeout, so calls never queue behind a host that
+                accepts and then says nothing.
+        """
+        key = self.connection_key(config)
+        lock = self._session_locks.setdefault(key, threading.Lock())
+        if not lock.acquire(timeout=_CONNECT_TIMEOUT_S):
+            raise RuntimeError("Bambu printer is not answering the connection")
+        try:
             session = self._sessions.get(key)
+            if session is not None and session.lost():
+                self._sessions.pop(key).close()
+                session = None
             if session is None:
                 session = self._sessions[key] = _Session(config)
             return session
+        finally:
+            lock.release()
 
-    def _drop(self, config: dict[str, Any] | None) -> None:
-        keys = [self._session_key(config)] if config is not None else list(self._sessions)
+    def _drop(self, config: dict[str, Any] | None, only: _Session | None = None) -> None:
+        """Closes one printer's session, or every session.
+
+        Args:
+            config: The printer, or None for all of them.
+            only: The session the caller was using. One opened since then is
+                another caller's and is left alone.
+        """
+        keys = [self.connection_key(config)] if config is not None else list(self._sessions)
         for key in keys:
             with self._session_locks.setdefault(key, threading.Lock()):
+                if only is not None and self._sessions.get(key) is not only:
+                    continue
                 session = self._sessions.pop(key, None)
                 if session is not None:
                     session.close()
 
     def _pull_report(self, config: dict[str, Any]) -> dict[str, Any] | None:
-        session = self._session(config)
-        if session.lost():
-            self._drop(config)
-            session = self._session(config)
-        return session.report()
+        return self._session(config).report()
 
     def _product(self, config: dict[str, Any]) -> str:
         return self._session(config).product()
 
     def _publish(self, config: dict[str, Any], payload: dict[str, Any]) -> None:
-        if self._session(config).lost():
-            self._drop(config)
+        """Sends a command on the printer's session, dropping the session if it fails.
+
+        Raises:
+            RuntimeError: If connecting outlasted the deadline the caller
+                waits for, so a command reported as timed out is never sent
+                afterwards.
+        """
+        give_up = time.monotonic() + _DEADLINE_S
+        session = self._session(config)
+        if time.monotonic() > give_up:
+            raise RuntimeError("Bambu printer took too long to connect")
         try:
-            self._session(config).command(payload)
+            session.command(payload)
         except Exception:
-            self._drop(config)
+            self._drop(config, session)
             raise

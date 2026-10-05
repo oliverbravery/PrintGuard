@@ -301,6 +301,10 @@ class MqttBridge:
     session the bridge ends itself says ``offline`` first. The client id is
     random per bridge because a broker gives a session to the newest client
     using an id, and a process id is 1 in every container.
+
+    Everything a monitor is announced by is retained, so the broker keeps it
+    until it is cleared. The monitors announced are remembered from one session
+    to the next for that, since one can be removed while the broker is away.
     """
 
     def __init__(self, engine: "Engine", get_config: Callable[[], dict[str, Any]]) -> None:
@@ -363,7 +367,6 @@ class MqttBridge:
         ) as client:
             self._published.clear()
             self._reported.clear()
-            self._devices.clear()
             self._state = {}
             logger.info("Home Assistant MQTT bridge connected to %s", config["host"])
             if self._outage is not None:
@@ -431,7 +434,8 @@ class MqttBridge:
             await self._publish(client, device_config_topic(prefix, monitor_id), json.dumps(discovery_config(monitor, printer, version, base)))
             await self._publish_state(client, monitor_id, base)
         for monitor_id in self._devices - desired:
-            await client.publish(device_config_topic(prefix, monitor_id), "", qos=1, retain=True)
+            for topic in (device_config_topic(prefix, monitor_id), state_topic(base, monitor_id), snapshot_topic(base, monitor_id)):
+                await client.publish(topic, "", qos=1, retain=True)
             self._published.pop(device_config_topic(prefix, monitor_id), None)
             self._reported.pop(monitor_id, None)
         self._devices = desired

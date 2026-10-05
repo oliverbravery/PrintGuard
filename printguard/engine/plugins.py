@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 
 from . import oauth, urls
 from .adapters import HttpFn
+from .bounds import clamp
 
 MANIFEST_FILE = "plugin.json"
 SOURCE_FILES = ("plugin.js", "worker.js", "panel.html")
@@ -31,6 +32,7 @@ SURFACES = ("panel", "monitor", "settings")
 MAX_SOURCE_BYTES = 256 * 1024
 MAX_CONFIG_BYTES = 16 * 1024
 MIN_TICK_S = 5.0
+MAX_TICK_S = 86400.0
 MAX_SECRETS = 8
 MAX_CHANNELS = 8
 MAX_CONSUMES = 16
@@ -49,6 +51,8 @@ GITHUB_COMMIT_URL = "https://api.github.com/repos/{repo}/commits/{ref}"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/{repo}/{sha}/{path}"
 GITHUB_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 TIMEOUT_S = 20.0
+MAX_LISTING_BYTES = 4 * 1024 * 1024
+"""The most the catalogue, or GitHub's description of a commit, may come to."""
 
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
 _REPO_PATTERN = re.compile(r"^[\w.-]+/[\w.-]+$")
@@ -668,7 +672,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         raise ValueError(f"reaching {', '.join(local)} needs the net:local permission")
     events = sorted(({str(e).strip() for e in raw.get("events", [])} & set(EVENTS)) | linked_events(raw))
     try:
-        tick_s = max(0.0, float(raw.get("tick_s", 0)))
+        tick_s = clamp("tick_s", raw.get("tick_s", 0), 0.0, MAX_TICK_S)
     except (TypeError, ValueError):
         tick_s = 0.0
     return {
@@ -691,7 +695,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         "consumes": consumes,
         "oauth": sign_in,
         "events": events,
-        "tick_s": min(tick_s, 86400.0) if tick_s >= MIN_TICK_S else 0.0,
+        "tick_s": tick_s if tick_s >= MIN_TICK_S else 0.0,
     }
 
 
@@ -958,7 +962,9 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
 
 
 async def _resolve_commit(http: HttpFn, repo: str, ref: str) -> str:
-    status, body = await http("GET", GITHUB_COMMIT_URL.format(repo=repo, ref=ref), headers=GITHUB_HEADERS, timeout=TIMEOUT_S)
+    status, body = await http(
+        "GET", GITHUB_COMMIT_URL.format(repo=repo, ref=ref), headers=GITHUB_HEADERS, timeout=TIMEOUT_S, max_bytes=MAX_LISTING_BYTES
+    )
     if status != 200 or not isinstance(body, dict) or not _SHA_PATTERN.match(str(body.get("sha", ""))):
         raise ValueError(f"GitHub could not resolve {repo}@{ref} ({status})")
     return str(body["sha"])
@@ -970,7 +976,7 @@ async def fetch_catalogue(http: HttpFn, url: str) -> list[dict[str, Any]]:
     Raises:
         RuntimeError: If the catalogue cannot be read.
     """
-    status, body = await http("GET", url, timeout=TIMEOUT_S)
+    status, body = await http("GET", url, timeout=TIMEOUT_S, max_bytes=MAX_LISTING_BYTES)
     if status != 200:
         raise RuntimeError(f"catalogue at {url} returned {status}")
     if not isinstance(body, dict) or not isinstance(body.get("plugins"), list):

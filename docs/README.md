@@ -20,8 +20,8 @@ Start at the [README](../README.md) to install PrintGuard. These pages cover eve
 | [API & MCP](api.md) | Drive the hub from a script, an agent or Home Assistant, with scoped access tokens |
 | [Plugins](plugins.md) | Install a plugin and understand what it can reach |
 | [Writing plugins](plugin-development.md) | Write a plugin and publish it to the catalogue |
-| [Troubleshooting](troubleshooting.md) | Fix a symptom like a dead feed, a failing printer test or a port already in use |
 | [Architecture](architecture.md) | Understand how the engine, the hub and the dashboard fit together, or change the code |
+| [Troubleshooting](troubleshooting.md) | Fix a symptom like a dead feed, a failing printer test or a port already in use |
 | [Contributing](../CONTRIBUTING.md) | Set up a dev environment, run the tests, add an integration or notifier |
 
 ## Conventions in these docs

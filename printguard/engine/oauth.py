@@ -22,6 +22,7 @@ from urllib.parse import urlencode, urlsplit
 
 from . import urls
 from .adapters import HttpFn
+from .bounds import clamp
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,8 @@ registers their own and types it in, and it is held like any other credential.
 CALLBACK_PATH = "/oauth/callback"
 PENDING_TTL_S = 600.0
 REFRESH_MARGIN_S = 60.0
+DEFAULT_LIFETIME_S = 3600.0
+MAX_LIFETIME_S = 366 * 86400.0
 
 
 def _urlsafe(raw: bytes) -> str:
@@ -103,7 +106,8 @@ class OAuthFlows:
         }
         if provider["scopes"]:
             query["scope"] = " ".join(provider["scopes"])
-        return f"{provider['authorize_url']}?{urlencode(query)}"
+        joiner = "&" if urlsplit(provider["authorize_url"]).query else "?"
+        return f"{provider['authorize_url']}{joiner}{urlencode(query)}"
 
     def _forget_stale(self) -> None:
         now = time.monotonic()
@@ -131,7 +135,8 @@ class OAuthFlows:
             PermissionError: If the state is unknown or has expired, which is
                 what stands in the way of a callback nobody asked for, or the
                 token endpoint is on this network and the plugin may not reach it.
-            RuntimeError: If the provider refused the exchange.
+            RuntimeError: If the provider refused the exchange, or answered with
+                a lifetime that is not a number.
         """
         self._forget_stale()
         pending = self._pending.pop(state, None)
@@ -177,7 +182,11 @@ class OAuthFlows:
         )
         if status >= 400 or not isinstance(body, dict) or not body.get("access_token"):
             raise RuntimeError(f"{provider['label']} refused the sign-in ({status})")
-        held = {ACCESS: str(body["access_token"]), EXPIRES: str(time.time() + float(body.get("expires_in") or 3600))}
+        try:
+            lifetime = clamp("expires_in", body.get("expires_in") or DEFAULT_LIFETIME_S, 0.0, MAX_LIFETIME_S)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"{provider['label']} answered with a sign-in that cannot be read: {exc}") from exc
+        held = {ACCESS: str(body["access_token"]), EXPIRES: str(time.time() + lifetime)}
         if body.get("refresh_token"):
             held[REFRESH] = str(body["refresh_token"])
         return held

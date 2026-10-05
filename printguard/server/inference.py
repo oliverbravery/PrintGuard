@@ -162,11 +162,13 @@ class OnnxInference:
     Attributes:
         device: Name of the hardware the model runs on.
         measured: Worker count the device sustains, and its throughput there.
+        skipped: One message for each device that was offered and passed over.
     """
 
     runtime = "onnx"
 
     def __init__(self, model_path: Path) -> None:
+        self.skipped: list[str] = []
         self._resources = ExitStack()
         self._model_path = str(model_path)
         self._register_plugins()
@@ -185,7 +187,7 @@ class OnnxInference:
                 self._benchmark(build())
                 return
             except Exception as exc:
-                logger.warning("%s cannot run the model and is skipped: %s", label, exc)
+                self.skipped.append(f"{label} cannot run the model, so detection is not using it: {exc}")
         self.device = "ONNX CPU"
         self._benchmark(self._session_on([], [DEFAULT_CPU_PROVIDER]))
 
@@ -261,17 +263,22 @@ class LiteRtInference:
     genuinely in parallel; the `CompiledModel` API does not, and serialises every
     caller onto one core no matter how many workers are given to it.
 
+    The model is handed over as bytes: given a path, LiteRT opens it through
+    the ANSI code page on Windows and can fail under a user folder whose name
+    is outside it.
+
     Attributes:
         measured: Worker count the processor sustains, and its throughput there.
     """
 
     runtime = "litert"
     device = "LiteRT CPU"
+    skipped: list[str] = []
 
     def __init__(self, model_path: Path) -> None:
-        self._model_path = str(model_path)
+        self._model = model_path.read_bytes()
         self._interpreters = threading.local()
-        probe = Interpreter(model_path=self._model_path, num_threads=1)
+        probe = Interpreter(model_content=self._model, num_threads=1)
         self._input_index = probe.get_input_details()[0]["index"]
         self._output_index = probe.get_output_details()[0]["index"]
         self.measured = _measure_concurrency(self.run)
@@ -280,7 +287,7 @@ class LiteRtInference:
         """Returns the model embedding for one preprocessed frame."""
         interpreter = getattr(self._interpreters, "interpreter", None)
         if interpreter is None:
-            interpreter = Interpreter(model_path=self._model_path, num_threads=1)
+            interpreter = Interpreter(model_content=self._model, num_threads=1)
             interpreter.allocate_tensors()
             self._interpreters.interpreter = interpreter
         interpreter.set_tensor(self._input_index, tensor)
@@ -293,7 +300,12 @@ class LiteRtInference:
 
 
 class Inference:
-    """Runs the requested model runtime at the concurrency it measurably sustains."""
+    """Runs the requested model runtime at the concurrency it measurably sustains.
+
+    Attributes:
+        skipped: One message for each accelerator that was offered and passed
+            over, whichever runtime was chosen in the end.
+    """
 
     def __init__(self, model_dir: Path, runtime: InferenceRuntime) -> None:
         candidates: list[OnnxInference | LiteRtInference] = []
@@ -308,6 +320,7 @@ class Inference:
                 for candidate in candidates
             ),
         )
+        self.skipped = [message for candidate in candidates for message in candidate.skipped]
         selected = max(candidates, key=lambda candidate: candidate.measured[1])
         self.workers, self.capacity_fps = selected.measured
         for candidate in candidates:

@@ -8,6 +8,7 @@ routes and the versioned REST API so an upload is handled one way.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Any, AsyncIterator
 
@@ -19,7 +20,10 @@ from ..engine import gcode
 from ..engine.engine import Engine
 from ..engine.prints import extension
 from ..engine.registry import PrintFile
+from ..engine.reviews import frame_key
 from .platform import DiskFileStore
+
+logger = logging.getLogger(__name__)
 
 MAX_PRINT_BYTES = 512 * 1024 * 1024
 MAX_SAMPLE_BYTES = gcode.HEAD_BYTES + gcode.TAIL_BYTES + 1
@@ -77,7 +81,8 @@ async def receive_print(engine: Engine, upload: PrintUpload, body: AsyncIterator
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     print_id = uuid.uuid4().hex[:8]
-    await store_of(engine).store(f"{print_id}.{ext}", _capped(body, MAX_PRINT_BYTES))
+    store = store_of(engine)
+    await store.store(f"{print_id}.{ext}", capped(body, MAX_PRINT_BYTES))
     try:
         await engine.request(
             {
@@ -93,7 +98,34 @@ async def receive_print(engine: Engine, upload: PrintUpload, body: AsyncIterator
         )
     except RuntimeError as exc:
         raise HTTPException(400, str(exc)) from exc
+    except TimeoutError:
+        await store.remove(f"{print_id}.{ext}")
+        await store.remove(f"{print_id}.thumb")
+        raise
     return record_of(engine, print_id)
+
+
+async def sweep_orphans(engine: Engine, *, unnamed: bool) -> None:
+    """Deletes what the store holds that the engine has no record of.
+
+    A hub killed part way through an upload leaves a ``.part``, and a file
+    whose record was never saved stays for good, since only a record's removal
+    deletes a file. This runs once when the hub starts, before anything can be
+    uploaded.
+
+    Args:
+        engine: The hub's engine, with its state loaded.
+        unnamed: Whether a finished file no print or review names goes too.
+            It stays while a damaged state file waits to be put back, since
+            that state may be the one naming it.
+    """
+    named = {key for record in engine.prints.values() for key in (record.file_key, record.thumbnail_key)}
+    named |= {frame_key(review["id"], frame["id"]) for review in engine.reviews.persisted() for frame in review["frames"]}
+    orphans = [path for path in store_of(engine).root.iterdir() if path.suffix == ".part" or (unnamed and path.name not in named)]
+    for path in orphans:
+        path.unlink()
+    if orphans:
+        logger.info("removed %d files in %s that no print or review names", len(orphans), store_of(engine).root)
 
 
 async def inspect_sample(ext: str, body: AsyncIterator[bytes]) -> dict[str, Any]:
@@ -117,13 +149,22 @@ async def inspect_sample(ext: str, body: AsyncIterator[bytes]) -> dict[str, Any]
     """
     try:
         extension(f"sample.{ext}")
-        sliced = await asyncio.to_thread(gcode.inspect, b"".join([chunk async for chunk in _capped(body, MAX_SAMPLE_BYTES)]), ext)
+        sliced = await asyncio.to_thread(gcode.inspect, b"".join([chunk async for chunk in capped(body, MAX_SAMPLE_BYTES)]), ext)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"meta": sliced.meta, "thumbnail": sliced.thumbnail is not None}
 
 
-async def _capped(body: AsyncIterator[bytes], limit: int) -> AsyncIterator[bytes]:
+async def capped(body: AsyncIterator[bytes], limit: int) -> AsyncIterator[bytes]:
+    """Passes a request body through, refusing it once it outgrows a limit.
+
+    Args:
+        body: The bytes as they arrive.
+        limit: The most bytes to take.
+
+    Raises:
+        HTTPException: 413 when the body is larger.
+    """
     size = 0
     async for chunk in body:
         size += len(chunk)
@@ -147,7 +188,7 @@ async def gcode_response(engine: Engine, print_id: str) -> Response:
     record = record_of(engine, print_id)
     path = store_of(engine).path(record.file_key)
     if record.ext == "3mf":
-        _, plate = gcode.plate_gcode(path.read_bytes())
+        _, plate = await asyncio.to_thread(lambda: gcode.plate_gcode(path.read_bytes()))
         return Response(plate, media_type="text/plain")
     if record.ext == "bgcode":
         raise HTTPException(404, "binary gcode carries nothing the viewer can draw")

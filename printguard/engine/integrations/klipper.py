@@ -6,7 +6,9 @@ Authorization (trusted_clients, API keys): https://moonraker.readthedocs.io/en/l
 
 from __future__ import annotations
 
+import re
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from ..adapters import multipart_form
 from ..cameras import webrtc_endpoint, whep_endpoint
@@ -127,10 +129,11 @@ class KlipperAdapter(IntegrationAdapter):
         """Lists Moonraker's registered webcams via /server/webcams/list.
 
         Each webcam's stream_url may be relative, resolved against the host's web
-        port (see ``webcam_url``); its stable uid keys the registered camera.
-        Webcams whose service advertises proprietary WebRTC signalling -
-        camera-streamer, the Crowsnest V5 default - are redirected to their
-        MJPEG endpoint. WHEP endpoints pass through to the hub's MediaMTX client.
+        port (see ``webcam_url``); its stable uid keys the registered camera, or
+        its name on a Moonraker too old to give one. A webcam on MediaMTX or
+        go2rtc is pulled from that server's WHEP endpoint, which the hub's
+        MediaMTX client reads. camera-streamer, the Crowsnest V5 default,
+        signals WebRTC its own way, so it is redirected to its MJPEG endpoint.
         """
         status, body = await http("GET", f"{config['base_url'].rstrip('/')}/server/webcams/list", headers=self._headers(config))
         if status != 200 or not isinstance(body, dict):
@@ -140,13 +143,16 @@ class KlipperAdapter(IntegrationAdapter):
             if not webcam.get("enabled", True):
                 continue
             stream = str(webcam.get("stream_url") or "")
-            if ("webrtc" in str(webcam.get("service") or "").lower() or webrtc_endpoint(stream)) and not whep_endpoint(stream):
+            service = str(webcam.get("service") or "").lower()
+            if stream and service in _WHEP_ENDPOINTS and not whep_endpoint(stream):
+                stream = _WHEP_ENDPOINTS[service](webcam_url(config["base_url"], stream, _API_PORTS))
+            elif ("webrtc" in service or webrtc_endpoint(stream)) and not whep_endpoint(stream):
                 stream = _mjpeg_endpoint(webcam)
             if not stream or (webrtc_endpoint(stream) and not whep_endpoint(stream)):
                 continue
             found.append(
                 {
-                    "key": str(webcam.get("uid") or webcam.get("name") or len(found)),
+                    "key": _UNSAFE_IN_A_KEY.sub("-", str(webcam.get("uid") or webcam.get("name") or len(found))),
                     "name": webcam.get("name") or "Webcam",
                     "source": {"kind": "url", "url": webcam_url(config["base_url"], stream, _API_PORTS)},
                 }
@@ -166,3 +172,30 @@ def _mjpeg_endpoint(webcam: dict[str, Any]) -> str:
     if snapshot:
         return snapshot.replace("snapshot", "stream")
     return str(webcam.get("stream_url") or "").replace("webrtc", "stream")
+
+
+def _mediamtx_whep(stream: str) -> str:
+    """MediaMTX serves WHEP under the path's own page, where Mainsail looks for it too."""
+    parts = urlsplit(stream)
+    return urlunsplit(parts._replace(path=f"{parts.path.rstrip('/')}/whep"))
+
+
+def _go2rtc_whep(stream: str) -> str:
+    """go2rtc serves WHEP at ``api/webrtc`` beside whichever of its pages Moonraker was given.
+
+    The path gives no sign of WHEP, so the address carries the scheme that says so.
+    """
+    parts = urlsplit(stream)
+    path = re.sub(r"(api/(webrtc|ws)|[^/]*)$", "api/webrtc", parts.path, count=1)
+    return urlunsplit(parts._replace(scheme="wheps" if parts.scheme == "https" else "whep", path=path))
+
+
+_WHEP_ENDPOINTS = {"webrtc-mediamtx": _mediamtx_whep, "webrtc-go2rtc": _go2rtc_whep}
+"""Moonraker's webcam services that serve WHEP, each with how its endpoint is found.
+
+Mainsail's player builds the same MediaMTX address, and go2rtc's is the WHEP
+route beside the socket Mainsail's player opens:
+https://github.com/mainsail-crew/mainsail/tree/develop/src/components/webcams/streamers
+"""
+_UNSAFE_IN_A_KEY = re.compile(r"[^\w.~-]", re.ASCII)
+"""A camera's key ends up in its id, which is also its MediaMTX path."""

@@ -21,6 +21,7 @@ your trusted network.
 - [What the hub reaches out to](#what-the-hub-reaches-out-to)
 - [Environment variables](#environment-variables)
 - [Your data and backups](#your-data-and-backups)
+- [Running the container as your own user](#running-the-container-as-your-own-user)
 - [Staying up to date](#staying-up-to-date)
 
 > [!CAUTION]
@@ -145,9 +146,9 @@ GitHub, Google or any OIDC provider and proxies everything, WebSockets included:
       - --cookie-secure=true
       - --reverse-proxy=true
     environment:
-      OAUTH2_PROXY_CLIENT_ID: "…"
-      OAUTH2_PROXY_CLIENT_SECRET: "…"
-      OAUTH2_PROXY_COOKIE_SECRET: "…"   # openssl rand -base64 32 | tr -- '+/' '-_'
+      OAUTH2_PROXY_CLIENT_ID: "<client id>"
+      OAUTH2_PROXY_CLIENT_SECRET: "<client secret>"
+      OAUTH2_PROXY_COOKIE_SECRET: "<cookie secret>"   # openssl rand -base64 32 | tr -- '+/' '-_'
     ports:
       - "4180:4180"
 ```
@@ -184,8 +185,9 @@ The check reads both `Host` and `X-Forwarded-Host`, so it works whether your pro
 host or forwards it. Tailscale, Cloudflare and oauth2-proxy all do one or the other.
 
 The hub also rejects any WebSocket, print upload or camera stream request a browser sends from an
-`Origin` that is not the address the request was for or one listed in `PRINTGUARD_ORIGINS`. A request with no
-`Origin`, which is what a script sends, is let through. An auth proxy checks the session cookie,
+`Origin` that is not the address the request was for or one listed in `PRINTGUARD_ORIGINS`. An upload or stream
+request with no `Origin`, which is what a script sends, is let through. A WebSocket with none is refused,
+since every browser sends one and only the dashboard opens them. An auth proxy checks the session cookie,
 and the browser attaches that cookie to sockets opened by other sites too, so this is what stops
 a signed-in user's other tabs from driving the engine.
 
@@ -217,7 +219,7 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 |---|---|
 | No router port-forwards for `8000`, `8554` or `1935` | The hub has no authentication of its own |
 | Only admit people you would hand the printer to | There are no per-user roles, so anyone who authenticates sees every camera and controls every printer |
-| Bind ports to `127.0.0.1:…` when a proxy on the same host is the only client | Keeps the app unreachable except through the proxy |
+| Bind ports to `127.0.0.1` when a proxy on the same host is the only client | Keeps the app unreachable except through the proxy |
 | Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback, and the hub proxies HLS out through `:8000`. The control API only answers the hub's own login, but the HLS muxer takes none |
 | List in `PRINTGUARD_ORIGINS` only the addresses you open the hub at | Every name in it is one a web page may reach the hub under. See [host and origin checking](#host-and-origin-checking) |
 | Publish `8554` and `1935` only to a network you trust, or not at all | The streaming server takes no login. Anyone who can reach those ports can watch any camera's stream and publish one of their own. A hub that only pulls from its cameras needs neither port published |
@@ -259,7 +261,7 @@ Everything PrintGuard keeps is in its data directory.
 |---|---|
 | `state.json` | Cameras, printers, monitors, settings, themes, layout, installed plugins and the record of each print's kept frames, with printer passwords, notifier keys, plugin credentials and API token hashes. Written readable only by the account running the hub |
 | `state.json.corrupt` | A `state.json` the hub could not read at start, [kept so you can recover it](troubleshooting.md#starting-up). It's only there after that has happened |
-| `prints/` | The [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub) |
+| `prints/` | The [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub). At start the hub deletes any upload there that never finished, and any file `state.json` doesn't name unless a `state.json.corrupt` is waiting to be recovered |
 
 | Install | Data directory |
 |---|---|
@@ -267,11 +269,44 @@ Everything PrintGuard keeps is in its data directory.
 | macOS app | `~/Library/Application Support/PrintGuard` |
 | Windows app | `%LOCALAPPDATA%\PrintGuard\PrintGuard` |
 
-The desktop app also keeps `printguard.log` and its window's own storage there.
+The desktop app also keeps `printguard.log` there, and on Windows its window's own storage in
+the `webview` folder. On macOS the window's storage is WebKit's, under `~/Library/WebKit`.
 
-To back up, copy that directory with the hub stopped. To move to another machine, put the copy
+To back up, copy that directory with the hub stopped. In Docker the hub runs as root unless you
+[set a user](#running-the-container-as-your-own-user), so a bind-mounted `state.json` belongs
+to root and copying it needs `sudo`. To move to another machine, put the copy
 in place before the first start. The risk chart and the alert log are held in memory and aren't
 part of it.
+
+## Running the container as your own user
+
+The image runs as root. That is left as it is because a data directory an earlier version
+created belongs to root, and a hub started as anyone else could not read its own
+`state.json`. To run it as another user, hand the directory over first:
+
+```bash
+docker compose down
+sudo chown -R 1000:1000 ./data
+```
+
+```yaml
+services:
+  printguard:
+    user: "1000:1000"
+    group_add:
+      - "44"    # video, for a camera under devices:
+      - "993"   # render, for /dev/dri on the latest-intel image
+```
+
+| Needs | Because |
+|---|---|
+| The data directory owned by that user | The hub writes `state.json` and `prints/` there and stops at start if it can't |
+| The host's `video` group in `group_add` | A [passed-in camera](cameras.md#cameras-plugged-into-the-hub) is readable by that group only. `getent group video` gives the number |
+| The host's `render` group in `group_add` | The same for `/dev/dri` on the [Intel image](hardware.md#intel-gpu). `getent group render` gives the number |
+
+Nothing in the container needs a port below 1024. Only the standard image on its CPU runtime has
+been run this way. The camera and GPU groups follow from how Linux guards those devices and are
+untested, as is the `latest-nvidia` image.
 
 ## Staying up to date
 

@@ -46,12 +46,12 @@ in the acceleration runtime they bundle.
 | `latest-nvidia` | `amd64` | TensorRT RTX execution provider and the CUDA 12 runtime | You have an RTX 30 series or newer and the NVIDIA Container Toolkit |
 
 Each variant is also tagged `X.Y.Z` and `X.Y`, with the same suffix, for example
-`2.5.1-intel`. Pin `X.Y` if you want patch updates without surprises.
+`X.Y.Z-intel`. Pin `X.Y` if you want patch updates without surprises.
 
 > [!NOTE]
 > The Intel GPU compute runtime is roughly 370 MB of compiler and driver libraries that do
 > nothing unless a GPU device is passed in, which is why it lives in its own tag rather
-> than the default image. Intel **CPU** acceleration through OpenVINO is in the standard
+> than the default image. Intel CPU acceleration through OpenVINO is in the standard
 > `amd64` image and needs no extra tag.
 
 ## Choosing a variant
@@ -111,9 +111,10 @@ GPU, then an NPU, then the CPU. What is available depends on the platform:
 If no accelerator is usable, PrintGuard keeps working on the CPU. On an `amd64` image that is
 OpenVINO's CPU path, which the `latest-nvidia` image carries too, and elsewhere it is ONNX
 Runtime's own CPU provider. That covers an accelerator that is offered but can't build or run
-the model, such as a GPU out of memory or a driver the provider rejects. The log names the
-device and the reason in a warning ending `cannot run the model and is skipped`, and
-**compute** names the device used instead. It applies with the runtime pinned to ONNX too.
+the model, such as a GPU out of memory or a driver the provider rejects. The dashboard and the
+log name the device and the reason in a warning that it `cannot run the model, so detection is
+not using it`, and **compute** names the device used instead. It applies with the runtime pinned
+to ONNX too.
 
 ## Intel GPU
 
@@ -194,10 +195,11 @@ and as **Active compute** in the Advanced tab in Settings.
 | `intel gpu`, `intel npu` | OpenVINO on that device |
 | `intel cpu` | OpenVINO on the processor, whoever made it |
 | `litert cpu` | LiteRT on the processor |
+| `apple core ml` | Core ML on a Mac, which shares the model between the CPU, GPU and Neural Engine itself |
 | `onnx cpu` | ONNX Runtime's own CPU provider, where no other provider offered a device |
 
-A Core ML, Windows ML or TensorRT device is named the same way, by its provider's vendor. The
-Advanced tab in Settings offers:
+A Windows ML or TensorRT device is named the same way as OpenVINO's, by its provider's vendor.
+The Advanced tab in Settings offers:
 
 | Setting | Effect |
 |---|---|

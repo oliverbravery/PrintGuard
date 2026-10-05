@@ -1,12 +1,12 @@
 """Demand-driven inference scheduling with max-min fair rate allocation.
 
 Capacity is never benchmarked up front: a smoothed estimate of observed
-inference latency continuously yields the sustainable total rate, which is
-water-filled across cameras so no camera is allocated beyond its effective
-rate (its native frame rate, held to the cap its user set) and spare
-capacity flows to cameras that can use it. Frames are grabbed at dispatch
-time and identified by sequence, so a frame is never inferred twice and
-results always describe the present.
+inference latency, a camera's own image adjustments included, continuously
+yields the sustainable total rate, which is water-filled across cameras so no
+camera is allocated beyond its effective rate (its native frame rate, held to
+the cap its user set) and spare capacity flows to cameras that can use it.
+Frames are grabbed at dispatch time and identified by sequence, so a frame is
+never inferred twice and results always describe the present.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import logging
 import time
 from typing import Any, Awaitable, Callable
 
-from . import vision
+from . import logs, vision
 from .platform import Frame, Platform
 from .registry import Camera, CameraRegistry
 
@@ -151,7 +151,9 @@ class Scheduler:
                 camera.next_due = time.monotonic() + STALE_RETRY_S
                 return
             camera.last_seq = frame.seq
-            rgb = vision.transform(
+            started = time.monotonic()
+            rgb = await asyncio.to_thread(
+                vision.transform,
                 frame.rgb,
                 rotation=camera.rotation,
                 crop=camera.crop,
@@ -159,7 +161,6 @@ class Scheduler:
                 contrast=camera.contrast,
                 sharpness=camera.sharpness,
             )
-            started = time.monotonic()
             result = await self._platform.infer(rgb)
             elapsed_ms = (time.monotonic() - started) * 1000.0
             self.infer_ms = (
@@ -174,7 +175,7 @@ class Scheduler:
             logger.debug("inference failed on '%s'", camera.name, exc_info=True)
             if time.monotonic() - self._last_error_at > ERROR_THROTTLE_S:
                 self._last_error_at = time.monotonic()
-                self._on_error(f"inference failed on '{camera.name}': {exc}")
+                self._on_error(f"inference failed on '{camera.name}': {logs.describe(exc)}")
         finally:
             camera.inferring = False
             self._slots.release()

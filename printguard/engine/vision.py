@@ -190,8 +190,10 @@ def transform(
 ) -> np.ndarray:
     """Applies a camera's full image pipeline, rotating, then cropping, then adjusting.
 
-    The crop is interpreted in the rotated frame's coordinates, so the result
-    matches exactly what the live view shows and what the model infers on.
+    The crop is interpreted in the rotated frame's coordinates, so the framing
+    matches the live view. The dashboard redraws the adjustments itself at the
+    size the feed is shown, so its sharpness looks stronger than the full-size
+    frame the model infers on.
 
     Args:
         rgb: HxWx3 uint8 frame in RGB channel order.
@@ -220,9 +222,11 @@ def defect_score(result: dict[str, Any]) -> float:
         result: Output of classify().
 
     Returns:
-        Failure probability in [0, 1], or 0.5 when the frame could not be classified.
+        Failure probability in [0, 1], or 0.5 when the frame could not be
+        classified or its distances are too large to compare.
     """
     distances = result.get("distances") or {}
     if "success" not in distances or "failure" not in distances:
         return 0.5
-    return 0.5 * (1.0 + math.tanh((distances["success"] ** 2 - distances["failure"] ** 2) / 2))
+    score = 0.5 * (1.0 + math.tanh((distances["success"] ** 2 - distances["failure"] ** 2) / 2))
+    return score if math.isfinite(score) else 0.5

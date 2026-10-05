@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -100,10 +102,11 @@ async def handshake_answer(app, path: str, headers: dict[str, str]) -> str:
 
 
 class Tab:
-    """Plays a browser tab on the engine socket, a frame at a time."""
+    """Plays a browser tab on one of the hub's sockets, a frame at a time."""
 
-    def __init__(self, app) -> None:
+    def __init__(self, app, path: str = "/api/ws") -> None:
         self._app = app
+        self._path = path
         self._inbound: asyncio.Queue[dict] = asyncio.Queue()
         self._sent: list[dict] = []
         self._inbound.put_nowait({"type": "websocket.connect"})
@@ -112,11 +115,11 @@ class Tab:
         scope = {
             "type": "websocket",
             "scheme": "ws",
-            "path": "/api/ws",
-            "raw_path": b"/api/ws",
+            "path": self._path,
+            "raw_path": self._path.encode(),
             "root_path": "",
             "query_string": b"",
-            "headers": [(b"host", b"test")],
+            "headers": [(b"host", b"test"), (b"origin", b"http://test")],
             "subprotocols": [],
         }
         self._socket = asyncio.ensure_future(self._app(scope, self._inbound.get, self._keep))
@@ -142,6 +145,13 @@ class Tab:
             while not self.events(kind):
                 await asyncio.sleep(0.01)
         return self.events(kind)[0]
+
+    async def closed(self) -> int:
+        """Waits for the hub to close the socket and returns the code it gave."""
+        async with asyncio.timeout(2):
+            while not [message for message in self._sent if message["type"] == "websocket.close"]:
+                await asyncio.sleep(0.01)
+        return next(message["code"] for message in self._sent if message["type"] == "websocket.close")
 
 
 async def test_a_slow_command_does_not_hold_the_next_one_from_the_same_tab(monkeypatch) -> None:
@@ -186,6 +196,58 @@ async def test_a_slow_command_does_not_hold_the_next_one_from_the_same_tab(monke
         await engine.stop()
 
 
+async def test_a_tab_cannot_have_more_than_a_few_commands_running_at_once(monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "SOCKET_COMMANDS_IN_FLIGHT", 2)
+    started: list[int] = []
+    release = asyncio.Event()
+
+    async def handle(command: dict, reply) -> None:
+        started.append(command["n"])
+        await release.wait()
+
+    app = create_app()
+    app.state.engine = SimpleNamespace(
+        platform=SimpleNamespace(plugin_runtime=None), handle=handle, add_sink=lambda sink: None, remove_sink=lambda sink: None
+    )
+    async with Tab(app) as tab:
+        for n in range(5):
+            tab.send(text=json.dumps({"n": n}))
+        await asyncio.sleep(0.05)
+        assert started == [0, 1]
+        release.set()
+        async with asyncio.timeout(2):
+            while len(started) < 5:
+                await asyncio.sleep(0.01)
+    assert started == [0, 1, 2, 3, 4]
+
+
+async def test_a_text_frame_on_the_publish_socket_closes_it(monkeypatch) -> None:
+    """A recording is binary, and a frame that is not used to end the handler in a KeyError."""
+    received = bytearray()
+
+    def drain(source, url: str) -> None:
+        while chunk := source.read(1):
+            received.extend(chunk)
+
+    monkeypatch.setattr(app_module, "remux", drain)
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(plugin_runtime=None))
+    async with Tab(app, "/api/publish/cam") as camera:
+        camera.send(bytes=b"\x1a\x45")
+        camera.send(text="not a recording")
+        assert await camera.closed() == 1003
+    assert bytes(received) == b"\x1a\x45"
+
+
+async def test_the_two_sockets_take_no_handshake_without_an_origin(monkeypatch) -> None:
+    """Every browser names one, so a handshake without it is not a dashboard. An upload may still be a script's."""
+    async with named_hub(monkeypatch) as (app, client, _told):
+        app.state.engine.prints = SimpleNamespace(get=lambda print_id: None)
+        assert await handshake_answer(app, "/api/ws", {"host": "test"}) == "websocket.close"
+        assert await handshake_answer(app, "/api/publish/cam", {"host": "test"}) == "websocket.close"
+        assert (await client.post("/api/prints?filename=a.stl", content=b"solid")).status_code == 400
+
+
 async def test_a_rebinding_page_is_refused_whatever_it_asks_for(monkeypatch) -> None:
     """Its origin and host agree, so only knowing the host is not the hub's stops it."""
     rebound = {"host": "evil.example:8000", "origin": "http://evil.example:8000"}
@@ -222,12 +284,24 @@ async def test_event_queue_conflates_telemetry_without_dropping_ordered_events()
     queue.put({"event": "result", "monitor_id": "one", "score": 0.9})
     queue.put({"event": "result", "monitor_id": "two", "score": 0.4})
     queue.put({"event": "state", "req_id": 7, "version": "command"})
+    queue.put({"event": "state", "version": "newest"})
 
     assert await queue.get() == {"event": "warning", "message": "camera stalled"}
     assert await queue.get() == {"event": "state", "req_id": 7, "version": "command"}
-    assert await queue.get() == {"event": "state", "version": "new"}
+    assert await queue.get() == {"event": "state", "version": "newest"}
     assert await queue.get() == {"event": "result", "monitor_id": "one", "score": 0.9}
     assert await queue.get() == {"event": "result", "monitor_id": "two", "score": 0.4}
+
+
+async def test_a_tick_state_queued_before_a_commands_state_is_not_delivered_after_it() -> None:
+    queue = ConflatedEventQueue()
+    queue.put({"event": "state", "version": "before the command"})
+    queue.put({"event": "state", "req_id": 7, "version": "command"})
+    queue.put({"event": "warning", "message": "camera stalled"})
+
+    assert await queue.get() == {"event": "state", "req_id": 7, "version": "command"}
+    assert await queue.get() == {"event": "warning", "message": "camera stalled"}
+    assert queue._state is None and not queue._events
 
 
 async def test_hls_view_wakes_camera_before_proxying() -> None:
@@ -402,6 +476,37 @@ async def test_a_gating_plugin_can_refuse_a_request_but_never_its_own_routes() -
     assert health.status_code == 200, "readiness is never gated, so an uptime check still works"
 
 
+async def test_an_unknown_host_is_told_the_setting_before_a_gating_plugin_is_asked() -> None:
+    runtime = StubRuntime(verdict=False)
+    app = app_with(runtime)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        refused = await client.get("/", headers={"host": "hub.example.com"})
+
+    assert refused.status_code == 403 and "PRINTGUARD_ORIGINS=http://hub.example.com" in refused.text
+    assert not runtime.seen, "a plugin was handed a request for a name the hub does not answer to"
+
+
+async def test_a_plugin_route_stops_reading_a_body_at_its_limit(monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "PLUGIN_BODY_LIMIT", 16)
+    runtime = StubRuntime(answer={"body": "ok"})
+    app = app_with(runtime)
+    read = 0
+
+    async def endless():
+        nonlocal read
+        while True:
+            read += 8
+            yield b"x" * 8
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        async with asyncio.timeout(2):
+            response = await client.post("/plugins/accounts/login", content=endless())
+
+    assert response.status_code == 200 and runtime.seen[-1]["body"] == "x" * 16
+    assert read <= 32
+
+
 async def test_a_flood_of_made_up_cookies_cannot_grow_the_gate_cache(monkeypatch) -> None:
     monkeypatch.setattr(app_module, "GATE_CACHE_ENTRIES", 2)
     runtime = StubRuntime(verdict=True)
@@ -477,6 +582,85 @@ async def test_dashboard_upload_is_same_origin_and_feeds_the_viewer(tmp_path) ->
             assert image.status_code == 200 and image.content == b"BIG" and image.headers["content-type"] == "image/png"
             assert "immutable" in image.headers["cache-control"]
             assert (await client.get("/api/prints/nope/gcode")).status_code == 404
+    finally:
+        await engine.stop()
+
+
+async def test_the_viewer_unpacks_a_3mf_off_the_event_loop(tmp_path, monkeypatch) -> None:
+    from printguard.engine.registry import PrintFile, PrintRegistry
+    from printguard.server import prints
+    from printguard.server.platform import DiskFileStore
+
+    unpacked_on: list[threading.Thread] = []
+
+    def plate_gcode(data: bytes) -> tuple[str, bytes]:
+        unpacked_on.append(threading.current_thread())
+        return "Metadata/plate_1.gcode", data
+
+    monkeypatch.setattr(prints.gcode, "plate_gcode", plate_gcode)
+    library = PrintRegistry()
+    library.add(PrintFile(id="plate", name="Plate", filename="plate.3mf", ext="3mf", size=3, printer_ids=[], uploaded=0.0, meta={}))
+    (tmp_path / "plate.3mf").write_bytes(b"G28")
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(plugin_runtime=None, files=DiskFileStore(tmp_path)), prints=library)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/api/prints/plate/gcode")).content == b"G28"
+    assert unpacked_on and unpacked_on[0] is not threading.main_thread()
+
+
+async def test_an_upload_the_engine_never_finishes_adding_leaves_no_file(tmp_path, monkeypatch) -> None:
+    from fakes import FakePlatform
+    from test_gcode import PRUSA
+
+    from printguard.engine.engine import Engine
+    from printguard.server import prints
+    from printguard.server.platform import DiskFileStore
+
+    monkeypatch.setattr(prints, "ADD_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(prints.gcode, "inspect", lambda data, ext: time.sleep(0.3))
+    platform = FakePlatform()
+    platform.files = DiskFileStore(tmp_path)
+    engine = Engine(platform)
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            with pytest.raises(TimeoutError):
+                await client.post("/api/prints?filename=benchy.gcode", content=PRUSA, headers={"origin": "http://test"})
+        assert not engine.prints.values() and not list(tmp_path.iterdir())
+    finally:
+        await engine.stop()
+
+
+async def test_a_starting_hub_clears_the_files_no_print_or_review_names(tmp_path) -> None:
+    from fakes import FakePlatform
+    from test_gcode import PRUSA
+
+    from printguard.engine.engine import Engine
+    from printguard.engine.platform import as_chunks
+    from printguard.engine.reviews import frame_key
+    from printguard.server import prints
+    from printguard.server.platform import DiskFileStore
+
+    platform = FakePlatform()
+    platform.files = DiskFileStore(tmp_path)
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        record = await prints.receive_print(engine, prints.PrintUpload(filename="benchy.gcode"), as_chunks(PRUSA))
+        engine.reviews.restore([{"id": "r1", "monitor_id": "m1", "started": 0.0, "spacing_s": 5.0, "frames": [{"id": "f1"}]}])
+        kept = {record.file_key, record.thumbnail_key, frame_key("r1", "f1")}
+        for name in (frame_key("r1", "f1"), frame_key("r1", "gone"), "killed.gcode.part", "norecord.gcode", "norecord.thumb"):
+            (tmp_path / name).write_bytes(b"x")
+
+        await prints.sweep_orphans(engine, unnamed=False)
+        assert {path.name for path in tmp_path.iterdir()} == kept | {frame_key("r1", "gone"), "norecord.gcode", "norecord.thumb"}, (
+            "a damaged state file may yet be put back, and it may name these"
+        )
+        await prints.sweep_orphans(engine, unnamed=True)
+        assert {path.name for path in tmp_path.iterdir()} == kept
     finally:
         await engine.stop()
 

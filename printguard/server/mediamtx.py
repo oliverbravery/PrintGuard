@@ -9,7 +9,7 @@ import asyncio
 import logging
 import os
 import subprocess
-from typing import Any
+from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -38,7 +38,12 @@ def pull_source(url: str) -> str | None:
 
 
 class MediaMTX:
-    """Manages stream paths on a MediaMTX instance."""
+    """Manages stream paths on a MediaMTX instance.
+
+    A path added through the control API lives in the server's memory, so the
+    ones this hub added are remembered here and can be added again to a server
+    that restarted.
+    """
 
     def __init__(
         self, api_base: str, rtsp_base: str, client: httpx.AsyncClient, login: tuple[str, str] | None = None
@@ -56,6 +61,7 @@ class MediaMTX:
         self._rtsp = rtsp_base.rstrip("/")
         self._client = client
         self._login = login
+        self._pulled: dict[str, dict[str, Any]] = {}
 
     def rtsp_url(self, path: str) -> str:
         """Internal RTSP URL the server reads frames from."""
@@ -81,6 +87,10 @@ class MediaMTX:
         }
         if fingerprint:
             payload["sourceFingerprint"] = fingerprint
+        await self._add_path(name, payload)
+        self._pulled[name] = payload
+
+    async def _add_path(self, name: str, payload: dict[str, Any]) -> None:
         resp = await self._client.post(
             f"{self._api}/v3/config/paths/add/{name}", json=payload, auth=self._login, timeout=5.0
         )
@@ -92,7 +102,18 @@ class MediaMTX:
 
     async def remove_path(self, name: str) -> None:
         """Deletes a managed path, ignoring paths that no longer exist."""
+        self._pulled.pop(name, None)
         await self._client.delete(f"{self._api}/v3/config/paths/delete/{name}", auth=self._login, timeout=5.0)
+
+    async def restore_paths(self) -> None:
+        """Adds every pull path again, for a server that restarted and forgot them.
+
+        A camera that is being watched finds its way back by reconnecting, but
+        one asleep until its printer starts is only asked for by a viewer, and
+        the server would answer that it has no such path.
+        """
+        for name, payload in list(self._pulled.items()):
+            await self._add_path(name, payload)
 
 
 class EmbeddedMediaMTX:
@@ -114,7 +135,14 @@ class EmbeddedMediaMTX:
     its environment and never written to disk.
     """
 
-    def __init__(self, binary: str, config: str, api_base: str, api_login: tuple[str, str]) -> None:
+    def __init__(
+        self,
+        binary: str,
+        config: str,
+        api_base: str,
+        api_login: tuple[str, str],
+        restarted: Callable[[], Awaitable[None]],
+    ) -> None:
         """Prepares the server without starting it.
 
         Args:
@@ -122,6 +150,8 @@ class EmbeddedMediaMTX:
             config: The config file it starts with.
             api_base: Where its control API will listen.
             api_login: The user and password to grant the control API to.
+            restarted: Awaited each time a server started in place of one that
+                exited is accepting connections.
         """
         self._binary = binary
         self._config = config
@@ -133,6 +163,7 @@ class EmbeddedMediaMTX:
             f"{API_USER_ENV}_PASS": password,
             f"{API_USER_ENV}_PERMISSIONS_0_ACTION": "api",
         }
+        self._restarted = restarted
         self._process: asyncio.subprocess.Process | None = None
         self._supervisor: asyncio.Task[None] | None = None
         self._stopping = False
@@ -143,15 +174,28 @@ class EmbeddedMediaMTX:
     async def start(self) -> None:
         """Launches the server and waits until its control API accepts connections."""
         self._supervisor = asyncio.ensure_future(self._run())
+        await self._ready()
+
+    async def _ready(self) -> bool:
+        """Waits for the control API to accept connections, reporting whether it did in time."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + READY_TIMEOUT_S
         while loop.time() < deadline:
             if await self._listening():
-                return
+                return True
             await asyncio.sleep(0.2)
         logger.error("MediaMTX did not accept connections within %ss", READY_TIMEOUT_S)
+        return False
+
+    async def _restore(self) -> None:
+        try:
+            if await self._ready():
+                await self._restarted()
+        except Exception as exc:
+            logger.error("MediaMTX restarted and its camera paths could not be added again: %s", exc)
 
     async def _run(self) -> None:
+        replacement = False
         while not self._stopping:
             try:
                 self._process = await asyncio.create_subprocess_exec(
@@ -165,12 +209,18 @@ class EmbeddedMediaMTX:
                 await asyncio.sleep(RESTART_DELAY_S)
                 continue
             self._bind_lifetime(self._process.pid)
-            code = await self._process.wait()
+            restoring = asyncio.ensure_future(self._restore()) if replacement else None
+            try:
+                code = await self._process.wait()
+            finally:
+                if restoring is not None:
+                    restoring.cancel()
             self._release_lifetime()
             if self._stopping:
                 return
             logger.error("MediaMTX exited (code %s); restarting", code)
             await asyncio.sleep(RESTART_DELAY_S)
+            replacement = True
 
     def _bind_lifetime(self, pid: int) -> None:
         """Makes the server die with this hub, however this hub exits.

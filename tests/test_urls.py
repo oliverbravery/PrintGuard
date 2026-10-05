@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import ipaddress
+import json
+import shutil
+import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
@@ -88,6 +93,46 @@ def test_a_pattern_reaching_this_network_is_told_apart_from_one_that_does_not() 
 
     assert all(urls.reaches_local(pattern) for pattern in local)
     assert not any(urls.reaches_local(pattern) for pattern in public)
+
+
+@pytest.mark.parametrize("host", ["2130706433", "127.1", "0x7f.0.0.1", "017700000001", "192.168.257", "0xc0a80132"])
+def test_an_address_is_local_however_it_is_spelt(host: str) -> None:
+    assert urls.is_local_address(host)
+    assert urls.reaches_local(f"http://{host}/*"), "a plugin asked for this network under the public permission"
+
+
+@pytest.mark.parametrize("host", ["134744072", "8.8.2056", "0x8.8.8.8", "1.1.1.1.1", "example.com"])
+def test_an_oddly_spelt_public_address_is_not_local(host: str) -> None:
+    assert not urls.is_local_address(host)
+
+
+def edges() -> list[str]:
+    """Hosts either side of every boundary the address rules draw."""
+    constants = (ipaddress._IPv4Constants, ipaddress._IPv6Constants)
+    networks = [network for family in constants for network in (*family._private_networks, *family._private_networks_exceptions)]
+    networks.append(ipaddress._IPv4Constants._public_network)
+    hosts = ["2130706433", "127.1", "0x7f.0.0.1", "134744072", "1.1.1.1.1", "localhost", "octopi.local", "example.com", "local"]
+    for network in networks:
+        first, last = int(network.network_address), int(network.broadcast_address)
+        for number in {max(first - 1, 0), first, last, min(last + 1, 2**network.max_prefixlen - 1)}:
+            address = ipaddress.ip_address(number) if network.version == 4 else ipaddress.IPv6Address(number)
+            hosts.append(str(address) if network.version == 4 else f"[{address}]")
+            if network.version == 4:
+                hosts.append(f"[::ffff:{address}]")
+    return sorted(set(hosts))
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="the dashboard's copy of the rules runs on node")
+def test_the_dashboard_calls_local_exactly_what_the_engine_does() -> None:
+    """The consent sheet sorts a plugin's addresses with its own copy of the rules."""
+    hosts = edges()
+    script = "import('./src/urls.ts').then((urls) => console.log(JSON.stringify(JSON.parse(process.argv[1]).map(urls.isLocalAddress))))"
+    answered = subprocess.run(
+        ["node", "-e", script, json.dumps(hosts)], cwd=Path(__file__).resolve().parent.parent / "web", capture_output=True, text=True, check=True
+    )
+
+    dashboard = dict(zip(hosts, json.loads(answered.stdout)))
+    assert dashboard == {host: urls.is_local_address(host) for host in hosts}
 
 
 def test_a_public_name_pointing_at_a_private_address_counts_as_local(monkeypatch: pytest.MonkeyPatch) -> None:

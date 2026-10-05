@@ -27,6 +27,9 @@ the other three.
 | **This machine** | A camera plugged into the machine PrintGuard runs on | Yes |
 | **This browser** | The camera of the phone or laptop you have the dashboard open on | Only while that page stays open |
 
+A device or a stream URL registers once. Adding one that's already a camera, including a
+printer's own webcam, is refused.
+
 ## Printer cameras
 
 If a registered printer exposes a webcam, PrintGuard registers it as a camera for you, with no
@@ -48,7 +51,7 @@ runs on the frames it read, so a re-encode that fails costs the live view and no
 |---|---|
 | `rtsp://`, `rtsps://` | IP cameras and most NVRs |
 | `rtmp://` | Cameras and encoders that serve RTMP |
-| `http://`, `https://` | MJPEG, such as `…/webcam/?action=stream` from mjpg-streamer or Crowsnest |
+| `http://`, `https://` | MJPEG, such as `http://<host>/webcam/?action=stream` from mjpg-streamer or Crowsnest |
 | `whep://`, `wheps://` | WebRTC sources with a WHEP endpoint, such as go2rtc at `whep://<host>:1984/api/webrtc?src=<stream>` |
 
 Cameras with their own WebRTC signalling, including camera-streamer and Creality feeds, have no
@@ -65,7 +68,9 @@ The URL has to be one the hub can reach. In Docker, `localhost` is the container
 
 ## Cameras plugged into the hub
 
-The desktop app lists the computer's cameras under **This machine**, ready to add.
+The desktop app lists the computer's cameras under **This machine**, ready to add. On Windows
+two cameras of the same model are listed as `(1)` and `(2)` and can both be added. On macOS a
+camera is opened by its name, so only the first of two that share one can be used.
 
 In Docker a USB camera reaches the container only if you pass it in, and once you have, it
 registers itself. List the ones attached with `ls /dev/v4l/by-id/`, whose names still point at
@@ -95,8 +100,8 @@ missing at the time.
 
 A phone or an old laptop can be the camera. Open the dashboard on it, add **This browser** and
 leave the page open. It publishes to the hub over a WebSocket and reconnects after a hub
-restart, on that browser only. A browser that can only record VP8 can't be viewed from other
-devices. The desktop app's own window doesn't offer it, since **This machine** covers that
+restart, on that browser only. A browser that can only record VP8 is monitored but has
+no live view, since the dashboard's HLS player can't carry VP8. Chrome, Edge and Safari record H.264. The desktop app's own window doesn't offer it, since **This machine** covers that
 computer's cameras.
 
 > [!IMPORTANT]

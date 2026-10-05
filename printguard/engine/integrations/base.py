@@ -115,10 +115,14 @@ class IntegrationAdapter(Adapter):
         heater_control: Whether the service takes heater targets through
             ``heat()``. Every service reports the temperatures it has; this is
             about setting them, which is off by default.
+        slow_action_s: Seconds the service can hold an action or a heater
+            target before answering, on top of an ordinary request. A caller
+            waiting on a command gives it that much longer.
     """
 
     formats: tuple[str, ...] = ()
     heater_control: bool = False
+    slow_action_s: float = 0.0
 
     def meta(self) -> dict[str, Any]:
         """Serialises adapter metadata, with the formats it prints and whether it heats."""
@@ -194,6 +198,19 @@ class IntegrationAdapter(Adapter):
             RuntimeError: If the service rejects the file or the print.
         """
         raise RuntimeError(f"{self.label} cannot receive print files")
+
+    def connection_key(self, config: dict[str, Any]) -> Any:
+        """Identifies the persistent connection a configuration is served by.
+
+        Args:
+            config: User-supplied values matching the adapter schema.
+
+        Returns:
+            A value equal for two configurations that share one connection,
+            so closing either closes it for both. The default is the whole
+            configuration.
+        """
+        return config
 
     async def close(self, config: dict[str, Any] | None = None) -> None:
         """Releases persistent connections for one configuration or all configurations."""

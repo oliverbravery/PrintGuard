@@ -32,7 +32,8 @@ flowchart LR
 ```
 
 The score is the model's own confidence that the frame shows a failing print, so 0.5 is where it
-changes its mind. One bad frame does nothing. A defect has to hold for a run of frames before the
+changes its mind. It only ever approaches 1, and few frames of a real failure pass 0.95, which is
+why the threshold stops there. One bad frame does nothing. A defect has to hold for a run of frames before the
 monitor acts, and the cooldown keeps one failure from alerting twice.
 
 ## Monitor settings
@@ -44,10 +45,10 @@ Open a monitor from the dashboard to change these. They save as you move them.
 | Setting | Default | Range | What it does |
 |---|---|---|---|
 | **Watch this monitor** | On | | Turns the monitor off without deleting it |
-| **Alert threshold** | 0.75 | 0.05 to 1 | The score a frame has to reach to count as a defect |
-| **Consecutive detections to alert** | 3 | 1 to 15 | How many flagged frames in a row it takes to act |
+| **Alert threshold** | 0.75 | 0.05 to 0.95 | The score a frame has to reach to count as a defect |
+| **Consecutive detections to alert** | 3 | 1 to 30 | How many flagged frames in a row it takes to act |
 | **On sustained defect** | Alert only | | Alert only, pause the print or cancel the print. Without a linked printer the last two only alert |
-| **Cooldown (seconds)** | 60 | 0 to 600 | The quiet gap after acting before the monitor can act again. At 0 every further flagged frame acts |
+| **Cooldown (seconds)** | 60 | 0 to 600 | The quiet gap after acting before the monitor can act again. At 0 every further flagged frame acts. It ends when the print does, and a pause or cancel the printer didn't take is tried again after 30 seconds at most |
 | **Push notifications** | Off | | Sends this monitor's alerts and warnings to your [alert channels](notifications.md) |
 
 > [!IMPORTANT]
@@ -73,15 +74,16 @@ the frames the [API](api.md) returns.
 | Setting | Default | Range | What it does |
 |---|---|---|---|
 | **Rotation** | 0° | 0°, 90°, 180°, 270° | Sets a camera mounted sideways or upside down upright |
-| **Crop region** | The middle square | Any square | The part of the view the model watches |
+| **Crop region** | The middle square | Any square | The square of the view the model is given |
 | **Brightness** | 1 | 0.25 to 2 | Lifts a dim chamber or tames a bright one |
 | **Contrast** | 1 | 0.25 to 2 | Separates the print from a background of a similar shade |
-| **Sharpness** | 0 | 0 to 2 | Brings out strands on a soft camera |
-| **Detection rate** | 60 a second | 0.5 up to the camera's own frame rate | The most frames a second the model scores from this camera |
+| **Sharpness** | 0 | 0 to 2 | Brings out strands on a soft camera. The live view sharpens the picture at the size it's shown, so it looks stronger there than in the frame the model gets |
+| **Detection rate** | 60 a second | 0.5 up to the camera's own frame rate, or from 0.1 over the API | The most frames a second the model scores from this camera |
 
 The model only watches a square of each camera's view. Until you crop a camera that square is the
 middle of the frame, so on a wide camera the sides of the bed go unwatched. Crop it to a square
-the print fills. Rotation is applied first, so you draw the crop on the picture as you see it.
+the print fills, leaving a little room: the model trims a sixteenth off each edge of the square
+before it scores it. Rotation is applied first, so you draw the crop on the picture as you see it.
 
 Detection normally runs as often as the hardware and the camera allow. Lower **Detection rate**
 to cut the load PrintGuard puts on a shared host. A defect takes longer to confirm at a lower

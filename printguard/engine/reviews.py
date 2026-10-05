@@ -148,7 +148,7 @@ class ReviewLibrary:
         score = round(score, 4)
         review = self._running(monitor["id"])
         if review and not monitor.get("printer_id") and ts - review.started >= UNLINKED_PRINT_S:
-            review.ended, review.status, review = ts, "ready", None
+            review.ended, review.status, review = ts, "ready" if review.frames else "dismissed", None
         if review is None:
             review = await self._begin(monitor["id"], ts)
         spaced = review.of_kind("spaced")
@@ -183,7 +183,8 @@ class ReviewLibrary:
         failed, or the monitor is switched off. A pause is part of the same
         print, and a printer that cannot be read keeps the review running. So
         does a defect response still in flight, since the command that stops a
-        print is sent before the frame that fired it is kept.
+        print is sent before the frame that fired it is kept. A print with no
+        frames kept has nothing to review, so it never waits for one.
 
         Args:
             monitors: Every monitor record by id.
@@ -201,7 +202,7 @@ class ReviewLibrary:
             if monitor and monitor.get("enabled") and not (printer and printer.reported_status in ENDED_STATUSES):
                 continue
             review.ended = time.time()
-            review.status = "ready" if wanted else "dismissed"
+            review.status = "ready" if wanted and review.frames else "dismissed"
             ended = True
         return ended
 
@@ -269,11 +270,14 @@ class ReviewLibrary:
         return next((review for review in self._reviews.values() if review.monitor_id == monitor_id and review.ended is None), None)
 
     async def _begin(self, monitor_id: str, ts: float) -> Review:
-        """Opens a review, dropping the oldest finished ones to stay within the caps."""
+        """Opens a review, dropping the oldest finished ones to stay within the caps.
+
+        Prints still running are not counted, so a hub with many monitors keeps finished ones too.
+        """
         finished = sorted((review for review in self._reviews.values() if review.ended is not None), key=lambda review: review.started)
         review = Review(id=uuid.uuid4().hex[:12], monitor_id=monitor_id, started=ts, spacing_s=SPACED_START_S)
         self._reviews[review.id] = review
-        while finished and (len(self._reviews) > REVIEW_MAX or self._stored_bytes() > BYTES_MAX):
+        while finished and (len(finished) >= REVIEW_MAX or self._stored_bytes() > BYTES_MAX):
             await self._discard(finished.pop(0))
         return review
 
@@ -281,12 +285,16 @@ class ReviewLibrary:
         return sum(frame["size"] for review in self._reviews.values() for frame in review.frames)
 
     async def _keep(self, review: Review, frame: Frame, record: dict[str, Any]) -> None:
+        """Stores a frame, unless its review was deleted while the file was being written."""
         small = await asyncio.to_thread(vision.shrink, frame.rgb, SHORTEST_PX)
         jpeg = await self._platform.encode_jpeg(small)
         if not jpeg:
             return
         frame_id = uuid.uuid4().hex[:12]
         size = await self._platform.files.store(frame_key(review.id, frame_id), as_chunks(jpeg))
+        if self._reviews.get(review.id) is not review:
+            await self._platform.files.remove(frame_key(review.id, frame_id))
+            return
         review.frames.append({"id": frame_id, **record, "size": size})
 
     async def _drop(self, review: Review, frames: list[dict[str, Any]]) -> None:
@@ -296,5 +304,6 @@ class ReviewLibrary:
             await self._platform.files.remove(frame_key(review.id, frame["id"]))
 
     async def _discard(self, review: Review) -> None:
+        """Forgets a review before deleting its files, so two prints that begin together cannot both evict it."""
+        self._reviews.pop(review.id, None)
         await self._drop(review, list(review.frames))
-        del self._reviews[review.id]

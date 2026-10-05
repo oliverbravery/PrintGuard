@@ -47,7 +47,7 @@ flowchart LR
 monitors. The response is never cached and carries the installed version:
 
 ```json
-{"ok": true, "version": "2.5.1"}
+{"ok": true, "version": "X.Y.Z"}
 ```
 
 It returns `200 OK` only once the engine has started. Camera, printer and notifier health
@@ -67,7 +67,7 @@ Scopes are cumulative:
 | `manage` | Everything in `control`, plus adding, editing and removing cameras, printers, monitors and print files, changing settings, testing services and discovering cameras |
 
 Issue tokens from the **API** tab in Settings. Name a token, choose its scope and
-press **Generate**. The secret, a `pg_…` string, is only shown once:
+press **Generate**. The secret, a string starting `pg_`, is only shown once:
 
 ```http
 Authorization: Bearer pg_Zr8...agent
@@ -76,7 +76,7 @@ Authorization: Bearer pg_Zr8...agent
 | Token state | Behaviour |
 |---|---|
 | No tokens issued, the default | The surface is read-only and trusts whatever fronts it. Control and management stay closed |
-| Any token issued | A valid bearer is required for every request, and its scope decides what it reaches. MCP additionally **hides** tools a token cannot use. The schema at `/api/v1/docs` and `/api/v1/openapi.json` describes the API and holds nothing from your hub, so it stays open |
+| Any token issued | A valid bearer is required for every request, and its scope decides what it reaches. MCP additionally hides tools a token cannot use. The schema at `/api/v1/docs` and `/api/v1/openapi.json` describes the API and holds nothing from your hub, so it stays open |
 
 > [!IMPORTANT]
 > Only a hash is stored, so a lost token cannot be recovered. Revoke it and issue another.
@@ -88,11 +88,15 @@ Authorization: Bearer pg_Zr8...agent
 
 Base path `/api/v1`. JSON in and out, except the camera frame and alert snapshot, which are
 `image/jpeg`, the print file download, and the frame and print file you upload as a raw body.
-Adding or removing a camera, printer or monitor returns the collection, and every other change
-returns the one thing it changed. A rejected command is a `400`, a timeout a `504`, and a
-missing or under-scoped token a `401` or `403`. A body of the wrong shape is a `422`, which
-includes a number sent as `NaN` or `Infinity`. Adding a camera waits up to 40 seconds for
-its first frame. The interactive OpenAPI schema is served at `/api/v1/docs`.
+Adding or removing a camera, printer or monitor returns the collection, as do removing a print
+file and `/cameras/refresh-printers`. Every other change returns the one thing it changed, which
+for `/prints/{id}/start` is the printer. The two test routes return the engine's `printer_test`
+or `notify_test` event as it was sent, `event` and `req_id` included. A rejected command is a
+`400`, a timeout a `504`, and a missing or under-scoped token a `401` or `403`. An id nothing
+matches is a `404` on a read and a `400` on a change. A body of the wrong shape is a `422`, which
+includes a number sent as `NaN` or `Infinity`. Adding a camera or refreshing the printer cameras waits up to 40 seconds for
+a first frame. A printer action or heater target waits 15 seconds, and 105 on an Elegoo printer,
+since a Centauri Carbon 2 answers a resume only once it has reheated. The interactive OpenAPI schema is served at `/api/v1/docs`.
 
 A hub opened at a domain name answers `403` to every request, this API included, until that
 name is in [`PRINTGUARD_ORIGINS`](deployment.md#host-and-origin-checking).
@@ -111,8 +115,8 @@ name is in [`PRINTGUARD_ORIGINS`](deployment.md#host-and-origin-checking).
 | `GET` | `/printers/{id}` | One printer |
 | `GET` | `/cameras` | List cameras with rate, health and latest score |
 | `GET` | `/cameras/{id}` | One camera |
-| `GET` | `/cameras/{id}/frame` | Freshest frame as `image/jpeg` |
-| `POST` | `/classify` | Classify a supplied frame, body `image/jpeg`. No registered camera needed |
+| `GET` | `/cameras/{id}/frame` | Freshest frame as `image/jpeg`. `404` while the camera is on standby or offline, since it has no current frame |
+| `POST` | `/classify` | Classify a supplied frame, body `image/jpeg` of up to 32 MB. No registered camera needed |
 | `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
 | `GET` | `/prints/{id}` | One print file |
 | `GET` | `/prints/{id}/file` | Download a print file as the library keeps it |
@@ -240,7 +244,7 @@ Leave the port blank for `1883`, or `8883` with TLS.
 | State | Sensor reading `watching`, `idle`, `triggered` or `disabled` | Always |
 | Enabled | Switch | Always |
 | Snapshot | Camera, the frame from the latest defect | Always |
-| Printer | Sensor, the printer's status, with the job name | With a linked printer |
+| Printer | Sensor, the printer's status | With a linked printer |
 | Progress | Sensor, % | With a linked printer |
 | Pause, Resume, Cancel | Buttons | With a linked printer |
 | Nozzle, Bed | Temperature sensors, °C | Once the printer has reported that heater |
@@ -253,6 +257,10 @@ unavailable while the hub is stopped, the bridge is switched off or the connecti
 The base topic defaults to `printguard` and the discovery prefix to `homeassistant`. Change
 either in the same tab if your broker is shared. Give each hub its own base topic if you run two
 on one broker, or stopping one marks the other's entities unavailable too.
+
+Removing a monitor removes its device and clears its retained topics. One removed while the
+broker is unreachable is cleared when the bridge reconnects, as long as the hub hasn't restarted
+in between.
 
 An **Enabled** command is `on`, `true` or `1` to arm a monitor and `off`, `false` or `0` to
 disarm it. Anything else is ignored.
@@ -269,22 +277,24 @@ collection. A monitor binds one camera and optionally one printer by `camera_id`
 clears it from any monitor that referenced it.
 
 A print file is a third resource. It carries the printers it is tagged for as `printer_ids`,
-and removing a printer drops it from every file's tags. Its `meta` holds the slicer, `time_s`,
+and a removed printer stays in them, so a file tagged only for it starts nowhere until its tags are changed. Its `meta` holds the slicer, `time_s`,
 `filament_g`, `filament_mm` and `printer_model` read from the file, each `null` where the file
 did not say, and `thumbnail` is the media type of its preview or `null`.
 
 > [!NOTE]
 > Credentials are redacted from this surface. Any printer or notifier config field its
-> adapter marks secret, such as API keys, access codes and bot tokens, is stripped from
+> adapter marks secret, such as API keys, access codes, bot tokens and an ntfy topic URL, is stripped from
 > every REST and MCP response, and any address in a config or a camera source loses its
-> `user:pass@` and has its query values replaced with `[redacted]`. Only the dashboard's own
-> WebSocket, behind your proxy, receives them.
+> `user:pass@` and has its query values replaced with `[redacted]`, as is any part of its path
+> that is 16 or more letters and digits, which is where UniFi Protect puts a stream's key. A
+> notifier this version doesn't know is left out. Only the dashboard's own WebSocket, behind
+> your proxy, receives them.
 >
 > What a plugin has stored is left out of `/state` as well, whatever the token's scope.
 >
 > You can send a config back as you read it. A secret field you leave out or blank, and an
-> address you send back unchanged, keep the stored value. To clear an optional secret, remove
-> that notifier or printer and add it again.
+> address you send back unchanged, keep the stored value. To clear a secret such as the MQTT
+> password, send it as `null`.
 
 Every integration is normalised to one shape, so a printer reads and controls the same way
 regardless of its service:
@@ -305,10 +315,10 @@ The camera object, from `GET /cameras` and `GET /cameras/{id}`:
 
 ```jsonc
 {
-  "id": "cam_1a2b",
+  "id": "1a2b3c4d",
   "name": "Left printer",
   "source": { /* redacted of any access_code / credentials */ },
-  "printer_id": "prn_…" | null,
+  "printer_id": "9c41d7e0" | null,
   "declared": false,                                        // passed in by the deployment
   "max_fps": 5.0, "target_fps": 2.0, "achieved_fps": 1.9,   // rate
   "detect_fps": 60.0,                                       // cap on target_fps, set by the user
@@ -331,9 +341,9 @@ The monitor object, from `GET /monitors` and `GET /monitors/{id}`:
 
 ```jsonc
 {
-  "id": "mon_…",
-  "camera_id": "cam_1a2b",
-  "printer_id": "prn_…" | "",
+  "id": "5b20a6f3",
+  "camera_id": "1a2b3c4d",
+  "printer_id": "9c41d7e0" | "",
   "name": "Left printer", "enabled": true,
   "threshold": 0.6,            // defect score at/above which a frame counts as a failure
   "consecutive": 3, "cooldown_s": 60,

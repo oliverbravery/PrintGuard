@@ -165,6 +165,16 @@ async def test_a_compressed_answer_is_refused_while_it_inflates() -> None:
     )
 
 
+@pytest.mark.parametrize("encoding", ["br", "deflate", "zstd"])
+async def test_an_answer_in_an_encoding_nobody_asked_for_is_refused_rather_than_handed_over_undecoded(encoding: str) -> None:
+    hub = SimpleNamespace(
+        _client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, headers={"Content-Encoding": encoding}, stream=httpx.ByteStream(b"\x1b\x03"))))
+    )
+
+    with pytest.raises(RuntimeError, match=f"93.184.216.34 answered in {encoding}, which was not asked for"):
+        await ServerPlatform.http(hub, "GET", f"{API}/v1/feed", max_bytes=MAX_PLUGIN_BODY)
+
+
 async def test_a_socket_redirected_off_its_declared_address_is_refused() -> None:
     platform = FakePlatform()
     platform.open_socket = lambda url, arrived: ServerPlatform.open_socket(None, url, arrived)
@@ -279,6 +289,26 @@ async def test_only_localhost_itself_becomes_the_loopback_address() -> None:
 
     assert named["redirect_uri"] == ["http://localhost.lan:8000/oauth/callback"]
     assert loopback["redirect_uri"] == ["http://127.0.0.1:8000/oauth/callback"]
+
+
+async def test_an_authorize_address_with_a_query_of_its_own_keeps_it() -> None:
+    declared = manifest("oauth", oauth={"authorize_url": f"{API}/authorize?prompt=consent", "token_url": f"{API}/token"})
+    async with engine_with(FakePlatform(), declared) as engine:
+        query = await start_sign_in(engine)
+
+    assert query["prompt"] == ["consent"]
+    assert query["response_type"] == ["code"] and query["client_id"] == ["my-client"]
+
+
+@pytest.mark.parametrize("lifetime", ["soon", "nan", "inf", [3600]])
+async def test_a_token_lifetime_that_is_not_a_number_is_a_refused_sign_in(lifetime: object) -> None:
+    """The callback page answers a RuntimeError with its message, and anything else with a 500."""
+    platform = FakePlatform()
+    platform.responses[f"{API}/token"] = (200, {"access_token": "at-1", "expires_in": lifetime})
+    async with engine_with(platform, SIGNS_IN) as engine:
+        with pytest.raises(RuntimeError, match="Example answered with a sign-in that cannot be read"):
+            await engine.finish_sign_in((await start_sign_in(engine))["state"][0], "code-1")
+        assert oauth.ACCESS not in engine.plugins.get("demo").secrets
 
 
 async def test_a_sign_in_and_a_rotated_refresh_token_survive_a_restart() -> None:

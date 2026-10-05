@@ -27,7 +27,12 @@ MONITOR_DEFAULTS: dict[str, Any] = {
 
 STANDBY_STATUSES = ("idle", "paused", "error")
 
-_CLAMPS = {"threshold": (0.05, 1.0), "consecutive": (1, 30), "cooldown_s": (0, 600)}
+# A score only approaches 1, and of the failure frames the model was trained
+# on one in seven passes 0.95 and one in seventy 0.99, so a threshold above
+# this would switch a monitor off without saying so.
+THRESHOLD_MAX = 0.95
+
+_CLAMPS = {"threshold": (0.05, THRESHOLD_MAX), "consecutive": (1, 30), "cooldown_s": (0, 600)}
 
 
 def monitor_watching(monitor: dict[str, Any], printers: "PrinterRegistry") -> bool:

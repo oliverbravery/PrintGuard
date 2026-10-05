@@ -15,11 +15,12 @@ from __future__ import annotations
 import asyncio
 import socket
 import tempfile
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 import pycentauri
+from pycentauri.cc2 import CONTROL_TIMEOUT_S
 
 from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 from .klipper import KlipperAdapter
@@ -30,6 +31,13 @@ _PRINTING = {1, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 27, 28, 29}
 _PAUSED = {5, 6}
 _IDLE = {0, 7, 8, 9}
 _ERROR = {14}
+_CC2_JOB_STATES = {1, 2}
+"""The Centauri Carbon 2 machine states that say whether a job is running: idle and printing.
+
+Elegoo's SDK names the rest initialising, filament loading and unloading,
+levelling, PID calibration, resonance testing, self-checking and updating:
+https://github.com/ELEGOO-3D/elegoo-link/blob/main/src/lan/adapters/elegoo_fdm_cc2/elegoo_fdm_cc2_message_adapter.cpp
+"""
 _ACTIONS = {
     DeviceAction.PAUSE: "pause",
     DeviceAction.RESUME: "resume",
@@ -51,6 +59,7 @@ class ElegooAdapter(IntegrationAdapter):
     experimental = False
     formats = ("gcode",)
     heater_control = True
+    slow_action_s = CONTROL_TIMEOUT_S
     schema = {
         "type": "object",
         "properties": {
@@ -87,21 +96,22 @@ class ElegooAdapter(IntegrationAdapter):
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
         """Reads and normalises the active print state.
 
+        A Centauri Carbon 2 that is starting up, moving filament, levelling or
+        calibrating outside a job says nothing about one, so those read as
+        unknown and the last answer stands.
+
         Raises:
             RuntimeError: If a Centauri printer has reported nothing since the
                 last read, so an old state is never taken for the current one.
         """
         if self._family(config) == _MOONRAKER:
             return await self._moonraker.fetch_state(http, self._moonraker_config(config))
-        try:
-            printer = await self._connect_centauri(config)
-            status = await self._fresh_status(self._connection_key(config), printer)
-        except Exception:
-            await self.close(config)
-            raise
-        remaining = (status.raw.get("_cc2") or {}).get("remaining_time_sec")
+        async with self._centauri(config) as printer:
+            status = await self._fresh_status(self.connection_key(config), printer)
+        cc2 = status.raw.get("_cc2") or {}
+        remaining = cc2.get("remaining_time_sec")
         return DeviceState(
-            self._status(status.print_status),
+            self._status(status.print_status, cc2.get("machine_status")),
             float(status.progress or 0.0),
             status.filename or None,
             remaining_s=int(remaining) if remaining is not None else None,
@@ -114,24 +124,18 @@ class ElegooAdapter(IntegrationAdapter):
         if self._family(config) == _MOONRAKER:
             await self._moonraker.send(http, self._moonraker_config(config), action)
             return
-        try:
-            printer = await self._connect_centauri(config)
-            _require_ack(await getattr(printer, _ACTIONS[action])(), _ACTIONS[action])
-        except Exception:
-            await self.close(config)
-            raise
+        async with self._centauri(config) as printer:
+            answer = await getattr(printer, _ACTIONS[action])()
+        _require_ack(answer, _ACTIONS[action])
 
     async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
         """Sets a heater target, through Moonraker or pycentauri's set_temperatures."""
         if self._family(config) == _MOONRAKER:
             await self._moonraker.heat(http, self._moonraker_config(config), heater, target)
             return
-        try:
-            printer = await self._connect_centauri(config)
-            _require_ack(await printer.set_temperatures(**{heater: target}), f"the {heater} target")
-        except Exception:
-            await self.close(config)
-            raise
+        async with self._centauri(config) as printer:
+            answer = await printer.set_temperatures(**{heater: target})
+        _require_ack(answer, f"the {heater} target")
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
         """Uploads to the printer's internal storage and starts the print.
@@ -142,16 +146,13 @@ class ElegooAdapter(IntegrationAdapter):
         if self._family(config) == _MOONRAKER:
             await self._moonraker.print_file(http, self._moonraker_config(config), filename, data)
             return
-        try:
-            printer = await self._connect_centauri(config)
+        async with self._centauri(config) as printer:
             with tempfile.TemporaryDirectory() as folder:
                 path = Path(folder) / filename
                 await asyncio.to_thread(path.write_bytes, data)
                 remote = await printer.upload_file(path, remote_name=filename)
-            _require_ack(await printer.start_print(remote), f"to print {filename}")
-        except Exception:
-            await self.close(config)
-            raise
+            answer = await printer.start_print(remote)
+        _require_ack(answer, f"to print {filename}")
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Exposes the built-in Centauri camera or Moonraker webcams."""
@@ -171,7 +172,7 @@ class ElegooAdapter(IntegrationAdapter):
         if config is not None and config.get("family") != _CENTAURI:
             return
         keys = (
-            [self._connection_key(config)]
+            [self.connection_key(config)]
             if config is not None
             else list(self._connections.keys() | self._connection_locks.keys())
         )
@@ -188,8 +189,23 @@ class ElegooAdapter(IntegrationAdapter):
         if config is None:
             self._connection_locks.clear()
 
+    @asynccontextmanager
+    async def _centauri(self, config: dict[str, Any]) -> AsyncIterator[Any]:
+        """Yields the printer's connection and closes it when a call on it fails.
+
+        A target pycentauri refuses before sending anything is a ValueError,
+        which leaves the connection as it was.
+        """
+        try:
+            yield await self._connect_centauri(config)
+        except ValueError:
+            raise
+        except Exception:
+            await self.close(config)
+            raise
+
     async def _connect_centauri(self, config: dict[str, Any]) -> Any:
-        key = self._connection_key(config)
+        key = self.connection_key(config)
         printer = self._connections.get(key)
         if printer is not None and not printer._closed:
             return printer
@@ -238,7 +254,8 @@ class ElegooAdapter(IntegrationAdapter):
         printers = await pycentauri.discover(timeout=1.0, retries=2)
         return next((printer.mainboard_id for printer in printers if printer.host in addresses and printer.mainboard_id), None)
 
-    def _connection_key(self, config: dict[str, Any]) -> tuple[str, str]:
+    def connection_key(self, config: dict[str, Any]) -> tuple[str, str]:
+        """A Centauri connection is one host under one access code."""
         return str(config.get("host")), str(config.get("access_code") or "")
 
     def _family(self, config: dict[str, Any]) -> str:
@@ -253,7 +270,9 @@ class ElegooAdapter(IntegrationAdapter):
             "api_key": str(config.get("api_key") or ""),
         }
 
-    def _status(self, status: int | None) -> DeviceStatus:
+    def _status(self, status: int | None, machine_state: int | None) -> DeviceStatus:
+        if machine_state is not None and machine_state not in _CC2_JOB_STATES:
+            return DeviceStatus.UNKNOWN
         if status in _PRINTING:
             return DeviceStatus.PRINTING
         if status in _PAUSED:

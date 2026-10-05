@@ -141,11 +141,18 @@ def allowed(url: str, patterns: list[str]) -> bool:
 
 
 def is_local_address(host: str) -> bool:
-    """Whether a host literal is an address on the machine or its network."""
+    """Whether a host literal is an address on the machine or its network.
+
+    An IPv4 address is read in every spelling a resolver takes, so ``127.1``,
+    ``0x7f.0.0.1`` and ``2130706433`` are all the loopback address.
+    """
     try:
         address = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
-        return host in LOCAL_HOSTNAMES or host.endswith(LOCAL_SUFFIXES)
+        try:
+            address = ipaddress.ip_address(socket.inet_aton(host))
+        except OSError:
+            return host in LOCAL_HOSTNAMES or host.endswith(LOCAL_SUFFIXES)
     return not address.is_global or address.is_private or address.is_loopback
 
 

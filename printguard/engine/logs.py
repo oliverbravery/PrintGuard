@@ -4,7 +4,8 @@ Modules log through the stdlib as usual; entry points call ``setup`` (or
 ``setup_from_env`` where the environment configures deployment) exactly once.
 Every record then reaches stdout for ``docker logs``, a rotating file where no
 console exists (the desktop app), and a bounded in-memory tail that bug
-reports attach.
+reports attach. Each line loses every stored secret on its way out, whichever
+module logged it.
 """
 
 from __future__ import annotations
@@ -15,11 +16,38 @@ import os
 import sys
 from collections import deque
 from pathlib import Path
+from typing import Callable
 
 FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 TAIL_LINES = 400
 FILE_MAX_BYTES = 2_000_000
 FILE_BACKUPS = 2
+
+
+_scrub: Callable[[str], str] = str
+
+
+def scrub_with(scrub: Callable[[str], str]) -> None:
+    """Sets what removes stored secrets from every log line.
+
+    Args:
+        scrub: Returns the text it is given without any credential in it.
+    """
+    global _scrub
+    _scrub = scrub
+
+
+def describe(exc: BaseException) -> str:
+    """What an exception says, or its type when it says nothing, as a timeout does."""
+    return str(exc) or type(exc).__name__
+
+
+class ScrubbingFormatter(logging.Formatter):
+    """Formats a record and its traceback, then removes every stored secret."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Returns the finished line, scrubbed."""
+        return _scrub(super().format(record))
 
 
 class TailHandler(logging.Handler):
@@ -30,8 +58,11 @@ class TailHandler(logging.Handler):
         self.lines: deque[str] = deque(maxlen=capacity)
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Formats and retains one record."""
-        self.lines.append(self.format(record))
+        """Formats and retains one record, reporting one that cannot be formatted the way logging does."""
+        try:
+            self.lines.append(self.format(record))
+        except Exception:
+            self.handleError(record)
 
 
 tail = TailHandler()
@@ -54,14 +85,15 @@ def setup(level: str = "INFO", file: Path | None = None) -> None:
     replacing whatever was configured before so uvicorn's loggers propagate
     here too. httpx is capped at WARNING: its per-request INFO lines flood
     the tail, and they print full request URLs - which for Telegram embed
-    the bot token in the path - onto unscrubbed console logs.
+    the bot token in the path, which is only scrubbed once the engine has
+    loaded its settings.
     """
-    formatter = logging.Formatter(FORMAT)
+    formatter = ScrubbingFormatter(FORMAT)
     handlers: list[logging.Handler] = [tail]
     if sys.stdout is not None:
         handlers.append(logging.StreamHandler(sys.stdout))
     if file is not None:
-        handlers.append(logging.handlers.RotatingFileHandler(file, maxBytes=FILE_MAX_BYTES, backupCount=FILE_BACKUPS))
+        handlers.append(logging.handlers.RotatingFileHandler(file, maxBytes=FILE_MAX_BYTES, backupCount=FILE_BACKUPS, encoding="utf-8"))
     root = logging.getLogger()
     root.handlers.clear()
     for handler in handlers:

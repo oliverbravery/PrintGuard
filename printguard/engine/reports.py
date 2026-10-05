@@ -46,6 +46,10 @@ MESSAGE_MAX = 4096
 TIMEOUT_S = 20.0
 SOURCE_KEYS = ("kind", "path", "device_id", "label")
 MESSAGE_STANDALONE_BELOW = 8
+PATH_TOKEN = re.compile(r"[A-Za-z0-9]{16,}")
+"""A path segment long and unbroken enough to be a key rather than a name.
+UniFi Protect puts a stream's key there, and words such as ``videostream`` or
+``h264Preview_01_main`` are shorter or punctuated."""
 
 
 def envelope_endpoint(dsn: str) -> str:
@@ -61,8 +65,9 @@ def scrub_url(url: str) -> str:
         url: A camera, printer or notifier address as the user entered it.
 
     Returns:
-        The address without its ``user:pass@`` part and with every query value
-        replaced, since ``?user=admin&pwd=...`` is how many cameras take a login.
+        The address without its ``user:pass@`` part, with every query value
+        replaced, since ``?user=admin&pwd=...`` is how many cameras take a login,
+        and with each path segment that reads as a key replaced.
         An address that cannot be split is replaced whole, since nothing says
         where its credentials end.
     """
@@ -70,8 +75,9 @@ def scrub_url(url: str) -> str:
         parts = urlsplit(url)
     except ValueError:
         return REDACTED
+    path = "/".join(REDACTED if PATH_TOKEN.fullmatch(segment) else segment for segment in parts.path.split("/"))
     query = "&".join(f"{pair.partition('=')[0]}={REDACTED}" if "=" in pair else pair for pair in parts.query.split("&"))
-    return urlunsplit(parts._replace(netloc=parts.netloc.rpartition("@")[2], query=query))
+    return urlunsplit(parts._replace(netloc=parts.netloc.rpartition("@")[2], path=path, query=query))
 
 
 def url_secrets(url: str) -> set[str]:
@@ -81,15 +87,16 @@ def url_secrets(url: str) -> set[str]:
         url: A camera, printer or notifier address as the user entered it.
 
     Returns:
-        Its username and password, and each query value with its key, since a
-        value such as ``stream`` on its own is an ordinary word. An address that
-        cannot be split is a secret whole.
+        Its username and password, each path segment that reads as a key, and
+        each query value with its key, since a value such as ``stream`` on its
+        own is an ordinary word. An address that cannot be split is a secret whole.
     """
     try:
         parts = urlsplit(url)
     except ValueError:
         return {url}
     secrets = {part for part in (parts.username, parts.password) if part}
+    secrets |= {segment for segment in parts.path.split("/") if PATH_TOKEN.fullmatch(segment)}
     for pair in parts.query.split("&"):
         if pair.partition("=")[2]:
             secrets.add(pair)
@@ -287,9 +294,12 @@ def report_files(
 
     The diagnostics JSON and both log tails are scrubbed of every value in
     ``secrets``, since an error string inside any of them may embed a
-    credential the structural redaction cannot see.
+    credential the structural redaction cannot see. The diagnostics are also
+    scrubbed of each value as JSON writes it, which is how one holding a
+    quote, a backslash or a letter outside ASCII appears there.
     """
-    files = [("diagnostics.json", "application/json", scrub(json.dumps(diag, indent=2), secrets).encode())]
+    escaped = {json.dumps(secret)[1:-1] for secret in secrets}
+    files = [("diagnostics.json", "application/json", scrub(json.dumps(diag, indent=2), secrets | escaped).encode())]
     if logs.recent():
         files.append(("engine.log", "text/plain", scrub("\n".join(logs.recent()), secrets).encode()))
     if ui_logs:

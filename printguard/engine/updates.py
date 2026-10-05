@@ -17,6 +17,7 @@ from .adapters import HttpFn
 RELEASES_URL = "https://api.github.com/repos/{repo}/releases"
 HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 TIMEOUT_S = 15.0
+MAX_RELEASES_BYTES = 4 * 1024 * 1024
 
 
 async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None = None) -> dict[str, Any]:
@@ -40,7 +41,7 @@ async def fetch_updates(http: HttpFn, repo: str, current: str, asset: str | None
     Raises:
         RuntimeError: If GitHub does not return a releases list.
     """
-    status, body = await http("GET", RELEASES_URL.format(repo=repo), headers=HEADERS, timeout=TIMEOUT_S)
+    status, body = await http("GET", RELEASES_URL.format(repo=repo), headers=HEADERS, timeout=TIMEOUT_S, max_bytes=MAX_RELEASES_BYTES)
     if status != 200 or not isinstance(body, list):
         raise RuntimeError(f"GitHub returned {status}")
     published: list[tuple[Version, dict[str, Any]]] = []

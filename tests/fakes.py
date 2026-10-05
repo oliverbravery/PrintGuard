@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import numpy as np
 import websockets
 
-from printguard.engine.platform import Frame
+from printguard.engine.platform import Frame, Notice
 
 
 class FakeSource:
@@ -94,6 +94,7 @@ class FakeFileStore:
         return self.blobs[key]
 
     async def remove(self, key: str) -> None:
+        await asyncio.sleep(0)
         self.blobs.pop(key, None)
 
 
@@ -128,10 +129,15 @@ class FakePlatform:
         self.state: dict[str, Any] = {}
         self.inference_runtime = "auto"
         self.files = FakeFileStore()
+        self.notices: list[Notice] = []
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Records the selected inference runtime."""
         self.inference_runtime = settings["inference_runtime"]
+
+    def take_notices(self) -> list[Notice]:
+        notices, self.notices = self.notices, []
+        return notices
 
     async def infer(self, rgb: np.ndarray) -> dict[str, Any]:
         self.inference_started.set()

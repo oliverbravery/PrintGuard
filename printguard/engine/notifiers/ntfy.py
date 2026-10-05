@@ -2,6 +2,9 @@
 
 API reference: https://docs.ntfy.sh/publish/
 Subscribing on a phone (how alerts are received): https://docs.ntfy.sh/subscribe/phone/
+
+An open topic has no credential but its name, so whoever holds the topic URL
+can read and publish to it, and the URL is kept as a secret: https://docs.ntfy.sh/
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ class NtfyNotifier(NotifierAdapter):
                 "type": "string",
                 "format": "uri",
                 "title": "Topic URL",
+                "secret": True,
                 "placeholder": "https://ntfy.sh/my-printers",
             },
             "token": {"type": "string", "title": "Access token (optional)", "secret": True, "placeholder": "Leave blank for open topics"},

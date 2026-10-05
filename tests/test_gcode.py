@@ -270,6 +270,29 @@ def test_a_file_that_unpacks_past_the_cap_is_refused_before_it_is_unpacked(monke
         gcode.inspect(bomb, "bgcode")
 
 
+def test_binary_gcode_whose_blocks_inflate_past_the_cap_between_them_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gcode, "MAX_BLOCK_BYTES", 1024)
+    preview = block(5, struct.pack("<HHH", 0, 16, 16), b"\0" * 400, compression=1)
+    assert gcode.inspect(bgcode(preview, preview), "bgcode").thumbnail == b"\0" * 400
+    with pytest.raises(ValueError, match="inflates to more than"):
+        gcode.inspect(bgcode(preview, preview, preview), "bgcode")
+
+
+def test_a_number_too_large_to_be_one_is_refused() -> None:
+    huge = b"9" * 400
+    near_the_limit = b",".join([b"9" * 308] * 20)
+    for crafted in (
+        b"; filament used [g] = " + huge + b"\n",
+        b"; filament used [g] = " + near_the_limit + b"\n",
+        b"; filament used [mm] = " + huge + b"\n",
+        b";TIME:" + huge + b"\n",
+        b"M104 S" + huge + b"\n",
+        b"M140 S60\n; bed_temperature = " + huge + b"\n",
+    ):
+        with pytest.raises(ValueError, match="must be a finite number"):
+            gcode.inspect(crafted, "gcode")
+
+
 def test_temperatures_move_together_and_leave_probing_alone() -> None:
     assert gcode.inspect(PRUSA_HEATED, "gcode").meta.items() >= {"nozzle": 215.0, "bed": 60.0}.items()
     moved = gcode.retemper(PRUSA_HEATED, "gcode", {"nozzle": 230, "bed": 70})
@@ -290,6 +313,14 @@ def test_temperatures_move_together_and_leave_probing_alone() -> None:
         "; temperature = 225,225\n"
     ).encode()
     assert gcode.inspect(moved, "gcode").meta["nozzle"] == 230.0, "the config moves too, so the file reads back as it prints"
+
+
+def test_a_file_rewritten_a_piece_at_a_time_moves_what_it_would_whole(monkeypatch: pytest.MonkeyPatch) -> None:
+    whole = gcode.retemper(PRUSA_HEATED, "gcode", {"nozzle": 230, "bed": 70})
+    for piece in (1, 7, len(PRUSA_HEATED) - 1):
+        monkeypatch.setattr(gcode, "REWRITE_BYTES", piece)
+        assert gcode.retemper(PRUSA_HEATED, "gcode", {"nozzle": 230, "bed": 70}) == whole
+        assert gcode.retemper(PRUSA_HEATED.rstrip(b"\n"), "gcode", {"nozzle": 230, "bed": 70}) == whole.rstrip(b"\n")
 
 
 def test_without_a_slicer_config_the_first_set_point_leads_and_klipper_macros_move() -> None:

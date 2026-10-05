@@ -17,13 +17,20 @@ class ConflatedEventQueue:
         self._ready = asyncio.Event()
 
     def put(self, event: dict[str, Any]) -> None:
-        """Queues an event, conflating replaceable state and result updates."""
+        """Queues an event, conflating replaceable state and result updates.
+
+        A command's state is newer than a tick's state still waiting, so it
+        drops that one, which would otherwise be delivered after it and undo
+        the command on screen until the next tick.
+        """
         kind = event.get("event")
         if kind == "result":
             self._results[event["monitor_id"]] = event
         elif kind == "state" and event.get("req_id") is None:
             self._state = event
         else:
+            if kind == "state":
+                self._state = None
             self._events.append(event)
         self._ready.set()
 

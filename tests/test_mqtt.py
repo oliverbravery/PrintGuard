@@ -248,6 +248,39 @@ async def test_a_bridge_that_stops_tells_home_assistant_the_hub_is_offline(monke
         await engine.stop()
 
 
+async def test_a_removed_monitor_leaves_nothing_retained_even_when_the_bridge_was_off(monkeypatch) -> None:
+    config = {"enabled": True, "host": "broker"}
+    broker, engine, bridge = await _bridged(monkeypatch, config)
+
+    def retained(monitor_id: str) -> set[str]:
+        kept: dict[str, Any] = {}
+        for topic, payload, retain in broker.published:
+            if retain and monitor_id in topic:
+                kept[topic] = payload
+        return {topic for topic, payload in kept.items() if payload != ""}
+
+    try:
+        await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 10.0}})
+        for name in ("Left", "Right"):
+            await engine.handle({"cmd": "monitor.add", "monitor": {"name": name, "camera_id": next(iter(engine.cameras.items))}})
+        left, right = list(engine.monitors)
+        await _until(lambda: len(retained(left)) == 2 and len(retained(right)) == 2)
+
+        await engine.handle({"cmd": "monitor.remove", "id": right})
+        await _until(lambda: not retained(right))
+
+        config["enabled"] = False
+        engine.emit({"event": "state"})
+        await _until(lambda: broker.published[-1] == OFFLINE)
+        await engine.handle({"cmd": "monitor.remove", "id": left})
+        config["enabled"] = True
+        await _until(lambda: broker.published.count(ONLINE) == 2)
+        await _until(lambda: not retained(left))
+    finally:
+        await bridge.stop()
+        await engine.stop()
+
+
 async def test_a_bridge_survives_settings_it_cannot_use(monkeypatch) -> None:
     config: dict[str, Any] = {"enabled": True, "host": "broker", "port": "abc"}
     broker, engine, bridge = await _bridged(monkeypatch, config)

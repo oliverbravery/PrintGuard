@@ -15,19 +15,22 @@ import hashlib
 import io
 import re
 import struct
+import sys
 import zipfile
 import zlib
 from dataclasses import dataclass
 from typing import Any, Callable, Iterator
 
-from .bounds import HEATER_MAX
+from .bounds import HEATER_MAX, clamp
 
 HEAD_BYTES = 4 * 1024 * 1024
 TAIL_BYTES = 512 * 1024
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
 """How large one file inside a 3mf may unpack to, which is what an upload itself is capped at."""
 MAX_BLOCK_BYTES = 16 * 1024 * 1024
-"""How large one metadata or thumbnail block of binary gcode may inflate to."""
+"""How much the metadata and thumbnail blocks of one binary gcode file may inflate to between them."""
+REWRITE_BYTES = 1024 * 1024
+"""About how much text gcode is rewritten at a time, so memory and the interpreter lock are held a piece at a time."""
 PLATE_GCODE = re.compile(r"^Metadata/plate_(\d+)\.gcode$")
 PLATE_GCODE_NAME = "Metadata/plate_{plate}.gcode"
 PLATE_IMAGE = "Metadata/plate_{plate}.png"
@@ -146,14 +149,20 @@ def retemper(data: bytes, ext: str, targets: dict[str, float]) -> bytes:
     if ext == "3mf":
         return _replace_plate(data, lambda plate: retemper(plate, "gcode", targets))
     found = _scan(data)[0]
+    moves: dict[str, tuple[set[float] | None, float]] = {}
     for heater, target in targets.items():
         first, listed = _temperature(data, found, heater)
         if first is None:
             raise ValueError(f"this file never heats the {heater}")
         if target <= 0:
             raise ValueError(f"a print needs its {heater} above 0°C")
-        data = _shift(data, heater, listed, target - first)
-    return data
+        moves[heater] = (listed, target - first)
+    output = io.BytesIO()
+    for lines in _whole_lines(data):
+        for heater, (listed, delta) in moves.items():
+            lines = _shift(lines, heater, listed, delta)
+        output.write(lines)
+    return output.getvalue()
 
 
 def plate_gcode(data: bytes) -> tuple[int, bytes]:
@@ -282,13 +291,13 @@ def _temperature(data: bytes, found: dict[str, str], heater: str) -> tuple[float
         falls back to the first non-zero set-point.
     """
     reached = _setpoints(data[:HEAD_BYTES], heater)
-    listed = [temperatures for key in _TEMPERATURE_KEYS[heater] if any(temperatures := [float(value) for value in _NUMBER.findall(found.get(key, ""))])]
+    listed = [temperatures for key in _TEMPERATURE_KEYS[heater] if any(temperatures := [_number(value) for value in _NUMBER.findall(found.get(key, ""))])]
     if not listed:
         return next((value for value in reached if value), None), None
     first_layer = listed[0]
     heated = [filament for filament, degrees in enumerate(first_layer) if degrees]
     usage = next((used for key in _USAGE_KEYS if len(used := _NUMBER.findall(found.get(key, ""))) == len(first_layer)), [])
-    printing = [filament for filament in heated if usage and float(usage[filament])] or heated
+    printing = [filament for filament in heated if usage and _number(usage[filament])] or heated
     filament = next((printing[index] for value in reached for index, candidate in enumerate(printing) if first_layer[candidate] == value), printing[0])
     return first_layer[filament], {temperatures[filament] for temperatures in listed if filament < len(temperatures) and temperatures[filament]}
 
@@ -302,19 +311,35 @@ def _setpoints(data: bytes, heater: str) -> Iterator[float]:
     """
     commands = [(match.start(), match[2]) for match in _SETPOINT[heater].finditer(b"\n" + data)]
     macros = [(line.start() + param.start(), param[2]) for line in _MACRO.finditer(data) for param in _MACRO_PARAM[heater].finditer(line[0])]
-    return (float(value) for _, value in sorted(commands + macros))
+    return (_number(value) for _, value in sorted(commands + macros))
+
+
+def _whole_lines(data: bytes) -> Iterator[bytes]:
+    """Cuts text gcode into pieces of about ``REWRITE_BYTES``, each ending where a line does."""
+    start = 0
+    while start < len(data):
+        end = data.find(b"\n", start + REWRITE_BYTES) + 1 or len(data)
+        yield data[start:end]
+        start = end
 
 
 def _shift(data: bytes, heater: str, listed: set[float] | None, delta: float) -> bytes:
-    """Moves a heater's print temperatures by ``delta``, in its set-points and its config comments, up to the heater's maximum."""
+    """Moves a heater's print temperatures by ``delta``, in its set-points and its config comments, up to the heater's maximum.
+
+    Args:
+        data: Whole lines of text gcode.
+        heater: One of the keys of ``_TEMPERATURE_KEYS``.
+        listed: The print temperatures to move, or None for every non-zero one.
+        delta: How far to move them, in degrees Celsius.
+    """
 
     def moved(value: bytes) -> bytes:
         degrees = float(value)
         return b"%g" % max(0.0, min(HEATER_MAX[heater], degrees + delta)) if degrees and (listed is None or degrees in listed) else value
 
-    data = _SETPOINT[heater].sub(lambda match: match[1] + moved(match[2]), b"\n" + data)[1:]
+    data = _SETPOINT[heater].sub(lambda match: match[1] + moved(match[2]), b"\n" + data)
     data = _MACRO.sub(lambda line: _MACRO_PARAM[heater].sub(lambda param: param[1] + moved(param[2]), line[0]), data)
-    return _CONFIG[heater].sub(lambda match: match[1] + b",".join(moved(value) for value in match[2].split(b",")), data)
+    return _CONFIG[heater].sub(lambda match: match[1] + b",".join(moved(value) for value in match[2].split(b",")), data)[1:]
 
 
 def _binary(data: bytes) -> Sliced:
@@ -326,7 +351,7 @@ def _binary(data: bytes) -> Sliced:
 
     Raises:
         ValueError: If the file is not binary gcode, is cut short or damaged,
-            or a block inflates past the cap.
+            or its blocks inflate past the cap.
     """
     if data[:4] != BGCODE_MAGIC:
         raise ValueError("this is not a binary gcode file")
@@ -341,6 +366,7 @@ def _blocks(data: bytes) -> Sliced:
     offset = 10
     found: dict[str, str] = {}
     thumbnails: list[tuple[int, str, bytes]] = []
+    room = MAX_BLOCK_BYTES
     while offset + 8 <= len(data):
         kind, compression, size = struct.unpack_from("<HHI", data, offset)
         offset += 8
@@ -355,9 +381,10 @@ def _blocks(data: bytes) -> Sliced:
         offset += params + size + (4 if checksum else 0)
         if compression == _BGCODE_DEFLATE:
             inflater = zlib.decompressobj()
-            body = inflater.decompress(body, MAX_BLOCK_BYTES)
-            if inflater.unconsumed_tail:
-                raise ValueError(f"a block of this binary gcode inflates to more than {MAX_BLOCK_BYTES // 1024 // 1024} MB")
+            body = inflater.decompress(body, room + 1)
+            room -= len(body)
+            if room < 0:
+                raise ValueError(f"the metadata and previews of this binary gcode inflates to more than {MAX_BLOCK_BYTES // 1024 // 1024} MB")
         elif compression:
             continue
         if kind == _BGCODE_THUMBNAIL:
@@ -399,21 +426,31 @@ def _first(found: dict[str, str], keys: tuple[str, ...], parse: Callable[[str], 
     return None
 
 
+def _number(value: str | bytes | float) -> float:
+    """Reads a number a file wrote, or a total of them.
+
+    Raises:
+        ValueError: If it is too large to be one, which would not survive the
+            JSON a browser reads the library from.
+    """
+    return clamp("a number in this file", value, 0.0, sys.float_info.max)
+
+
 def _seconds(value: str) -> int | None:
     units = {"d": 86400, "h": 3600, "m": 60, "s": 1}
     parts = _DURATION.findall(value)
     if parts:
         return sum(int(amount) * units[unit] for amount, unit in parts)
-    return int(float(value)) if _NUMBER.fullmatch(value.strip()) else None
+    return int(_number(value)) if _NUMBER.fullmatch(value.strip()) else None
 
 
 def _grams(value: str) -> float | None:
     amounts = _NUMBER.findall(value)
-    return round(sum(float(amount) for amount in amounts), 2) if amounts else None
+    return round(_number(sum(float(amount) for amount in amounts)), 2) if amounts else None
 
 
 def _millimetres(value: str) -> float | None:
     scale = {None: 1.0, "mm": 1.0, "cm": 10.0, "m": 1000.0}
     amounts = _LENGTH.findall(value)
     total = sum(float(amount) * scale[unit or None] for amount, unit in amounts)
-    return round(total, 1) if amounts else None
+    return round(_number(total), 1) if amounts else None

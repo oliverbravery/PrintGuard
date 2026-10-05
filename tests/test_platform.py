@@ -39,6 +39,7 @@ from printguard.server.platform import (
     V4L2_CAP_VIDEO_CAPTURE,
     V4L2_OPEN_OPTIONS,
     AVSource,
+    DiskFileStore,
     ServerPlatform,
     _v4l2_card,
     _video_devices,
@@ -154,8 +155,14 @@ def test_windows_device_listing_ends_without_failing_the_hub(monkeypatch: pytest
     assert _video_devices() == []
 
 
-def test_windows_lists_its_cameras_by_name_and_leaves_out_microphones(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DirectShow reports cameras and microphones together, each under a name and a device path."""
+def test_windows_lists_its_cameras_by_device_path_and_leaves_out_microphones(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """DirectShow reports cameras and microphones together, each under a name and a device path.
+
+    What it reported is logged at debug, so one run on a PC shows whether the
+    listing matches what this expects of it.
+    """
     devices = [
         SimpleNamespace(name="@device_pnp_usb#vid_046d", description="HD Pro Webcam C920", media_types=["video"]),
         SimpleNamespace(name="@device_cm_wave", description="Microphone (HD Pro Webcam C920)", media_types=["audio"]),
@@ -164,8 +171,37 @@ def test_windows_lists_its_cameras_by_name_and_leaves_out_microphones(monkeypatc
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(av.device, "enumerate_input_devices", lambda name: asked.append(name) or devices)
 
-    assert _video_devices() == [("HD Pro Webcam C920", "HD Pro Webcam C920")]
+    with caplog.at_level(logging.DEBUG, logger="printguard.server.platform"):
+        assert _video_devices() == [("@device_pnp_usb#vid_046d", "HD Pro Webcam C920")]
     assert asked == ["dshow"]
+    assert "@device_cm_wave" in caplog.text and "HD Pro Webcam C920" in caplog.text
+
+
+def test_two_windows_cameras_of_one_model_are_two_devices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Listed by the name they share, the second vanished and would have opened the first anyway."""
+    devices = [
+        SimpleNamespace(name="@device_pnp_usb#vid_046d&mi_00#6", description="HD Pro Webcam C920", media_types=["video"]),
+        SimpleNamespace(name="@device_pnp_usb#vid_046d&mi_00#7", description="HD Pro Webcam C920", media_types=["video"]),
+    ]
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(av.device, "enumerate_input_devices", lambda name: devices)
+
+    assert _video_devices() == [
+        ("@device_pnp_usb#vid_046d&mi_00#6", "HD Pro Webcam C920 (1)"),
+        ("@device_pnp_usb#vid_046d&mi_00#7", "HD Pro Webcam C920 (2)"),
+    ]
+
+
+def test_macos_opens_a_camera_by_the_name_it_shows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AVFoundation's other name is a position in the list, which moves when a camera is plugged in."""
+    devices = [
+        SimpleNamespace(name="0", description="FaceTime HD Camera", media_types=["video"]),
+        SimpleNamespace(name="1", description="Capture screen 0", media_types=["video"]),
+    ]
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(av.device, "enumerate_input_devices", lambda name: devices)
+
+    assert _video_devices() == [("FaceTime HD Camera", "FaceTime HD Camera")]
 
 
 def test_provider_library_that_cannot_load_leaves_the_cpu(tmp_path: Path) -> None:
@@ -180,9 +216,11 @@ def test_provider_library_that_cannot_load_leaves_the_cpu(tmp_path: Path) -> Non
 
 @pytest.mark.parametrize(("runtime", "fault"), [("auto", "build"), ("onnx", "build"), ("onnx", "run")])
 async def test_an_accelerator_that_cannot_run_the_model_loses_to_the_cpu(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, runtime: str, fault: str
+    monkeypatch: pytest.MonkeyPatch, runtime: str, fault: str
 ) -> None:
     """A GPU that is offered but cannot compile or run the model must not stop the hub starting.
+
+    What was passed over is kept for the dashboard, whichever runtime wins.
 
     The setting that picked the runtime is only reachable from a running hub, so a
     start that fails here leaves editing the state file as the way back.
@@ -203,15 +241,14 @@ async def test_an_accelerator_that_cannot_run_the_model_loses_to_the_cpu(
     monkeypatch.setattr(ort.SessionOptions, "add_provider_for_devices", lambda *_: None)
     monkeypatch.setattr(ort, "InferenceSession", session)
 
-    with caplog.at_level(logging.WARNING, logger="printguard.server.inference"):
-        inference = Inference(Path("models"), runtime)
+    inference = Inference(Path("models"), runtime)
     embedding = await inference.run(np.zeros((1, 3, 224, 224), dtype=np.float32))
     inference.close()
 
     reason = "could not compile the model" if fault == "build" else "ran out of memory"
     assert inference.device in ("ONNX CPU", "LiteRT CPU" if runtime == "auto" else "ONNX CPU")
     assert embedding.shape == (1024,)
-    assert [record.getMessage() for record in caplog.records] == [f"Intel GPU cannot run the model and is skipped: the GPU {reason}"]
+    assert inference.skipped == [f"Intel GPU cannot run the model, so detection is not using it: the GPU {reason}"]
 
 
 def test_a_windows_provider_that_cannot_be_installed_is_left_out(
@@ -282,6 +319,23 @@ def test_the_state_file_is_readable_only_by_whoever_runs_the_hub(tmp_path) -> No
 
     assert oct((tmp_path / "state.json").stat().st_mode)[-3:] == "600"
     assert not (tmp_path / "state.tmp").exists(), "the temporary file was left behind"
+
+
+def test_the_state_file_is_never_readable_by_anyone_else_while_it_is_written(tmp_path, monkeypatch) -> None:
+    """The temporary file holds every secret from the first byte, not only once it is renamed.
+
+    One a killed hub left behind keeps the mode it had, so it is held to the
+    mode as well as created with it.
+    """
+    modes: list[str] = []
+    monkeypatch.setattr("printguard.server.platform.os.fsync", lambda descriptor: modes.append(oct((tmp_path / "state.tmp").stat().st_mode)[-3:]))
+    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
+    ServerPlatform.save_state(holder, {"printers": [{"config": {"password": "hunter2"}}]})
+    (tmp_path / "state.tmp").write_text("left by a hub that was killed")
+    (tmp_path / "state.tmp").chmod(0o644)
+    ServerPlatform.save_state(holder, {"printers": []})
+
+    assert modes == ["600", "600"]
 
 
 def test_the_state_file_reaches_the_disk_before_it_takes_the_name(tmp_path, monkeypatch) -> None:
@@ -367,6 +421,7 @@ class _MjpegPipe:
     """A healthy MJPEG camera read as a byte stream, as a Bambu A1's is."""
 
     opened = 0
+    frame_every_s = 0.03
 
     def __init__(self) -> None:
         type(self).opened += 1
@@ -382,7 +437,7 @@ class _MjpegPipe:
         if self._closed:
             return b""
         if not self._unread:
-            time.sleep(0.03)
+            time.sleep(self.frame_every_s)
             self._unread = self._jpeg
         out, self._unread = self._unread[:size], self._unread[size:]
         return out
@@ -409,23 +464,143 @@ async def test_a_live_view_that_cannot_publish_leaves_detection_running(
     monkeypatch.setattr(av, "open", spy)
     monkeypatch.setattr("printguard.server.platform.RECONNECT_DELAY_S", 0.3)
     monkeypatch.setattr(_MjpegPipe, "opened", 0)
+    reported: list[tuple[str, bool]] = []
 
-    with caplog.at_level(logging.WARNING, logger="printguard.server.platform"):
-        source = AVSource(_MjpegPipe, refusing)
-        try:
-            deadline = time.monotonic() + 15
-            while len(publishes) < 3 and time.monotonic() < deadline:
-                await asyncio.sleep(0.05)
-            online = source.online
-            frame = await source.grab()
-        finally:
-            source.close()
+    source = AVSource(_MjpegPipe, refusing, report=lambda message, recovered: reported.append((message, recovered)))
+    try:
+        deadline = time.monotonic() + 15
+        while len(publishes) < 3 and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        online = source.online
+        frame = await source.grab()
+    finally:
+        source.close()
 
     assert len(publishes) >= 3, "the publish was not tried again"
     assert _MjpegPipe.opened == 1, "retrying the publish restarted capture"
     assert online and frame is not None and frame.seq > 10
     assert source.last_error and source.last_error.startswith("live view unavailable: ")
-    assert len(caplog.records) == 1 and "detection carries on" in caplog.text
+    assert reported == [(f"{source.last_error}. Detection carries on without it", False)], "the dashboard is told once"
+
+
+async def test_a_camera_on_standby_hands_over_no_frame_from_before_it_stood_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("printguard.server.platform.DEMAND_IDLE_S", 0.1)
+    source = AVSource(_MjpegPipe)
+    try:
+        deadline = time.monotonic() + 15
+        while not source.online and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        watching = await source.grab()
+        source.set_monitoring(False)
+        while source.online and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        stood_down = await source.grab()
+    finally:
+        source.close()
+
+    assert watching is not None and source.standby
+    assert stood_down is None, "a frame from before the camera stood down was handed over as its current one"
+
+
+async def test_a_slow_byte_stream_camera_has_its_rate_measured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Bambu A1 sends about a frame a second, and the raw MJPEG demuxer calls every stream 25."""
+    monkeypatch.setattr("printguard.server.platform.MEASURE_WARMUP_S", 0.2)
+    monkeypatch.setattr("printguard.server.platform.FPS_SAMPLE_S", 1.0)
+    monkeypatch.setattr(_MjpegPipe, "frame_every_s", 0.2)
+
+    source = AVSource(_MjpegPipe)
+    try:
+        deadline = time.monotonic() + 15
+        while not source.online and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+        unmeasured = source.fps
+        while not source.fps and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+    finally:
+        source.close()
+
+    assert unmeasured == 0, "the demuxer's default was taken for the camera's rate"
+    assert 3 <= source.fps <= 6
+
+
+async def test_a_reader_that_cannot_be_stopped_is_not_joined_by_another(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A device that opens and never delivers a frame holds its thread inside a read nothing can interrupt.
+
+    Every re-attach used to start another beside it, each with a capture
+    session of its own.
+    """
+    release = threading.Event()
+    opened: list[int] = []
+
+    def stuck_stream(host: str, access_code: str) -> object:
+        opened.append(1)
+        release.wait()
+        raise OSError("gone")
+
+    monkeypatch.setattr("printguard.server.platform.open_bambu_jpeg_stream", stuck_stream)
+    monkeypatch.setattr("printguard.server.platform.OPEN_WAIT_S", 0.2)
+    monkeypatch.setattr("printguard.server.platform.READER_STOP_WAIT_S", 0.2)
+    platform = object.__new__(ServerPlatform)
+    platform.mediamtx = SimpleNamespace(rtsp_url=lambda path: f"rtsp://127.0.0.1:9/{path}")
+    platform._sources, platform._closing, platform._notices = {}, {}, []
+    camera = {"kind": "bambu", "host": "printer", "access_code": "code"}
+
+    try:
+        with pytest.raises(RuntimeError, match="no frames from camera cam1"):
+            await platform.open_camera("cam1", camera)
+        for _ in range(2):
+            with pytest.raises(RuntimeError, match="stopped answering and cannot be closed"):
+                await platform.open_camera("cam1", camera)
+        assert opened == [1]
+    finally:
+        release.set()
+    assert platform._closing["cam1"].stopped(5.0)
+    release.clear()
+    with pytest.raises(RuntimeError, match="no frames from camera cam1"):
+        await platform.open_camera("cam1", camera)
+    release.set()
+    assert opened == [1, 1], "a reader that ended still kept its camera from opening"
+
+
+async def test_a_camera_whose_address_can_no_longer_be_pulled_is_still_released() -> None:
+    """A printer can change its webcam to a WebRTC page with no WHEP, and removing that printer must not stop half way."""
+    removed: list[str] = []
+
+    async def remove_path(name: str) -> None:
+        removed.append(name)
+
+    platform = object.__new__(ServerPlatform)
+    platform.mediamtx = SimpleNamespace(remove_path=remove_path)
+    platform._sources, platform._closing = {}, {}
+
+    await platform.release_camera("cam1", {"kind": "url", "url": "http://pi/webcam/webrtc"})
+
+    assert removed == ["cam1"]
+
+
+async def test_an_upload_is_written_off_the_event_loop(tmp_path: Path) -> None:
+    """A sliced file can be hundreds of megabytes onto an SD card, and the loop also carries detection."""
+    loop_thread = threading.get_ident()
+    written_on: list[int] = []
+
+    class Recording(type(tmp_path)):
+        def open(self, *args: object, **kwargs: object) -> object:
+            handle = super().open(*args, **kwargs)
+            real_write = handle.write
+            handle.write = lambda chunk: written_on.append(threading.get_ident()) or real_write(chunk)
+            return handle
+
+    async def chunks() -> object:
+        yield b"G28\n"
+        yield b"G1 X10\n"
+
+    store = DiskFileStore(tmp_path)
+    plain_path = store.path
+    store.path = lambda key: Recording(plain_path(key))
+
+    assert await store.store("benchy.gcode", chunks()) == 11
+    assert (tmp_path / "benchy.gcode").read_bytes() == b"G28\nG1 X10\n"
+    assert written_on and loop_thread not in written_on
 
 
 def test_a_camera_without_mjpeg_is_opened_with_the_next_capture_options(monkeypatch: pytest.MonkeyPatch) -> None:

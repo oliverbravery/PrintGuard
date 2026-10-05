@@ -115,24 +115,26 @@ class PrusaAdapter(IntegrationAdapter):
         PrusaLink starts the job itself on ``Print-After-Upload``, and the
         storage is whichever the printer offers: the USB stick on a printer
         running PrusaLink itself, local storage on a Raspberry Pi running it.
+        One client asks for the storage and then uploads, so the digest
+        challenge the first request answers also signs the second and the
+        file is sent once.
+
+        Raises:
+            RuntimeError: If the printer has no storage to write to, or
+                refuses the listing or the file.
         """
-        storage = await self._storage(config)
-        await self._upload(config, f"/api/v1/files{storage}{filename}", _UPLOAD_HEADERS, data)
-
-    async def _storage(self, config: dict[str, Any]) -> str:
-        async with self._link(config) as link:
-            storages = await link.get_storage()
-        available = next((s["path"] for s in storages if s.get("available") and not s.get("read_only")), None)
-        if not available:
-            raise RuntimeError("Prusa printer has no storage to upload to")
-        return available if available.endswith("/") else f"{available}/"
-
-    async def _upload(self, config: dict[str, Any], path: str, headers: dict[str, str], data: bytes) -> None:
         auth = DigestAuthWorkaround(username=_USERNAME, password=str(config.get("password", "")))
-        async with httpx.AsyncClient(timeout=_UPLOAD_TIMEOUT_S) as client:
-            response = await client.put(f"{str(config['base_url']).rstrip('/')}{path}", content=data, headers=headers, auth=auth)
-        if response.status_code >= 400:
-            raise RuntimeError(f"PrusaLink rejected the file: HTTP {response.status_code}")
+        async with httpx.AsyncClient(base_url=str(config["base_url"]).rstrip("/"), auth=auth, timeout=_UPLOAD_TIMEOUT_S) as client:
+            listing = await client.get("/api/v1/storage", timeout=_TIMEOUT_S)
+            if listing.status_code >= 400:
+                raise RuntimeError(f"PrusaLink refused to list its storage: HTTP {listing.status_code}")
+            storages = listing.json()["storage_list"]
+            storage = next((s["path"] for s in storages if s.get("available") and not s.get("read_only")), None)
+            if not storage:
+                raise RuntimeError("Prusa printer has no storage to upload to")
+            stored = await client.put(f"/api/v1/files{storage.rstrip('/')}/{filename}", content=data, headers=_UPLOAD_HEADERS)
+        if stored.status_code >= 400:
+            raise RuntimeError(f"PrusaLink rejected the file: HTTP {stored.status_code}")
 
     async def _read(self, config: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         async with self._link(config) as link:
