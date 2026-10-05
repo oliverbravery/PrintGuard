@@ -387,7 +387,8 @@ def create_app() -> FastAPI:
         Each command runs as its own task, so a slow one such as registering a
         stream does not hold a pause from the same tab behind it. A command
         that never waits on anything still finishes before the next one starts,
-        which keeps an auto-saved update ahead of whatever the tab sends after it.
+        which keeps an auto-saved update ahead of whatever the tab sends after it,
+        and ahead of the tab closing, since a close read first would cancel it unrun.
         A tab with ``SOCKET_COMMANDS_IN_FLIGHT`` commands running is not read
         from until one finishes, so one socket cannot pile up tasks without end.
         """
@@ -421,6 +422,7 @@ def create_app() -> FastAPI:
                         slots.release()
                     else:
                         commands.create_task(engine.handle(command, queue.put)).add_done_callback(lambda _: slots.release())
+                        await asyncio.sleep(0)
 
         engine.add_sink(queue.put)
         tasks = [asyncio.ensure_future(pump()), asyncio.ensure_future(receive())]
