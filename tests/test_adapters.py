@@ -692,6 +692,28 @@ async def test_bambu_unacknowledged_command_raises(bambu_printers, monkeypatch) 
     await adapter.close()
 
 
+async def test_bambu_command_that_fails_is_never_left_for_the_connection_to_replay(bambu_printers, monkeypatch) -> None:
+    """paho resends a queued QoS 1 publish, so a pause reported as failed must lose its session."""
+    adapter = BambuAdapter()
+    await adapter.fetch_state(None, BAMBU_CONFIG)
+    monkeypatch.setattr(FakeBambuPrinter, "acknowledges", False)
+    with pytest.raises(RuntimeError, match="did not acknowledge pause"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    (failed,) = bambu_printers
+    assert not failed.connected, "the session holding an unacknowledged pause stayed open to resend it"
+
+    monkeypatch.setattr(FakeBambuPrinter, "acknowledges", True)
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    retried = bambu_printers[1]
+    assert _commands(failed).count("pause") == 1 and "pause" in _commands(retried), "the next command reused the dropped session"
+
+    retried.connected = False
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.RESUME)
+    assert "resume" not in _commands(retried), "a command was queued on a connection already lost"
+    assert "resume" in _commands(bambu_printers[2])
+    await adapter.close()
+
+
 async def test_bambu_command_the_printer_fails_raises(bambu_printers, monkeypatch) -> None:
     monkeypatch.setattr(FakeBambuPrinter, "verdict", {"result": "failed", "reason": "mqtt message verify failed", "err_code": 84033543})
     adapter = BambuAdapter()
