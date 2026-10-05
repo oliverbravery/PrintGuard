@@ -22,6 +22,7 @@ Discovery format: https://www.home-assistant.io/integrations/mqtt/#device-discov
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import secrets
@@ -370,7 +371,8 @@ class MqttBridge:
                 for task in done:
                     task.result()
             except (_Reconnect, asyncio.CancelledError):
-                await client.publish(status_topic(base), "offline", qos=1, retain=True)
+                with contextlib.suppress(aiomqtt.MqttError):
+                    await client.publish(status_topic(base), "offline", qos=1, retain=True)
                 raise
             finally:
                 self._engine.remove_sink(self._sink)

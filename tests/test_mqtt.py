@@ -288,3 +288,26 @@ async def test_two_hubs_on_one_broker_do_not_share_a_client_id(monkeypatch) -> N
         await first.stop()
         await second.stop()
         await engine.stop()
+
+
+
+async def test_a_bridge_stops_when_the_broker_has_already_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stop that waited on telling a dead broker the hub is offline would hold the whole shutdown up."""
+
+    class Gone(FakeBroker):
+        async def publish(self, topic: str, payload: Any, qos: int = 0, retain: bool = False) -> None:
+            if payload == "offline":
+                raise mqtt.aiomqtt.MqttError("broker gone")
+            await super().publish(topic, payload, qos, retain)
+
+    broker = Gone()
+    monkeypatch.setattr(mqtt.aiomqtt, "Client", broker.client)
+    engine = Engine(FakePlatform())
+    await engine.start()
+    bridge = mqtt.MqttBridge(engine, lambda: {"enabled": True, "host": "broker"})
+    bridge.start()
+    await _until(lambda: ONLINE in broker.published)
+    try:
+        await asyncio.wait_for(bridge.stop(), 2)
+    finally:
+        await engine.stop()
