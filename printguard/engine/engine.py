@@ -967,12 +967,13 @@ class Engine:
         config = message.get("config", {})
         try:
             state = await adapter.fetch_state(self.platform.http, config)
-            if not any(p.provider == message["provider"] and p.config == config for p in self.printers.values()):
-                await adapter.close(config)
             ok = state.status.value not in ("offline", "unknown")
             self.emit({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
         except Exception as exc:
             self.emit({"event": "printer_test", "ok": False, "status": None, "error": str(exc), "req_id": message.get("req_id")})
+        finally:
+            if not any(p.provider == message["provider"] and p.config == config for p in self.printers.values()):
+                await adapter.close(config)
 
     async def _cmd_print_add(self, message: dict[str, Any]) -> None:
         """Registers a sliced file the platform's store already holds.

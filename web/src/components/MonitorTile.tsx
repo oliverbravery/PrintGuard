@@ -77,7 +77,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
         ) : (
           <>
             <DeviceChip state={printer?.device_state ?? undefined} />
-            {!monitor.watching && <span className="chip">standby</span>}
+            {!monitor.watching && <span className="chip">{camera ? "standby" : "no camera"}</span>}
             {tools.map(({ plugin, node }) => (
               <span key={plugin.id} className="relative z-[3]">
                 <PluginNodeView plugin={plugin} node={node} />
