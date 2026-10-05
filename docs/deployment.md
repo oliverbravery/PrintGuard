@@ -2,7 +2,7 @@
 
 # Deploying a hub securely
 
-[Docs](README.md) · [Architecture](architecture.md) · [Printers & cameras](printers.md) · [Hardware](hardware.md) · **Deployment** · [API & MCP](api.md) · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Training frames](feedback.md) · [Hardware](hardware.md) · **Deployment** · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -18,6 +18,9 @@ your trusted network.
 - [Origin checking](#origin-checking)
 - [Plugins](#plugins)
 - [Hardening checklist](#hardening-checklist)
+- [What the hub reaches out to](#what-the-hub-reaches-out-to)
+- [Environment variables](#environment-variables)
+- [Your data and backups](#your-data-and-backups)
 - [Staying up to date](#staying-up-to-date)
 
 > [!CAUTION]
@@ -50,7 +53,10 @@ flowchart LR
 | `9997`, `8888` | Internal | Never. They bind to `127.0.0.1` inside the container |
 
 Cameras that PrintGuard pulls from, and printers it talks to, need no published ports at
-all.
+all. The compose file publishes `8000` and `8554`, so add `"1935:1935"` for an RTMP push.
+
+The desktop app listens on the same three ports on every interface of the computer it runs on,
+so the same rule applies to it on a network you don't trust.
 
 ## Choosing an approach
 
@@ -136,7 +142,8 @@ PrintGuard's own port to localhost so the proxy is the only way in.
 
 ## Origin checking
 
-The hub rejects any WebSocket whose `Origin` is not its own. This matters because an auth
+The hub rejects any WebSocket or print upload a browser sends from an `Origin` that is not its
+own. A request with no `Origin`, which is what a script sends, is let through. This matters because an auth
 proxy checks the session cookie, and the browser attaches that cookie to sockets opened by
 other sites too, so origin checking is what stops a logged-in user's unrelated tabs from
 driving the engine.
@@ -152,13 +159,14 @@ host, list your public origin:
 
 ## Plugins
 
-Plugins run in a sandbox with no network and no reach into your credentials, cameras or
-tokens. Two permissions still change what an exposed hub looks like:
+Plugins run in a sandbox and reach only what you grant them, which
+[permissions](plugins.md#permissions) lists. Two permissions change what an exposed hub looks
+like:
 
 | Permission | What it means for an exposed hub |
 |---|---|
 | **Serve its own pages** | The plugin answers requests under `/plugins/<id>/`. Those responses go out through your proxy like anything else, so whatever it serves is as exposed as the dashboard. It is served into a sandboxed origin, so it can never act as the dashboard |
-| **Authorise every request** | The plugin sees every request to the hub, headers included, and can refuse it. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out |
+| **Authorise every request** | The plugin sees every request to the hub except `/api/health` and its own pages, with its cookie and authorisation headers, and can refuse it. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out |
 
 To start the hub with every plugin switched off, add this and then remove the plugin:
 
@@ -188,15 +196,55 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 
 | Host | When |
 |---|---|
-| `api.github.com` | Once a day for the update check, and when you browse the plugin store |
+| `api.github.com` | Once a day for the update check, when you press **Check now**, and to resolve a plugin's commit when you install or update it |
+| `raw.githubusercontent.com` | The plugin catalogue and a plugin's files, when you browse the store or install one |
 | `*.ingest.de.sentry.io` | Only when you send a bug report |
 | `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
 | Your printers, cameras, notification services and MQTT broker | As you configure them |
+| The addresses a plugin's manifest lists | Only for a plugin you granted [the network](plugins.md#permissions) |
+
+## Environment variables
+
+Everything else is set from the dashboard. These are the ones a deployment sets.
+
+| Variable | Default | Does |
+|---|---|---|
+| `PRINTGUARD_ORIGINS` | Unset | Extra origins the hub accepts WebSockets and print uploads from, comma-separated. See [origin checking](#origin-checking) |
+| `PRINTGUARD_PLUGINS` | On | `off` starts the hub with every plugin switched off |
+| `PRINTGUARD_CAMERAS` | `auto` in the image | Anything else, such as `off`, leaves [cameras passed into the container](cameras.md#cameras-plugged-into-the-hub) to be added by hand |
+| `PORT` | `8000` | The port the hub listens on |
+| `DATA_DIR` | `/data` in the image | Where state and print files are kept |
+| `LOG_LEVEL` | `INFO` | `DEBUG` adds command traces and exception tracebacks |
+| `LOG_FILE` | Unset in the image | Also writes a rotating log file at this path. The desktop app sets it |
+| `NVIDIA_VISIBLE_DEVICES` | Every GPU | Picks one card on the [`latest-nvidia`](hardware.md#nvidia-gpu) image |
+
+## Your data and backups
+
+Everything PrintGuard keeps is in its data directory.
+
+| Path | Holds |
+|---|---|
+| `state.json` | Cameras, printers, monitors, settings, themes, layout, installed plugins and the record of each print's kept frames, with printer passwords, notifier keys, plugin credentials and API token hashes. Written readable only by the account running the hub |
+| `prints/` | The [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub) |
+
+| Install | Data directory |
+|---|---|
+| Docker | The `/data` volume |
+| macOS app | `~/Library/Application Support/PrintGuard` |
+| Windows app | `%LOCALAPPDATA%\PrintGuard\PrintGuard` |
+
+The desktop app also keeps `printguard.log` and its window's own storage there.
+
+To back up, copy that directory with the hub stopped. To move to another machine, put the copy
+in place before the first start. The risk chart and the alert log are held in memory and aren't
+part of it.
 
 ## Staying up to date
 
 The hub checks GitHub releases once a day and the header's version chip turns into an update
-badge. Open it to read the changelog for any release, then update:
+badge. Open it to read the changelog for any release, then update. The check sends nothing about
+you, and **Automatically check for updates** in the **Updates** tab in Settings turns the daily
+one off.
 
 ```bash
 docker compose pull && docker compose up -d --wait
