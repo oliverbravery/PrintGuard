@@ -28,6 +28,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   **Read the dashboard**.
 - A plugin's request doesn't follow redirects, and its sign-in endpoints must be https.
 - Bug report attachments are capped at 10 MB.
+- An update that changes where a plugin signs in signs it out and has to be accepted again.
 
 ### Fixed
 
@@ -70,6 +71,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A plugin that gates the hub and then fails refuses every request until you enable or remove it,
   where it used to leave the hub open.
 - A plugin sign-in survives a restart straight after connecting.
+- A flood of requests can no longer disable a healthy gate plugin and lock you out.
+- A USB camera missing when the container starts stays under **Cameras** as offline and keeps its
+  name, crop and tuning. Remove it there if it's gone for good.
 - Home Assistant shows the hub as unavailable after it stops, the MQTT bridge recovers from a bad
   setting, two hubs can share a broker and an unrecognised payload no longer disables a monitor.
 - A damaged `state.json` is kept as `state.json.corrupt`, where it used to be overwritten with an
