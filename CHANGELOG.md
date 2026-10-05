@@ -26,9 +26,12 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   before updating. [Host and origin checking](docs/deployment.md#host-and-origin-checking).
 - Live scores, alerts, warnings, printer status and errors only reach a plugin granted
   **Read the dashboard**.
-- A plugin's request doesn't follow redirects, and its sign-in endpoints must be https.
+- A plugin's request or WebSocket doesn't follow redirects, and its sign-in endpoints must be
+  https.
+- A plugin's `panel.html` can't use inline handlers such as `onclick="..."`.
 - Bug report attachments are capped at 10 MB.
 - An update that changes where a plugin signs in signs it out and has to be accepted again.
+- A printer can't be registered with a required field left blank.
 
 ### Fixed
 
@@ -91,6 +94,17 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - Clicking the defect banner on a tile opens the monitor, and a tile whose camera is offline no
   longer shows its last inference rate and risk as current.
 - Reviewed frames interrupted by a restart are sent afterwards.
+- A camera that stays connected while its feed is frozen or the model keeps failing on it is
+  reported as stalled after the fault grace period. The warning used to never be sent.
+- A pause, heater target, print start or notification sent to an address that redirects with a
+  301 or 302 is reported as failed and names the address to register. It used to be reported as
+  done and never arrive.
+- A web page open in a browser on the same computer as the desktop app can no longer read your
+  camera addresses and passwords, or run a command, through the video server's control port.
+- A hub plugin that returns a malformed answer is switched off and reported, where it could stop
+  every plugin's timer until a restart.
+- A dashboard plugin without the network permission can no longer send what it reads to another
+  server by navigating its own frame or over WebRTC.
 
 ## [2.5.0] - 2026-09-21
 
