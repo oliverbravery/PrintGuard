@@ -349,7 +349,7 @@ async def test_a_monitor_whose_camera_is_gone_warns_and_gets_it_back(monkeypatch
     monitor_id = next(iter(engine.monitors))
     await engine.stop()
 
-    platform.devices = []
+    platform.devices = [{**device, "declared": False}]
     engine = Engine(platform)
     events: list[dict] = []
     await engine.start()
@@ -360,7 +360,7 @@ async def test_a_monitor_whose_camera_is_gone_warns_and_gets_it_back(monkeypatch
     await engine.stop()
     assert unwatched["enabled"] and not unwatched["watching"], "a monitor with no camera does not read as watching"
     assert any("has no camera" in event["message"] for event in _of(events, "warning")) and _pushes(platform)
-    assert platform.state["monitors"][0]["camera_id"] == camera_id, "the binding outlives the boot the device was missing from"
+    assert platform.state["monitors"][0]["camera_id"] == camera_id, "the binding outlives the boot the device was not declared at"
 
     platform.devices = [device]
     engine = Engine(platform)
@@ -1078,11 +1078,62 @@ async def test_declared_camera_registers_is_managed_and_follows_the_deployment()
     assert [(c.id, c.name) for c in restarted.cameras.values()] == [(camera.id, "Nozzle")], "the camera was not restored to its name"
     await restarted.stop()
 
-    platform.devices = []
+    platform.devices = [{**platform.devices[0], "declared": False}]
     undeclared = Engine(platform)
     await undeclared.start()
-    assert not undeclared.cameras.values(), "the camera stayed registered after the deployment stopped passing it in"
+    assert not undeclared.cameras.values(), "the camera stayed registered after the deployment stopped declaring it"
     await undeclared.stop()
+
+
+async def test_a_declared_camera_missing_at_boot_stays_offline_and_comes_back_as_it_was(monkeypatch) -> None:
+    """A device unplugged for one boot must not cost the camera its name and tuning."""
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.05)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    device = {"kind": "device", "device_id": "/dev/nozzle-cam", "label": "HD Pro Webcam C920", "declared": True}
+    tuning = {"name": "Nozzle", "rotation": 180, "brightness": 1.4, "detect_fps": 2.0}
+    platform = FakePlatform(infer_s=0.02)
+    platform.devices = [device]
+    engine = Engine(platform)
+    await engine.start()
+    camera_id = engine.cameras.values()[0].id
+    await engine.handle({"cmd": "camera.update", "id": camera_id, "patch": tuning})
+    tuned = {key: engine.state_event()["cameras"][0][key] for key in tuning}
+    await engine.handle({"cmd": "settings.update", "patch": {"fault_grace_s": 0.1}})
+    await engine.handle({"cmd": "monitor.add", "monitor": {"name": "m", "camera_id": camera_id}})
+    await engine.stop()
+    assert tuned == tuning
+
+    platform.devices = []
+    engine = Engine(platform)
+    events: list[dict] = []
+    await engine.start()
+    engine.add_sink(events.append)
+    await asyncio.sleep(0.5)
+    missing = engine.state_event()["cameras"]
+    await engine.stop()
+    assert [(c["id"], c["online"]) for c in missing] == [(camera_id, False)], "a camera missing at boot was not kept, offline"
+    assert any("'Nozzle' is offline" in event["message"] for event in _of(events, "warning")), "nobody was told the monitor is unwatched"
+
+    platform.devices = [device]
+    engine = Engine(platform)
+    events = []
+    await engine.start()
+    engine.add_sink(events.append)
+    await asyncio.sleep(0.5)
+    returned = engine.state_event()
+    await engine.handle({"cmd": "camera.remove", "id": camera_id, "req_id": 3})
+    await engine.stop()
+    assert {key: returned["cameras"][0][key] for key in tuning} == tuning, "the camera came back without its name and tuning"
+    assert returned["cameras"][0]["declared"] and returned["monitors"][0]["watching"] and _of(events, "result")
+    assert any(e.get("req_id") == 3 for e in _of(events, "error")), "a camera the deployment passes in was removed on its own"
+
+    platform.devices = []
+    engine = Engine(platform)
+    await engine.start()
+    await engine.handle({"cmd": "camera.remove", "id": camera_id})
+    gone = engine.state_event()
+    await engine.stop()
+    assert gone["cameras"] == [] and gone["monitors"][0]["camera_id"] == "", "a camera that is gone for good could not be removed"
 
 
 async def test_discovery_hides_registered_devices() -> None:

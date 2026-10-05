@@ -794,17 +794,30 @@ class Engine:
         Runs at boot, which is as often as the set can change: a container is
         given its devices when it starts. A declared device registers under a
         deterministic id, so a restart returns the camera to the name and tuning
-        it was given, and dropping it from the deployment is what removes it.
+        it was given.
+
+        A device missing at one boot is often only unplugged, so its camera
+        stays registered and offline, and is declared again when the device
+        returns. Until then it is the user's to remove. A device that is still
+        there but no longer declared is one the deployment stopped managing,
+        and its camera goes.
         """
-        declared = {
+        devices = {
             declared_camera_id(source["device_id"]): source
             for source in await self.platform.discover_cameras()
-            if source.get("declared")
+            if source["kind"] == "device"
         }
-        for camera in [c for c in self.cameras.values() if c.declared and c.id not in declared]:
-            await self._drop_camera(camera.id)
-        for camera_id, source in declared.items():
-            if self.cameras.get(camera_id):
+        for camera in [c for c in self.cameras.values() if c.declared]:
+            if camera.id not in devices:
+                camera.declared = False
+            elif not devices[camera.id].get("declared"):
+                await self._drop_camera(camera.id)
+        for camera_id, source in devices.items():
+            if not source.get("declared"):
+                continue
+            known = self.cameras.get(camera_id)
+            if known:
+                known.declared = True
                 continue
             camera = Camera(
                 id=camera_id,

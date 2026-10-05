@@ -246,8 +246,13 @@ A deployment can declare video devices the same way. The Docker image sets
 `PRINTGUARD_CAMERAS=auto`, so every capture device passed into the container comes back from
 `discover_cameras()` marked `declared`, and the engine reconciles those into the registry at
 boot under a deterministic id through `Camera.declared`. A declared camera keeps the name and
-tuning it was given across restarts, cannot be removed on its own, and goes when the
-deployment stops passing it in.
+tuning it was given across restarts and cannot be removed on its own.
+
+| Device at boot | Its camera |
+|---|---|
+| Listed and declared | Registered, or marked `declared` again if it was already there |
+| Listed, no longer declared | Dropped |
+| Not listed | Kept, offline and no longer `declared`, so `camera.remove` works on it |
 
 A monitor keeps its `camera_id` when a declared or printer-owned camera is dropped, so it
 watches again when the camera returns under the same id. Only `camera.remove` and
