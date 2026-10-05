@@ -20,18 +20,28 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Changed
 
-- The hub only answers to IP addresses, `localhost`, local names such as `printguard.local` and
-  the addresses in `PRINTGUARD_ORIGINS`, which stops a DNS rebinding page reaching it. If you open
-  PrintGuard at a domain, through a tunnel or a proxy, add that address to `PRINTGUARD_ORIGINS`
-  before updating. [Host and origin checking](docs/deployment.md#host-and-origin-checking).
+- The hub only answers to IP addresses, `localhost`, names with no dot, names ending `.local`,
+  `.lan`, `.home`, `.internal` or `.localhost`, and the addresses in `PRINTGUARD_ORIGINS`, which
+  stops a DNS rebinding page reaching it. If you open PrintGuard at any other name, such as a
+  domain, a Tailscale `ts.net` name or `printguard.fritz.box`, add it to `PRINTGUARD_ORIGINS`
+  with its `http://` or `https://` before updating. The API and MCP server are held to the same
+  rule. [Host and origin checking](docs/deployment.md#host-and-origin-checking).
 - Live scores, alerts, warnings, printer status and errors only reach a plugin granted
   **Read the dashboard**.
 - A plugin's request or WebSocket doesn't follow redirects, and its sign-in endpoints must be
-  https.
+  https. An installed plugin that signs in over plain http is removed when the hub starts.
 - A plugin's `panel.html` can't use inline handlers such as `onclick="..."`.
 - Bug report attachments are capped at 10 MB.
 - An update that changes where a plugin signs in signs it out and has to be accepted again.
 - A printer can't be registered with a required field left blank.
+- A plugin's README is shown as Markdown only, so it can't put forms, audio, video or its own
+  styling on the plugin's page.
+- An answer to a plugin's request over 256 KB fails the request, where text used to be cut short.
+  A plugin that's switched off can't make requests.
+- A plugin zip or repository with more than 12 MB of files is refused before it's unpacked.
+- `/api/v1/state` and the MCP server no longer return what a plugin has stored.
+- The test alert carries a picture, so a channel that can't take one shows up at setup.
+- Sliced files over 32 MB upload without the 3D toolpath or a drawn preview.
 
 ### Fixed
 
@@ -105,6 +115,43 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   every plugin's timer until a restart.
 - A dashboard plugin without the network permission can no longer send what it reads to another
   server by navigating its own frame or over WebRTC.
+- A slow or rate-capped camera no longer holds the cameras beside it to a few detections a
+  second.
+- A camera warned about as unreliable is no longer announced as steady again while it's offline.
+- A USB, MJPEG or Bambu A1 or P1 camera keeps detecting when its live view can't start, such as
+  with another program on port 8554 beside the desktop app. It used to read as offline.
+- A Linux webcam with no MJPEG format opens with its other formats.
+- A GPU or NPU that's offered but can't run the model is skipped for the CPU with a warning in
+  the log, where PrintGuard used to fail to start.
+- A Bambu printer can start a print from the library after a cancelled or failed job.
+- A defect alert reaches a self-hosted ntfy server with attachments switched off. It's sent as
+  text and the dashboard says the picture was refused.
+- A file sliced with several filaments shows the temperature of the one its first layer prints
+  with, and changing it moves only that filament.
+- A heater target, threshold or camera setting sent as NaN or Infinity over the API is refused.
+  NaN used to be read as the top of the range, so a nozzle target of NaN heated to 350°C.
+- An API key, notifier token or plugin secret saved with a trailing space or newline is no longer
+  quoted in the error it causes.
+- A pause no longer waits behind a slow command, such as registering a stream, sent from the
+  same tab.
+- A web page on another origin can no longer read a camera stream through the hub.
+- An MQTT broker that's down raises one warning, not one every 5 seconds, so alerts stay in the
+  recent events.
+- A camera, printer or notifier address with a stray square bracket is refused when you save it,
+  and one already saved no longer stops a bug report sending.
+- A plugin address pattern with a capital letter in its path, such as Telegram's
+  `/bot*/sendMessage`, matches. Reinstall the plugin to pick it up.
+- A plugin address pattern with many wildcards can't stall the hub.
+- A plugin's WebSocket closes when the plugin is switched off, removed, stopped for failing or
+  loses its network permission.
+- A plugin whose README contains an SVG link no longer blanks the dashboard.
+- Deleting a monitor from its panel no longer leaves the other tiles on "starting stream".
+- The history sheet no longer asks the hub for the whole history on every result.
+- A button pressed while the dashboard is reconnecting says the command wasn't sent, and the
+  dashboard reconnects on its own when its connection has died without closing.
+- A camera floated with picture in picture keeps playing when you switch tabs or open a dialog.
+- A sliced file your browser can't draw a preview for uploads without one.
+- Links in the release notes under **Updates** open on GitHub.
 
 ## [2.5.0] - 2026-09-21
 
