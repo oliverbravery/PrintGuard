@@ -2,7 +2,7 @@
 
 # Plugins
 
-[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · **Plugins** · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Training frames](feedback.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · **Plugins** · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -59,8 +59,8 @@ The Plugins tab in Settings lists what you have installed and what the catalogue
 
 Every installed plugin has the same page, opened from its card.
 
-The catalogue is filtered by where your hub runs, so a plugin that names other platforms is out
-of the way.
+The catalogue is filtered by where your hub runs, and an install from a repository or a zip is
+refused if the plugin names other platforms.
 
 ## Verified and third party
 
@@ -90,8 +90,8 @@ you see its whole reach before it runs.
 
 ## Updates
 
-A repository install pins the commit it resolved to. **Update** re-resolves the branch and
-re-checks the hashes.
+A repository install pins the commit it resolved to. **Update** re-resolves the branch it was
+installed from, or the default branch if it had none, and re-checks the hashes.
 
 An update that asks for more stands the plugin down until you accept the wider list. More means
 a permission, an address or another plugin it calls.

@@ -2,7 +2,7 @@
 
 # Deploying a hub securely
 
-[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Hardware](hardware.md) · **Deployment** · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Training frames](feedback.md) · [Hardware](hardware.md) · **Deployment** · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -18,6 +18,7 @@ your trusted network.
 - [Origin checking](#origin-checking)
 - [Plugins](#plugins)
 - [Hardening checklist](#hardening-checklist)
+- [What the hub reaches out to](#what-the-hub-reaches-out-to)
 - [Environment variables](#environment-variables)
 - [Your data and backups](#your-data-and-backups)
 - [Staying up to date](#staying-up-to-date)
@@ -187,6 +188,15 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | Grant a plugin nothing you would not grant its author | Especially **Control printers** and **Authorise every request**. `PRINTGUARD_PLUGINS=off` is the way back from a lockout |
 | Keep the image current | `latest` moves on every release |
 
+## What the hub reaches out to
+
+| Host | When |
+|---|---|
+| `api.github.com` | Once a day for the update check, and when you browse the plugin store |
+| `*.ingest.de.sentry.io` | Only when you send a bug report |
+| `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
+| Your printers, cameras, notification services and MQTT broker | As you configure them |
+
 ## Environment variables
 
 Everything else is set from the dashboard. These are the ones a deployment sets.
@@ -209,7 +219,7 @@ Everything PrintGuard keeps is in its data directory.
 | Path | Holds |
 |---|---|
 | `state.json` | Cameras, printers, monitors, settings, themes and layout, with printer passwords, notifier keys and API token hashes. Readable only by the account running the hub |
-| `prints/` | The [print library](printers.md#sending-prints) |
+| `prints/` | The [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub) |
 
 | Install | Data directory |
 |---|---|
@@ -218,7 +228,7 @@ Everything PrintGuard keeps is in its data directory.
 | Windows app | `%LOCALAPPDATA%\PrintGuard\PrintGuard` |
 
 To back up, copy that directory with the hub stopped. To move to another machine, put the copy
-in place before the first start. Risk history is held in memory and isn't part of it.
+in place before the first start. The risk chart is held in memory and isn't part of it.
 
 ## Staying up to date
 

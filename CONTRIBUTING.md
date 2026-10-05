@@ -36,9 +36,10 @@ Run the tests before and after your change:
 uv run pytest                        # engine simulation, adapter contracts, plugin sandbox and lint
 cd web && npm run typecheck          # strict TypeScript over the UI
 cd web && npm run test:sandbox       # the browser plugin sandbox, in chromium and webkit
+cd feedback-worker && npm ci && npm test   # the training inbox Worker, in the Workers runtime
 ```
 
-CI runs `uv run pytest`, and type-checks the UI as part of building the image. Nothing in CI
+CI runs `uv run pytest` and the Worker's tests, and type-checks the UI as part of building the image. Nothing in CI
 runs `typecheck` or `test:sandbox` on their own, so run them yourself. `test:sandbox` needs
 `npx playwright install chromium webkit` once.
 
@@ -52,6 +53,10 @@ checker runs on node. If you touch the scheduler, monitor or printer state handl
 first. A new adapter gets its payloads tested in the second. The REST API, MCP server, MQTT
 bridge, tokens, gcode reader and MediaMTX client each have a `tests/test_<name>.py` of their
 own.
+
+[`feedback-worker/`](feedback-worker) is the Cloudflare Worker that takes
+[training frames](docs/feedback.md). Its limits are in `src/limits.ts` and every one has a test.
+Install with `npm ci`, since npm 10 fails to resolve Vitest's peers from scratch.
 
 The browser half of the plugin sandbox is only meaningful in a real engine, so
 `web/tests/sandbox.spec.ts` drives it through Playwright in both chromium and webkit. Run it
@@ -83,6 +88,7 @@ pull request, and delete anything the change makes wrong or redundant.
 | A printer integration or its setup steps, the print library, temperatures | [docs/printers.md](docs/printers.md) |
 | A camera source | [docs/cameras.md](docs/cameras.md) |
 | A monitor or camera setting, risk history | [docs/monitoring.md](docs/monitoring.md) |
+| The frames kept from a print, what's sent for training, the Worker's limits | [docs/feedback.md](docs/feedback.md) |
 | A notifier, or when a notice is sent | [docs/notifications.md](docs/notifications.md) |
 | Model runtimes, execution providers, image variants, GPU setup | [docs/hardware.md](docs/hardware.md) |
 | Exposure, proxies, origin checks, ports, hardening, an environment variable | [docs/deployment.md](docs/deployment.md) |
@@ -268,12 +274,13 @@ time. The check on a pull request into `main` compares it with today, and the re
 refuses a section dated any other day than its merge commit, so a release that waits a day
 needs its date moved on before it merges.
 
-Four checks are required. A pull request into a release branch runs **tests**, **image** and
-**version**, and the release's own pull request into `main` adds **launch** and the date:
+Five checks are required. A pull request into a release branch runs **tests**, **audit**,
+**image** and **version**, and the release's own pull request into `main` adds **launch** and the date:
 
 | Check | Enforces |
 |---|---|
 | **tests** | Everything under `tests/`, with `uv run pytest` |
+| **audit** | `uv audit` and `npm audit` find no known vulnerability in `uv.lock` or either `package-lock.json`. A new advisory fails every open pull request until the dependency is bumped |
 | **image** | Every production image variant builds, which also type-checks and builds the UI, so a change that breaks an image can never reach `main` |
 | **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |
 | **version** | The version is past the last release and has a matching `CHANGELOG.md` section, dated the day it merges into `main` in London time. Re-publishing an existing tag is refused |

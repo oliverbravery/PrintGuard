@@ -2,7 +2,7 @@
 
 # Architecture
 
-[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · **Architecture** · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Training frames](feedback.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · **Architecture** · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -108,7 +108,7 @@ Three smaller protocols hang off it:
 | Protocol | Members | On the hub |
 |---|---|---|
 | `FrameSource` | `fps`, `online`, `standby`, `grab()`, `set_monitoring(active)`, `close()` | A PyAV reader thread per camera |
-| `FileStore` | `store(key, chunks)`, `read(key)`, `remove(key)` | Print files and their previews on disk under `data/prints/` |
+| `FileStore` | `store(key, chunks)`, `read(key)`, `remove(key)` | Print files, their previews and the frames kept from each print, on disk under `data/prints/` |
 | `PluginRuntime` | `attach()`, `on_event()`, `reload()`, `serve()`, `authorise()`, `gate_paths()`, `close()` | QuickJS in WebAssembly, under wasmtime |
 
 A `Frame` is the RGB array, a `seq` that identifies it and its capture time.
@@ -147,7 +147,7 @@ Commands, UI to engine. The table is the engine's `_handlers` map:
 | Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.heat`, `printer.test`, `printer.cameras.refresh` |
 | Prints | `print.add`, `print.update`, `print.remove`, `print.start` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
-| History | `history.get`, `snapshot.get` |
+| History | `history.get`, `snapshot.get`, `review.get`, `review.send`, `review.retry`, `review.dismiss` |
 | Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.page`, `plugin.http`, `plugin.socket`, `plugin.call`, `plugin.answer`, `plugin.publish`, `plugin.secrets`, `plugin.oauth`, `plugin.effect` |
 | System | `settings.update`, `notify.test`, `notify.send`, `token.create`, `token.remove`, `update.check`, `update.releases`, `report.send`, `report.bundle` |
 
@@ -166,10 +166,11 @@ Events, engine to UI:
 | `device` | A printer's status, progress, job, time left and heaters |
 | `print_started` | A file from the library has been sent to a printer and started |
 | `discovered`, `printer_test`, `notify_test` | Command responses |
-| `history`, `snapshot` | Risk history buckets and stored alert snapshots |
+| `history`, `snapshot`, `review` | Risk history buckets, a kept frame's JPEG, and the frames kept from one print |
+| `review_sent` | How far a reviewed print's upload got, with the refusal code and retry time when it is queued |
 | `frame` | A camera's current picture as a JPEG, the answer to `camera.snapshot` |
 | `releases` | The changelog history the update dialog browses |
-| `token_created` | A new API token's secret, delivered to the requesting transport and never written to the log |
+| `token_created` | A new API token's secret, delivered only to the transport that asked, never to the others and never written to the log |
 | `report_sent`, `report_bundle` | Bug report outcome, and the downloadable diagnostics zip |
 | `plugin_code`, `plugin_page`, `catalogue`, `plugin_effect` | A plugin's source for its sandbox, the page files a zip install carries, the reviewed-plugin catalogue, and an effect a dashboard performs for a plugin that has no screen of its own |
 | `plugin_oauth` | The provider URL the dashboard opens to start a plugin's sign-in |
@@ -184,6 +185,7 @@ Events, engine to UI:
 | `host`, `version`, `update` | The deployment, the running version and the release status |
 | `cameras`, `printers`, `prints`, `tokens`, `plugins` | The public record of everything in each registry |
 | `monitors` | Each monitor with `watching` and its latest `result` |
+| `reviews`, `feedback_hub` | A count of the frames kept from each print with its review status, and the public half of the hub's training inbox token |
 | `settings` | Notifier configs, MQTT, theme, layout, inference runtime, catalogue URL, grace period and preheat presets |
 | `stats` | `inference_device`, `infer_ms` and `capacity_fps` from the scheduler |
 | `integrations`, `notifiers` | Adapter metadata the config forms are drawn from |
@@ -243,6 +245,44 @@ A deployment can declare video devices the same way. The Docker image sets
 boot under a deterministic id through `Camera.declared`. A declared camera keeps the name and
 tuning it was given across restarts, cannot be removed on its own, and goes when the
 deployment stops passing it in.
+
+### Print reviews
+
+[`engine/reviews.py`](../printguard/engine/reviews.py) keeps a few frames from every print a
+monitor watches, scaled to 512px and stored in the `files` store, with their records in the
+persisted state so they survive a restart. A print runs from a monitor's first frame until its
+printer positively reports idle or error, so a pause stays inside it, and a monitor with no
+printer closes its print after a day.
+
+| Kind | Kept | Chosen by |
+|---|---|---|
+| `alert` | The last 40 | The frame that fired each alert, which is what the risk history gallery shows |
+| `near` | The top 5 | The highest scores under the threshold, at least a minute apart |
+| `spaced` | 10 to 20 | One per interval, and every other one is dropped and the interval doubled at 20, so a long print keeps no more than a short one |
+
+The hub holds the last 20 prints or 200 MB and drops the oldest finished print first. The
+`state` snapshot carries only a count per print, and `review.get` returns one print's frames.
+
+A finished print can be [sent as training data](feedback.md). `review.send` records which
+frames show a failure and which were left out, and
+[`engine/feedback.py`](../printguard/engine/feedback.py) uploads the rest through
+`platform.http` to the Worker in [`feedback-worker/`](../feedback-worker), one frame per
+request. The upload runs as a background task and its progress rides in the `state` snapshot.
+It is deliberately absent from the REST API, the MCP server and the plugin permission table,
+so frames only leave the hub when a person presses Send in the dashboard.
+
+| `status` | Meaning |
+|---|---|
+| `running` | The print is still being watched |
+| `ready` | It has ended and waits to be reviewed |
+| `dismissed` | Nobody wants to review it, or `settings.feedback` is `off` |
+| `queued` | It was reviewed and frames are uploading, or wait on a refusal's `retry_at` |
+| `sent` | Every chosen frame is in the inbox |
+
+The Worker is the only writer to a private R2 bucket and holds every limit in one Durable
+Object, so the hub only reports what it was told. A refused print keeps its frames and the
+engine's ticker sends the rest once `retry_at` passes. The hub's token is issued by the Worker
+and persisted, and the `state` snapshot carries only its public half as `feedback_hub`.
 
 ## Scheduling inference
 
@@ -324,13 +364,12 @@ boundary, and a frame that could not be classified scores 0.5.
 
 The engine runs `_on_result` for every monitor on that camera that is watching. Each score
 goes into [`engine/history.py`](../printguard/engine/history.py), which is held in memory and
-lost on restart:
+lost on restart. The frame that fired each alert is kept on disk by [print reviews](#print-reviews):
 
 | Series | Size |
 |---|---|
 | Rollup buckets | 60 s each, the newest 1440, so 24 hours of watching |
 | Alert log | The newest 50 |
-| Alert snapshots | The newest 40 JPEGs |
 
 An alert starts the monitor's `cooldown_s`, and no second response fires inside it. Push
 notifications have their own 30 s floor per monitor. A printer action is tried 3 times, 1 s
@@ -485,7 +524,8 @@ permission is asked about every other HTTP request except `/api/health` and its 
 and about both WebSocket handshakes. An allowed HTTP answer is cached for 10 s per credential,
 method and path. A refusal is never cached.
 
-`PRINTGUARD_PLUGINS=off` starts with every plugin off. [Plugins](plugins.md) covers installing
+`PRINTGUARD_PLUGINS=off` starts with every plugin off, and the state snapshot reports each as
+disabled so the dashboard stops its half too. [Plugins](plugins.md) covers installing
 them and [what each permission grants](plugins.md#permissions), and
 [writing plugins](plugin-development.md) covers the API.
 
@@ -567,7 +607,9 @@ printguard/
     gcode.py         what a sliced file says about itself: estimates, printer model, preview
     scheduler.py     fair allocation of inference across cameras
     vision.py        image transform, preprocessing, prototype classification and the defect score
-    history.py       per-monitor risk buckets and alert snapshots, in memory
+    history.py       per-monitor risk buckets and the alert log, in memory
+    reviews.py       the frames kept from each watched print, and which ones are worth keeping
+    feedback.py      uploads a reviewed print's frames to the training inbox
     watchdog.py      defect response: streaks, printer actions, notifications, health
     tokens.py        scoped API tokens
     updates.py       GitHub release check and changelog history
@@ -603,6 +645,7 @@ web/                 React + Tailwind UI (presentation only)
   tests/             Playwright tests of the browser plugin sandbox
   screenshots/       renders docs/assets from fake data
   scripts/           the plugin linter
+feedback-worker/     the Cloudflare Worker and R2 inbox that take training frames, and the script that empties it
 plugins/             first-party plugins and the hash-pinned catalogue they are verified by
 models/              TFLite and ONNX encoders, normalisation metadata, class prototypes
 tests/               engine simulation, adapter contracts and the plugin sandbox (pytest)

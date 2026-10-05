@@ -2,7 +2,7 @@
 
 # Troubleshooting
 
-[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · **Troubleshooting**
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Training frames](feedback.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · **Troubleshooting**
 
 </div>
 
@@ -65,6 +65,8 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | A wireless camera still notifies when it drops out for a few seconds | The fault grace period is shorter than the camera takes to reconnect | Raise **Fault grace period** in the Alerts tab in Settings. It goes up to fifteen minutes, and the dashboard still shows the drop-out as it happens |
 | A warning that the camera dropped out for a share of the last ten minutes | It reconnects quickly enough to clear the grace period every time, so the print is only being watched part of the time | Chase the connection rather than the notification. This one fires once for the whole unstable episode |
 | Pushover alerts arrive during quiet hours | Priority defaults to High, which bypasses them, and it covers every notice including warnings and recoveries | Set it to Normal in the Alerts tab in Settings. [Channels](notifications.md#channels) |
+| A reviewed print says it's queued | A [daily limit](feedback.md#limits) on training frames was hit, or the inbox couldn't be reached | Nothing. The frames stay on the hub and send by themselves at the time shown, or press **Try now** |
+| No **Review frames** prompt after a print | The monitor has no printer, so it can't tell a print ended, or the prompt is switched off | Open the print from **Prints** on the monitor's detailed history page, or turn the prompt on in **Settings**, under **Advanced** |
 | Home Assistant shows nothing | The broker settings are wrong, or discovery is disabled in Home Assistant | Check the Home Assistant tab in Settings and the broker's own log. [Home Assistant](api.md#home-assistant) |
 
 ## Plugins

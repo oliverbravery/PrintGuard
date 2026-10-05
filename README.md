@@ -18,7 +18,7 @@
 A compact vision model scores every camera frame on the machine you run it on. When a defect
 holds for long enough, PrintGuard pauses or cancels the print through your print server and
 pushes a snapshot to your phone. There's no cloud and no subscription, and your camera frames
-never leave hardware you own.
+stay on hardware you own unless you choose to [send some to help train the model](docs/feedback.md).
 
 The detector is my own, a ShuffleNetV2 encoder of about 5 MB trained for this in
 [Edge-FDM-Fault-Detection](https://github.com/oliverbravery/Edge-FDM-Fault-Detection). Against
@@ -133,6 +133,8 @@ Open a monitor for its live risk score and printer controls. Each one has its ow
 threshold, the number of flagged frames in a row it takes to act, a cooldown and a response of
 alert, pause or cancel. Its history page charts the score over the last hour, 6 hours or 24
 hours beside a snapshot of every alert, so you can pick values from what your own camera saw.
+When a print ends you can label a few of its frames and [send them](docs/feedback.md) to help
+train the model.
 
 ![A monitor's panel: live risk, pause, resume and cancel, temperatures, preheat presets and the monitoring settings](docs/assets/printer-detail.png)
 
@@ -254,6 +256,7 @@ report, or downloads the same diagnostics as a zip with every credential strippe
 | [Cameras](docs/cameras.md) | Printer webcams, stream URLs, USB cameras and a browser's own camera |
 | [Monitoring](docs/monitoring.md) | Thresholds, defect response, framing the camera and risk history |
 | [Notifications](docs/notifications.md) | Alert channels, what gets sent and the fault grace period |
+| [Training frames](docs/feedback.md) | Sending labelled frames to help train the model, what's sent and the limits |
 | [Hardware](docs/hardware.md) | Image variants, model runtimes, GPU and NPU acceleration |
 | [Deployment](docs/deployment.md) | Reaching a hub from outside your LAN, hardening it, environment variables and backups |
 | [API & MCP](docs/api.md) | REST API, MCP server and Home Assistant, with scoped tokens |

@@ -2,7 +2,7 @@
 
 # PrintGuard documentation
 
-**Docs** · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
+**Docs** · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Training frames](feedback.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -14,6 +14,7 @@ Start at the [README](../README.md) to install PrintGuard. These pages cover eve
 | [Cameras](cameras.md) | Add a printer webcam, a stream URL, a USB camera or a phone |
 | [Monitoring](monitoring.md) | Tune a monitor's thresholds, frame its camera and read its risk history |
 | [Notifications](notifications.md) | Set up an alert channel, or quieten a camera that keeps dropping out |
+| [Training frames](feedback.md) | Send labelled frames to help train the model, and see what's sent and the limits |
 | [Hardware](hardware.md) | Pick an image variant, understand the model runtimes, and use a GPU or NPU |
 | [Deployment](deployment.md) | Reach a hub from outside your LAN without exposing it, harden it and back it up |
 | [API & MCP](api.md) | Drive the hub from a script, an agent or Home Assistant, with scoped access tokens |

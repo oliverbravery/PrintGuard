@@ -2,7 +2,7 @@
 
 # Monitoring and tuning
 
-[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · **Monitoring** · [Notifications](notifications.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · **Monitoring** · [Notifications](notifications.md) · [Training frames](feedback.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -15,6 +15,7 @@ the risk history you tune them against.
 - [When a monitor watches](#when-a-monitor-watches)
 - [Tuning the camera](#tuning-the-camera)
 - [Risk history](#risk-history)
+- [Reviewing a print](#reviewing-a-print)
 - [Choosing values](#choosing-values)
 
 ## How a defect becomes an alert
@@ -96,9 +97,16 @@ A monitor's panel shows the live score on a gauge beside the last few minutes of
 | Risk per period | The score charted over the last hour, 6 hours, 24 hours or everything kept |
 | Risky moments | A snapshot of what the camera saw each time the monitor raised an alert |
 
-History is kept in memory as one-minute buckets covering the last 24 hours, with the latest 40
-snapshots and 50 alerts for each monitor. Restarting the hub clears it. The
+The chart is kept in memory as one-minute buckets covering the last 24 hours, so restarting the
+hub clears it. The alert snapshots are kept on disk and survive a restart. The
 [REST API](api.md#rest-api) serves the same history and snapshots.
+
+## Reviewing a print
+
+PrintGuard keeps a few frames from each print on your hub. When a print ends its monitor offers
+**Review frames from the last print**, where you can label them and send them to help train the
+detection model. Nothing is sent unless you press **Send**.
+[Training frames](feedback.md) covers what's kept, what's sent and how to switch the prompt off.
 
 ## Choosing values
 

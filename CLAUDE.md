@@ -146,6 +146,7 @@ change made wrong or redundant. Never leave a doc describing something that no l
 | A printer integration or its setup, the print library, temperatures | `docs/printers.md` |
 | A camera source | `docs/cameras.md` |
 | A monitor or camera setting, risk history | `docs/monitoring.md` |
+| The frames kept from a print, what's sent for training, the Worker's limits | `docs/feedback.md` |
 | A notifier, or when a notice is sent | `docs/notifications.md` |
 | Model runtimes, execution providers, image variants, GPU setup | `docs/hardware.md` |
 | Exposure, proxies, origin checks, ports, hardening, an environment variable, the data directory | `docs/deployment.md` |
@@ -172,7 +173,8 @@ heading in [CHANGELOG.md](CHANGELOG.md). The release branch owns the bump and th
 The changelog section is published **verbatim** as the GitHub release notes - write it for
 someone deciding whether to pull the new image, not about the implementation.
 
-Four checks are required: **tests** (`uv run pytest`), the production **image** build (which
+Five checks are required: **tests** (`uv run pytest`), **audit** (`uv audit` and `npm audit`
+over the lockfiles), the production **image** build (which
 also type-checks and builds the UI), **version** (past the last release with a matching
 changelog section) and, on pull requests into `main` only, **launch** (the container and both
 desktop apps start and catch a failing print) plus the changelog date, which must be the day it

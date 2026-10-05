@@ -2,7 +2,7 @@
 
 # Writing plugins
 
-[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · **Writing plugins** · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Training frames](feedback.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · **Writing plugins** · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
@@ -162,8 +162,8 @@ Anything that belongs to one monitor goes in `settings`.
 
 ### Platforms
 
-`platforms` says where it runs. The store filters the catalogue by the one you are on, so
-anything that would not work is out of the way.
+`platforms` says where it runs. The store filters the catalogue by the one you are on, and an
+install from a repository or a zip is refused on any other.
 
 | Platform | |
 |---|---|
