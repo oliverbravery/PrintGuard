@@ -1,22 +1,18 @@
 <div align="center">
 
-# Printers, cameras and notifications
+# Printers
 
-[Docs](README.md) · [Architecture](architecture.md) · **Printers & cameras** · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · **Printers** · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Training frames](feedback.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
-Connecting print services and cameras, what PrintGuard does with a printer's webcam, and
-how alerts are wired up.
+Connecting a print service, sending it files and setting its temperatures.
 
 - [How the pieces fit](#how-the-pieces-fit)
 - [Register a printer](#register-a-printer)
+- [Supported print services](#supported-print-services)
 - [Sending prints](#sending-prints)
 - [Temperatures and preheat](#temperatures-and-preheat)
-- [Supported print services](#supported-print-services)
-- [Printer cameras](#printer-cameras)
-- [Adding cameras yourself](#adding-cameras-yourself)
-- [Notifications](#notifications)
 - [Networking caveats](#networking-caveats)
 
 ## How the pieces fit
@@ -35,12 +31,14 @@ flowchart LR
 ```
 
 The dotted lines are the optional parts. Bind no printer and PrintGuard still alerts you, it
-just cannot stop the print.
+just cannot stop the print. [Cameras](cameras.md) covers the video side,
+[monitoring](monitoring.md) the thresholds and [notifications](notifications.md) the alert
+channels.
 
 ## Register a printer
 
-Open the printer registry, choose the service, fill in the form and **Test** it before
-saving. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
+Open the printer registry, choose the service, fill in the form and press **Test connection**
+before saving. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
 print or cancels it.
 
 Linked printers report job name, progress, temperatures and state on every monitor that uses
@@ -50,71 +48,13 @@ or a state the adapter cannot read keeps whatever the printer last reported, mea
 switched off after a print stays in standby while one that drops off mid-print keeps being
 watched and warns you. See [failing safely](architecture.md#failing-safely).
 
-## Sending prints
-
-The print library holds sliced files on the hub. Open **Prints** in the header and drop files in
-or browse for them. Each one opens in a panel that draws its toolpath on your device before
-anything is uploaded, where you can name it, tag it and correct its first layer nozzle and bed
-temperatures. Every other print temperature the slicer set moves by the same amount, while the
-temperatures a start gcode probes or wipes at stay put. Binary gcode keeps the temperatures it
-was sliced with.
-
-Each file keeps the preview, estimated time, filament and printer model its slicer wrote into it.
-Cura and a few others write no preview, so your browser draws one and adds it to the gcode as
-it's uploaded. A file uploaded through the REST API without a preview shows its format
-instead. Open a file to orbit its toolpath in 3D, layer by layer.
-
-Tag a file with the printers it was sliced for and it can only start on one of those. A file
-with no tags can go to any printer whose service takes the format. Either way the printer has to
-report idle at the moment you press **Print**, so nothing lands on top of a running job.
-
-| Service | Takes | How it starts |
-|---|---|---|
-| OctoPrint | `.gcode`, `.gco`, `.g` | Uploaded to local storage, selected and printed |
-| Klipper via Moonraker | `.gcode`, `.gco`, `.g` | Uploaded to the gcodes root and printed |
-| Elegoo | `.gcode` | Centauri: uploaded to internal storage and started. Neptune and OrangeStorm: through Moonraker |
-| Prusa via PrusaLink | `.gcode`, `.bgcode` | Put onto the USB stick, or local storage on a Raspberry Pi, and printed after upload |
-| Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the SD card over FTPS, then the first plate is started over MQTT |
-
-A file is sent under its library name, so rename it first if the printer's own file list
-matters to you. Binary gcode has no 3D view and no drawn preview, since its toolpath is
-compressed, so it shows the preview PrusaSlicer embedded and nothing else.
-
-A Bambu print uses the settings sliced into the file, with bed levelling on, flow and vibration
-calibration off, and filament from the external spool or the first AMS slot. Starting a 3mf
-needs Developer Mode, the same switch the MQTT connection needs. A project exported without its
-gcode is refused at upload.
-
-Files live in the data directory under `prints/`, so they survive a restart and travel with the
-`/data` volume.
-
-## Temperatures and preheat
-
-A linked printer's nozzle and bed temperatures sit on its monitor's tile and in the monitor's
-panel, where a running print also gets a progress bar and the time left. The panel takes a
-target for either heater, applied on Enter, and a row of preheat presets that set both at once.
-**Edit** beside them changes the presets, which every printer shares, and **Off** turns every
-heater off.
-
-| Service | Reads temperatures | Sets targets |
-|---|---|---|
-| OctoPrint | Yes | Yes, through its tool and bed endpoints |
-| Klipper via Moonraker | Yes | Yes, with `SET_HEATER_TEMPERATURE` |
-| Elegoo | Yes | Yes, on both families |
-| Prusa via PrusaLink | Yes | No, PrusaLink has no endpoint for it |
-| Bambu Lab | Yes | Yes, as the `M104` and `M140` lines Bambu Studio sends |
-
-A target is capped at 350 °C for the nozzle and 150 °C for the bed, and the printer's own
-firmware applies its limits on top. Temperatures refresh with the printer's state, every five
-seconds.
-
 ## Supported print services
 
-| Service | Authentication | Exposes a camera |
+| Service | Authentication | [Exposes a camera](cameras.md#printer-cameras) |
 |---|---|---|
 | [OctoPrint](https://octoprint.org) | API key | Yes, its webcam stream |
 | [Klipper via Moonraker](https://moonraker.readthedocs.io) | Optional API key | Yes, its configured webcams |
-| [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code, or Moonraker API key | Centauri chamber camera |
+| [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code, or Moonraker API key | Centauri chamber camera, or Moonraker's configured webcams |
 | [Prusa via PrusaLink](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest, user `maker` | No local stream |
 | [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | Access code and serial | Chamber camera |
 
@@ -148,7 +88,7 @@ local protocol the printer speaks and registers its chamber camera automatically
 
 **Neptune/OrangeStorm** covers the Neptune 4 Pro, Plus and Max, the OrangeStorm Giga, and
 any other Elegoo printer running Moonraker. PrintGuard uses the stock Moonraker service on
-port `7125` and accepts an API key if you set one.
+port `7125`, accepts an API key if you set one and registers the webcams Moonraker lists.
 
 All state, camera and control traffic stays between PrintGuard and the printer on your LAN.
 Elegoo's cloud is never involved.
@@ -167,88 +107,79 @@ MK2.5. It authenticates with HTTP Digest.
 
 PrusaConnect is not used, so no frames or job data leave hardware you own. PrusaLink's
 webcam feature pushes snapshots to PrusaConnect rather than serving a local video stream, so
-if the printer has a camera, add it separately as a **Stream URL**.
+if the printer has a camera, add it separately as a [stream URL](cameras.md#stream-urls).
 
 </details>
 
-## Printer cameras
+## Sending prints
 
-If a registered printer exposes a webcam, PrintGuard registers it as a camera for you, with
-no stream URL to copy. The camera registry's **Printer cameras** tab lists them and a
-**Refresh** button picks up a camera attached after the printer was registered.
+The print library holds sliced files on the hub. Open **Prints** in the header and drop files in
+or browse for them.
 
-These cameras belong to their printer, so they cannot be removed on their own and they are
-dropped when the printer is.
+![The print library: three sliced files with their slicer, print time and filament, with the printers each is tagged for](assets/prints.png)
 
-## Adding cameras yourself
+Each one opens in a panel that draws its toolpath on your device before
+the file is uploaded, where you can name it, tag it and correct its first layer nozzle and bed
+temperatures. The panel sends the start and end of the file to the hub to read its print time,
+filament and temperatures. Every other print temperature the slicer set moves by the same amount, while the
+temperatures a start gcode probes or wipes at stay put. A file whose slicer lists no print
+temperatures has every one of its set-points moved. Binary gcode keeps the temperatures it
+was sliced with.
 
-Beyond printer webcams, a hub takes cameras three ways:
+Each file keeps the preview, estimated time, filament and printer model its slicer wrote into it.
+Cura and a few others write no preview, so your browser draws one and adds it to the gcode as
+it's uploaded. A file uploaded through the REST API without a preview shows its format
+instead. Open a file to orbit its toolpath in 3D, layer by layer.
 
-| Source | What it accepts | Notes |
+![A sliced vase in the 3D viewer with a layer slider, its print time, filament and temperatures](assets/print-viewer.png)
+
+Tag a file with the printers it was sliced for and it can only start on one of those. A tag is
+only offered for a printer whose service takes the format. A file
+with no tags can go to any printer whose service takes the format. Either way the printer has to
+report idle at the moment you press **Print**, so nothing lands on top of a running job.
+
+| Service | Takes | How it starts |
 |---|---|---|
-| **Stream URL** | RTSP, RTMP, HTTP/MJPEG or WHEP, including anything already pushed to the bundled MediaMTX | PrintGuard creates a MediaMTX pull path for it |
-| **This machine** | A camera plugged into the machine PrintGuard runs on | Captured by the hub itself, so it keeps watching with every window closed |
-| **This browser** | The browser's own camera | Publishes to the hub over a WebSocket and reconnects after a hub restart |
+| OctoPrint | `.gcode`, `.gco`, `.g` | Uploaded to local storage, selected and printed |
+| Klipper via Moonraker | `.gcode`, `.gco`, `.g` | Uploaded to the gcodes root and printed |
+| Elegoo | `.gcode` | Centauri: uploaded to internal storage and started. Neptune and OrangeStorm: through Moonraker |
+| Prusa via PrusaLink | `.gcode`, `.bgcode` | Put onto the USB stick, or local storage on a Raspberry Pi, and printed after upload |
+| Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the SD card over FTPS, then the first plate is started over MQTT |
 
-> [!IMPORTANT]
-> Browsers only grant camera access on secure pages, so **This browser** publishing needs
-> the hub served over HTTPS or opened on `localhost`.
-> [Deployment](deployment.md) covers HTTPS with Tailscale or a tunnel.
+A file is sent under its library name, cut to 60 characters with anything outside plain letters,
+digits, dots and dashes turned into `_`. Rename it first if the printer's own file list matters
+to you. PrusaLink replaces a file of the same name already on the printer. A file can be up to
+512 MB. Binary gcode has no 3D view and no drawn preview, since its toolpath is
+compressed, so it shows the preview PrusaSlicer embedded and nothing else. Its print time and filament can
+be blank too, where PrusaSlicer compressed them.
 
-### Cameras plugged into the hub
+A Bambu print uses the settings sliced into the file, with bed levelling on, flow and vibration
+calibration off, and filament from the external spool or the first AMS slot. Starting a 3mf
+needs Developer Mode, the same switch the MQTT connection needs. A project exported without its
+gcode is refused at upload.
 
-A USB camera reaches the container only if you pass it in, and once you have, it registers
-itself and appears in the camera registry. List the ones attached with `ls /dev/v4l/by-id/`,
-whose names still point at the same camera after a reboot renumbers the devices, and map each
-one in.
+Files live in the data directory under `prints/`, so they survive a restart and travel with the
+`/data` volume.
 
-```yaml
-    devices:
-      - /dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_A1B2C3-video-index0:/dev/nozzle-cam
-```
+## Temperatures and preheat
 
-A camera arrives named after itself, so rename it in the registry. There's no Remove button on
-it, since the compose file is what decides it exists. Drop the `devices:` entry and restart to
-remove it.
+A linked printer's nozzle and bed temperatures sit on its monitor's tile and in the monitor's
+panel, where a running print also gets a progress bar and the time left. The panel takes a
+target for either heater, applied on Enter or when you leave the field, and a row of preheat presets that set both at once.
+**Edit** beside them changes the presets, which every printer shares, and **Off** turns every
+heater off.
 
-Docker can't hand a running container a camera plugged in after it started, so a new camera
-means another `devices:` entry and `docker compose up -d`.
+| Service | Reads temperatures | Sets targets |
+|---|---|---|
+| OctoPrint | Yes | Yes, through its tool and bed endpoints, for the first nozzle |
+| Klipper via Moonraker | Yes | Yes, with `SET_HEATER_TEMPERATURE` |
+| Elegoo | Yes | Yes, on both families |
+| Prusa via PrusaLink | Yes | No, PrusaLink has no endpoint for it |
+| Bambu Lab | Yes | Yes, as the `M104` and `M140` lines Bambu Studio sends |
 
-Set `PRINTGUARD_CAMERAS=off` to leave them unregistered and add them by hand from **This
-machine** instead. The desktop app works that way already, since a computer's own webcam is
-rarely the one you want watched.
-
-## Framing the print
-
-The model only watches a square of each camera's view. Until you crop a camera that square is
-the middle of the frame, so on a wide camera the sides of the bed go unwatched. Open the camera
-in the registry and crop it to a square the print fills.
-
-## Notifications
-
-Alert channels live in **Settings**. Enable a channel, fill in the form and send a test
-alert. Every enabled channel receives defect snapshots and watchdog warnings for monitors
-that have notifications switched on.
-
-A monitor's **cooldown** is the quiet window after a defect alert. Watchdog warnings are
-separate, so a camera or printer that keeps dropping out warns once for the whole unstable
-episode, and the recovery is only announced once it has stayed healthy, so reconnections
-cannot turn into a stream of notifications.
-
-The **fault grace period**, in the Alerts tab, is how long a fault has to last before it is
-pushed. Two minutes by default, and worth raising for a wireless camera that drops out and
-comes straight back. It stops at fifteen minutes and cannot be turned off, since a print
-nothing is watching is worth hearing about, and an outage nobody has answered is announced
-again every thirty minutes. The dashboard shows every fault as it happens whatever it is set
-to.
-
-| Channel | Notes |
-|---|---|
-| [ntfy](https://ntfy.sh) | Self-hostable, no account needed |
-| [Pushover](https://pushover.net) | One-off app purchase, and you create the application token. Priority covers every notice and defaults to High, which bypasses the quiet hours set on the device |
-| [Discord](https://discord.com) | Webhook URL |
-| [Telegram](https://telegram.org) | A bot token from @BotFather and your chat ID |
-| Desktop notification | Desktop app only. A native OS notification on the computer running the app |
+A target is capped at 350 °C for the nozzle and 150 °C for the bed, and the printer's own
+firmware applies its limits on top. Temperatures refresh with the printer's state, every five
+seconds.
 
 ## Networking caveats
 
