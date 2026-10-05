@@ -74,9 +74,10 @@ flowchart LR
 | `/api/v1`, `/mcp` | The REST API and the MCP server |
 | `/` | The built dashboard from `STATIC_DIR` |
 
-Both WebSockets and the two print `POST` routes check the request's `Origin` against the host
-it was sent to, plus anything listed in `PRINTGUARD_ORIGINS`. See
-[origin checking](deployment.md#origin-checking).
+Every request is refused unless its host is an address, a local name or one listed in
+`PRINTGUARD_ORIGINS`. Both WebSockets and the two print `POST` routes also check the request's
+`Origin` against that host. See
+[host and origin checking](deployment.md#host-and-origin-checking).
 
 ## The platform contract
 
@@ -474,10 +475,9 @@ engine the UI talks to, so they add no logic of their own and cannot drift from 
   `recent_events()`. `recent_events()` is the newest 100 alert, warning, device and error
   events.
 - [`server/mcp.py`](../printguard/server/mcp.py) derives its tools from that app with
-  `FastMCP.from_fastapi`, leaving out the camera frame,
-  classify, and the print file download and upload, which carry a binary body. The alert
-  snapshot route is derived like the rest, so its tool can't return the picture. It adds two tools of its own,
-  `get_camera_frame` returning native image content and `classify_frame` taking a base64
+  `FastMCP.from_fastapi`, leaving out the camera frame, the alert snapshot,
+  classify, and the print file download and upload, which carry a binary body. It adds three tools of its own,
+  `get_camera_frame` and `get_monitor_snapshot` returning native image content and `classify_frame` taking a base64
   image, and enforces the route scope tags so a caller only sees the tools its token may use.
 - [`server/mqtt.py`](../printguard/server/mqtt.py) bridges the engine to Home Assistant. It
   subscribes to engine events as a transport sink, reconciles one MQTT device per monitor
