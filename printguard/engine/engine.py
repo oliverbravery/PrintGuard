@@ -23,7 +23,7 @@ from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, IntegrationA
 from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import Frame, Platform, as_chunks
-from .printers import PREHEAT_DEFAULTS, sanitise_presets, sanitise_printer, sanitise_targets
+from .printers import PREHEAT_DEFAULTS, require_fields, sanitise_presets, sanitise_printer, sanitise_targets
 from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers
 from .registry import (
     Camera,
@@ -899,6 +899,7 @@ class Engine:
     async def _cmd_printer_add(self, message: dict[str, Any]) -> None:
         printer_id = uuid.uuid4().hex[:8]
         record = sanitise_printer(printer_id, message.get("printer", {}))
+        require_fields(record["provider"], record["config"])
         printer = Printer(id=printer_id, name=record["name"], provider=record["provider"], config=record["config"])
         self.printers.add(printer)
         asyncio.ensure_future(self.reconcile_printer_cameras(printer))
@@ -908,6 +909,7 @@ class Engine:
         if not existing:
             raise KeyError(f"no printer {message['id']}")
         record = sanitise_printer(existing.id, message.get("patch", {}), existing.persisted())
+        require_fields(record["provider"], record["config"])
         if record["provider"] != existing.provider or record["config"] != existing.config:
             await INTEGRATIONS[existing.provider].close(existing.config)
         if record["provider"] != existing.provider:
@@ -979,6 +981,7 @@ class Engine:
             raise RuntimeError(f"unknown provider {message.get('provider')!r}")
         config = message.get("config", {})
         try:
+            require_fields(adapter.id, config)
             state = await adapter.fetch_state(self.platform.http, config)
             ok = state.status.value not in ("offline", "unknown")
             self.emit({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
@@ -1471,7 +1474,11 @@ class Engine:
         )
 
     async def _cmd_plugin_socket(self, message: dict[str, Any]) -> None:
-        """Opens, writes to or closes a WebSocket a plugin is holding."""
+        """Opens, writes to or closes a WebSocket a plugin is holding.
+
+        Only the declared address is checked, and the platform refuses a
+        handshake that redirects, so a socket ends where the plugin said.
+        """
         action = str(message.get("action", ""))
         plugin_id = str(message["id"])
         if action == "open":

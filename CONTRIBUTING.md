@@ -18,7 +18,7 @@ hub server runs it, and everything the engine's own logic needs from hardware, t
 
 ```bash
 uv sync                              # Python engine + hub server
-uv run printguard                    # hub on :8000 (MediaMTX is bundled into the image; for video in dev, brew install mediamtx and set MEDIAMTX_BINARY=$(which mediamtx))
+uv run printguard                    # hub on :8000 (MediaMTX is bundled into the image; for video in dev, brew install mediamtx, 1.15.4 or newer, and set MEDIAMTX_BINARY=$(which mediamtx))
 cd web && npm install && npm run dev # UI with hot reload on :5173, proxied to :8000
 cd web && npm run site               # the GitHub Pages landing page in web/site, with hot reload
 ```

@@ -38,7 +38,8 @@ channels.
 ## Register a printer
 
 Open the printer registry, choose the service, fill in the form and press **Test connection**
-before saving. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
+before saving. A printer with a starred field left blank is not saved, and the error names the
+field. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
 print or cancels it.
 
 Linked printers report job name, progress, temperatures and state on every monitor that uses
@@ -194,6 +195,27 @@ seconds.
 The hub makes every request to a print service itself, so the address you register has to be
 one the hub can reach, not one your browser can. The browser never calls the printer, so an
 `http://` printer works from a hub you open over HTTPS.
+
+Register the address the service answers on, not one that redirects to it. A proxy that answers
+`http://` with a 301 or 302 to `https://` turns a pause into a read, so PrintGuard reports the
+command as failed and names the address to use. A 307 or 308 keeps the command and is followed.
+
+### Where a printer's webcam is read from
+
+OctoPrint and Moonraker usually report their webcam as a path such as `/webcam/?action=stream`,
+which their own web interface resolves against the address it's served on. PrintGuard does the
+same from the address you registered:
+
+| Registered address | Webcam is read from |
+|---|---|
+| Moonraker's own port, `7125` to `7199`, such as `http://pi.lan:7126` for a second instance | The same host on the default port, `http://pi.lan/webcam2/…` |
+| OctoPrint's own port, `http://octopi.local:5000` | The same host on the default port, `http://octopi.local/webcam/…` |
+| Any other port, such as a reverse proxy on `http://nas.lan:8080` | That port, `http://nas.lan:8080/webcam/…` |
+| No port | The same address |
+
+An OctoPrint container published as `5000:80` can't be told apart from OctoPrint's own port, so
+its webcam is looked for on port 80. Publish it on another port, or set an absolute stream URL
+in OctoPrint's webcam settings, which is used as it is.
 
 ### Running in Docker
 

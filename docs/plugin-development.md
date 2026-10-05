@@ -321,7 +321,9 @@ plugin.on("tick", (event, ctx) => ctx.log(`${ctx.store.alerts || 0} alerts so fa
 That needs `alert` in `events` and a `tick_s`.
 
 A worker still busy with the last event is skipped, so a slow plugin drops events instead of
-falling behind. One that fails or runs past its limits is disabled and reported.
+falling behind. One that fails or runs past its limits is disabled and reported, and so is one
+whose answer is not the store and effects PrintGuard asked for, such as a worker that has
+redefined `toJSON` on a built-in prototype.
 
 A worker has `plugin` and the JavaScript built-ins in scope and nothing else. There is no
 `console` or `print`, so log with `ctx.log`. A call ends when your handler returns, so a promise
@@ -519,6 +521,9 @@ service finally answers on.
 `ctx.socket` opens a WebSocket under a tag and `socket` events carry it, with `state` saying
 `open`, `message` or `closed`. PrintGuard drops it when the plugin is disabled, reinstalled or removed, or loses `net` or `net:local`. The manifest needs `socket` in `events` and a `ws` or `wss` pattern in `urls`.
 
+A redirect is not followed here either. The socket fails to open, so declare the address the
+service finally answers on.
+
 ```js
 plugin.on("tick", (event, ctx) => ctx.socket({ url: "wss://hub.local:8123/api/websocket", tag: "hub" }));
 
@@ -701,7 +706,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | Effects | 32 per call. The rest are dropped |
 | `plugin.js` call | 4 seconds, then the plugin is stopped |
 | Worker call | 96 MB of memory and 400 million units of wasmtime fuel, then the plugin is disabled. A call that waits more than 5 seconds to start is dropped |
-| Worker output | 512 KB per call, the store and effects together, then the plugin is disabled |
+| Worker output | 512 KB per call, the store and effects together, then the plugin is disabled. So is one whose output is not an object carrying a list of effects |
 | Node tree | 400 nodes |
 | Node text | `label` 80 characters, `action` 60, `placeholder` 60 |
 | `select` options | 60 |

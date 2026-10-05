@@ -22,7 +22,7 @@ from fakes import FakePlatform
 from printguard.engine import engine as engine_module
 from printguard.engine import feedback, logs, oauth, plugins, reports, reviews, vision, watchdog
 from printguard.engine.engine import EVENT_LOG_LEVELS, Engine
-from printguard.engine.integrations import INTEGRATIONS
+from printguard.engine.integrations import INTEGRATIONS, DeviceState, DeviceStatus
 from printguard.engine.printers import PREHEAT_DEFAULTS
 
 OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
@@ -573,6 +573,75 @@ async def test_testing_a_printer_closes_the_connection_it_opened(monkeypatch) ->
         assert [event["ok"] for event in _of(events, "printer_test")] == [True, True]
 
 
+@pytest.mark.parametrize(
+    ("provider", "partial", "blank"),
+    [
+        ("bambu", {"host": "10.0.0.9", "access_code": "12345678"}, "Serial number"),
+        ("elegoo", {"host": "10.0.0.9"}, "Printer family"),
+        ("octoprint", {"base_url": "http://op", "api_key": " "}, "API key"),
+    ],
+)
+async def test_a_printer_missing_a_required_field_is_refused_by_name(provider: str, partial: dict, blank: str) -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "printer.add", "printer": {"name": "P", "provider": provider, "config": partial}})
+        assert not engine.printers.values() and not platform.state.get("printers")
+        assert blank in _of(events, "error")[-1]["message"]
+
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"provider": provider, "config": partial}})
+        assert engine.printers.get(printer_id).provider == "octoprint", "the printer keeps the details that worked"
+        assert blank in _of(events, "error")[-1]["message"]
+
+        errors = len(_of(events, "error"))
+        await engine.handle({"cmd": "printer.test", "provider": provider, "config": partial})
+        (tested,) = _of(events, "printer_test")
+        assert not tested["ok"] and blank in tested["error"]
+        assert len(_of(events, "error")) == errors, "a failed test is reported once"
+
+
+@pytest.mark.parametrize(
+    ("provider", "partial", "completed"),
+    [
+        ("bambu", {"host": "10.0.0.9", "access_code": "12345678"}, {"serial": "01S00A"}),
+        ("elegoo", {"host": "10.0.0.9"}, {"family": "moonraker"}),
+        ("elegoo", {"family": "centauri"}, {"host": "10.0.0.9"}),
+    ],
+)
+async def test_a_printer_saved_without_a_required_field_can_be_completed_or_removed(
+    monkeypatch, provider: str, partial: dict, completed: dict
+) -> None:
+    """2.5.0 saved these, and closing their connection raised before the edit or the removal was kept."""
+
+    async def offline(http, config):
+        return DeviceState(DeviceStatus.OFFLINE)
+
+    async def no_cameras(http, config):
+        return []
+
+    monkeypatch.setattr(INTEGRATIONS[provider], "fetch_state", offline)
+    monkeypatch.setattr(INTEGRATIONS[provider], "cameras", no_cameras)
+    saved = {
+        "printers": [{"id": "old", "name": "P", "provider": provider, "config": partial}],
+        "monitors": [{"id": "m", "name": "M", "printer_id": "old"}],
+    }
+    platform = FakePlatform()
+    platform.state = json.loads(json.dumps(saved))
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "printer.update", "id": "old", "patch": {"config": {**partial, **completed}}})
+        assert engine.printers.get("old").config == {**partial, **completed}
+        assert platform.state["printers"][0]["config"] == {**partial, **completed}
+        await engine.handle({"cmd": "printer.update", "id": "old", "patch": {"config": partial}})
+        assert engine.printers.get("old").config == {**partial, **completed}
+
+    platform = FakePlatform()
+    platform.state = saved
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "printer.remove", "id": "old"})
+        assert platform.state["printers"] == [] and platform.state["monitors"][0]["printer_id"] == ""
+        assert not _of(events, "error")
+
+
 async def test_reading_history_neither_saves_nor_broadcasts_state() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[]) as (engine, events):
@@ -793,6 +862,93 @@ async def test_watchdog_restarts_stalled_camera_after_fresh_inference(monkeypatc
             if event.get("event") == "warning" and event["recovered"] and "feed recovered" in event["message"]
         )
         assert any(event.get("event") == "result" for event in events[stalled_index + 1 : recovered_index])
+
+
+async def test_a_stall_is_announced_through_the_watchdogs_own_restarts(monkeypatch) -> None:
+    from printguard.engine import engine as engine_module
+
+    scale = 0.01
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", watchdog.WATCH_TICK_S * scale)
+    monkeypatch.setattr(watchdog, "STALL_GRACE_S", watchdog.STALL_GRACE_S * scale)
+    monkeypatch.setattr(watchdog, "RESTART_AFTER_S", watchdog.RESTART_AFTER_S * scale)
+    monkeypatch.setattr(watchdog, "RESTART_COOLDOWN_S", watchdog.RESTART_COOLDOWN_S * scale)
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", watchdog.RECOVER_HOLD_S * scale)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", watchdog.GRACE_MIN_S * scale)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    platform = FakePlatform(infer_s=0.01)
+    open_camera = platform.open_camera
+    frozen = False
+
+    async def open_as_it_stands(camera_id: str, source: dict):
+        await asyncio.sleep(watchdog.WATCH_TICK_S * 2)
+        opened = await open_camera(camera_id, source)
+        opened.frozen = frozen
+        return opened
+
+    monkeypatch.setattr(platform, "open_camera", open_as_it_stands)
+    async with running_engine(platform, camera_fps=[20.0]) as (engine, events):
+        camera = next(iter(engine.cameras.values()))
+        await engine.handle({"cmd": "settings.update", "patch": {"fault_grace_s": watchdog.GRACE_DEFAULT_S * scale}})
+        await asyncio.sleep(0.1)
+        frozen = True
+        camera.frame_source.frozen = True
+        await asyncio.sleep((watchdog.STALL_GRACE_S + watchdog.GRACE_DEFAULT_S * scale) * 2)
+
+        def warnings(recovered: bool) -> list[dict]:
+            return [e for e in events if e.get("event") == "warning" and e["recovered"] is recovered]
+
+        assert len(platform.released_cameras) >= 2, "the stalled camera was not attached afresh more than once"
+        assert [w["message"] for w in warnings(False)] == [
+            f"Camera '{camera.name}' feed has stalled, so 'm-{camera.name}' is NOT being monitored"
+        ], "a stall the restarts did not cure was not announced once"
+        assert not warnings(True), "a restart that produced no inference was announced as a recovery"
+
+        frozen = False
+        for _ in range(300):
+            if warnings(True):
+                break
+            await asyncio.sleep(0.02)
+        assert [w["message"] for w in warnings(True)] == [
+            f"Camera '{camera.name}' feed recovered, so 'm-{camera.name}' is monitored again"
+        ]
+        assert any(e.get("event") == "result" for e in events[events.index(warnings(False)[0]) : events.index(warnings(True)[0])])
+
+
+async def test_a_printer_removed_during_a_poll_is_not_read_again(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    platform = FakePlatform()
+    answer = platform.http
+    reading = asyncio.Event()
+    release = asyncio.Event()
+    release.set()
+
+    async def slow(method: str, url: str, **request) -> tuple[int, object]:
+        if "slow.lan" in url:
+            reading.set()
+            await release.wait()
+        return await answer(method, url, **request)
+
+    monkeypatch.setattr(platform, "http", slow)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        for host in ("slow.lan", "gone.lan"):
+            await engine.handle(
+                {"cmd": "printer.add", "printer": {"name": host, "provider": "octoprint", "config": {"base_url": f"http://{host}", "api_key": "k"}}}
+            )
+        await asyncio.sleep(0.05)
+        removed_id = engine.printers.values()[1].id
+        platform.device_status = "Paused"
+        reading.clear()
+        release.clear()
+        platform.http_calls.clear()
+        events.clear()
+        poll = asyncio.create_task(engine.watchdog.poll_devices())
+        await asyncio.wait_for(reading.wait(), 1.0)
+        await engine.handle({"cmd": "printer.remove", "id": removed_id})
+        release.set()
+        await poll
+
+    assert not [url for _, url in platform.http_calls if "gone.lan" in url], "a removed printer was read"
+    assert [e["printer_id"] for e in _of(events, "device")] == [engine.printers.values()[0].id]
 
 
 async def test_brief_outage_reattaches_without_notifying(monkeypatch) -> None:

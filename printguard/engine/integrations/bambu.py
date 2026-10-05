@@ -400,7 +400,7 @@ class BambuAdapter(IntegrationAdapter):
             ftps.close()
 
     def _session_key(self, config: dict[str, Any]) -> tuple[str, str, str]:
-        return str(config["host"]), str(config["serial"]), str(config.get("access_code", ""))
+        return str(config.get("host")), str(config.get("serial")), str(config.get("access_code", ""))
 
     def _session(self, config: dict[str, Any]) -> _Session:
         key = self._session_key(config)

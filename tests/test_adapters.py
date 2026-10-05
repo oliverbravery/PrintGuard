@@ -8,7 +8,7 @@ import json as jsonlib
 from email.header import decode_header, make_header
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Container
 
 import httpx
 import numpy as np
@@ -19,7 +19,7 @@ from paho.mqtt.reasoncodes import ReasonCode
 from printguard.engine import vision
 from printguard.engine.cameras import webrtc_endpoint, whep_endpoint
 from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
-from printguard.engine.integrations import bambu
+from printguard.engine.integrations import bambu, klipper, octoprint
 from printguard.engine.integrations.bambu import BambuAdapter
 from printguard.engine.integrations.base import webcam_url
 from printguard.engine.integrations.elegoo import ElegooAdapter
@@ -1420,9 +1420,25 @@ async def test_elegoo_moonraker_family_uploads_through_moonraker() -> None:
     assert http.last["headers"]["X-Api-Key"] == "secret"
 
 
-
-def test_a_relative_webcam_url_keeps_a_port_that_is_not_the_api_port() -> None:
-    """OctoPrint behind a proxy on 8080 serves its webcam there, while one on its own 5000 serves it on the web port."""
-    assert webcam_url("http://nas.lan:8080", "/webcam/?action=stream", 5000) == "http://nas.lan:8080/webcam/?action=stream"
-    assert webcam_url("http://nas.lan:5000", "/webcam/?action=stream", 5000) == "http://nas.lan/webcam/?action=stream"
-    assert webcam_url("http://nas.lan:5000", "http://cam.lan/stream", 5000) == "http://cam.lan/stream"
+@pytest.mark.parametrize(
+    ("api_ports", "base_url", "stream", "resolved"),
+    [
+        (klipper._API_PORTS, "http://pi.lan:7125", "/webcam/?action=stream", "http://pi.lan/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://pi.lan:7126", "/webcam2/?action=stream", "http://pi.lan/webcam2/?action=stream"),
+        (klipper._API_PORTS, "https://pi.lan:7130", "/webcam/?action=stream", "https://pi.lan/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://pi.lan:8080", "/webcam/?action=stream", "http://pi.lan:8080/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://pi.lan", "/webcam/?action=stream", "http://pi.lan/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://[fd00::7]:7125", "/webcam/?action=stream", "http://[fd00::7]/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://[fd00::7]:8080", "/webcam/?action=stream", "http://[fd00::7]:8080/webcam/?action=stream"),
+        (klipper._API_PORTS, "http://[fd00::7]", "/webcam/?action=stream", "http://[fd00::7]/webcam/?action=stream"),
+        (octoprint._API_PORTS, "http://octopi.local:5000", "/webcam/?action=stream", "http://octopi.local/webcam/?action=stream"),
+        (octoprint._API_PORTS, "http://nas.lan:8080", "/webcam/?action=stream", "http://nas.lan:8080/webcam/?action=stream"),
+        (octoprint._API_PORTS, "https://print.example.com", "/webcam/?action=stream", "https://print.example.com/webcam/?action=stream"),
+        (octoprint._API_PORTS, "http://octopi.local:5000", "http://cam.lan/stream", "http://cam.lan/stream"),
+    ],
+)
+def test_a_relative_webcam_url_resolves_where_the_web_interface_is_served(
+    api_ports: Container[int], base_url: str, stream: str, resolved: str
+) -> None:
+    """The service's own API port serves no webcam, so only a web server's or a proxy's port is kept."""
+    assert webcam_url(base_url, stream, api_ports) == resolved

@@ -41,6 +41,7 @@ ENOTSUP = 58
 SHIM = """
 import * as __io from "qjs:std";
 const __input = JSON.parse(__io.in.readAsString());
+const __stringify = JSON.stringify;
 const __effects = [];
 const __hooks = { events: new Map(), route: null, gate: null, serve: null };
 const __assets = __input.assets || {};
@@ -86,7 +87,7 @@ if (__input.kind === "event" || __input.kind === "tick") {
 } else if (__input.kind === "gate" && __hooks.gate) {
   __result = __hooks.gate(__input.request, ctx) === true;
 }
-__io.out.puts(JSON.stringify({ store: ctx.store, effects: __effects, result: __result }));
+__io.out.puts(__stringify({ store: ctx.store, effects: __effects, result: __result }));
 __io.out.flush();
 __io.exit(0);
 """
@@ -96,9 +97,11 @@ module, so the worker cannot name the std module or the bindings above, and its
 own ``import`` is a syntax error. The driver exits as soon as it has answered,
 before any job runs, so an ``import()`` never resolves either.
 
-None of that makes the answer trustworthy. A worker shares the globals the
-driver uses, so everything in an answer is treated as the worker's own word and
-checked against its grants."""
+None of that makes the answer trustworthy. The driver keeps its own
+``JSON.stringify``, but a worker shares the prototypes it serialises through, so
+an answer of the wrong shape is that worker failing, and everything in one of
+the right shape is treated as the worker's own word and checked against its
+grants."""
 
 
 class Busy(Exception):
@@ -138,9 +141,12 @@ class Sandbox:
     def call(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Runs the worker once and returns its parsed output.
 
+        Returns:
+            The worker's answer, an object whose ``effects`` are a list.
+
         Raises:
-            RuntimeError: If the sandbox trapped, timed out or wrote nothing
-                a caller can read.
+            RuntimeError: If the sandbox trapped, timed out or wrote anything
+                but an answer of that shape.
         """
         out, err = Capped(), Capped()
         with tempfile.TemporaryDirectory() as work:
@@ -165,9 +171,12 @@ class Sandbox:
         if out.overflowed:
             raise RuntimeError(self._diagnose(out, err, None))
         try:
-            return json.loads(out.data)
+            answer = json.loads(out.data)
         except ValueError as exc:
             raise RuntimeError("worker returned nothing usable") from exc
+        if not isinstance(answer, dict) or not isinstance(answer.get("effects"), list):
+            raise RuntimeError("worker returned nothing usable")
+        return answer
 
     @staticmethod
     def _diagnose(out: Capped, err: Capped, exc: Exception | None) -> str:
@@ -349,7 +358,7 @@ class WasmPluginRuntime:
         finally:
             self._busy.discard(plugin.id)
         await self._store(plugin, output.get("store"))
-        await self._perform(plugin, output.get("effects") or [])
+        await self._perform(plugin, output["effects"])
         return output.get("result")
 
     async def _store(self, plugin: Plugin, store: Any) -> None:

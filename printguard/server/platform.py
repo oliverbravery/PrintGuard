@@ -146,42 +146,22 @@ def _v4l2_devices() -> list[tuple[str, str]]:
 def _video_devices() -> list[tuple[str, str]]:
     """Names the host's attachable video capture devices as (device_id, label).
 
-    libavdevice only exposes device discovery through its log stream, so the
-    names are parsed from a capture of the listing call's messages, raised to
-    INFO for the duration. Screens are excluded - a capture of the host's own
-    display is never a printer camera. Listing needs no camera permission;
-    only opening a device does.
+    Screens are excluded - a capture of the host's own display is never a
+    printer camera. Listing needs no camera permission; only opening a device
+    does. A device is opened by the name it is listed under, on macOS and
+    Windows alike.
     """
     if sys.platform.startswith("linux"):
         return _v4l2_devices()
-    import av.logging
-
-    spec, container_format = ("", "avfoundation") if sys.platform == "darwin" else ("video=dummy", "dshow")
-    previous = av.logging.get_level()
-    av.logging.set_level(av.logging.INFO)
     try:
-        with av.logging.Capture(local=True) as logs:
-            try:
-                av.open(spec, format=container_format, options={"list_devices": "true"})
-            except av.error.FFmpegError:
-                pass
-    finally:
-        av.logging.set_level(previous)
-    logger.debug("device listing captured %d lines: %r", len(logs), [message for _lv, _n, message in logs])
-    names: list[str] = []
-    in_video_section = False
-    for _level, _name, message in logs:
-        line = message.strip()
-        if sys.platform == "darwin":
-            if line.endswith("video devices:"):
-                in_video_section = True
-            elif line.endswith("audio devices:"):
-                in_video_section = False
-            elif in_video_section and (match := re.match(r"\[\d+\] (.+)", line)) and not match[1].startswith("Capture screen"):
-                names.append(match[1])
-        elif match := re.match(r'"(.+)" \(video', line):
-            names.append(match[1])
-    return [(name, name) for name in names]
+        devices = av.device.enumerate_input_devices("avfoundation" if sys.platform == "darwin" else "dshow")
+    except av.error.FFmpegError:
+        return []
+    return [
+        (device.description, device.description)
+        for device in devices
+        if "video" in device.media_types and not device.description.startswith("Capture screen")
+    ]
 
 
 def _device_input(device_id: str) -> tuple[str, str]:
@@ -481,6 +461,14 @@ class AVSource:
         self._wake.set()
 
 
+class ConnectWithoutRedirects(websockets.connect):
+    """A WebSocket handshake that ends at the address it was given."""
+
+    def process_redirect(self, exc: Exception) -> Exception:
+        """Hands a redirect back as the refusal it arrived as, never the address to try next."""
+        return exc
+
+
 class WebSocket:
     """One connection the hub holds open for a plugin."""
 
@@ -560,7 +548,13 @@ class ServerPlatform:
     update_repo = "oliverbravery/PrintGuard"
 
     def __init__(
-        self, model_dir: Path, data_dir: Path, mediamtx_api: str, mediamtx_rtsp: str, update_asset: str | None = None
+        self,
+        model_dir: Path,
+        data_dir: Path,
+        mediamtx_api: str,
+        mediamtx_rtsp: str,
+        update_asset: str | None = None,
+        mediamtx_login: tuple[str, str] | None = None,
     ) -> None:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
@@ -575,7 +569,7 @@ class ServerPlatform:
         self.assets = vision.assets_from_dicts(meta, protos)
         self._state_path = data_dir / "state.json"
         self._client = httpx.AsyncClient(follow_redirects=True)
-        self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client)
+        self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client, mediamtx_login)
         self._sources: dict[str, AVSource] = {}
         self._declares_devices = os.environ.get("PRINTGUARD_CAMERAS") == "auto"
         self.plugin_runtime = None if os.environ.get("PRINTGUARD_PLUGINS") == "off" else WasmPluginRuntime()
@@ -722,10 +716,21 @@ class ServerPlatform:
         timeout: float = 10.0,
         follow_redirects: bool = True,
     ) -> tuple[int, Any]:
-        """Performs an HTTP request with httpx, base64 encoding a binary reply."""
+        """Performs an HTTP request with httpx, base64 encoding a binary reply.
+
+        Raises:
+            RuntimeError: If a redirect made httpx replay the request under
+                another method, as it does a POST answered with 301 or 302,
+                so the request itself was never delivered.
+        """
         resp = await self._client.request(
             method, url, headers=headers, json=json, content=data, timeout=timeout, follow_redirects=follow_redirects
         )
+        hops = [*resp.history, resp]
+        for hop, landed in zip(hops, hops[1:]):
+            if hop.status_code != 303 and landed.request.method != hop.request.method:
+                source, target = (f"{at.url.scheme}://{at.url.netloc.decode()}" for at in (hop, landed))
+                raise RuntimeError(f"{source} redirects to {target}, which drops the {method}. Use the address it redirects to")
         if binary:
             return resp.status_code, base64.b64encode(resp.content).decode()
         try:
@@ -734,8 +739,13 @@ class ServerPlatform:
             return resp.status_code, resp.text
 
     async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> WebSocket:
-        """Connects a WebSocket and reads it on a task of its own."""
-        connection = await websockets.connect(url, open_timeout=SOCKET_TIMEOUT_S, max_size=SOCKET_MAX_BYTES)
+        """Connects a WebSocket and reads it on a task of its own.
+
+        Raises:
+            websockets.InvalidStatus: If the server answers with anything but
+                the upgrade, a redirect included.
+        """
+        connection = await ConnectWithoutRedirects(url, open_timeout=SOCKET_TIMEOUT_S, max_size=SOCKET_MAX_BYTES)
         socket = WebSocket(connection)
         socket.read(arrived)
         return socket

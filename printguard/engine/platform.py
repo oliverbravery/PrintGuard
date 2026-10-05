@@ -193,11 +193,18 @@ class Platform(Protocol):
         A plugin's request passes ``follow_redirects=False`` and gets the
         redirect itself back, since only the address it named was checked
         against its grant.
+
+        Raises:
+            RuntimeError: If following a redirect would send the request under
+                another method, so a command never arrives as a read.
         """
         ...
 
     async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> sockets.Socket:
         """Opens a WebSocket and reports every frame through the callback.
+
+        A redirect is a failed handshake, never followed, since only ``url``
+        was checked.
 
         Args:
             url: A ``ws://`` or ``wss://`` URL, already checked against the

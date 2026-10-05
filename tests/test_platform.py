@@ -13,8 +13,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import av
+import httpx
 import numpy as np
 import pytest
+import websockets
+from fakes import redirected_socket
 
 from printguard.engine import vision
 from printguard.server.inference import (
@@ -130,17 +133,31 @@ def test_windows_software_adapter_is_never_handed_to_directml() -> None:
 def test_windows_device_listing_ends_without_failing_the_hub(monkeypatch: pytest.MonkeyPatch) -> None:
     """A hub on Windows must start whether or not a camera is plugged in.
 
-    DirectShow ends every device listing with FFmpeg's immediate exit, which PyAV
+    DirectShow can end a device listing with FFmpeg's immediate exit, which PyAV
     raises as an error of its own rather than an ``OSError``.
     """
 
-    def list_devices(*_args: object, **_kwargs: object) -> None:
+    def list_devices(_format: str) -> list[object]:
         raise av.error.ExitError(1414092869, "Immediate exit requested")
 
     monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(av, "open", list_devices)
+    monkeypatch.setattr(av.device, "enumerate_input_devices", list_devices)
 
     assert _video_devices() == []
+
+
+def test_windows_lists_its_cameras_by_name_and_leaves_out_microphones(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DirectShow reports cameras and microphones together, each under a name and a device path."""
+    devices = [
+        SimpleNamespace(name="@device_pnp_usb#vid_046d", description="HD Pro Webcam C920", media_types=["video"]),
+        SimpleNamespace(name="@device_cm_wave", description="Microphone (HD Pro Webcam C920)", media_types=["audio"]),
+    ]
+    asked: list[str] = []
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(av.device, "enumerate_input_devices", lambda name: asked.append(name) or devices)
+
+    assert _video_devices() == [("HD Pro Webcam C920", "HD Pro Webcam C920")]
+    assert asked == ["dshow"]
 
 
 def test_provider_library_that_cannot_load_leaves_the_cpu(tmp_path: Path) -> None:
@@ -208,6 +225,46 @@ def test_a_damaged_state_file_is_kept_rather_than_overwritten(tmp_path, caplog) 
     assert "state.json.corrupt" in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("answer", "reached", "outcome"),
+    [
+        ("301 Moved Permanently", ["GET"], "drops the POST"),
+        ("302 Found", ["GET"], "drops the POST"),
+        ("307 Temporary Redirect", ["POST"], 204),
+        ("308 Permanent Redirect", ["POST"], 204),
+    ],
+)
+async def test_a_redirect_never_turns_a_command_into_a_read(answer: str, reached: list[str], outcome: str | int) -> None:
+    """httpx replays a POST answered with 301 or 302 as a GET, which OctoPrint answers 200 while the print carries on."""
+    arrived: list[str] = []
+
+    async def printer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        arrived.append((await reader.readuntil(b"\r\n\r\n")).split()[0].decode())
+        writer.write(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    async def proxy(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(f"HTTP/1.1 {answer}\r\nLocation: {moved}/api/job\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".encode())
+        await writer.drain()
+        writer.close()
+
+    async with await asyncio.start_server(printer, "127.0.0.1", 0) as behind, await asyncio.start_server(proxy, "127.0.0.1", 0) as front:
+        moved = f"http://127.0.0.1:{behind.sockets[0].getsockname()[1]}"
+        registered = f"http://127.0.0.1:{front.sockets[0].getsockname()[1]}"
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            holder = SimpleNamespace(_client=client)
+            if isinstance(outcome, int):
+                assert (await ServerPlatform.http(holder, "POST", f"{registered}/api/job", json={"command": "pause"}))[0] == outcome
+            else:
+                with pytest.raises(RuntimeError, match=f"{registered} redirects to {moved}, which {outcome}"):
+                    await ServerPlatform.http(holder, "POST", f"{registered}/api/job", json={"command": "pause"})
+            assert (await ServerPlatform.http(holder, "GET", f"{registered}/api/job"))[0] == 204
+            assert (await ServerPlatform.http(holder, "POST", f"{registered}/api/job", follow_redirects=False))[0] == int(answer[:3])
+    assert arrived == [*reached, "GET"]
+
+
 def test_a_camera_that_will_not_open_keeps_its_password_out_of_the_error() -> None:
     """PyAV quotes the address it failed on, and that text becomes an error event."""
     source = AVSource("http://admin:CAMPASS@127.0.0.1:9/video?user=admin&pwd=QUERYPASS", None)
@@ -220,6 +277,15 @@ def test_a_camera_that_will_not_open_keeps_its_password_out_of_the_error() -> No
 
     assert source.last_error and "127.0.0.1:9/video" in source.last_error
     assert "CAMPASS" not in source.last_error and "QUERYPASS" not in source.last_error
+
+
+async def test_a_plugin_socket_refuses_a_redirect_instead_of_following_it() -> None:
+    """Only the address a plugin declared was checked against its grant."""
+    async with redirected_socket() as (declared, reached):
+        with pytest.raises(websockets.InvalidStatus, match="HTTP 302"):
+            await ServerPlatform.open_socket(None, f"{declared}/feed", lambda state, text: None)
+
+    assert reached == [], "the handshake went on to an address nobody checked"
 
 
 def _capability(card: bytes, device_caps: int) -> bytes:

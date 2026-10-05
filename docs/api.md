@@ -138,7 +138,7 @@ name is in [`PRINTGUARD_ORIGINS`](deployment.md#host-and-origin-checking).
 | `POST` | `/monitors` | Add a monitor, binding a camera and an optional printer |
 | `PATCH` | `/monitors/{id}` | Update a monitor |
 | `DELETE` | `/monitors/{id}` | Remove a monitor |
-| `POST` | `/printers` | Register a printer |
+| `POST` | `/printers` | Register a printer. Refused with the field named if one the service requires is blank |
 | `PATCH` | `/printers/{id}` | Update a printer. `config` replaces the stored one, [keeping the secrets a read left out](#the-resource-model) |
 | `DELETE` | `/printers/{id}` | Remove a printer |
 | `POST` | `/printers/test` | `{"provider", "config"}`, reachability only |

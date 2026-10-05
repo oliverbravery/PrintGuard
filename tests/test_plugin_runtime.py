@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from fakes import FakePlatform
 
+from printguard.engine import plugins as engine_plugins
 from printguard.engine.engine import Engine
 
 OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
@@ -285,6 +286,56 @@ async def test_a_gate_that_fails_goes_on_refusing_until_somebody_deals_with_it(r
         assert await runtime.authorise(GATE_REQUEST) is None
     finally:
         await restarted.stop()
+
+
+def test_a_worker_cannot_replace_what_serialises_its_answer(runtime: WasmPluginRuntime) -> None:
+    output = call(runtime, "JSON.stringify = () => '[]'; plugin.on('alert', (event, ctx) => ctx.log('heard'));")
+
+    assert output["effects"] == [{"kind": "log", "text": "heard"}]
+
+
+@pytest.mark.parametrize(
+    "forgery",
+    ["Array.prototype.toJSON = () => 5;", "Object.prototype.toJSON = () => [];", "Object.prototype.toJSON = () => 'ok';"],
+)
+def test_an_answer_of_the_wrong_shape_is_the_worker_failing(runtime: WasmPluginRuntime, forgery: str) -> None:
+    with pytest.raises(RuntimeError, match="nothing usable"):
+        call(runtime, forgery)
+
+
+async def test_a_worker_forging_its_effects_is_disabled_and_the_others_keep_ticking(
+    runtime: WasmPluginRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every plugin's timer is one task, so an answer that breaks it stops them all."""
+    monkeypatch.setattr(engine_plugins, "MIN_TICK_S", 0.2)
+    timer = {"version": "1.0.0", "permissions": [], "reasons": {}, "tick_s": 0.2}
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, {**timer, "id": "honest"}, "plugin.on('tick', (event, ctx) => { ctx.store.ticks = (ctx.store.ticks || 0) + 1; });")
+        await install_and_accept(engine, {**timer, "id": "forger"}, "Array.prototype.toJSON = () => 5; plugin.on('tick', (event, ctx) => ctx.log('x'));")
+        await asyncio.sleep(1.0)
+        forger = engine.plugins.get("forger")
+        seen = engine.plugins.get("honest").config.get("ticks", 0)
+        await asyncio.sleep(1.0)
+
+        assert forger.enabled is False and forger.failure, "a worker that forged its answer was left running"
+        assert engine.plugins.get("honest").config["ticks"] > seen, "one plugin's forged answer stopped every plugin's timer"
+    finally:
+        await engine.stop()
+
+
+async def test_a_gate_forging_its_answer_refuses_rather_than_erroring(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, GATE_MANIFEST, "Object.prototype.toJSON = () => []; plugin.gate(() => true);")
+        assert await runtime.authorise(GATE_REQUEST) is False
+        plugin = engine.plugins.get("doorman")
+        assert plugin.enabled is False and plugin.failure
+        assert await runtime.authorise(GATE_REQUEST) is False, "the hub opened once its forging gate had been disabled"
+    finally:
+        await engine.stop()
 
 
 async def test_a_flood_of_requests_cannot_disable_a_healthy_gate(

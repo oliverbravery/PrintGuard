@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
-from fakes import FakePlatform, FakeSocket
+from fakes import FakePlatform, FakeSocket, redirected_socket
 
 from printguard.engine import oauth, plugins, sockets
 from printguard.engine.engine import Engine
@@ -94,6 +94,19 @@ async def test_a_redirect_is_handed_back_to_the_plugin_and_never_followed() -> N
     assert [e["status"] for e in answer if e["event"] == "http"] == [302]
     assert asked == [(f"{API}/v1/hop", "s3cr3t")], "the plugin's request went on to an address it never declared"
     assert followed == (200, {"wifi_password": "hunter2"}), "an adapter's request stopped following redirects"
+
+
+async def test_a_socket_redirected_off_its_declared_address_is_refused() -> None:
+    platform = FakePlatform()
+    platform.open_socket = lambda url, arrived: ServerPlatform.open_socket(None, url, arrived)
+    async with redirected_socket() as (declared, reached):
+        async with engine_with(platform, manifest("net", "net:local", urls=[f"{declared}/*"])) as engine:
+            with pytest.raises(RuntimeError, match="HTTP 302"):
+                await engine.request({"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "hop", "url": f"{declared}/feed"})
+            with pytest.raises(RuntimeError):
+                await engine.request({"cmd": "plugin.socket", "id": "demo", "action": "send", "tag": "hop", "text": '{"cmd":"token.create"}'})
+
+    assert reached == [], "the plugin's socket went on to an address it never declared"
 
 
 async def test_a_sign_in_never_follows_a_redirect_from_the_token_endpoint() -> None:

@@ -99,8 +99,8 @@ for the hub:
 | `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list |
 | `open_camera(id, source)` | A `FrameSource`. MediaMTX pulls every URL that is not plain HTTP, so RTSP, RTMP and WHEP, and PyAV reads HTTP MJPEG and capture devices directly. A `path` source reads a stream already on MediaMTX, and a `bambu` source the A1 and P1 chamber camera |
 | `release_camera(id, source)` | Closes the source and removes its MediaMTX pull path |
-| `http(...)` | httpx |
-| `open_socket(url, arrived)` | A `websockets` client connection held for a plugin |
+| `http(...)` | httpx. A redirect that would replay the request under another method, such as a POST answered with 301 or 302, raises |
+| `open_socket(url, arrived)` | A `websockets` client connection held for a plugin, which refuses a redirect |
 | `encode_jpeg(rgb)` / `decode_jpeg(data)` | PyAV |
 | `load_state()` / `save_state(state)` | `data/state.json`, written atomically and readable only by its owner |
 
@@ -461,7 +461,11 @@ source that reconnects and drops
 again is still the same warning, and each announced recovery doubles how long the
 next one must hold before it is announced, up to fifteen minutes. Only the notification
 waits on the grace period. The dashboard shows a fault as it happens, and re-attaching a
-failed camera runs on its own timer, so a longer grace period never delays recovery.
+failed camera runs on its own timer, so a longer grace period never delays recovery. A stall
+starts once an online camera has gone `STALL_GRACE_S` without a completed inference and ends
+only when one completes again, so re-attaching the camera neither restarts its grace period
+nor counts as recovery, and the warning follows the last result by `STALL_GRACE_S` plus the
+grace period.
 Notifier delivery failures and inference crashes emit `error` events. There is no silent
 `except: pass` anywhere in the alert path.
 
@@ -479,7 +483,7 @@ The timings are constants at the top of [`engine/watchdog.py`](../printguard/eng
 | `GRACE_DEFAULT_S`, `GRACE_MIN_S`, `GRACE_MAX_S` | 120 s, 30 s, 900 s | The grace period and its clamp |
 | `REPEAT_EVERY_S` | 1800 s | How often a standing warning is repeated |
 | `RECOVER_HOLD_S`, `FLAP_HOLD_MAX_S` | 60 s, 900 s | The first recovery hold, and the ceiling it doubles towards |
-| `STALL_GRACE_S` | 30 s | How long an online camera may go without a fresh frame |
+| `STALL_GRACE_S` | 30 s | How long an online camera may go without a completed inference before it counts as stalled |
 | `COVERAGE_WINDOW_S`, `COVERAGE_MIN` | 600 s, 0.9 | The window and share behind the coverage condition |
 | `RESTART_AFTER_S`, `RESTART_COOLDOWN_S` | 15 s, 60 s | How long a camera faults before it is re-attached, and the gap between attempts |
 | `ACT_ATTEMPTS`, `ACT_RETRY_S` | 3, 1 s | Printer action attempts and their spacing |
@@ -610,9 +614,9 @@ for development and packaging.
 | `MODEL_DIR` | The model, its metadata and prototypes | `models/` |
 | `STATIC_DIR` | The built dashboard the hub serves | `web/dist` |
 | `LOG_FILE` | A rotating log file, 2 MB with two backups | None, and `printguard.log` in the desktop app's data directory |
-| `MEDIAMTX_BINARY` | The MediaMTX binary the hub supervises. Unset, the hub expects one already running | Unset |
+| `MEDIAMTX_BINARY` | The MediaMTX binary the hub supervises, 1.15.4 or newer. The hub starts it with a random login for its control API, which `mediamtx.yml` grants to nobody. Unset, the hub expects one already running | Unset |
 | `MEDIAMTX_CONFIG` | The config that binary starts with | `mediamtx.yml` |
-| `MEDIAMTX_API`, `MEDIAMTX_RTSP`, `MEDIAMTX_HLS` | Where MediaMTX's control API, RTSP and HLS listeners are | `http://localhost:9997`, `rtsp://localhost:8554`, `http://localhost:8888` |
+| `MEDIAMTX_API`, `MEDIAMTX_RTSP`, `MEDIAMTX_HLS` | Where MediaMTX's control API, RTSP and HLS listeners are. If a MediaMTX you run yourself wants a login for its API, put it in the URL as `http://user:pass@host:9997` | `http://localhost:9997`, `rtsp://localhost:8554`, `http://localhost:8888` |
 | `UPDATE_ASSET` | The release asset this deployment updates with. Setting it marks the hub as the desktop app | Unset, and the platform's installer in the desktop app |
 | `PRINTGUARD_VARIANT` | The image variant suffix reported in `host`, set from the image build arg | Empty |
 | `APP_ICON` | The icon on native notifications, set by the Windows desktop app | Unset |

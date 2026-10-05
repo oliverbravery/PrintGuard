@@ -31,6 +31,8 @@ the other three.
 
 If a registered printer exposes a webcam, PrintGuard registers it as a camera for you, with no
 stream URL to copy. **Refresh** picks up a camera attached after the printer was registered.
+[Where a printer's webcam is read from](printers.md#where-a-printers-webcam-is-read-from) covers
+how a relative stream path from OctoPrint or Moonraker becomes an address.
 
 These cameras belong to their printer, so they can't be removed on their own and they're dropped
 when the printer is. One the printer stops exposing stays registered until then. [Supported print services](printers.md#supported-print-services) lists which

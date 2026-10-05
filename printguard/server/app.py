@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import secrets
+import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from string import Template
@@ -212,13 +213,15 @@ def create_app() -> FastAPI:
         """
         logger.info("hub starting (data=%s, models=%s, static=%s)", data_dir, model_dir, static_dir)
         async with AsyncExitStack() as resources:
+            mediamtx_login = None
             if mediamtx_binary and Path(mediamtx_binary).exists():
-                streamer = EmbeddedMediaMTX(mediamtx_binary, mediamtx_config, mediamtx_api)
+                mediamtx_login = ("printguard", secrets.token_urlsafe(32))
+                streamer = EmbeddedMediaMTX(mediamtx_binary, mediamtx_config, mediamtx_api, mediamtx_login)
                 await streamer.start()
                 resources.push_async_callback(streamer.stop)
             else:
                 logger.warning("no bundled MediaMTX binary (%r), expecting an external MediaMTX at %s", mediamtx_binary, mediamtx_api)
-            platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset)
+            platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset, mediamtx_login)
             resources.push_async_callback(platform.close)
             engine = Engine(platform)
             await engine.start()

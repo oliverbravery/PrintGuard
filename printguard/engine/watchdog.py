@@ -103,12 +103,19 @@ class Watchdog:
 
         A change in the status a printer last reported is saved, so a hub
         restarted while the printer is switched off still knows it was idle.
+        A printer removed while an earlier one was answering is not read, since
+        reading it would open the connection its removal just closed.
 
         Returns:
             Seconds until the next poll.
         """
         reported = [printer.reported_status for printer in self._engine.printers.values()]
-        if any([await self._read(printer) for printer in self._engine.printers.values()]):
+        changed = [
+            await self._read(printer)
+            for printer in self._engine.printers.values()
+            if self._engine.printers.get(printer.id) is printer
+        ]
+        if any(changed):
             self.follow_printers()
         if reported != [printer.reported_status for printer in self._engine.printers.values()]:
             self._engine.save()
@@ -161,12 +168,15 @@ class Watchdog:
         delays the notification and never the recovery.
 
         A camera that stays online but stops producing fresh frames counts as
-        stalled - frozen feeds must not pass for monitoring. One that keeps
-        dropping and returning clears the grace period every time yet is only
-        watching part of the print, so the share of the last COVERAGE_WINDOW_S
-        it delivered frames for is warned on separately. A printer that
-        reports nothing usable only counts while its monitor is watching,
-        since one switched off after a print leaves its monitor in standby.
+        stalled - frozen feeds must not pass for monitoring. A stall lasts
+        until an inference completes again, so the watchdog's own re-attach of
+        the camera neither restarts its grace period nor reads as recovery.
+        One that keeps dropping and returning clears the grace period every
+        time yet is only watching part of the print, so the share of the last
+        COVERAGE_WINDOW_S it delivered frames for is warned on separately. A
+        printer that reports nothing usable only counts while its monitor is
+        watching, since one switched off after a print leaves its monitor in
+        standby.
 
         A watching monitor whose camera is not registered is as unwatched as
         one whose camera is offline, and is warned about the same way. A
@@ -228,8 +238,8 @@ class Watchdog:
             if not camera.online and self._due_restart(offline_key, now):
                 await self._engine.restart_camera(camera)
             progressing = (
-                camera.online and camera.last_done > self._down_since[stall_key]
-                if stall_key in self._warned
+                camera.online and self._down_since[stall_key] < camera.last_done > now - STALL_GRACE_S
+                if stall_key in self._down_since
                 else not camera.online or now - max(camera.last_done, self._online_since.get(mid, now)) < STALL_GRACE_S
             )
             await self._edge(
@@ -241,7 +251,7 @@ class Watchdog:
                 f"Camera '{camera.name}' feed has stalled, so '{monitor['name']}' is NOT being monitored",
                 f"Camera '{camera.name}' feed recovered, so '{monitor['name']}' is monitored again",
             )
-            if not progressing and self._due_restart(stall_key, now):
+            if camera.online and not progressing and self._due_restart(stall_key, now):
                 await self._engine.restart_camera(camera)
             await self._cover(monitor, camera, offline_key, now)
         return WATCH_TICK_S

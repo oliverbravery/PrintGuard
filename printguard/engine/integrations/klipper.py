@@ -13,6 +13,8 @@ from ..cameras import webrtc_endpoint, whep_endpoint
 from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, webcam_url
 
 _UPLOAD_TIMEOUT_S = 180.0
+_API_PORTS = range(7125, 7200)
+"""Moonraker's own ports: 7125, one more for each further instance on the host, and 7130 for TLS."""
 _HEATERS = {"nozzle": "extruder", "bed": "heater_bed"}
 _STATUS_MAP = {
     "printing": DeviceStatus.PRINTING,
@@ -146,7 +148,7 @@ class KlipperAdapter(IntegrationAdapter):
                 {
                     "key": str(webcam.get("uid") or webcam.get("name") or len(found)),
                     "name": webcam.get("name") or "Webcam",
-                    "source": {"kind": "url", "url": webcam_url(config["base_url"], stream, 7125)},
+                    "source": {"kind": "url", "url": webcam_url(config["base_url"], stream, _API_PORTS)},
                 }
             )
         return found

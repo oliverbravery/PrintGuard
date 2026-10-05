@@ -12,6 +12,7 @@ from ..adapters import multipart_form
 from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, webcam_url
 
 _UPLOAD_TIMEOUT_S = 180.0
+_API_PORTS = (5000,)
 _STATUS_MAP = {
     "printing": DeviceStatus.PRINTING,
     "resuming": DeviceStatus.PRINTING,
@@ -139,4 +140,4 @@ class OctoPrintAdapter(IntegrationAdapter):
         stream = ((body.get("plugins") or {}).get("classicwebcam") or {}).get("stream") or (body.get("webcam") or {}).get("streamUrl")
         if not stream:
             return []
-        return [{"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": webcam_url(config["base_url"], stream, 5000)}}]
+        return [{"key": "webcam", "name": "OctoPrint webcam", "source": {"kind": "url", "url": webcam_url(config["base_url"], stream, _API_PORTS)}}]

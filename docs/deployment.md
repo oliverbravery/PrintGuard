@@ -50,7 +50,7 @@ flowchart LR
 | `8000` | In | Always. Dashboard, engine WebSocket, live video, device publishing |
 | `8554` | In | A camera pushes RTSP into PrintGuard |
 | `1935` | In | A camera pushes RTMP |
-| `9997`, `8888` | Internal | Never. They bind to `127.0.0.1` inside the container |
+| `9997`, `8888` | Internal | Never. They bind to `127.0.0.1`, inside the container or on the computer the desktop app runs on |
 
 Cameras that PrintGuard pulls from, and printers it talks to, need no published ports at
 all. The compose file publishes `8000` and `8554`, so add `"1935:1935"` for an RTMP push.
@@ -60,6 +60,11 @@ by its id and publish a stream of their own, because cameras push to the hub tha
 
 The desktop app listens on the same three ports on every interface of the computer it runs on,
 so the same rule applies to it on a network you don't trust.
+
+On the desktop app `9997` and `8888` are that computer's own loopback, which a web page open in
+its browser can reach. The MediaMTX control API on `9997` only answers a login the hub makes up
+each time it starts and passes to MediaMTX in its environment, so it is never on disk. Neither
+port sends CORS headers, so a page from another origin can't read a reply from them.
 
 ## Choosing an approach
 
@@ -213,7 +218,7 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | No router port-forwards for `8000`, `8554` or `1935` | The hub has no authentication of its own |
 | Only admit people you would hand the printer to | There are no per-user roles, so anyone who authenticates sees every camera and controls every printer |
 | Bind ports to `127.0.0.1:…` when a proxy on the same host is the only client | Keeps the app unreachable except through the proxy |
-| Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback inside the container, and the hub proxies HLS out through `:8000` |
+| Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback, and the hub proxies HLS out through `:8000`. The control API only answers the hub's own login, but the HLS muxer takes none |
 | List in `PRINTGUARD_ORIGINS` only the addresses you open the hub at | Every name in it is one a web page may reach the hub under. See [host and origin checking](#host-and-origin-checking) |
 | Publish `8554` and `1935` only to a network you trust, or not at all | The streaming server takes no login. Anyone who can reach those ports can watch any camera's stream and publish one of their own. A hub that only pulls from its cameras needs neither port published |
 | Serve over HTTPS if you issue API tokens | Bearer tokens must never travel in clear. See [API & MCP](api.md) |

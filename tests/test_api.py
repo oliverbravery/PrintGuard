@@ -119,7 +119,7 @@ async def test_scoped_tokens_gate_control_and_management() -> None:
         acted = await client.post(f"/printers/{printer_id}/action", json={"action": "pause"}, headers=manage)
         assert acted.status_code == 200
         assert any("/api/job" in url for _, url in platform.http_calls)
-        added = await client.post("/printers", json={"name": "x", "provider": "octoprint", "config": {}}, headers=manage)
+        added = await client.post("/printers", json={"name": "x", **OCTOPRINT}, headers=manage)
         assert added.status_code == 200
         made = await client.post("/monitors", json={"name": "m2", "camera_id": camera_id}, headers=manage)
         assert made.status_code == 200

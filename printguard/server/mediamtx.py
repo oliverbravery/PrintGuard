@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 READY_TIMEOUT_S = 10.0
 RESTART_DELAY_S = 2.0
 STOP_TIMEOUT_S = 5.0
+API_USER_ENV = "MTX_AUTHINTERNALUSERS_1"
 
 
 def pull_source(url: str) -> str | None:
@@ -39,10 +40,22 @@ def pull_source(url: str) -> str | None:
 class MediaMTX:
     """Manages stream paths on a MediaMTX instance."""
 
-    def __init__(self, api_base: str, rtsp_base: str, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self, api_base: str, rtsp_base: str, client: httpx.AsyncClient, login: tuple[str, str] | None = None
+    ) -> None:
+        """Points the client at a MediaMTX.
+
+        Args:
+            api_base: Where its control API listens.
+            rtsp_base: Where its RTSP listener is.
+            client: The HTTP client the API calls go through.
+            login: The user and password its control API asks for. The bundled
+                server only answers the one this hub started it with.
+        """
         self._api = api_base.rstrip("/")
         self._rtsp = rtsp_base.rstrip("/")
         self._client = client
+        self._login = login
 
     def rtsp_url(self, path: str) -> str:
         """Internal RTSP URL the server reads frames from."""
@@ -50,7 +63,7 @@ class MediaMTX:
 
     async def list_paths(self) -> list[str]:
         """Names of currently active stream paths."""
-        resp = await self._client.get(f"{self._api}/v3/paths/list", timeout=5.0)
+        resp = await self._client.get(f"{self._api}/v3/paths/list", auth=self._login, timeout=5.0)
         resp.raise_for_status()
         return [item["name"] for item in resp.json().get("items", [])]
 
@@ -68,14 +81,18 @@ class MediaMTX:
         }
         if fingerprint:
             payload["sourceFingerprint"] = fingerprint
-        resp = await self._client.post(f"{self._api}/v3/config/paths/add/{name}", json=payload, timeout=5.0)
+        resp = await self._client.post(
+            f"{self._api}/v3/config/paths/add/{name}", json=payload, auth=self._login, timeout=5.0
+        )
         if resp.status_code == 400:
-            resp = await self._client.patch(f"{self._api}/v3/config/paths/patch/{name}", json=payload, timeout=5.0)
+            resp = await self._client.patch(
+                f"{self._api}/v3/config/paths/patch/{name}", json=payload, auth=self._login, timeout=5.0
+            )
         resp.raise_for_status()
 
     async def remove_path(self, name: str) -> None:
         """Deletes a managed path, ignoring paths that no longer exist."""
-        await self._client.delete(f"{self._api}/v3/config/paths/delete/{name}", timeout=5.0)
+        await self._client.delete(f"{self._api}/v3/config/paths/delete/{name}", auth=self._login, timeout=5.0)
 
 
 class EmbeddedMediaMTX:
@@ -89,12 +106,33 @@ class EmbeddedMediaMTX:
     the failure logged, because dropped streams must never pass silently, and
     its lifetime is tied to the hub's so no exit can leave it holding the
     streaming ports.
+
+    The control API can read every camera's source URL and add a path that runs
+    a command, and on the desktop app it listens on the computer's own loopback,
+    where any web page in a browser can reach it. The shipped config grants the
+    API to nobody, so the one login that can use it is handed to the server in
+    its environment and never written to disk.
     """
 
-    def __init__(self, binary: str, config: str, api_base: str) -> None:
+    def __init__(self, binary: str, config: str, api_base: str, api_login: tuple[str, str]) -> None:
+        """Prepares the server without starting it.
+
+        Args:
+            binary: The MediaMTX executable.
+            config: The config file it starts with.
+            api_base: Where its control API will listen.
+            api_login: The user and password to grant the control API to.
+        """
         self._binary = binary
         self._config = config
         self._api = urlsplit(api_base)
+        user, password = api_login
+        self._env = {
+            **os.environ,
+            f"{API_USER_ENV}_USER": user,
+            f"{API_USER_ENV}_PASS": password,
+            f"{API_USER_ENV}_PERMISSIONS_0_ACTION": "api",
+        }
         self._process: asyncio.subprocess.Process | None = None
         self._supervisor: asyncio.Task[None] | None = None
         self._stopping = False
@@ -117,7 +155,10 @@ class EmbeddedMediaMTX:
         while not self._stopping:
             try:
                 self._process = await asyncio.create_subprocess_exec(
-                    self._binary, self._config, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    self._binary,
+                    self._config,
+                    env=self._env,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
             except OSError as exc:
                 logger.error("MediaMTX failed to launch (%s); retrying", exc)

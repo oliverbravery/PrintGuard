@@ -168,7 +168,7 @@ class ElegooAdapter(IntegrationAdapter):
 
     async def close(self, config: dict[str, Any] | None = None) -> None:
         """Closes persistent Centauri connections."""
-        if config is not None and self._family(config) != _CENTAURI:
+        if config is not None and config.get("family") != _CENTAURI:
             return
         keys = (
             [self._connection_key(config)]
@@ -239,7 +239,7 @@ class ElegooAdapter(IntegrationAdapter):
         return next((printer.mainboard_id for printer in printers if printer.host in addresses and printer.mainboard_id), None)
 
     def _connection_key(self, config: dict[str, Any]) -> tuple[str, str]:
-        return str(config["host"]), str(config.get("access_code") or "")
+        return str(config.get("host")), str(config.get("access_code") or "")
 
     def _family(self, config: dict[str, Any]) -> str:
         family = str(config["family"])

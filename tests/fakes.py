@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 
 import numpy as np
+import websockets
 
 from printguard.engine.platform import Frame
 
@@ -50,6 +52,29 @@ class FakeSocket:
     async def close(self) -> None:
         self.closed = True
         self.arrived("closed", "")
+
+
+@asynccontextmanager
+async def redirected_socket() -> AsyncIterator[tuple[str, list[str]]]:
+    """Serves a WebSocket address on loopback that redirects to a second one.
+
+    Yields:
+        The address that redirects, and the path of every handshake that
+        reached the address it points at.
+    """
+    reached: list[str] = []
+
+    async def elsewhere(connection: websockets.ServerConnection) -> None:
+        reached.append(connection.request.path)
+
+    async with websockets.serve(elsewhere, "127.0.0.1", 0) as target:
+        def redirect(connection: websockets.ServerConnection, request: Any) -> Any:
+            response = connection.respond(302, "")
+            response.headers["Location"] = f"ws://127.0.0.1:{target.sockets[0].getsockname()[1]}/api/ws"
+            return response
+
+        async with websockets.serve(elsewhere, "127.0.0.1", 0, process_request=redirect) as declared:
+            yield f"ws://127.0.0.1:{declared.sockets[0].getsockname()[1]}", reached
 
 
 class FakeFileStore:

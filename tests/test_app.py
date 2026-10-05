@@ -160,6 +160,23 @@ async def test_hls_view_wakes_camera_before_proxying() -> None:
     platform.view_camera.assert_awaited_once_with("camera-one")
 
 
+async def test_hls_answers_502_while_the_streaming_server_is_unreachable() -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(view_camera=AsyncMock(), plugin_runtime=None))
+    app.state.hls = httpx.AsyncClient(base_url="http://mediamtx", transport=httpx.MockTransport(refuse))
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            responses = [await client.get("/hls/camera-one/index.m3u8") for _ in range(2)]
+    finally:
+        await app.state.hls.aclose()
+
+    assert [response.status_code for response in responses] == [502, 502]
+
+
 async def test_a_sandboxed_page_cannot_pull_a_camera_stream() -> None:
     """A plugin's own pages are served into an opaque origin.
 
