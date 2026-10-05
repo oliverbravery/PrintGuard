@@ -2,26 +2,29 @@
 
 # Architecture
 
-[Docs](README.md) · **Architecture** · [Printers & cameras](printers.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Troubleshooting](troubleshooting.md)
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · **Architecture** · [Troubleshooting](troubleshooting.md)
 
 </div>
 
 PrintGuard is a monolith. One Python engine owns every decision, a hub server runs it, and
 the React dashboard, the REST API, the MCP server and the MQTT bridge are transports that only
-send it commands. The engine reaches hardware, the network and disk through one `Platform`
-protocol, so the tests run the whole of it against an in-memory fake.
+send it commands. The engine's own logic reaches hardware, the network and disk through one
+`Platform` protocol, so the tests run it against an in-memory fake. Adapters built on a
+vendor's client library are the exception, covered under
+[the platform contract](#the-platform-contract).
 
 - [The shape of it](#the-shape-of-it)
 - [The platform contract](#the-platform-contract)
 - [The protocol](#the-protocol)
 - [Resources and monitors](#resources-and-monitors)
-- [Updates and bug reports](#updates-and-bug-reports)
-- [Logging](#logging)
-- [The programmatic surface](#the-programmatic-surface)
-- [Plugins](#plugins)
 - [Scheduling inference](#scheduling-inference)
 - [The defect pipeline](#the-defect-pipeline)
 - [Failing safely](#failing-safely)
+- [The programmatic surface](#the-programmatic-surface)
+- [Plugins](#plugins)
+- [Updates and bug reports](#updates-and-bug-reports)
+- [Logging](#logging)
+- [Configuration](#configuration)
 - [Repository layout](#repository-layout)
 - [The website](#the-website)
 
@@ -37,21 +40,43 @@ flowchart LR
     transports <-- "JSON commands / events" --> engine
 
     subgraph engine["printguard/engine"]
-        registry["camera + printer registries"]
+        registry["registries<br/>cameras · printers · prints · tokens · plugins"]
         monitors["monitors (camera + printer)"]
         scheduler["fair scheduler"]
+        vision["vision (transform / preprocess / classify)"]
+        history["risk history"]
         watchdog["watchdog (defect response)"]
-        vision["vision (preprocess / classify)"]
         integrations["integration adapters"]
         notifiers["notifier adapters"]
+        plugins["plugins (sourcing + permissions)"]
     end
 
-    engine -- "Platform protocol" --> server["server/platform.py<br/>LiteRT / ONNX Runtime · PyAV · httpx"]
+    engine -- "Platform protocol" --> server["server/platform.py<br/>LiteRT / ONNX Runtime · PyAV · httpx · QuickJS"]
 
     server --- mediamtx["MediaMTX<br/>RTSP / RTMP / WHEP / HLS"]
     integrations --- printersvc["OctoPrint / Moonraker / Elegoo / PrusaLink / Bambu Lab"]
     notifiers --- push["ntfy / Pushover / Telegram / Discord / native"]
 ```
+
+### What the hub serves
+
+[`server/app.py`](../printguard/server/app.py) builds one FastAPI app on one port.
+
+| Route | Serves |
+|---|---|
+| `/api/ws` | The engine socket the dashboard speaks the protocol over |
+| `/api/publish/{path}` | A second WebSocket taking a browser's camera recording, which [`server/publish.py`](../printguard/server/publish.py) remuxes into MediaMTX over RTSP |
+| `/hls/{path}` | A proxy to MediaMTX's LL-HLS, which also wakes a sleeping camera source for the viewer. A request with `Origin: null` is refused, so a plugin page cannot pull a feed |
+| `/api/health` | `{ok, version}`, used by the image's health check |
+| `/api/prints`, `/api/prints/inspect`, `/api/prints/{id}/gcode`, `/api/prints/{id}/thumbnail` | The dashboard's print library upload, pre-upload inspection, gcode viewer and previews |
+| `/plugins/{id}/{path}` | A plugin's own routes, answered from its sandbox |
+| `/oauth/callback` | Where a provider sends the user back after a plugin's sign-in |
+| `/api/v1`, `/mcp` | The REST API and the MCP server |
+| `/` | The built dashboard from `STATIC_DIR` |
+
+Both WebSockets and the two print `POST` routes check the request's `Origin` against the host
+it was sent to, plus anything listed in `PRINTGUARD_ORIGINS`. See
+[origin checking](deployment.md#origin-checking).
 
 ## The platform contract
 
@@ -61,68 +86,112 @@ for the hub:
 
 | Member | On the hub |
 |---|---|
+| `host` | Which deployment this is: `macos`, `windows`, or `docker` plus the image variant |
+| `workers` | How many inferences run at once, measured when the runtime loads |
+| `inference_device` | The name of the device the selected runtime runs on, shown in the dashboard |
+| `version` | The installed package version |
+| `update_repo`, `update_asset` | The GitHub repository whose releases are checked, and the installer the desktop app updates with |
+| `plugin_runtime` | A `PluginRuntime`, or `None` with `PRINTGUARD_PLUGINS=off` |
+| `files` | A `FileStore` |
 | `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count |
-| `infer(rgb)` | The selected LiteRT or ONNX Runtime model |
+| `infer(rgb)` | `vision.preprocess`, the selected LiteRT or ONNX Runtime model, then `vision.classify` |
 | `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list |
-| `open_camera(id, source)` | PyAV reader thread, with MediaMTX pulling RTSP and WHEP streams |
+| `open_camera(id, source)` | A `FrameSource`. MediaMTX pulls every URL that is not plain HTTP, so RTSP, RTMP and WHEP, and PyAV reads HTTP MJPEG and capture devices directly |
+| `release_camera(id, source)` | Closes the source and removes its MediaMTX pull path |
 | `http(...)` | httpx |
 | `open_socket(url, arrived)` | A `websockets` client connection held for a plugin |
 | `encode_jpeg(rgb)` / `decode_jpeg(data)` | PyAV |
-| `load_state` / `save_state` | `data/state.json` |
-| `plugin_runtime` | QuickJS in WebAssembly, under wasmtime, or `None` with `PRINTGUARD_PLUGINS=off` |
-| `files` | Print files, their previews and the frames kept from each print, on disk under `data/prints/` |
-| `host`, `update_repo`, `update_asset` | Which deployment this is, and where and how it updates |
+| `load_state()` / `save_state(state)` | `data/state.json`, written atomically and readable only by its owner |
 
-[`tests/fakes.py`](../tests/fakes.py) implements the same protocol in memory, with synthetic
+Three smaller protocols hang off it:
+
+| Protocol | Members | On the hub |
+|---|---|---|
+| `FrameSource` | `fps`, `online`, `standby`, `grab()`, `set_monitoring(active)`, `close()` | A PyAV reader thread per camera |
+| `FileStore` | `store(key, chunks)`, `read(key)`, `remove(key)` | Print files and their previews on disk under `data/prints/` |
+| `PluginRuntime` | `attach()`, `on_event()`, `reload()`, `serve()`, `authorise()`, `gate_paths()`, `close()` | QuickJS in WebAssembly, under wasmtime |
+
+A `Frame` is the RGB array, a `seq` that identifies it and its capture time.
+
+[`tests/fakes.py`](../tests/fakes.py) implements the same protocols in memory, with synthetic
 cameras, a canned model and recorded HTTP. That is how the engine tests drive alerts, outages
 and printer actions in milliseconds with no camera, model or network.
 
-The UI is presentation-only and speaks one JSON command and event protocol over a WebSocket.
-
 > [!IMPORTANT]
-> **The engine never imports from `server/` and never touches the OS, the network or disk
-> itself.** If a feature needs a runtime service, add it to the `Platform` protocol and
-> implement it in `server/platform.py` and in the test fake.
+> The engine never imports from `server/`, and its own logic does no I/O outside `Platform`.
+> If a feature needs a runtime service, add it to the `Platform` protocol and implement it in
+> `server/platform.py` and in the test fake.
+
+HTTP adapters go through `platform.http`, so the tests pin every request they make. Adapters
+built on a vendor's client library open their own connections:
+
+| Module | Reaches outside `Platform` through |
+|---|---|
+| [`integrations/bambu.py`](../printguard/engine/integrations/bambu.py) | paho MQTT, `ftplib` over TLS and raw sockets |
+| [`integrations/elegoo.py`](../printguard/engine/integrations/elegoo.py) | pycentauri, which holds its own connection, and a DNS lookup |
+| [`integrations/prusa.py`](../printguard/engine/integrations/prusa.py) | pyprusalink with its own httpx client |
+| [`notifiers/native.py`](../printguard/engine/notifiers/native.py) | desktop-notifier and a temporary snapshot file |
+| [`urls.py`](../printguard/engine/urls.py) | A DNS lookup, to tell whether a plugin's URL lands on a private address |
+| [`logs.py`](../printguard/engine/logs.py) | The rotating log file |
+
+The tests cover those adapters by monkeypatching their private seams, such as Bambu's
+`_pull_report` and `_publish`. See [`tests/test_adapters.py`](../tests/test_adapters.py).
 
 ## The protocol
 
-Commands, UI to engine:
+Commands, UI to engine. The table is the engine's `_handlers` map:
 
 | Group | Commands |
 |---|---|
-| Cameras | `discover`, `camera.add`, `camera.update`, `camera.remove` |
+| Cameras | `discover`, `camera.add`, `camera.update`, `camera.remove`, `camera.snapshot` |
 | Printers | `printer.add`, `printer.update`, `printer.remove`, `printer.action`, `printer.heat`, `printer.test`, `printer.cameras.refresh` |
 | Prints | `print.add`, `print.update`, `print.remove`, `print.start` |
 | Monitors | `monitor.add`, `monitor.update`, `monitor.remove` |
-| History | `history.get`, `snapshot.get`, `review.get`, `review.send`, `review.retry`, `review.dismiss` |
-| Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.http`, `plugin.effect` |
-| System | `settings.update`, `notify.test`, `token.create`, `token.remove`, `update.check`, `update.releases`, `report.send`, `report.bundle` |
+| History | `history.get`, `snapshot.get` |
+| Plugins | `plugin.install`, `plugin.remove`, `plugin.update`, `plugin.code`, `plugin.catalogue`, `plugin.page`, `plugin.http`, `plugin.socket`, `plugin.call`, `plugin.answer`, `plugin.publish`, `plugin.secrets`, `plugin.oauth`, `plugin.effect` |
+| System | `settings.update`, `notify.test`, `notify.send`, `token.create`, `token.remove`, `update.check`, `update.releases`, `report.send`, `report.bundle` |
 
 Every command may carry a `req_id`, echoed on the responding event so the UI can resolve
-pending requests.
+pending requests. A command that succeeds ends with a `state` event carrying that `req_id`,
+and one that fails ends with an `error`.
 
 Events, engine to UI:
 
 | Event | Carries |
 |---|---|
-| `state` | Full snapshot, on connect, after every command and on a 1 s ticker: version, cameras, printers, monitors with their latest results, a summary of each print's kept frames, settings, stats and update status |
+| `state` | Full snapshot, on connect, after every command and on a 1 s ticker. The fields are listed below |
 | `result` | One monitor's score, sampled at up to 5 Hz per monitor |
 | `alert` | A sustained defect, with the action taken |
-| `warning` | Watchdog conditions and their recovery |
+| `warning` | Watchdog conditions and their recovery, and an MQTT broker the bridge cannot reach |
 | `device` | A printer's status, progress, job, time left and heaters |
 | `print_started` | A file from the library has been sent to a printer and started |
 | `discovered`, `printer_test`, `notify_test` | Command responses |
-| `history`, `snapshot`, `review` | Risk history buckets, a kept frame's JPEG, and the frames kept from one print |
-| `review_sent` | How far a reviewed print's upload got, with the refusal code and retry time when it is queued |
+| `history`, `snapshot` | Risk history buckets and stored alert snapshots |
+| `frame` | A camera's current picture as a JPEG, the answer to `camera.snapshot` |
 | `releases` | The changelog history the update dialog browses |
-| `token_created` | A new API token's secret, delivered only to the transport that asked, never to the others and never written to the log |
+| `token_created` | A new API token's secret, delivered to the requesting transport and never written to the log |
 | `report_sent`, `report_bundle` | Bug report outcome, and the downloadable diagnostics zip |
-| `plugin_code`, `catalogue`, `plugin_effect` | A plugin's source for its sandbox, the reviewed-plugin catalogue, and an effect a dashboard performs for a plugin that has no screen of its own |
+| `plugin_code`, `plugin_page`, `catalogue`, `plugin_effect` | A plugin's source for its sandbox, the page files a zip install carries, the reviewed-plugin catalogue, and an effect a dashboard performs for a plugin that has no screen of its own |
+| `plugin_oauth` | The provider URL the dashboard opens to start a plugin's sign-in |
 | `http`, `socket` | An answer to a plugin's own request, and a frame on a socket it is holding, both addressed to the plugin that asked |
-| `error` | Anything that failed, including failed printer actions |
+| `call`, `answer`, `message` | One plugin's question to another, the reply, and a message published on a channel other plugins listen to |
+| `error` | Anything that failed, including failed printer actions and a Home Assistant command the bridge could not run |
 
-Result updates are conflated when a transport is slower than 5 Hz. Ordered events and
-command responses are never evicted by telemetry.
+`state_event()` in [`engine/engine.py`](../printguard/engine/engine.py) returns these fields:
+
+| Field | Holds |
+|---|---|
+| `host`, `version`, `update` | The deployment, the running version and the release status |
+| `cameras`, `printers`, `prints`, `tokens`, `plugins` | The public record of everything in each registry |
+| `monitors` | Each monitor with `watching` and its latest `result` |
+| `settings` | Notifier configs, MQTT, theme, layout, inference runtime, catalogue URL, grace period and preheat presets |
+| `stats` | `inference_device`, `infer_ms` and `capacity_fps` from the scheduler |
+| `integrations`, `notifiers` | Adapter metadata the config forms are drawn from |
+| `plugin_permissions`, `plugin_events`, `plugin_event_permissions`, `plugin_oauth_callback`, `plugin_platforms`, `plugin_assets` | The plugin policy both sandboxes apply |
+
+Each socket gets its own queue in [`server/events.py`](../printguard/server/events.py). Ordered
+events and command responses leave first and are never dropped. A slow transport keeps only
+the newest ticker `state` and the newest `result` per monitor.
 
 ## Resources and monitors
 
@@ -131,13 +200,25 @@ registered resources, created and deleted only in their own registry. A monitor 
 each, the printer optionally, and carries the inference thresholds and the
 defect-response policy.
 
+| Monitor field | Default | Clamped to |
+|---|---|---|
+| `threshold` | 0.75 | 0.05 to 1.0 |
+| `consecutive` | 3 | 1 to 30 |
+| `cooldown_s` | 60 | 0 to 600 |
+| `on_defect` | `none` | `none`, `pause` or `cancel` |
+| `notify` | off | |
+
+A camera's `detect_fps` caps its inference rate. It defaults to 60 and is clamped to between
+0.1 and 60. [Monitoring](monitoring.md) covers how to choose these.
+
 A printer integration that exposes a webcam registers it automatically as a camera owned by
 that printer through `Camera.printer_id`, covering the OctoPrint and Moonraker stream URLs, the
 Elegoo Centauri chamber camera, and the Bambu chamber camera, over RTSP on the X1 and H2
 series or the proprietary port 6000 protocol on the A1 and P1. The adapter's optional
 `cameras()` declares them, and the engine reconciles them on printer add and update, and on
 demand through `printer.cameras.refresh` to pick up a camera attached later. Such cameras
-cannot be removed on their own and are dropped with their printer.
+cannot be removed on their own and are dropped with their printer. See
+[printers](printers.md) and [cameras](cameras.md).
 
 A print file is the third registered resource. The bytes are far
 too large for the protocol, so the hub's own upload route streams them into the platform's
@@ -153,41 +234,8 @@ A file carries the printers it is tagged for, checked against the adapter's `for
 tag is set, and `print.start` re-polls the printer and refuses unless it answers idle before
 the adapter's `print_file()` uploads and starts it.
 
-[`engine/reviews.py`](../printguard/engine/reviews.py) keeps a few frames from every print a
-monitor watches, scaled to 512px and stored in the same `files` store, with their records in
-the persisted state so they survive a restart. A print runs from a monitor's first frame until
-its printer positively reports idle or error, so a pause stays inside it, and a monitor with no
-printer closes its print after a day.
-
-| Kind | Kept | Chosen by |
-|---|---|---|
-| `alert` | The last 40 | The frame that fired each alert, which is what the risk history gallery shows |
-| `near` | The top 5 | The highest scores under the threshold, at least a minute apart |
-| `spaced` | 10 to 20 | One per interval, and every other one is dropped and the interval doubled at 20, so a long print keeps no more than a short one |
-
-The hub holds the last 20 prints or 200 MB and drops the oldest finished print first. The
-`state` snapshot carries only a count per print, and `review.get` returns one print's frames.
-
-A finished print can be [sent as training data](feedback.md). `review.send` records which
-frames show a failure and which were left out, and
-[`engine/feedback.py`](../printguard/engine/feedback.py) uploads the rest through
-`platform.http` to the Worker in [`feedback-worker/`](../feedback-worker), one frame per
-request. The upload runs as a background task and its progress rides in the `state` snapshot.
-It is deliberately absent from the REST API, the MCP server and the plugin permission table,
-so frames only leave the hub when a person presses Send in the dashboard.
-
-| `status` | Meaning |
-|---|---|
-| `running` | The print is still being watched |
-| `ready` | It has ended and waits to be reviewed |
-| `dismissed` | Nobody wants to review it, or `settings.feedback` is `off` |
-| `queued` | It was reviewed and frames are uploading, or wait on a refusal's `retry_at` |
-| `sent` | Every chosen frame is in the inbox |
-
-The Worker is the only writer to a private R2 bucket and holds every limit in one Durable
-Object, so the hub only reports what it was told. A refused print keeps its frames and the
-engine's ticker sends the rest once `retry_at` passes. The hub's token is issued by the Worker
-and persisted, and the `state` snapshot carries only its public half as `feedback_hub`.
+API tokens and installed plugins are held in the same registry module and saved with the rest
+of the state.
 
 A deployment can declare video devices the same way. The Docker image sets
 `PRINTGUARD_CAMERAS=auto`, so every capture device passed into the container comes back from
@@ -196,102 +244,11 @@ boot under a deterministic id through `Camera.declared`. A declared camera keeps
 tuning it was given across restarts, cannot be removed on its own, and goes when the
 deployment stops passing it in.
 
-## Updates and bug reports
-
-`update.check` refreshes the release status against GitHub
-([`engine/updates.py`](../printguard/engine/updates.py)) and `update.releases` serves the
-changelog history the update dialog browses. The `state` snapshot carries only the status,
-meaning version, latest and whether an update is available, because every release's notes
-together dwarf the rest of the snapshot and the history is wanted only while that dialog is
-open.
-
-`report.send` is the anonymous bug report
-([`engine/reports.py`](../printguard/engine/reports.py)). It is one user-initiated POST of a
-Sentry feedback envelope carrying the description, an optional contact email, user-attached files,
-a diagnostics bundle and the engine and UI log tails, with every credential redacted, sent
-through `platform.http`. There is no SDK and no
-automatic telemetry, and nothing is sent unless the user submits a report. `report.bundle` packs
-those same scrubbed files into a zip the UI downloads instead, for a user who would rather
-read the diagnostics or take them somewhere else.
-
-## Logging
-
-One setup ([`engine/logs.py`](../printguard/engine/logs.py)) serves the container and the
-desktop app. Entry points call it once and records flow to stdout for `docker logs`, to a rotating file where
-no console exists, since the desktop app sets `LOG_FILE` in its data directory, and into a
-bounded in-memory tail.
-
-Emitted alert, warning, error and device events are logged as they broadcast, so the tail
-carries the same timeline the UI shows plus the lifecycle around it, so boot, camera attach
-and drop, resource registration, printer actions, and API and socket denials. Uvicorn runs without
-its own log config so its records land in the same handlers. The UI keeps its own ring
-([`web/src/log.ts`](../web/src/log.ts)) of boot milestones, socket drops, toasts, console
-warnings and errors, and uncaught exceptions.
-
-Bug reports attach both tails, scrubbed of every configured credential value, and the same
-pair can be downloaded as a zip from the report dialog. `LOG_LEVEL=DEBUG` adds command
-traces and exception tracebacks.
-
-## The programmatic surface
-
-The MCP server, REST API and Home Assistant MQTT bridge are thin transports over the same
-commands the UI sends, so they add no logic of their own and cannot drift from the dashboard.
-
-- [`engine.request()`](../printguard/engine/engine.py) turns the broadcast protocol into
-  request and response by correlating a `req_id`, and `engine.snapshot()` encodes a camera's
-  freshest frame as JPEG.
-- [`server/api.py`](../printguard/server/api.py) is a FastAPI sub-app at `/api/v1` whose
-  routes delegate to those methods, each tagged with the scope it requires.
-- [`server/mcp.py`](../printguard/server/mcp.py) derives its tools from that app with
-  `FastMCP.from_fastapi`, adds a camera-frame tool returning native image content, and
-  enforces the route scope tags so a caller only sees the tools its token may use.
-- [`server/mqtt.py`](../printguard/server/mqtt.py) bridges the engine to Home Assistant. It
-  subscribes to engine events as a transport sink, reconciles one MQTT device per monitor
-  through Home Assistant discovery, and routes inbound commands, the Enabled switch and the
-  printer buttons, back through `engine.request()`. The discovery payloads, state blob and
-  command routing are pure functions, wrapped in an `aiomqtt` session that reconnects on
-  failure and on a settings change. Control is gated by broker access, not by a token.
-
-REST and MCP are gated by cumulative scopes, where `control` includes `read` and `manage`
-includes both. See
-[API & MCP](api.md).
-
-## Plugins
-
-Plugins are third-party code, and the engine runs none of it.
-[`engine/plugins.py`](../printguard/engine/plugins.py) only sources it: a fetch from GitHub at
-a resolved commit or a zip, manifest validation, a hash of every file, and a comparison against
-the catalogue. The registry holds the result beside the cameras, printers and tokens.
-
-Execution is a sandbox on each side. `PERMISSIONS` is the one policy both enforce, and it
-reaches the UI in the state snapshot as `plugin_permissions`, the way `integrations_meta()`
-already drives the config forms.
-
-```mermaid
-flowchart LR
-    engine["engine (state, commands)"] -- "permitted state" --> panel & worker
-    panel["plugin.js<br/>opaque-origin iframe<br/>default-src 'none'"] -- "node tree + effects" --> ui["UI draws it"]
-    worker["worker.js<br/>QuickJS in wasm<br/>no fs, no sockets, fuel-capped"] -- "effects" --> engine
-    ui -- "checked effects" --> engine
-```
-
-A sandbox asks for effects and PrintGuard carries them out, checking each against the grants
-first. That check belongs at the sandbox edge: by the time a command reaches the engine it is
-indistinguishable from one the dashboard sent.
-
-A plugin's source never rides in the state snapshot, which broadcasts every second. It travels
-on request through `plugin.code`, like `snapshot.get` and `history.get`. That response reaches
-every connected client, so a tab ignores one whose `req_id` is not its own, or a second tab
-starts a duplicate sandbox.
-
-The hub mounts `/plugins/<id>/` onto a plugin's route handler and consults a `gate` plugin
-before serving anything else. `PRINTGUARD_PLUGINS=off` starts with every plugin off, and the state snapshot reports each as disabled so the dashboard stops its half too. See
-[plugins](plugins.md).
-
 ## Scheduling inference
 
-When a camera is registered its native frame rate is measured once. From then on allocation
-is fully dynamic:
+A camera registers with a 15 fps placeholder. Its native frame rate is read from the source
+when it attaches, and read again on every 1 s tick and every re-attach. Allocation is fully
+dynamic:
 
 1. A smoothed estimate of observed inference latency continuously yields the sustainable
    total rate, `workers / latency`. `workers` is measured once when the runtime loads, by
@@ -329,26 +286,55 @@ printer keeps it active.
 ```mermaid
 sequenceDiagram
     participant S as Scheduler
+    participant V as Vision
     participant P as Platform
+    participant E as Engine
     participant W as Watchdog
     participant I as Integration adapter
     participant N as Notifier adapters
 
-    S->>P: grab freshest frame, infer()
+    S->>P: grab the camera's freshest frame
+    S->>V: transform (rotate, crop, adjust)
+    S->>P: infer()
     P-->>S: classification result
-    S->>W: on_score(monitor, frame, score)
-    alt score ≥ threshold for N consecutive frames
+    S->>E: _on_result(camera, frame, result)
+    E-->>E: defect_score, record in history, emit result (up to 5 Hz)
+    E->>W: on_score(monitor, frame, score)
+    alt score ≥ threshold for N consecutive frames, outside the cooldown
+        W-->>W: start the cooldown
         W->>I: pause / cancel the linked printer (retried on failure)
         I-->>W: ok, or "failed" after retries
         W-->>W: emit alert event (action included)
-        W->>N: snapshot + outcome to every enabled channel
+        W->>E: note_alert (snapshot into history)
+        W->>N: snapshot + outcome to every configured channel, if notify is on
     else score below threshold
         W-->>W: streak and alert reset
     end
 ```
 
-A failed printer action is retried, then reported in the alert, the UI error feed and the
-push notification.
+[`engine/vision.py`](../printguard/engine/vision.py) holds every image step. `transform`
+applies the camera's settings in a fixed order, so rotation, then the crop in the rotated
+frame's coordinates, then brightness, contrast and sharpness. `preprocess` resizes the
+shortest edge to 256 with Pillow's bilinear filter, converts to luminance, centre-crops to 224
+and normalises. `classify` picks the nearest class prototype by Euclidean distance.
+
+`defect_score` maps the two distances to `0.5 * (1 + tanh((success² - failure²) / 2))`, the
+softmax over negative squared distances the model was trained with. 0.5 is the decision
+boundary, and a frame that could not be classified scores 0.5.
+
+The engine runs `_on_result` for every monitor on that camera that is watching. Each score
+goes into [`engine/history.py`](../printguard/engine/history.py), which is held in memory and
+lost on restart:
+
+| Series | Size |
+|---|---|
+| Rollup buckets | 60 s each, the newest 1440, so 24 hours of watching |
+| Alert log | The newest 50 |
+| Alert snapshots | The newest 40 JPEGs |
+
+An alert starts the monitor's `cooldown_s`, and no second response fires inside it. Push
+notifications have their own 30 s floor per monitor. A printer action is tried 3 times, 1 s
+apart, then reported as failed in the alert, the UI error feed and the push notification.
 
 ## Failing safely
 
@@ -404,8 +390,9 @@ dropping clears the grace period every time yet is only watching part of the pri
 what the coverage condition is for: the share of the recent window it delivered frames for
 is one warning about an unreliable feed rather than one per drop.
 
-Warnings surface as dashboard toasts and go out through the notification channels, so the
-watchdog suppresses flapping rather than repeating itself. A source that reconnects and drops
+Warnings surface as dashboard toasts, and go out through the notification channels when the
+monitor has `notify` on, so the watchdog suppresses flapping rather than repeating itself. A
+source that reconnects and drops
 again is still the same warning, and each announced recovery doubles how long the
 next one must hold before it is announced, up to fifteen minutes. Only the notification
 waits on the grace period. The dashboard shows a fault as it happens, and re-attaching a
@@ -413,26 +400,192 @@ failed camera runs on its own timer, so a longer grace period never delays recov
 Notifier delivery failures and inference crashes emit `error` events. There is no silent
 `except: pass` anywhere in the alert path.
 
+The timings are constants at the top of [`engine/watchdog.py`](../printguard/engine/watchdog.py):
+
+| Constant | Value | Governs |
+|---|---|---|
+| `DEVICE_POLL_S` | 5 s | How often every printer's state is read |
+| `WATCH_TICK_S` | 2 s | How often the health conditions are checked |
+| `GRACE_DEFAULT_S`, `GRACE_MIN_S`, `GRACE_MAX_S` | 120 s, 30 s, 900 s | The grace period and its clamp |
+| `REPEAT_EVERY_S` | 1800 s | How often a standing warning is repeated |
+| `RECOVER_HOLD_S`, `FLAP_HOLD_MAX_S` | 60 s, 900 s | The first recovery hold, and the ceiling it doubles towards |
+| `STALL_GRACE_S` | 30 s | How long an online camera may go without a fresh frame |
+| `COVERAGE_WINDOW_S`, `COVERAGE_MIN` | 600 s, 0.9 | The window and share behind the coverage condition |
+| `RESTART_AFTER_S`, `RESTART_COOLDOWN_S` | 15 s, 60 s | How long a camera faults before it is re-attached, and the gap between attempts |
+| `ACT_ATTEMPTS`, `ACT_RETRY_S` | 3, 1 s | Printer action attempts and their spacing |
+| `NOTIFY_COOLDOWN_S` | 30 s | The floor between defect notifications for one monitor |
+
+A camera with no source at all is retried by the engine's ticker every 10 s.
+
+## The programmatic surface
+
+The MCP server, REST API and Home Assistant MQTT bridge are thin transports over the same
+engine the UI talks to, so they add no logic of their own and cannot drift from the dashboard.
+
+- [`engine.request()`](../printguard/engine/engine.py) turns the broadcast protocol into
+  request and response by correlating a `req_id`, and `engine.snapshot()` encodes a camera's
+  freshest frame as JPEG.
+- [`server/api.py`](../printguard/server/api.py) is a FastAPI sub-app at `/api/v1`, each
+  route tagged with the scope it requires. Every write goes through `engine.request()`. Reads
+  call the engine directly: the state, list and get routes use `state_event()` with printer,
+  notifier, MQTT and camera-source credentials stripped, and the alert snapshot, camera frame,
+  classify and events routes use `monitor_snapshot()`, `snapshot()`, `classify()` and
+  `recent_events()`. `recent_events()` is the newest 100 alert, warning, device and error
+  events.
+- [`server/mcp.py`](../printguard/server/mcp.py) derives its tools from that app with
+  `FastMCP.from_fastapi`, leaving out the routes with a binary body: the camera frame,
+  classify, and the print file download and upload. It adds two tools of its own,
+  `get_camera_frame` returning native image content and `classify_frame` taking a base64
+  image, and enforces the route scope tags so a caller only sees the tools its token may use.
+- [`server/mqtt.py`](../printguard/server/mqtt.py) bridges the engine to Home Assistant. It
+  subscribes to engine events as a transport sink, reconciles one MQTT device per monitor
+  through Home Assistant discovery, and routes inbound commands, the Enabled switch and the
+  printer buttons, back through `engine.request()`. The discovery payloads, state blob and
+  command routing are pure functions, wrapped in an `aiomqtt` session that reconnects on
+  failure and on a settings change. Control is gated by broker access, not by a token.
+
+REST and MCP are gated by cumulative scopes, where `control` includes `read` and `manage`
+includes both. See
+[API & MCP](api.md).
+
+## Plugins
+
+Plugins are third-party code, and the engine runs none of it.
+[`engine/plugins.py`](../printguard/engine/plugins.py) only sources it: a fetch from GitHub at
+a resolved commit or a zip, manifest validation, a hash of every file, and a comparison against
+the catalogue. The registry holds the result beside the cameras, printers and tokens.
+
+Execution is a sandbox on each side. `PERMISSIONS` is the one policy both enforce, and it
+reaches the UI in the state snapshot as `plugin_permissions`, the way `integrations_meta()`
+already drives the config forms.
+
+```mermaid
+flowchart LR
+    engine["engine (state, commands)"] -- "permitted state" --> panel & page & worker
+    panel["plugin.js<br/>plugin-sandbox.html<br/>opaque-origin iframe"] -- "node tree + effects" --> ui["UI draws it"]
+    page["panel.html<br/>plugin-panel.html<br/>opaque-origin iframe"] -- "its own markup + effects" --> ui
+    worker["worker.js<br/>QuickJS in wasm<br/>no fs, no sockets, fuel-capped"] -- "effects" --> engine
+    ui -- "checked effects" --> engine
+```
+
+Both frames set `default-src 'none'`. A plugin ships either `plugin.js`, which
+returns a node tree the dashboard draws, or `panel.html`, which draws itself inside its frame.
+
+A sandbox asks for effects and PrintGuard carries them out, checking each against the grants
+first. That check belongs at the sandbox edge: by the time a command reaches the engine it is
+indistinguishable from one the dashboard sent.
+
+A plugin's source never rides in the state snapshot, which broadcasts every second. It travels
+on request through `plugin.code`, like `snapshot.get` and `history.get`. That response reaches
+every connected client, so a tab ignores one whose `req_id` is not its own, or a second tab
+starts a duplicate sandbox.
+
+The hub mounts `/plugins/<id>/` onto a plugin's route handler. A plugin holding the `gate`
+permission is asked about every other HTTP request except `/api/health` and its own routes,
+and about both WebSocket handshakes. An allowed HTTP answer is cached for 10 s per credential,
+method and path. A refusal is never cached.
+
+`PRINTGUARD_PLUGINS=off` starts with every plugin off. [Plugins](plugins.md) covers installing
+them and [what each permission grants](plugins.md#permissions), and
+[writing plugins](plugin-development.md) covers the API.
+
+## Updates and bug reports
+
+`update.check` refreshes the release status against GitHub
+([`engine/updates.py`](../printguard/engine/updates.py)) and `update.releases` serves the
+changelog history the update dialog browses. The engine also checks at boot and every 24
+hours after it while `settings.update_check` is on. The `state` snapshot carries only the status,
+meaning version, latest and whether an update is available, because every release's notes
+together dwarf the rest of the snapshot and the history is wanted only while that dialog is
+open.
+
+`report.send` is the anonymous bug report
+([`engine/reports.py`](../printguard/engine/reports.py)). It is one user-initiated POST of a
+Sentry feedback envelope carrying the description, an optional contact email, user-attached files,
+a diagnostics bundle and the engine and UI log tails, with every credential redacted, sent
+through `platform.http`. There is no SDK and no
+automatic telemetry, and nothing is sent unless the user submits a report. `report.bundle` packs
+those same scrubbed files into a zip the UI downloads instead, for a user who would rather
+read the diagnostics or take them somewhere else.
+
+## Logging
+
+One setup ([`engine/logs.py`](../printguard/engine/logs.py)) serves the container and the
+desktop app. Entry points call it once and records flow to stdout for `docker logs`, to a rotating file where
+no console exists, since the desktop app sets `LOG_FILE` in its data directory, and into a
+bounded in-memory tail of 400 lines.
+
+Alert, warning and error events are logged as they broadcast, so the tail
+carries the same timeline the UI shows plus the lifecycle around it, so boot, camera attach
+and drop, resource registration, printer actions, and API and socket denials. Device events
+log at DEBUG, so they are absent at the default `INFO`. Uvicorn runs without
+its own log config so its records land in the same handlers. The UI keeps its own ring
+([`web/src/log.ts`](../web/src/log.ts)) of boot milestones, socket drops, toasts, console
+warnings and errors, and uncaught exceptions.
+
+Bug reports attach both tails, scrubbed of every configured credential value, and the same
+pair can be downloaded as a zip from the report dialog. `LOG_LEVEL=DEBUG` adds command
+traces, device events and exception tracebacks.
+
+## Configuration
+
+Everything a user changes is a setting in the dashboard, saved in `state.json`. The variables a
+deployment sets are in [deployment](deployment.md#environment-variables). These are the rest,
+for development and packaging.
+
+| Variable | Does | Default |
+|---|---|---|
+| `MODEL_DIR` | The model, its metadata and prototypes | `models/` |
+| `STATIC_DIR` | The built dashboard the hub serves | `web/dist` |
+| `LOG_FILE` | A rotating log file, 2 MB with two backups | None, and `printguard.log` in the desktop app's data directory |
+| `MEDIAMTX_BINARY` | The MediaMTX binary the hub supervises. Unset, the hub expects one already running | Unset |
+| `MEDIAMTX_CONFIG` | The config that binary starts with | `mediamtx.yml` |
+| `MEDIAMTX_API`, `MEDIAMTX_RTSP`, `MEDIAMTX_HLS` | Where MediaMTX's control API, RTSP and HLS listeners are | `http://localhost:9997`, `rtsp://localhost:8554`, `http://localhost:8888` |
+| `UPDATE_ASSET` | The release asset this deployment updates with. Setting it marks the hub as the desktop app | Unset, and the platform's installer in the desktop app |
+| `PRINTGUARD_VARIANT` | The image variant suffix reported in `host`, set from the image build arg | Empty |
+| `APP_ICON` | The icon on native notifications, set by the Windows desktop app | Unset |
+| `PRINTGUARD_DEBUG_PORT` | Opens the Windows desktop window to the DevTools protocol, which is how CI drives it | Unset |
+| `MEDIAMTX_VERSION` | The MediaMTX release `packaging/build.sh` downloads | `1.18.2` |
+| `MEDIAMTX_BUNDLE`, `PRINTGUARD_ICON` | The binary and icon `printguard.spec` bundles, exported by `build.sh` | Set by the build |
+| `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` | Sign and notarise the macOS build | Unset, giving an unsigned build |
+| `PRINTGUARD_URL` | The running hub the launch tests drive. Unset, Playwright starts the Vite dev server | Unset |
+| `PRINTGUARD_CAMERA_HOST` | The host the hub under test reaches the launch tests' fake camera on | `127.0.0.1` |
+| `PRINTGUARD_CDP`, `PRINTGUARD_LOG` | The desktop window's DevTools endpoint and the app's log file, for the launch tests | Unset |
+
 ## Repository layout
 
 ```
 printguard/
-  engine/            the engine - every decision, and no I/O except through the Platform protocol
-    registry.py      camera + printer registries (registered resources)
+  engine/            the engine - every decision, with its own logic doing no I/O outside Platform
+    engine.py        the command handlers, events, state snapshot and background loops
+    platform.py      the Platform, FrameSource, FileStore and PluginRuntime protocols
+    registry.py      registered resources: cameras, printers, prints, tokens and plugins
+    cameras.py       camera settings: defaults, clamps and WebRTC URL detection
     monitors.py      monitor config: a camera + printer pairing and its thresholds
     printers.py      registered-printer (integration connection) validation
     prints.py        print library records: formats, names and which printers a file may go to
-    reviews.py       the frames kept from each watched print, and which ones are worth keeping
-    feedback.py      uploads a reviewed print's frames to the training inbox
     gcode.py         what a sliced file says about itself: estimates, printer model, preview
+    scheduler.py     fair allocation of inference across cameras
+    vision.py        image transform, preprocessing, prototype classification and the defect score
+    history.py       per-monitor risk buckets and alert snapshots, in memory
     watchdog.py      defect response: streaks, printer actions, notifications, health
+    tokens.py        scoped API tokens
     updates.py       GitHub release check and changelog history
     reports.py       anonymous bug report and downloadable diagnostics bundle
+    logs.py          the one logging setup and the in-memory tail
     plugins.py       plugin sourcing, hash pinning and the permission table (never executes)
+    oauth.py         a plugin's sign-in to a service, by authorisation code with PKCE
+    sockets.py       WebSockets held open for plugins
+    urls.py          URL match patterns, the scope of a plugin's network grant
     integrations/    printer service adapters (OctoPrint, Klipper, Elegoo, PrusaLink, Bambu Lab, …)
     notifiers/       alert channel adapters (ntfy, Pushover, Telegram, Discord, native desktop, …)
     adapters.py      shared adapter contract (id, label, docs_url, JSON-schema config)
   server/            hub platform: FastAPI, bundled MediaMTX (child process), LiteRT / ONNX Runtime, PyAV
+    app.py           the FastAPI app: engine socket, publish socket, HLS proxy, plugin routes and gate
+    platform.py      the hub's Platform: capture, MediaMTX, httpx, the state file and the file store
+    inference.py     LiteRT and ONNX Runtime selection and the worker benchmark
+    events.py        the per-socket queue that conflates state and result events
+    publish.py       pushes browser recordings and MJPEG sources into MediaMTX over RTSP
     api.py           REST API (/api/v1) over the engine protocol, scoped by token
     mcp.py           MCP server for agents, derived from the REST API
     prints.py        print library uploads and downloads, shared by the dashboard and the REST API
@@ -443,12 +596,21 @@ printguard/
     bambu_camera.py  Bambu A1/P1 chamber-camera reader (proprietary port-6000 protocol)
     desktop.py       macOS and Windows tray app around the hub
 web/                 React + Tailwind UI (presentation only)
-  public/            plugin-sandbox.html, the opaque-origin frame a plugin panel runs in
+  src/               the dashboard: the store, the engine socket and the components
+  public/            plugin-sandbox.html and plugin-panel.html, the opaque-origin frames a plugin runs in
   site/              the landing page published to GitHub Pages
+  launch/            Playwright run from camera to alert against a running build
+  tests/             Playwright tests of the browser plugin sandbox
+  screenshots/       renders docs/assets from fake data
+  scripts/           the plugin linter
 plugins/             first-party plugins and the hash-pinned catalogue they are verified by
-feedback-worker/     the Cloudflare Worker and R2 inbox that take training frames, and the script that empties it
 models/              TFLite and ONNX encoders, normalisation metadata, class prototypes
 tests/               engine simulation, adapter contracts and the plugin sandbox (pytest)
+packaging/           the desktop app build: PyInstaller spec, build script and macOS entitlements
+templates/           the Unraid container template
+docs/                these pages and their screenshots
+Dockerfile           the image, with MediaMTX and the built dashboard inside
+mediamtx.yml         the config the bundled MediaMTX starts with
 ```
 
 ## The website
