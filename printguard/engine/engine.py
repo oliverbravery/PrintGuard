@@ -849,7 +849,7 @@ class Engine:
     async def _cmd_discover(self, message: dict[str, Any]) -> None:
         """Lists the sources that are not registered yet.
 
-        A Windows camera registered before 2.5.1 has the name it shows as its
+        A Windows camera registered before 2.6.0 has the name it shows as its
         device id where the hub now lists its device path, so a source whose
         label is registered is that same camera.
         """

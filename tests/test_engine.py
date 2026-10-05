@@ -1974,7 +1974,7 @@ async def test_discovery_hides_registered_devices() -> None:
 
 
 async def test_discovery_hides_a_device_registered_under_the_name_it_shows() -> None:
-    """A Windows camera added before 2.5.1 is stored by its name, and is now listed by its device path."""
+    """A Windows camera added before 2.6.0 is stored by its name, and is now listed by its device path."""
     platform = FakePlatform()
     platform.devices = [{"kind": "device", "device_id": "HD Pro Webcam C920", "label": "HD Pro Webcam C920", "declared": False}]
     async with running_engine(platform, camera_fps=[]) as (engine, events):

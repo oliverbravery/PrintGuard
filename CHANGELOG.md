@@ -7,7 +7,7 @@ release notes.
 The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.5.1] - 2026-10-05
+## [2.6.0] - 2026-10-05
 
 ### Added
 
@@ -1018,7 +1018,7 @@ contract. Nothing from 1.x is migrated: a 2.0 hub starts from a fresh configurat
   [docs/deployment.md](https://github.com/oliverbravery/PrintGuard/blob/main/docs/deployment.md).
 - 32-bit ARM (`arm/v7`) images — `arm64` (Raspberry Pi 4/5) remains supported.
 
-[2.5.1]: https://github.com/oliverbravery/PrintGuard/compare/v2.5.0...v2.5.1
+[2.6.0]: https://github.com/oliverbravery/PrintGuard/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/oliverbravery/PrintGuard/compare/v2.4.1...v2.5.0
 [2.4.1]: https://github.com/oliverbravery/PrintGuard/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/oliverbravery/PrintGuard/compare/v2.3.12...v2.4.0
