@@ -74,7 +74,8 @@ ones from any [deletion request](docs/feedback.md#having-your-frames-deleted).
 The browser half of the plugin sandbox is only meaningful in a real engine, so
 `web/tests/sandbox.spec.ts` drives it through Playwright in both chromium and webkit. Run it
 if you touch anything under `web/public/plugin-sandbox.html`, `web/public/plugin-panel.html` or
-`web/src/plugins.ts`.
+`web/src/plugins.ts`. `web/tests/dashboard.spec.ts` runs alongside it and holds the dashboard's
+own behaviour, such as reconnecting to the hub, against a faked engine.
 
 `web/launch/launch.spec.ts` checks a build the way a user meets it. It registers two cameras
 fed by a fake MJPEG server, one showing a healthy print and one a failing print, binds a
