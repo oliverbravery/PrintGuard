@@ -8,7 +8,7 @@ disk. Those services live behind these protocols, implemented by the hub in
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncIterable, Awaitable, Callable, Protocol
+from typing import TYPE_CHECKING, Any, AsyncIterable, AsyncIterator, Awaitable, Callable, Protocol
 
 import numpy as np
 
@@ -54,12 +54,17 @@ class FrameSource(Protocol):
         ...
 
 
-class FileStore(Protocol):
-    """Where uploaded print files and their previews live.
+async def as_chunks(data: bytes) -> AsyncIterator[bytes]:
+    """Presents bytes already in memory as the chunks a file store writes."""
+    yield data
 
-    A sliced file is far too large for the state the engine persists as JSON,
-    so the bytes are kept here under a key the engine chooses and the state
-    carries only the record describing them.
+
+class FileStore(Protocol):
+    """Where uploaded print files, their previews and kept frames live.
+
+    A sliced file or a JPEG is far too large for the state the engine persists
+    as JSON, so the bytes are kept here under a key the engine chooses and the
+    state carries only the record describing them.
     """
 
     async def store(self, key: str, chunks: AsyncIterable[bytes]) -> int:
@@ -141,7 +146,7 @@ class Platform(Protocol):
     switched off at boot."""
 
     files: FileStore
-    """Where uploaded print files are kept."""
+    """Where uploaded print files and kept frames are stored."""
 
     async def configure(self, settings: dict[str, Any]) -> None:
         """Applies platform-owned settings before inference starts."""

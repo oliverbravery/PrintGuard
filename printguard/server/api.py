@@ -353,7 +353,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
     )
     async def get_monitor_snapshot(monitor_id: str, snap_id: str, engine: Engine = Depends(get_engine)) -> Response:
         """Returns a captured risky-moment snapshot as a JPEG image."""
-        jpeg = engine.monitor_snapshot(monitor_id, snap_id)
+        jpeg = await engine.monitor_snapshot(monitor_id, snap_id)
         if jpeg is None:
             raise HTTPException(404, f"no snapshot {snap_id!r} for monitor {monitor_id!r}")
         return Response(jpeg, media_type="image/jpeg")

@@ -19,7 +19,7 @@ import pytest
 from fakes import FakePlatform
 
 from printguard.engine import engine as engine_module
-from printguard.engine import logs, oauth, plugins, reports, vision, watchdog
+from printguard.engine import logs, oauth, plugins, reports, reviews, vision, watchdog
 from printguard.engine.engine import EVENT_LOG_LEVELS, Engine
 from printguard.engine.integrations import INTEGRATIONS
 from printguard.engine.printers import PREHEAT_DEFAULTS
@@ -965,6 +965,96 @@ async def test_monitor_remove_clears_history() -> None:
         assert engine.history[monitor_id].buckets, "history should accumulate while watching"
         await engine.handle({"cmd": "monitor.remove", "id": monitor_id})
         assert monitor_id not in engine.history, "history is dropped with its monitor"
+        assert engine.state_event()["reviews"] == [] and not platform.files.blobs, "a removed monitor's kept frames are deleted"
+
+
+async def _review(engine: Engine, review_id: str) -> dict:
+    return next(e for e in await engine.request({"cmd": "review.get", "id": review_id}) if e["event"] == "review")
+
+
+async def test_alert_snapshots_survive_a_restart() -> None:
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        await asyncio.sleep(1.0)
+
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        history = next(e for e in await restarted.request({"cmd": "history.get", "monitor_id": monitor_id}) if e["event"] == "history")
+        snapshot = next(e for e in await restarted.request({"cmd": "snapshot.get", "monitor_id": monitor_id, "id": history["snaps"][0]["id"]}) if e["event"] == "snapshot")
+    finally:
+        await restarted.stop()
+    assert len(history["snaps"]) == 1 and history["stats"]["snaps"] == 1, "the alert's frame was lost with the restart"
+    assert base64.b64decode(snapshot["jpeg"]) == b"\xff\xd8fake", "the kept frame's bytes did not come back from the file store"
+
+
+async def test_a_print_keeps_a_thinned_spread_of_frames_and_its_near_misses(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.01)
+    monkeypatch.setattr(reviews, "NEAR_APART_S", 0.3)
+    platform = FakePlatform(infer_s=0.01)
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, _):
+        await asyncio.sleep(2.0)
+        summary = engine.state_event()["reviews"][0]
+        review = await _review(engine, summary["id"])
+
+    frames = review["frames"]
+    spaced = [frame for frame in frames if frame["kind"] == "spaced"]
+    near = [frame for frame in frames if frame["kind"] == "near"]
+    assert summary["ended"] is None and summary["frames"] > 0 and "spacing_s" not in summary, "the state carries a running print's summary"
+    assert 3 <= len(spaced) < reviews.SPACED_MAX, "the spread is thinned once it reaches its cap"
+    gaps = [later["ts"] - earlier["ts"] for earlier, later in zip(spaced[:-2], spaced[1:-1])]
+    assert min(gaps) > 0.05, "thinning should have widened the gap between spaced frames"
+    assert 1 <= len(near) <= reviews.NEAR_MAX and all(frame["score"] < 0.5 for frame in near), "near misses score under the threshold"
+    assert not [frame for frame in frames if frame["kind"] == "alert"], "a clean print has no alert frames"
+    assert len(platform.files.blobs) == len(frames), "every kept frame has its JPEG stored, and thinned ones are deleted"
+
+
+async def test_a_review_ends_when_the_printer_goes_idle_and_not_on_a_pause(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await asyncio.sleep(0.4)
+        platform.device_status = "Paused"
+        await asyncio.sleep(0.4)
+        paused = [review["ended"] for review in engine.state_event()["reviews"]]
+        platform.device_status = "Printing"
+        await asyncio.sleep(0.4)
+        platform.device_status = "Operational"
+        await asyncio.sleep(0.4)
+        finished = [review["ended"] for review in engine.state_event()["reviews"]]
+        platform.device_status = "Printing"
+        await asyncio.sleep(0.4)
+        again = [review["ended"] for review in engine.state_event()["reviews"]]
+        persisted = platform.state["reviews"]
+
+    assert paused == [None], "a pause is part of the same print"
+    assert len(finished) == 1 and finished[0] is not None, "an idle printer ends the print's review"
+    assert len(again) == 2 and again[1] is None, "the next print opens a review of its own"
+    assert persisted[0]["ended"] == finished[0], "a finished review is persisted"
+
+
+async def test_the_oldest_finished_reviews_make_room_for_new_prints(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "REVIEW_MAX", 2)
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        seen: list[str] = []
+        for _ in range(3):
+            await asyncio.sleep(0.3)
+            seen.append(engine.state_event()["reviews"][-1]["id"])
+            await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+            await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": True}})
+        await asyncio.sleep(0.3)
+        kept = engine.state_event()["reviews"]
+        frames = sum(review["frames"] for review in kept)
+
+    assert len(set(seen)) == 3, "switching a monitor off ends its print"
+    assert len(kept) == 2 and seen[0] not in [review["id"] for review in kept], "the oldest finished review is dropped first"
+    assert len(platform.files.blobs) == frames, "a dropped review's frames are deleted with it"
 
 
 @asynccontextmanager
