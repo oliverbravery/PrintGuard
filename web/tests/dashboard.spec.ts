@@ -81,6 +81,21 @@ test("a dropped hub shows in the header, frees its buttons and gets the unsaved 
   await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().optimistic).length)).toBe(0);
 });
 
+test("a dashboard left open through an update reloads onto the new version", async ({ page }) => {
+  const { sockets } = await hub(page);
+  sockets[0].send(JSON.stringify({ event: "state", ...engine({ version: "next" }) }));
+  await expect.poll(() => sockets.length).toBe(2);
+});
+
+test("a setting changed while another is still saving is sent on its own", async ({ page }) => {
+  const { commands } = await hub(page);
+  const updates = () => commands.filter((c) => c.cmd === "settings.update").map((c) => c.patch);
+  await page.evaluate(() => (window as any).__pg.getState().updateSettings({ update_check: false }));
+  await expect.poll(updates).toEqual([{ update_check: false }]);
+  await page.evaluate(() => (window as any).__pg.getState().updateSettings({ theme: "light" }));
+  await expect.poll(updates).toEqual([{ update_check: false }, { theme: "light" }]);
+});
+
 test("a hub that goes silent without closing is dropped and reached again", async ({ page }) => {
   await page.clock.install();
   const { sockets } = await hub(page);

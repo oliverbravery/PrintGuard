@@ -29,6 +29,7 @@ interface OptimisticEntry {
   kind: OptimisticKind;
   id?: string;
   patch: Record<string, unknown>;
+  unsent: Record<string, unknown>;
   reqId: string | null;
 }
 
@@ -251,14 +252,20 @@ export const useStore = create<PgStore>((set, get) => {
     delete updateTimers[key];
     const entry = get().optimistic[key];
     if (!entry) return;
-    const reqId = sendSilent(commandFor(entry));
-    set((s) => (s.optimistic[key] ? { optimistic: { ...s.optimistic, [key]: { ...s.optimistic[key], reqId } } } : s));
+    const reqId = sendSilent(commandFor({ ...entry, patch: entry.unsent }));
+    set((s) => (s.optimistic[key] ? { optimistic: { ...s.optimistic, [key]: { ...s.optimistic[key], unsent: {}, reqId } } } : s));
   };
 
   const queueUpdate = (key: string, kind: OptimisticKind, id: string | undefined, patch: Record<string, unknown>) => {
     set((s) => {
       const prev = s.optimistic[key];
-      const entry: OptimisticEntry = { kind, id, patch: { ...(prev?.patch ?? {}), ...patch }, reqId: null };
+      const entry: OptimisticEntry = {
+        kind,
+        id,
+        patch: { ...(prev?.patch ?? {}), ...patch },
+        unsent: { ...(prev?.unsent ?? {}), ...patch },
+        reqId: null,
+      };
       const optimistic = { ...s.optimistic, [key]: entry };
       return { optimistic, savedAt: null, engine: s.engine ? applyOptimistic(s.engine, optimistic) : s.engine };
     });
@@ -294,7 +301,7 @@ export const useStore = create<PgStore>((set, get) => {
       testing: null,
       testingNotifier: null,
       reportResult: "report.send" in s.pending ? { ok: false, error: "the connection to the hub dropped" } : s.reportResult,
-      optimistic: Object.fromEntries(Object.entries(s.optimistic).map(([key, entry]) => [key, { ...entry, reqId: null }])),
+      optimistic: Object.fromEntries(Object.entries(s.optimistic).map(([key, entry]) => [key, { ...entry, unsent: entry.patch, reqId: null }])),
     }));
   };
 
@@ -480,6 +487,10 @@ export const useStore = create<PgStore>((set, get) => {
         clearPending(event.req_id);
         publishRequests.delete(event.req_id);
         const server = event as EngineState;
+        if (get().engine && get().engine!.version !== server.version) {
+          location.reload();
+          return;
+        }
         let optimistic = get().optimistic;
         const had = Object.keys(optimistic).length > 0;
         if (event.req_id != null && had) {

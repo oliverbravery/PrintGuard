@@ -13,11 +13,11 @@ export function IntroDialog() {
   return (
     <Dialog title="How PrintGuard works" onClose={close} fixed>
       <div className="flex h-full flex-col gap-4">
-        <div aria-live="polite" className="grid min-h-0 flex-1">
+        <div aria-live="polite" className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]">
           {INTRO.map((entry, i) => (
             <div
               key={entry.id}
-              className={`col-start-1 row-start-1 min-h-0 ${i === page ? "page-swap" : ""}`}
+              className={`col-start-1 row-start-1 min-h-0 overflow-y-auto overscroll-contain ${i === page ? "page-swap" : ""}`}
               style={{ visibility: i === page ? undefined : "hidden" }}
               aria-hidden={i !== page}
               inert={i !== page}
