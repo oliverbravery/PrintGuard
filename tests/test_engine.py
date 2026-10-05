@@ -2688,3 +2688,25 @@ async def test_prints_survive_a_restart() -> None:
         await reborn.stop()
 
 
+async def test_the_frame_that_cancels_a_print_stays_in_that_prints_review(monkeypatch) -> None:
+    """Reading the printer idle before recording the alert would end the review and open a second one for the frame."""
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    platform = FakePlatform(infer_s=0.02)
+    answer = platform.http
+
+    async def cancelling(method: str, url: str, **request: Any) -> tuple[int, Any]:
+        response = await answer(method, url, **request)
+        if method == "POST" and "/api/job" in url:
+            platform.device_status = "Operational"
+        return response
+
+    monkeypatch.setattr(platform, "http", cancelling)
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, _events):
+        printer_id = await _register_printer(engine)
+        patch = {"printer_id": printer_id, "on_defect": "cancel", "cooldown_s": 0, "consecutive": 1}
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": patch})
+        await asyncio.sleep(0.5)
+        platform.failing = True
+        await asyncio.sleep(1.2)
+        reviews = engine.state_event()["reviews"]
+    assert len(reviews) == 1

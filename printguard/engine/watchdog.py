@@ -394,7 +394,8 @@ class Watchdog:
         and a removal means there is nothing left to alert on. A printer that
         took the command is read again without waiting for the poll, so a
         paused or cancelled print stands its monitor down before another
-        defect frame can repeat the command.
+        defect frame can repeat the command. That read comes after the alert
+        is recorded, so the frame lands in the review of the print it stopped.
         """
         mid = monitor["id"]
         try:
@@ -407,12 +408,14 @@ class Watchdog:
                 monitor["alert"] = alert
             self._engine.emit({"event": "alert", "monitor_id": mid, **alert})
             await self._notify(monitor, score, action, await self._engine.platform.encode_jpeg(frame.rgb))
-            printer = self._engine.printers.get(monitor["printer_id"])
-            if action not in ("none", "failed") and printer and await self._read(printer):
-                self.follow_printers()
+            try:
+                await self._engine.note_alert(mid, alert, frame)
+            finally:
+                printer = self._engine.printers.get(monitor["printer_id"])
+                if action not in ("none", "failed") and printer and await self._read(printer):
+                    self.follow_printers()
         finally:
             self._responding.discard(mid)
-        await self._engine.note_alert(mid, alert, frame)
 
     async def _act(self, monitor: dict[str, Any]) -> str:
         wanted = monitor.get("on_defect", "none")
