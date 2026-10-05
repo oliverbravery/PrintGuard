@@ -461,7 +461,10 @@ async def test_watchdog_restarts_stalled_camera_after_fresh_inference(monkeypatc
         await asyncio.sleep(0.1)
         stalled_source = camera.frame_source
         stalled_source.frozen = True
-        await asyncio.sleep(0.5)
+        for _ in range(150):
+            if any(event.get("event") == "warning" and event["recovered"] for event in events):
+                break
+            await asyncio.sleep(0.02)
 
         assert camera.frame_source is not stalled_source and camera.online, "stalled camera source was not attached afresh"
         assert camera.id in platform.released_cameras, "stalled camera resources were not released"

@@ -145,6 +145,7 @@ class ReviewLibrary:
         Returns:
             Whether the kept frames changed.
         """
+        score = round(score, 4)
         review = self._running(monitor["id"])
         if review and not monitor.get("printer_id") and ts - review.started >= UNLINKED_PRINT_S:
             review.ended, review.status, review = ts, "ready", None
@@ -152,7 +153,7 @@ class ReviewLibrary:
             review = await self._begin(monitor["id"], ts)
         spaced = review.of_kind("spaced")
         if not spaced or ts - spaced[-1]["ts"] >= review.spacing_s:
-            await self._keep(review, frame, {"ts": ts, "score": round(score, 4), "kind": "spaced"})
+            await self._keep(review, frame, {"ts": ts, "score": score, "kind": "spaced"})
             if len(spaced) + 1 >= SPACED_MAX:
                 await self._drop(review, review.of_kind("spaced")[1::2])
                 review.spacing_s *= 2
@@ -164,7 +165,7 @@ class ReviewLibrary:
         outscored = neighbour or (min(near, key=lambda kept: kept["score"]) if len(near) >= NEAR_MAX else None)
         if outscored and score <= outscored["score"]:
             return False
-        await self._keep(review, frame, {"ts": ts, "score": round(score, 4), "kind": "near"})
+        await self._keep(review, frame, {"ts": ts, "score": score, "kind": "near"})
         if outscored:
             await self._drop(review, [outscored])
         return True
