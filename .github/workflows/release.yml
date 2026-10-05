@@ -106,6 +106,7 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/printguard
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}}${{ matrix.suffix }},value=v${{ needs.version.outputs.version }}
             type=semver,pattern={{major}}.{{minor}}${{ matrix.suffix }},value=v${{ needs.version.outputs.version }}
