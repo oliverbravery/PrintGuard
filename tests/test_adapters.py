@@ -4,10 +4,12 @@ multipart encoding, printer sanitisation and the vision score maths."""
 from __future__ import annotations
 
 import json as jsonlib
+from email.header import decode_header, make_header
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import numpy as np
 import pytest
 
@@ -89,6 +91,17 @@ async def test_ntfy_posts_text_without_snapshot() -> None:
     assert call["method"] == "POST"
     assert call["data"] == b"Body"
     assert "Authorization" not in call["headers"]
+
+
+@pytest.mark.parametrize("image", [JPEG, None])
+async def test_ntfy_headers_carry_names_outside_ascii(image: bytes | None) -> None:
+    http = RecordingHttp()
+    title, body = "PrintGuard: Küche № 2 defect (87%)", "Camera 'Küche' is offline,\nso it is not watched"
+    await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, title, body, image)
+    sent = httpx.Request(http.last["method"], http.last["url"], headers=http.last["headers"], content=http.last["data"])
+    received = {name: str(make_header(decode_header(value))) for name, value in sent.headers.items()}
+    assert received["title"] == title
+    assert (received["message"] if image else sent.content.decode()) == body
 
 
 async def test_ntfy_raises_on_rejection() -> None:
@@ -994,8 +1007,17 @@ async def test_octoprint_uploads_selected_and_printing() -> None:
         await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=415), {"base_url": "http://op", "api_key": "k"}, "x.gcode", b"")
 
 
+MOONRAKER_UPLOADED = {"item": {"path": "benchy.gcode", "root": "gcodes"}, "print_started": True, "print_queued": False, "action": "create_file"}
+
+
+async def test_klipper_upload_that_does_not_start_the_print_raises() -> None:
+    stored = {**MOONRAKER_UPLOADED, "print_started": False}
+    with pytest.raises(RuntimeError, match="did not start printing"):
+        await INTEGRATIONS["klipper"].print_file(RecordingHttp(status=201, body=stored), {"base_url": "http://mr:7125"}, "benchy.gcode", b"G1 X1\n")
+
+
 async def test_klipper_uploads_into_gcodes_and_prints() -> None:
-    http = RecordingHttp(status=201)
+    http = RecordingHttp(status=201, body=MOONRAKER_UPLOADED)
     await INTEGRATIONS["klipper"].print_file(http, {"base_url": "http://mr:7125", "api_key": "s"}, "benchy.gcode", b"G1 X1\n")
     call = http.last
     assert (call["method"], call["url"]) == ("POST", "http://mr:7125/server/files/upload")
@@ -1006,14 +1028,18 @@ async def test_klipper_uploads_into_gcodes_and_prints() -> None:
         await INTEGRATIONS["klipper"].print_file(RecordingHttp(status=400), {"base_url": "http://mr:7125"}, "x.gcode", b"")
 
 
-async def test_prusa_puts_onto_the_first_available_storage_and_prints_after_upload(monkeypatch) -> None:
+async def test_prusa_puts_onto_the_first_writable_storage_and_prints_after_upload(monkeypatch) -> None:
     from contextlib import asynccontextmanager
 
     uploads: list[tuple[str, dict[str, str], bytes]] = []
 
     class FakeLink:
         async def get_storage(self):
-            return [{"path": "/local", "available": False}, {"path": "/usb", "available": True}]
+            return [
+                {"path": "/local", "available": False},
+                {"path": "/sdcard", "available": True, "read_only": True},
+                {"path": "/usb", "available": True, "read_only": False},
+            ]
 
     @asynccontextmanager
     async def link(config):
@@ -1121,7 +1147,7 @@ async def test_elegoo_centauri_uploads_then_starts(monkeypatch) -> None:
 
 
 async def test_elegoo_moonraker_family_uploads_through_moonraker() -> None:
-    http = RecordingHttp(status=201)
+    http = RecordingHttp(status=201, body=MOONRAKER_UPLOADED)
     await INTEGRATIONS["elegoo"].print_file(http, ELEGOO_MOONRAKER_CONFIG, "benchy.gcode", b"G1\n")
     assert http.last["url"] == "http://192.168.1.91:7125/server/files/upload"
     assert http.last["headers"]["X-Api-Key"] == "secret"
