@@ -66,7 +66,7 @@ Scopes are cumulative:
 | `control` | Everything in `read`, plus pause, resume and cancel, setting a heater target, and starting a file from the print library |
 | `manage` | Everything in `control`, plus adding, editing and removing cameras, printers, monitors and print files, changing settings, testing services and discovering cameras |
 
-Issue tokens from the API & MCP access tab in Settings. Name a token, choose its scope and
+Issue tokens from the **API** tab in Settings. Name a token, choose its scope and
 press **Generate**. The secret, a `pg_…` string, is only shown once:
 
 ```http
@@ -86,8 +86,11 @@ Authorization: Bearer pg_Zr8...agent
 
 ## REST API
 
-Base path `/api/v1`. JSON in and out, except the camera frame, which is `image/jpeg`.
-Mutating endpoints return the affected collection. The interactive OpenAPI schema is served
+Base path `/api/v1`. JSON in and out, except the camera frame and alert snapshot, which are
+`image/jpeg`, the print file download, and the frame and print file you upload as a raw body.
+Adding or removing a camera, printer or monitor returns the collection, and every other change
+returns the one thing it changed. A rejected command is a `400`, a timeout a `504`, and a
+missing or under-scoped token a `401` or `403`. The interactive OpenAPI schema is served
 at `/api/v1/docs`.
 
 <details open>
@@ -95,10 +98,10 @@ at `/api/v1/docs`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/state` | Full snapshot: cameras, printers, monitors, settings, stats |
+| `GET` | `/state` | Full snapshot: cameras, printers, monitors, prints, settings, stats and what the dashboard draws its forms from |
 | `GET` | `/monitors` | List monitors with camera, linked printer and latest alert |
 | `GET` | `/monitors/{id}` | One monitor |
-| `GET` | `/monitors/{id}/history` | Its [risk history](monitoring.md#risk-history): one-minute buckets, the snapshot index and summary stats |
+| `GET` | `/monitors/{id}/history` | Its [risk history](monitoring.md#risk-history): one-minute buckets, the alert log, the snapshot index and summary stats |
 | `GET` | `/monitors/{id}/snapshots/{snap_id}` | The snapshot taken at one alert, as `image/jpeg` |
 | `GET` | `/printers` | List registered printers with status, progress and job |
 | `GET` | `/printers/{id}` | One printer |
@@ -109,7 +112,7 @@ at `/api/v1/docs`.
 | `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
 | `GET` | `/prints/{id}` | One print file |
 | `GET` | `/prints/{id}/file` | Download a print file as the library keeps it |
-| `GET` | `/events` | Recent alerts, warnings, device changes and errors |
+| `GET` | `/events` | The last 100 alerts, warnings, device changes and errors |
 
 </details>
 
@@ -184,13 +187,15 @@ filtered to the scopes its token holds.
 
 | Scope | Tools |
 |---|---|
-| `read` | `get_state`, `list_monitors`, `get_monitor`, `get_monitor_history`, `get_monitor_snapshot`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `list_prints`, `get_print`, `recent_events` |
+| `read` | `get_state`, `list_monitors`, `get_monitor`, `get_monitor_history`, `list_printers`, `get_printer`, `list_cameras`, `get_camera`, `list_prints`, `get_print`, `recent_events` |
 | `read` | `get_camera_frame`, which returns the frame as image content an agent can look at |
 | `read` | `classify_frame`, which scores an image the agent supplies as base64 and needs no registered camera |
 | `control` | `control_printer`, `heat_printer`, `start_print` |
 | `manage` | `add_monitor`, `update_monitor`, `remove_monitor`, `add_printer`, `update_printer`, `remove_printer`, `test_printer`, `add_camera`, `update_camera`, `remove_camera`, `discover_cameras`, `refresh_printer_cameras`, `update_print`, `remove_print`, `update_settings`, `test_notifier` |
 
-Uploading and downloading a print file carry a binary body, so they are REST only.
+Uploading and downloading a print file carry a binary body, so they are REST only. An alert
+snapshot is best fetched over REST too, since only `get_camera_frame` returns an image an agent
+can look at.
 
 Point a client at the endpoint with the token as a bearer header:
 
@@ -222,16 +227,18 @@ the MQTT integration set up in Home Assistant and no custom component.
 1. Open **Settings**, then the **Home Assistant** tab.
 2. Turn on **Publish to an MQTT broker** and enter the broker's host.
 3. Add a username and password if the broker wants them, and **Use TLS** if it serves it.
-4. Save. The devices appear under the MQTT integration.
+4. Press **Save broker settings**. The devices appear under the MQTT integration.
+
+Leave the port blank for `1883`, or `8883` with TLS.
 
 | Entity | Type | Appears |
 |---|---|---|
 | Defect | Binary sensor, problem | Always |
 | Defect score | Sensor, 0 to 100% | Always |
-| State | Sensor | Always |
+| State | Sensor reading `watching`, `idle`, `triggered` or `disabled` | Always |
 | Enabled | Switch | Always |
 | Snapshot | Camera, the frame from the latest defect | Always |
-| Printer | Sensor, the printer's status | With a linked printer |
+| Printer | Sensor, the printer's status, with the job name | With a linked printer |
 | Progress | Sensor, % | With a linked printer |
 | Pause, Resume, Cancel | Buttons | With a linked printer |
 | Nozzle, Bed | Temperature sensors, °C | Once the printer has reported that heater |
@@ -293,6 +300,7 @@ The camera object, from `GET /cameras` and `GET /cameras/{id}`:
   "max_fps": 5.0, "target_fps": 2.0, "achieved_fps": 1.9,   // rate
   "detect_fps": 60.0,                                       // cap on target_fps, set by the user
   "inferring": true, "in_use": true, "online": true,        // health
+  "standby": false,                                         // no monitor is watching it and nobody is viewing it
   "last_result": {                                          // latest score (per FRAME)
     "prediction": "success",                                //   "success" | "failure" | "unknown"
     "distances": { "success": 0.48, "failure": 1.64 },      //   distance to each class prototype
@@ -313,13 +321,17 @@ The monitor object, from `GET /monitors` and `GET /monitors/{id}`:
   "id": "mon_…",
   "camera_id": "cam_1a2b",
   "printer_id": "prn_…" | "",
+  "name": "Left printer", "enabled": true,
   "threshold": 0.6,            // defect score at/above which a frame counts as a failure
+  "consecutive": 3, "cooldown_s": 60,
+  "on_defect": "pause",        // "none" | "pause" | "cancel"
+  "notify": true,
   "watching": true,            // whether it is actively inferring right now
   "result": {                  // latest per-monitor score, or null before the first inference
     "score": 0.42, "ts": 1720000000.0
   },
-  "alert": {                   // null until a sustained defect trips the watchdog
-    "score": 0.82, "action": "pause", "ts": 1720000000.0
+  "alert": {                   // set while a sustained defect holds, null again at the first frame under the threshold
+    "score": 0.82, "action": "pause", "ts": 1720000000.0   // action: "none" | "pause" | "cancel" | "failed"
   }
 }
 ```
