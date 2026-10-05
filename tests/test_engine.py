@@ -247,8 +247,8 @@ async def test_slow_printer_action_does_not_pause_inference(monkeypatch) -> None
     assert not any(event.get("event") == "warning" and "feed has stalled" in event["message"] for event in events)
 
 
-async def test_standby_gating() -> None:
-    watchdog.DEVICE_POLL_S = 0.1
+async def test_standby_gating(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.1)
     platform = FakePlatform(infer_s=0.02, failing=True)
     platform.device_status = "Operational"
     async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
@@ -1202,9 +1202,9 @@ async def test_removing_camera_cancels_pending_attachment(monkeypatch) -> None:
 async def test_watchdog_and_failed_action(monkeypatch) -> None:
     from printguard.engine import engine as engine_module
 
-    watchdog.DEVICE_POLL_S = 0.1
-    watchdog.WATCH_TICK_S = 0.05
-    watchdog.ACT_RETRY_S = 0.01
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.1)
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.05)
+    monkeypatch.setattr(watchdog, "ACT_RETRY_S", 0.01)
     monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
     monkeypatch.setattr(watchdog, "RESTART_AFTER_S", 0.3)
     monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)

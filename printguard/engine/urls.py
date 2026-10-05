@@ -144,7 +144,9 @@ def is_local_address(host: str) -> bool:
     """Whether a host literal is an address on the machine or its network.
 
     An IPv4 address is read in every spelling a resolver takes, so ``127.1``,
-    ``0x7f.0.0.1`` and ``2130706433`` are all the loopback address.
+    ``0x7f.0.0.1`` and ``2130706433`` are all the loopback address. An IPv4
+    address written inside an IPv6 one is judged as the IPv4 address it is,
+    which Python only began doing for itself part way through 3.12.
     """
     try:
         address = ipaddress.ip_address(host.strip("[]"))
@@ -153,6 +155,7 @@ def is_local_address(host: str) -> bool:
             address = ipaddress.ip_address(socket.inet_aton(host))
         except OSError:
             return host in LOCAL_HOSTNAMES or host.endswith(LOCAL_SUFFIXES)
+    address = getattr(address, "ipv4_mapped", None) or address
     return not address.is_global or address.is_private or address.is_loopback
 
 
