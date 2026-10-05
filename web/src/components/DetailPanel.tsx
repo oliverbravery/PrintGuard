@@ -36,7 +36,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
   const printer = engine?.printers.find((p) => p.id === monitor.printer_id);
   const printers = engine?.printers ?? [];
   const points = history[monitor.id] ?? [];
-  const score = points.at(-1)?.score ?? 0;
+  const score = camera?.online ? (points.at(-1)?.score ?? 0) : null;
   const close = () => openDetail(null);
 
   return (

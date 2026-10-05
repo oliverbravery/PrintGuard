@@ -19,11 +19,12 @@ export function Slider({
   format?: (v: number) => string;
   onChange: (v: number) => void;
 }) {
+  const labelId = useId();
   const hintId = useId();
   return (
     <label className="block">
       <div className="flex justify-between mb-1">
-        <span className="label">{label}</span>
+        <span id={labelId} className="label">{label}</span>
         <span className="mono text-[0.72rem] text-text-0">{format(value)}</span>
       </div>
       <input
@@ -32,6 +33,8 @@ export function Slider({
         max={max}
         step={step}
         value={value}
+        aria-labelledby={labelId}
+        aria-valuetext={format(value)}
         aria-describedby={hint ? hintId : undefined}
         onChange={(e) => onChange(Number(e.target.value))}
       />
