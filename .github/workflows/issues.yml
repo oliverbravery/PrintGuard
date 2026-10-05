@@ -33,14 +33,18 @@ jobs:
       issues: write
       pull-requests: read
     steps:
-      - name: Reopen the issues the merge closed and mark them completed
+      - name: Reopen the issues the merge closed, leave the ones their reporter closed, and mark them all completed
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGED_AT: ${{ github.event.pull_request.merged_at }}
         run: |
           issue_numbers=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
           for issue_number in $issue_numbers; do
-            gh issue reopen "$issue_number" --repo "$GITHUB_REPOSITORY"
+            closed_before_merge=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json closedAt --jq "(.closedAt // \"$MERGED_AT\") < \"$MERGED_AT\"")
+            if [ "$closed_before_merge" = "false" ]; then
+              gh issue reopen "$issue_number" --repo "$GITHUB_REPOSITORY"
+            fi
             gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json labels \
               --jq '{labels: ([.labels[].name | select(startswith("status: ") | not)] + ["status: completed"])}' \
               | gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/labels" -X PUT --input -

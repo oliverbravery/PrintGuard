@@ -240,6 +240,9 @@ jobs:
           fi
           issue_numbers=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
           for issue_number in $issue_numbers; do
+            if [ "$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state --jq .state)" = "CLOSED" ]; then
+              continue
+            fi
             marker="<!-- release-follow-up:${VERSION} -->"
             if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments" --jq '.[].body' | grep -Fq "$marker"; then
               continue

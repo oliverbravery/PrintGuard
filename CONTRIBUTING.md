@@ -332,7 +332,8 @@ write `Reported in #123` instead, so the issue closes when the release goes out.
 
 A fix is not resolved until the reporter says it is, so
 [the issues workflow](.github/workflows/issues.yml) reopens what the merge closed and swaps
-the issue's `status:` label for `status: completed`. Once the release is actually published,
+the issue's `status:` label for `status: completed`. An issue its reporter closed before the
+merge stays closed and is not asked again. Once the release is actually published,
 the release workflow comments on each one naming the version and asking the reporter to close
 it if it worked, or to say what is still wrong. Thirty days without a reply closes it, and
 anyone can reopen it later.
