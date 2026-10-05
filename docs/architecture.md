@@ -589,7 +589,6 @@ for development and packaging.
 | `PRINTGUARD_VARIANT` | The image variant suffix reported in `host`, set from the image build arg | Empty |
 | `APP_ICON` | The icon on native notifications, set by the Windows desktop app | Unset |
 | `PRINTGUARD_DEBUG_PORT` | Opens the Windows desktop window to the DevTools protocol, which is how CI drives it | Unset |
-| `MEDIAMTX_VERSION` | The MediaMTX release `packaging/build.sh` downloads | `1.18.2` |
 | `MEDIAMTX_BUNDLE`, `PRINTGUARD_ICON` | The binary and icon `printguard.spec` bundles, exported by `build.sh` | Set by the build |
 | `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` | Sign and notarise the macOS build | Unset, giving an unsigned build |
 | `PRINTGUARD_URL` | The running hub the launch tests drive. Unset, Playwright starts the Vite dev server | Unset |

@@ -201,7 +201,7 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | `*.ingest.de.sentry.io` | Only when you send a bug report |
 | `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
 | Your printers, cameras, notification services and MQTT broker | As you configure them |
-| The addresses a plugin's manifest lists | Only for a plugin you granted [the network](plugins.md#permissions) |
+| The addresses a plugin's manifest lists, and the service it signs you in to | Only for a plugin you granted [`net` or `oauth`](plugins.md#permissions) |
 
 ## Environment variables
 

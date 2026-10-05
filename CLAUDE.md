@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PrintGuard watches 3D-printer cameras with an on-device vision model, pauses the printer
 on a sustained defect, and pushes a snapshot alert. It runs as a self-hosted **hub**, either
-the Docker image or the macOS and Windows desktop app, and that is the only way to run it. No
-frames leave hardware the user owns.
+the Docker image or the macOS and Windows desktop app, and that is the only way to run it.
+Frames leave hardware the user owns only when they review a print and send its frames for
+training.
 
 ## Commands
 
@@ -23,9 +24,8 @@ cd web && npm run site                    # the GitHub Pages landing page (web/s
 cd feedback-worker && npm ci && npm test  # the training inbox Worker
 ```
 
-There is no Python lint step. CI runs `uv run pytest` and the feedback Worker's tests, and type-checks the UI only as part of
-building the image, so run `npm run typecheck`, and `npm run test:sandbox` after touching the
-plugin sandbox, yourself before pushing.
+There is no Python lint step. The **tests** check in CI runs `uv run pytest`, `npm run typecheck`
+and `npm run test:sandbox` in `web/`, and the feedback Worker's `typecheck` and tests.
 
 ## Architecture
 
@@ -174,9 +174,10 @@ heading in [CHANGELOG.md](CHANGELOG.md). The release branch owns the bump and th
 The changelog section is published **verbatim** as the GitHub release notes - write it for
 someone deciding whether to pull the new image, not about the implementation.
 
-Five checks are required: **tests** (`uv run pytest`), **audit** (`uv audit` and `npm audit`
+Five checks are required: **tests** (`uv run pytest`, the UI's `typecheck` and `test:sandbox`,
+and the feedback Worker's `typecheck` and tests), **audit** (`uv audit` and `npm audit`
 over the lockfiles), the production **image** build (which
-also type-checks and builds the UI), **version** (not yet tagged, with a matching
+also builds the UI), **version** (not yet tagged, with a matching
 changelog section) and, on pull requests into `main` only, **launch** (the container and both
 desktop apps start and catch a failing print) plus the changelog date, which must be the day it
 merges into `main` in London time. PrintGuard is distributed as the Docker image and the macOS

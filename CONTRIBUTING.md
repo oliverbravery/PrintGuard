@@ -36,12 +36,11 @@ Run the tests before and after your change:
 uv run pytest                        # engine simulation, adapter contracts, plugin sandbox and lint
 cd web && npm run typecheck          # strict TypeScript over the UI
 cd web && npm run test:sandbox       # the browser plugin sandbox, in chromium and webkit
-cd feedback-worker && npm ci && npm test   # the training inbox Worker, in the Workers runtime
+cd feedback-worker && npm ci && npm run typecheck && npm test   # the training inbox Worker, in the Workers runtime
 ```
 
-CI runs `uv run pytest` and the Worker's tests, and type-checks the UI as part of building the image. Nothing in CI
-runs `typecheck` or `test:sandbox` on their own, so run them yourself. `test:sandbox` needs
-`npx playwright install chromium webkit` once.
+The **tests** check in CI runs all four. `typecheck` covers the Playwright suites as well as the
+UI, and `test:sandbox` needs `npx playwright install chromium webkit` once.
 
 `tests/test_engine.py` simulates cameras and printers against a fake platform, covering
 fairness, gating, the watchdog, alerts and the protocol. `tests/test_adapters.py` pins the
@@ -265,7 +264,8 @@ with the ones it does, and declares the network hosts you would expect.
 
 Merging to `main` publishes a release, so work collects on a release branch first. Open your
 pull request against the open `release/vX.Y.Z` branch, or against `main` if there isn't one and
-I'll move it. Don't bump the version. Add one line for your change under the release's heading
+I'll move it. A pull request from a fork can't pass **launch**, which signs the macOS app with
+secrets a fork isn't given, so it only ever merges into a release branch. Don't bump the version. Add one line for your change under the release's heading
 in [CHANGELOG.md](CHANGELOG.md) if a user would notice it.
 
 The release branch owns the version bump and the changelog heading:
@@ -296,11 +296,16 @@ Five checks are required. A pull request into a release branch runs **tests**, *
 
 | Check | Enforces |
 |---|---|
-| **tests** | Everything under `tests/`, with `uv run pytest`, and the feedback Worker's tests |
+| **tests** | Everything under `tests/`, with `uv run pytest`. The UI and its Playwright suites type-check, and the browser plugin sandbox holds in chromium and webkit. The feedback Worker type-checks and passes its tests |
 | **audit** | `uv audit` and `npm audit` find no known vulnerability in `uv.lock` or either `package-lock.json`. A new advisory fails every open pull request until the dependency is bumped |
-| **image** | Every production image variant builds, which also type-checks and builds the UI, so a change that breaks an image can never reach `main` |
+| **image** | Every production image variant builds, which also builds the UI, so a change that breaks an image can never reach `main` |
 | **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |
 | **version** | The version has no release tag yet and has a matching `CHANGELOG.md` section, dated the day it merges into `main` in London time. Re-publishing an existing tag is refused |
+
+Every action in the workflows is pinned to a commit, with its version in a comment. The base
+images in the `Dockerfile` are pinned by digest beside their tag, and the MediaMTX archive in
+`packaging/build.sh` and the Intel GPU packages in both workflows carry the sha256 their release
+publishes. Bumping any of them means changing the version and its hash together.
 
 On merge, the [release workflow](.github/workflows/release.yml):
 
