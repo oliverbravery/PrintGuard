@@ -26,6 +26,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   trained, which also stops noise pulling a failing print's score under the threshold.
 - Restarting PrintGuard while an idle printer is switched off no longer warns that the printer
   and its camera are offline. The printer's last status is kept across restarts.
+- `PRINTGUARD_PLUGINS=off` switches off every plugin, including the half that runs in your
+  dashboard. It used to stop only the half on the hub.
 
 ## [2.5.0] - 2026-09-21
 
