@@ -15,35 +15,42 @@ permissions:
 jobs:
   version:
     name: version
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       version: ${{ steps.read.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - id: read
         run: echo "version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "$GITHUB_OUTPUT"
       - name: Refuse to re-release an existing version
+        env:
+          VERSION: ${{ steps.read.outputs.version }}
         run: |
-          if git rev-parse -q --verify "refs/tags/v${{ steps.read.outputs.version }}" >/dev/null; then
-            echo "::error file=pyproject.toml::v${{ steps.read.outputs.version }} is already released, run 'uv version --bump patch|minor|major'"
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "::error file=pyproject.toml::v${VERSION} is already released, run 'uv version --bump patch|minor|major'"
             exit 1
           fi
       - name: Refuse to release an undocumented version
+        env:
+          VERSION: ${{ steps.read.outputs.version }}
         run: |
-          if ! grep -q "^## \[${{ steps.read.outputs.version }}\]" CHANGELOG.md; then
-            echo "::error file=CHANGELOG.md::no '## [${{ steps.read.outputs.version }}]' section, describe the change in CHANGELOG.md; it becomes the release notes"
+          if ! grep -q "^## \[${VERSION}\]" CHANGELOG.md; then
+            echo "::error file=CHANGELOG.md::no '## [${VERSION}]' section, describe the change in CHANGELOG.md, which becomes the release notes"
             exit 1
           fi
       - name: Refuse to release a changelog dated any day but the one it merged, London time
+        env:
+          VERSION: ${{ steps.read.outputs.version }}
         run: |
           merged=$(TZ=Europe/London date -d "$(git log -1 --format=%cI)" +%F)
-          dated=$(grep -m1 "^## \[${{ steps.read.outputs.version }}\]" CHANGELOG.md | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+          dated=$(grep -m1 "^## \[${VERSION}\]" CHANGELOG.md | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
           if [ "${dated}" != "${merged}" ]; then
-            echo "::error file=CHANGELOG.md::'## [${{ steps.read.outputs.version }}]' is dated '${dated}' but it merged on ${merged} in London, correct the date and merge again"
+            echo "::error file=CHANGELOG.md::'## [${VERSION}]' is dated '${dated}' but it merged on ${merged} in London, correct the date and merge again"
             exit 1
           fi
 
@@ -59,6 +66,7 @@ jobs:
             suffix: ""
             extra: ""
             gpu_runtime_debs: ""
+            gpu_runtime_debs_sha256: ""
             gpu_visible_devices: ""
           - name: Intel
             platforms: linux/amd64
@@ -69,34 +77,40 @@ jobs:
               https://github.com/intel/intel-graphics-compiler/releases/download/v2.38.2/intel-igc-opencl-2_2.38.2+22051_amd64.deb
               https://github.com/intel/compute-runtime/releases/download/26.27.39122.11/libigdgmm12_22.10.0_amd64.deb
               https://github.com/intel/compute-runtime/releases/download/26.27.39122.11/intel-opencl-icd_26.27.39122.11-0_amd64.deb
+            gpu_runtime_debs_sha256: >-
+              3dbcbe4e716d62e9bd43a4a476d724cf772b4581dbcdd096d70df382e7ccad7e
+              e265d191590efd5491bfbbd148c144fdd40aea51e0b57f8651130d2da20b8186
+              6031a63d6e8a12ce61c14efc15f2c8e727061286e3820b8594e6d00615e04d54
+              6e447a783c99fb5634df298c135a81165be07db98672df96cdf413d22f3e6ac4
             gpu_visible_devices: ""
           - name: NVIDIA
             platforms: linux/amd64
             suffix: -nvidia
             extra: --extra nvidia
             gpu_runtime_debs: ""
+            gpu_runtime_debs_sha256: ""
             gpu_visible_devices: all
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/printguard
           tags: |
             type=semver,pattern={{version}}${{ matrix.suffix }},value=v${{ needs.version.outputs.version }}
             type=semver,pattern={{major}}.{{minor}}${{ matrix.suffix }},value=v${{ needs.version.outputs.version }}
             type=raw,value=latest${{ matrix.suffix }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: ${{ matrix.platforms }}
@@ -107,6 +121,7 @@ jobs:
             VARIANT=${{ matrix.suffix }}
             INFERENCE_EXTRA=${{ matrix.extra }}
             GPU_RUNTIME_DEBS=${{ matrix.gpu_runtime_debs }}
+            GPU_RUNTIME_DEBS_SHA256=${{ matrix.gpu_runtime_debs_sha256 }}
             NVIDIA_VISIBLE_DEVICES=${{ matrix.gpu_visible_devices }}
           provenance: mode=max
           sbom: true
@@ -120,18 +135,21 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Extract this version's changelog section as the release notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          awk -v ver="${{ needs.version.outputs.version }}" '
+          awk -v ver="${VERSION}" '
             $0 ~ "^## \\[" ver "\\]" {hit=1; next}
             hit && (/^## \[/ || /^\[[^]]+\]: /) {exit}
             hit {print}
           ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
           test -s "$RUNNER_TEMP/release-notes.md"
-      - run: gh release create "v${{ needs.version.outputs.version }}" --target "$GITHUB_SHA" --title "v${{ needs.version.outputs.version }}" --notes-file "$RUNNER_TEMP/release-notes.md"
+      - run: gh release create "v${VERSION}" --target "$GITHUB_SHA" --title "v${VERSION}" --notes-file "$RUNNER_TEMP/release-notes.md"
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
 
   desktop:
     name: desktop
@@ -144,14 +162,14 @@ jobs:
         os: [macos-14, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - uses: apple-actions/import-codesign-certs@v7
+      - uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7.0.0
         if: runner.os == 'macOS'
         with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
@@ -168,7 +186,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "v${{ needs.version.outputs.version }}" dist/PrintGuard-* --clobber
+          VERSION: ${{ needs.version.outputs.version }}
+        run: gh release upload "v${VERSION}" dist/PrintGuard-* --clobber
 
   pages:
     name: pages
@@ -182,8 +201,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -193,12 +212,12 @@ jobs:
         run: |
           npm ci
           npm run site:build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: web/dist-site
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
 
   follow-up:
     name: reporter follow-up

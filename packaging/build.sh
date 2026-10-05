@@ -7,7 +7,7 @@
 # (with APPLE_API_KEY_ID and APPLE_API_ISSUER) notarises the disk image.
 set -euo pipefail
 
-MEDIAMTX_VERSION="${MEDIAMTX_VERSION:-1.18.2}"
+MEDIAMTX_VERSION=1.18.2
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 rm -rf dist build/desktop build/pyinstaller
@@ -26,8 +26,16 @@ case "$(uname -s)" in
 esac
 
 mtx="mediamtx_v${MEDIAMTX_VERSION}_${OS}_${ARCH}.${MTX_EXT}"
+case "$mtx" in
+  mediamtx_v1.18.2_darwin_arm64.tar.gz) MTX_SHA256=6a9273ae22a9d0ba85d00d03fdd1b13b9eeaf129ea8b90999ec746367f20449a ;;
+  mediamtx_v1.18.2_darwin_amd64.tar.gz) MTX_SHA256=d0f9b2f67da6bbed0b8e01d6baea07d9e5e9b2b617d6c421fc9b1a98d232bfca ;;
+  mediamtx_v1.18.2_windows_amd64.zip) MTX_SHA256=945ab46c5fc6d2802ad18e2f1d7e49245ca5609657d85e310aa6eda4cdd72eec ;;
+  *) echo "no pinned checksum for ${mtx}, add it from the release's checksums.sha256" >&2; exit 1 ;;
+esac
 curl -fsSL -o "build/desktop/${mtx}" \
   "https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/${mtx}"
+[ "$(openssl dgst -sha256 -r "build/desktop/${mtx}" | cut -d' ' -f1)" = "$MTX_SHA256" ] \
+  || { echo "${mtx} does not match its pinned checksum" >&2; exit 1; }
 if [ "$MTX_EXT" = zip ]; then
   powershell -NoProfile -Command "Expand-Archive -Path 'build/desktop/${mtx}' -DestinationPath build/desktop -Force"
 else
