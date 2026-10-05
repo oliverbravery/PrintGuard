@@ -102,9 +102,14 @@ class KlipperAdapter(IntegrationAdapter):
             raise RuntimeError(f"Moonraker rejected the {heater} target: HTTP {status}")
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
-        """Uploads into the gcodes root through /server/files/upload and starts it."""
+        """Uploads into the gcodes root through /server/files/upload and starts it.
+
+        Moonraker answers 201 for a file it stored whether or not Klipper then
+        started it, and says which in ``print_started``. This reply is the one
+        Moonraker does not wrap in ``result``.
+        """
         headers, body = multipart_form({"root": "gcodes", "print": "true"}, "file", filename, data, "application/octet-stream")
-        status, _ = await http(
+        status, reply = await http(
             "POST",
             f"{config['base_url'].rstrip('/')}/server/files/upload",
             headers={**self._headers(config), **headers},
@@ -113,6 +118,8 @@ class KlipperAdapter(IntegrationAdapter):
         )
         if status >= 400:
             raise RuntimeError(f"Moonraker rejected {filename}: HTTP {status}")
+        if not reply["print_started"]:
+            raise RuntimeError(f"Moonraker stored {filename} but did not start printing it")
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Lists Moonraker's registered webcams via /server/webcams/list.
