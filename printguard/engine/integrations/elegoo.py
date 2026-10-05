@@ -213,6 +213,8 @@ class ElegooAdapter(IntegrationAdapter):
             printer = self._connections.get(key)
             if printer is not None and not printer._closed:
                 return printer
+            if printer is not None and printer.mainboard_id:
+                self._mainboard_ids[key[0]] = printer.mainboard_id
             mainboard_id = self._mainboard_ids.get(key[0]) or await self._discover_mainboard_id(key[0])
             printer = await pycentauri.connect_auto(
                 key[0],

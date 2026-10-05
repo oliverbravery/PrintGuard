@@ -1463,6 +1463,19 @@ async def test_octoprint_uploads_selected_and_printing() -> None:
         await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=415), {"base_url": "http://op", "api_key": "k"}, "x.gcode", b"")
 
 
+async def test_octoprint_upload_it_stored_but_did_not_start_raises() -> None:
+    stored = {"files": {"local": {"name": "benchy.gcode"}}, "done": True, "effectiveSelect": False, "effectivePrint": False}
+    with pytest.raises(RuntimeError, match="did not start printing"):
+        await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=201, body=stored), {"base_url": "http://op", "api_key": "k"}, "benchy.gcode", b"G1 X1\n")
+
+
+def test_prusa_signs_in_as_maker_unless_another_username_is_given() -> None:
+    from printguard.engine.integrations.prusa import _username
+
+    assert _username({"password": "p"}) == _username({"username": " "}) == "maker"
+    assert _username({"username": "olly"}) == "olly"
+
+
 MOONRAKER_UPLOADED = {"item": {"path": "benchy.gcode", "root": "gcodes"}, "print_started": True, "print_queued": False, "action": "create_file"}
 
 

@@ -56,7 +56,7 @@ watched and warns you. See [failing safely](architecture.md#failing-safely).
 | [OctoPrint](https://octoprint.org) | API key | Yes, its webcam stream |
 | [Klipper via Moonraker](https://moonraker.readthedocs.io) | Optional API key | Yes, its configured webcams |
 | [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code, or Moonraker API key | Centauri chamber camera, or Moonraker's configured webcams |
-| [Prusa via PrusaLink](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest, user `maker` | No local stream |
+| [Prusa via PrusaLink](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest, user `maker` unless you set another | No local stream |
 | [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | Access code and serial | Chamber camera |
 
 <details>
@@ -112,7 +112,7 @@ MK4, MK4S, MK3.9, MK3.5, MINI, XL and CORE One, or on a Raspberry Pi attached to
 MK2.5. It authenticates with HTTP Digest.
 
 1. Enable **PrusaLink** on the printer under Settings, Network, then PrusaLink.
-2. Register it with its URL and the password shown there. The username is always `maker`.
+2. Register it with its URL and the password shown there. The username is `maker` on the printer's own firmware. PrusaLink on a Raspberry Pi uses the one you chose when setting it up, so enter that under **Username**.
 
 PrusaConnect is not used, so no frames or job data leave hardware you own. PrusaLink's
 webcam feature pushes snapshots to PrusaConnect rather than serving a local video stream, so

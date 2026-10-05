@@ -65,4 +65,6 @@ class NativeNotifier(NotifierAdapter):
 
         icon = os.environ.get("APP_ICON")
         notifier = DesktopNotifier(app_name="PrintGuard", app_icon=Icon(path=Path(icon)) if icon else None)
+        if not await notifier.request_authorisation():
+            raise RuntimeError("notifications are switched off for PrintGuard in the system's settings")
         await notifier.send(title=title, message=body, attachment=Attachment(path=snapshot) if snapshot else None)

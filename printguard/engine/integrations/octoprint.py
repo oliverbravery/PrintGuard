@@ -114,9 +114,17 @@ class OctoPrintAdapter(IntegrationAdapter):
             raise RuntimeError(f"OctoPrint rejected the {heater} target: HTTP {status}")
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
-        """Uploads to local storage through /api/files/local, selected and printing."""
+        """Uploads to local storage through /api/files/local, selected and printing.
+
+        OctoPrint answers 201 with ``effectivePrint`` false when it kept the
+        file and did not start it, such as for a key without the print
+        permission.
+
+        Raises:
+            RuntimeError: If OctoPrint refuses the file or does not start it.
+        """
         headers, body = multipart_form({"select": "true", "print": "true"}, "file", filename, data, "application/octet-stream")
-        status, _ = await http(
+        status, stored = await http(
             "POST",
             f"{config['base_url'].rstrip('/')}/api/files/local",
             headers={**self._headers(config), **headers},
@@ -125,6 +133,8 @@ class OctoPrintAdapter(IntegrationAdapter):
         )
         if status >= 400:
             raise RuntimeError(f"OctoPrint rejected {filename}: HTTP {status}")
+        if isinstance(stored, dict) and stored.get("effectivePrint") is False:
+            raise RuntimeError(f"OctoPrint stored {filename} but did not start printing it")
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Reads the configured webcam stream from /api/settings.

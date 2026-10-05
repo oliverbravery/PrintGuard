@@ -42,6 +42,10 @@ _STATUS_MAP = {
 }
 
 
+def _username(config: dict[str, Any]) -> str:
+    return str(config.get("username") or "").strip() or _USERNAME
+
+
 class PrusaAdapter(IntegrationAdapter):
     """Talks to a Prusa printer's local PrusaLink API via pyprusalink."""
 
@@ -51,7 +55,7 @@ class PrusaAdapter(IntegrationAdapter):
     setup_url = "https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293"
     setup_hint = (
         "Enable PrusaLink on the printer (Settings > Network > PrusaLink) and use the password "
-        "shown there. The username is always 'maker'."
+        "shown there. The username is 'maker' unless you chose another setting PrusaLink up on a Raspberry Pi."
     )
     experimental = False
     formats = ("gcode", "bgcode")
@@ -63,6 +67,12 @@ class PrusaAdapter(IntegrationAdapter):
                 "format": "uri",
                 "title": "Base URL",
                 "placeholder": "http://192.168.1.80",
+            },
+            "username": {
+                "type": "string",
+                "title": "Username",
+                "default": _USERNAME,
+                "placeholder": "maker, unless you set another on a Raspberry Pi",
             },
             "password": {
                 "type": "string",
@@ -123,7 +133,7 @@ class PrusaAdapter(IntegrationAdapter):
             RuntimeError: If the printer has no storage to write to, or
                 refuses the listing or the file.
         """
-        auth = DigestAuthWorkaround(username=_USERNAME, password=str(config.get("password", "")))
+        auth = DigestAuthWorkaround(username=_username(config), password=str(config.get("password", "")))
         async with httpx.AsyncClient(base_url=str(config["base_url"]).rstrip("/"), auth=auth, timeout=_UPLOAD_TIMEOUT_S) as client:
             listing = await client.get("/api/v1/storage", timeout=_TIMEOUT_S)
             if listing.status_code >= 400:
@@ -159,4 +169,4 @@ class PrusaAdapter(IntegrationAdapter):
     @asynccontextmanager
     async def _link(self, config: dict[str, Any]) -> AsyncIterator[Any]:
         async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
-            yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _USERNAME, str(config.get("password", "")))
+            yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _username(config), str(config.get("password", "")))
