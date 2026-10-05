@@ -24,18 +24,19 @@ Send.
 |---|---|
 | The frame that fired each alert | The last 40 |
 | The highest scoring frames that didn't alert | 5 |
-| Ordinary frames spread evenly over the print | 10 to 20 |
+| Ordinary frames spread evenly over the print | Up to 19, starting at one a minute |
 
 Frames are scaled to 512px and stored in the hub's data directory, so they survive a restart.
 The hub keeps the last 20 prints or 200 MB and drops the oldest first. The alert frames are the
 ones the risk history shows under **Risky moments**.
 
-A print ends when its printer reports idle or an error, so a paused print stays open. A monitor
+A print ends when its printer reports idle or an error, or when you switch its monitor off, so a
+paused print stays open. A monitor
 with no printer has no way to know a print ended, so it closes one every 24 hours.
 
 ## Reviewing a print
 
-When a print ends its monitor shows **Review frames from the last print**. Older prints are
+When a print ends its monitor shows a button to review the frames from the last print. Older prints are
 listed under **Prints** on the monitor's detailed history page.
 
 ![The review sheet with a failed print's frames labelled good, failure and real failure](assets/review.png)
@@ -49,7 +50,8 @@ listed under **Prints** on the monitor's detailed history page.
 ## What's sent
 
 - The frames you kept, with the label you gave each one.
-- Each frame's risk score, time and whether it was an alert.
+- Each frame's risk score, time and which of the three kinds above it is.
+- A random ID for the print and for each frame.
 - The monitor's alert threshold.
 - The type of printer connection, such as `moonraker`, and the printer model if you typed one.
 - The PrintGuard version.
@@ -63,8 +65,8 @@ after 30 days. They are used only to train PrintGuard's detection model.
 ## Limits
 
 The inbox runs on Cloudflare's free tier, which has a fixed amount of room, so the Worker caps
-what it takes. A frame is never lost to a limit. It stays on your hub and sends by itself once
-the limit resets.
+what it takes. A frame that hits a limit stays on your hub and sends by itself once the limit resets, unless
+20 newer prints or 200 MB push its print out first.
 
 | Limit | Value | What you see |
 |---|---|---|
