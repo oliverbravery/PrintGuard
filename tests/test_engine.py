@@ -1349,9 +1349,13 @@ async def test_token_secret_reaches_requester_but_is_never_logged(monkeypatch) -
     monkeypatch.setitem(EVENT_LOG_LEVELS, "token_created", logging.ERROR)
     platform = FakePlatform(infer_s=0.02)
     async with configured_logging(), running_engine(platform, camera_fps=[]) as (engine, events):
-        await engine.handle({"cmd": "token.create", "req_id": 7, "name": "ci", "scope": "control"})
+        bystander: list[dict] = []
+        engine.add_sink(bystander.append)
+        requester: list[dict] = []
+        await engine.handle({"cmd": "token.create", "req_id": 7, "name": "ci", "scope": "control"}, requester.append)
 
-    created = next(e for e in events if e.get("event") == "token_created")
+    assert not any(e.get("event") == "token_created" for e in events + bystander), "token secret reached a transport that did not ask"
+    created = next(e for e in requester if e.get("event") == "token_created")
     assert created["req_id"] == 7 and created["scope"] == "control"
     assert engine.tokens.get(created["id"]) is not None, "token was not registered"
     secret = created["token"]

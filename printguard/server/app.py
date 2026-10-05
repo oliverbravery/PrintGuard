@@ -286,7 +286,7 @@ def create_app() -> FastAPI:
 
         async def receive() -> None:
             while True:
-                await engine.handle(json.loads(await websocket.receive_text()))
+                await engine.handle(json.loads(await websocket.receive_text()), queue.put)
 
         engine.add_sink(queue.put)
         tasks = [asyncio.ensure_future(pump()), asyncio.ensure_future(receive())]

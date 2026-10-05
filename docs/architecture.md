@@ -115,7 +115,7 @@ Events, engine to UI:
 | `history`, `snapshot`, `review` | Risk history buckets, a kept frame's JPEG, and the frames kept from one print |
 | `review_sent` | How far a reviewed print's upload got, with the refusal code and retry time when it is queued |
 | `releases` | The changelog history the update dialog browses |
-| `token_created` | A new API token's secret, delivered to the requesting transport and never written to the log |
+| `token_created` | A new API token's secret, delivered only to the transport that asked, never to the others and never written to the log |
 | `report_sent`, `report_bundle` | Bug report outcome, and the downloadable diagnostics zip |
 | `plugin_code`, `catalogue`, `plugin_effect` | A plugin's source for its sandbox, the reviewed-plugin catalogue, and an effect a dashboard performs for a plugin that has no screen of its own |
 | `http`, `socket` | An answer to a plugin's own request, and a frame on a socket it is holding, both addressed to the plugin that asked |

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
 import logging
 import time
 import uuid
@@ -104,6 +105,7 @@ class Engine:
         self._plugin_calls: dict[str, list[float]] = {}
         self._pending_calls: dict[str, tuple[str, str, str, float]] = {}
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
+        self._requester: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = contextvars.ContextVar("requester", default=None)
         self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
         self._tasks: list[asyncio.Task[None]] = []
         self._attach_tasks: dict[str, asyncio.Task[None]] = {}
@@ -268,12 +270,7 @@ class Engine:
         self._broadcast(event)
 
     def _broadcast(self, event: dict[str, Any]) -> None:
-        """Delivers an event to recent history and every transport sink.
-
-        Kept separate from emit() so an event carrying a one-time secret
-        (token_created) can reach the requesting transport without ever being
-        written to the log in clear text.
-        """
+        """Delivers an event to recent history and every transport sink."""
         if event.get("event") in RECENT_EVENT_TYPES:
             self._recent.append(event)
         for sink in list(self._sinks):
@@ -331,8 +328,31 @@ class Engine:
         """Maps each issued token's secret hash to the scope it grants."""
         return {t.hash: t.scope for t in self.tokens.values()}
 
-    async def handle(self, message: dict[str, Any]) -> None:
-        """Executes a protocol command, emitting an error event on failure."""
+    def _reply(self, event: dict[str, Any]) -> None:
+        """Delivers an event to the transport that issued the running command only.
+
+        For an event carrying a one-time secret (token_created), which must
+        reach neither the other transports nor the log.
+        """
+        requester = self._requester.get()
+        if requester is not None:
+            requester(event)
+
+    async def handle(self, message: dict[str, Any], reply: Callable[[dict[str, Any]], None] | None = None) -> None:
+        """Executes a protocol command, emitting an error event on failure.
+
+        Args:
+            message: The command, with its ``cmd`` name and arguments.
+            reply: The issuing transport's sink, which alone receives events
+                addressed to the requester.
+        """
+        reset = self._requester.set(reply)
+        try:
+            await self._dispatch(message)
+        finally:
+            self._requester.reset(reset)
+
+    async def _dispatch(self, message: dict[str, Any]) -> None:
         handler = self._handlers.get(message.get("cmd", ""))
         if not handler:
             self.emit({"event": "error", "message": f"unknown command {message.get('cmd')!r}"})
@@ -364,7 +384,7 @@ class Engine:
 
         self.add_sink(sink)
         try:
-            await asyncio.wait_for(self.handle({**message, "req_id": req_id}), timeout)
+            await asyncio.wait_for(self.handle({**message, "req_id": req_id}, sink), timeout)
         finally:
             self.remove_sink(sink)
         for event in collected:
@@ -1041,7 +1061,7 @@ class Engine:
         record, secret = new_token(name, message.get("scope") or "read")
         token = Token(**record)
         self.tokens.add(token)
-        self._broadcast({"event": "token_created", **token.public(), "token": secret, "req_id": message.get("req_id")})
+        self._reply({"event": "token_created", **token.public(), "token": secret, "req_id": message.get("req_id")})
 
     async def _cmd_token_remove(self, message: dict[str, Any]) -> None:
         self.tokens.remove(message["id"])

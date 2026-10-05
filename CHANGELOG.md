@@ -28,6 +28,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   and its camera are offline. The printer's last status is kept across restarts.
 - `PRINTGUARD_PLUGINS=off` switches off every plugin, including the half that runs in your
   dashboard. It used to stop only the half on the hub.
+- A new API token's secret is only sent to the dashboard tab that created it, where every open tab used to receive it.
 
 ## [2.5.0] - 2026-09-21
 
