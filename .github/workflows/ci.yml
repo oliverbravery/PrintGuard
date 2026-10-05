@@ -24,6 +24,19 @@ jobs:
       - run: npm ci --prefix feedback-worker
       - run: npm test --prefix feedback-worker
 
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: uv audit --locked --preview-features audit
+      - run: npm audit --prefix web
+      - run: npm audit --prefix feedback-worker
+
   image:
     name: image (${{ matrix.name }})
     runs-on: ubuntu-latest

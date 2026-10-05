@@ -234,11 +234,12 @@ time. The check on a pull request into `main` compares it with today, and the re
 refuses a section dated any other day than its merge commit, so a release that waits a day
 needs its date moved on before it merges.
 
-A pull request can only merge once four required checks pass:
+A pull request can only merge once five required checks pass:
 
 | Check | Enforces |
 |---|---|
 | **tests** | The engine simulation suite |
+| **audit** | `uv audit` and `npm audit` find no known vulnerability in `uv.lock` or either `package-lock.json`. A new advisory fails every open pull request until the dependency is bumped |
 | **image** | Every production image variant builds, so a change that breaks an image can never reach `main` |
 | **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |
 | **version** | The version is bumped past the last release and has a matching `CHANGELOG.md` section dated the day it merges into `main`, London time, so every merge ships as a unique, documented, immutable version. Re-publishing an existing tag is refused |
