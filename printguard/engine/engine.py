@@ -27,7 +27,7 @@ from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, IntegrationA
 from .monitors import monitor_watching, persisted_monitor, sanitise_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import Frame, Platform, as_chunks
-from .printers import PREHEAT_DEFAULTS, require_fields, sanitise_presets, sanitise_printer, sanitise_targets
+from .printers import PREHEAT_DEFAULTS, sanitise_presets, sanitise_printer, sanitise_targets
 from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers
 from .registry import (
     Camera,
@@ -1057,7 +1057,7 @@ class Engine:
     async def _cmd_printer_add(self, message: dict[str, Any]) -> None:
         printer_id = uuid.uuid4().hex[:8]
         record = sanitise_printer(printer_id, message.get("printer", {}))
-        require_fields(record["provider"], record["config"])
+        INTEGRATIONS[record["provider"]].require(record["config"])
         reports.require_splittable(record["config"].values())
         printer = Printer(id=printer_id, name=record["name"], provider=record["provider"], config=record["config"])
         self.printers.add(printer)
@@ -1069,7 +1069,7 @@ class Engine:
         if not existing:
             raise KeyError(f"no printer {message['id']}")
         record = sanitise_printer(existing.id, message.get("patch", {}), existing.persisted())
-        require_fields(record["provider"], record["config"])
+        INTEGRATIONS[record["provider"]].require(record["config"])
         reports.require_splittable(record["config"].values())
         if record["provider"] != existing.provider or record["config"] != existing.config:
             await INTEGRATIONS[existing.provider].close(existing.config)
@@ -1127,12 +1127,16 @@ class Engine:
         """Re-reads a printer's state after a command changed it, announces it and re-gates its monitors.
 
         The command has already gone through, so a read that fails is left to
-        the next poll and never fails the command.
+        the next poll and never fails the command. So is one answered from
+        connection details the printer was edited away from meanwhile.
         """
+        asked = (printer.provider, printer.config)
         try:
             state = await adapter.fetch_state(self.platform.http, printer.config)
         except Exception as exc:
             logger.warning("printer '%s' took a command but could not be read back: %s", printer.name, logs.describe(exc))
+            return
+        if (printer.provider, printer.config) != asked:
             return
         printer.observe(state.public())
         self.emit({"event": "device", "printer_id": printer.id, **printer.device_state})
@@ -1149,7 +1153,7 @@ class Engine:
             raise RuntimeError(f"unknown provider {message.get('provider')!r}")
         config = message.get("config", {})
         try:
-            require_fields(adapter.id, config)
+            adapter.require(config)
             state = await adapter.fetch_state(self.platform.http, config)
             ok = state.status.value not in ("offline", "unknown")
             self.emit({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
@@ -1351,6 +1355,7 @@ class Engine:
         if not adapter:
             raise RuntimeError(f"unknown notifier {message.get('provider')!r}")
         try:
+            adapter.require(message.get("config", {}))
             picture = await self.platform.encode_jpeg(np.zeros(TEST_PICTURE_SHAPE, np.uint8))
             await adapter.send(self.platform.http, message.get("config", {}), "PrintGuard test", "Notifications are working.", picture)
             self.emit({"event": "notify_test", "provider": adapter.id, "ok": True, "req_id": message.get("req_id")})
@@ -1380,6 +1385,7 @@ class Engine:
             if provider not in NOTIFIERS:
                 raise ValueError(f"unknown notifier {provider!r}")
             reports.require_splittable(config.values())
+            NOTIFIERS[provider].require(config)
         settings["fault_grace_s"] = clamp_grace(settings["fault_grace_s"])
         settings["preheat"] = sanitise_presets(settings["preheat"])
         settings.update(appearance.sanitise(settings))

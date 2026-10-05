@@ -65,6 +65,23 @@ class Adapter(ABC):
         """Config property names the schema marks secret (credentials)."""
         return {key for key, prop in self.schema.get("properties", {}).items() if prop.get("secret")}
 
+    def require(self, config: dict[str, Any]) -> None:
+        """Refuses a configuration that leaves a field the service needs blank.
+
+        Args:
+            config: The values supplied for the schema.
+
+        Raises:
+            ValueError: If a field the schema marks required is blank, naming each.
+        """
+        blank = [
+            self.schema["properties"][key]["title"]
+            for key in self.schema.get("required", [])
+            if not str(config.get(key) or "").strip()
+        ]
+        if blank:
+            raise ValueError(f"{self.label} needs {' and '.join(blank)} filled in")
+
 
 def multipart_form(
     fields: dict[str, str], file_field: str, filename: str, file_bytes: bytes, content_type: str = "image/jpeg"

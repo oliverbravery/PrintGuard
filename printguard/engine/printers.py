@@ -45,26 +45,6 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
     return record
 
 
-def require_fields(provider: str, config: dict[str, Any]) -> None:
-    """Refuses connection details that leave a field the integration needs blank.
-
-    Args:
-        provider: A known integration's id.
-        config: The values supplied for its schema.
-
-    Raises:
-        ValueError: If a field the schema marks required is blank, naming each.
-    """
-    adapter = INTEGRATIONS[provider]
-    blank = [
-        adapter.schema["properties"][key]["title"]
-        for key in adapter.schema.get("required", [])
-        if not str(config.get(key) or "").strip()
-    ]
-    if blank:
-        raise ValueError(f"{adapter.label} needs {' and '.join(blank)} filled in")
-
-
 def _target(heater: str, value: Any) -> float:
     return clamp(f"{heater} temperature", value, 0.0, HEATER_MAX[heater])
 

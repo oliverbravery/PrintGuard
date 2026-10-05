@@ -993,6 +993,44 @@ async def test_a_printer_missing_a_required_field_is_refused_by_name(provider: s
         assert len(_of(events, "error")) == errors, "a failed test is reported once"
 
 
+async def test_an_alert_channel_missing_a_required_field_is_refused_by_name() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"telegram": {"bot_token": "t"}}}})
+        assert not engine.settings["notifiers"] and "Chat ID" in _of(events, "error")[-1]["message"]
+
+        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {}})
+        (tested,) = _of(events, "notify_test")
+        assert not tested["ok"] and "Topic URL" in tested["error"] and not platform.http_calls
+
+
+async def test_a_printer_edited_while_it_was_being_read_drops_the_old_address_answer() -> None:
+    platform = FakePlatform()
+    answering, held = asyncio.Event(), asyncio.Event()
+
+    async def fetch_state(http, config):
+        if config["base_url"] != "http://old":
+            raise ConnectionError("unreachable")
+        answering.set()
+        await held.wait()
+        return DeviceState(DeviceStatus.IDLE)
+
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        printer = engine.printers.get(printer_id)
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": {"base_url": "http://old", "api_key": "k"}}})
+        adapter = INTEGRATIONS[printer.provider]
+        original, adapter.fetch_state = adapter.fetch_state, fetch_state
+        try:
+            reading = asyncio.ensure_future(engine.watchdog._read(printer))
+            await answering.wait()
+            await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": {"base_url": "http://new", "api_key": "k"}}})
+            held.set()
+            assert not await reading and printer.reported_status is None
+        finally:
+            adapter.fetch_state = original
+
+
 @pytest.mark.parametrize(
     ("provider", "partial", "completed"),
     [

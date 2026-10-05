@@ -130,7 +130,9 @@ class Watchdog:
 
         A printer removed by the time its turn comes is not read, since
         reading it would open the connection its removal just closed, and one
-        removed while it was answering has its answer dropped.
+        removed while it was answering has its answer dropped. So has one whose
+        connection details were edited meanwhile, since the answer came from
+        an address it no longer has.
 
         Returns:
             Whether the state changed.
@@ -138,11 +140,12 @@ class Watchdog:
         adapter = INTEGRATIONS.get(printer.provider)
         if not adapter or self._engine.printers.get(printer.id) is not printer:
             return False
+        asked = (printer.provider, printer.config)
         try:
             snapshot = (await adapter.fetch_state(self._engine.platform.http, printer.config)).public()
         except Exception:
             snapshot = DeviceState(DeviceStatus.OFFLINE).public()
-        if self._engine.printers.get(printer.id) is not printer:
+        if self._engine.printers.get(printer.id) is not printer or (printer.provider, printer.config) != asked:
             return False
         changed = printer.observe(snapshot)
         if changed:
