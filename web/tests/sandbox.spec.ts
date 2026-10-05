@@ -441,6 +441,7 @@ test("glass takes the text colour its tone can carry", async ({ page }) => {
 
 
 test("an event never wipes the per-monitor views the plugin drew", async ({ page }) => {
+  await stubFloat(page);
   await dashboardWithPlugin(page, `${MONITOR_PIP}\nplugin.on('result', () => {});`, PLUGIN.granted, ["monitor"]);
   const float = page.getByRole("button", { name: "Float Bench" });
 
