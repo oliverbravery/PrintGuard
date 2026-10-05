@@ -155,8 +155,8 @@ indexes the set, so a new page goes in that table and in the README's Documentat
 Merging to `main` ships a release, so every PR carries its own metadata: a version bump and
 a matching top section in [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com)
 form), which is published **verbatim** as the GitHub release notes - write it for someone
-deciding whether to pull the new image, not about the implementation. Four required checks
-must pass: **tests**, the production **image** build, **launch** (on pull requests into
+deciding whether to pull the new image, not about the implementation. Five required checks
+must pass: **tests**, **audit** (`uv audit` and `npm audit` over the lockfiles), the production **image** build, **launch** (on pull requests into
 `main`, the container and both desktop apps start and catch a failing print) and **version**
 (bumped past the last release with a matching changelog section, dated the day it merges into
 `main` in London time). Docker is the only supported distribution.
