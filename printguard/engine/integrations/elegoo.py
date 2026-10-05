@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import tempfile
+from contextlib import aclosing
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ _ACTIONS = {
     DeviceAction.RESUME: "resume",
     DeviceAction.CANCEL: "stop",
 }
+_FRESH_STATUS_TIMEOUT_S = 10.0
 
 
 class ElegooAdapter(IntegrationAdapter):
@@ -80,14 +82,20 @@ class ElegooAdapter(IntegrationAdapter):
         self._connections: dict[tuple[str, str], Any] = {}
         self._connection_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._mainboard_ids: dict[str, str] = {}
+        self._polled: dict[tuple[str, str], Any] = {}
 
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
-        """Reads and normalises the active print state."""
+        """Reads and normalises the active print state.
+
+        Raises:
+            RuntimeError: If a Centauri printer has reported nothing since the
+                last read, so an old state is never taken for the current one.
+        """
         if self._family(config) == _MOONRAKER:
             return await self._moonraker.fetch_state(http, self._moonraker_config(config))
         try:
             printer = await self._connect_centauri(config)
-            status = await printer.status()
+            status = await self._fresh_status(self._connection_key(config), printer)
         except Exception:
             await self.close(config)
             raise
@@ -108,7 +116,7 @@ class ElegooAdapter(IntegrationAdapter):
             return
         try:
             printer = await self._connect_centauri(config)
-            await getattr(printer, _ACTIONS[action])()
+            _require_ack(await getattr(printer, _ACTIONS[action])(), _ACTIONS[action])
         except Exception:
             await self.close(config)
             raise
@@ -120,7 +128,7 @@ class ElegooAdapter(IntegrationAdapter):
             return
         try:
             printer = await self._connect_centauri(config)
-            await printer.set_temperatures(**{heater: target})
+            _require_ack(await printer.set_temperatures(**{heater: target}), f"the {heater} target")
         except Exception:
             await self.close(config)
             raise
@@ -140,7 +148,7 @@ class ElegooAdapter(IntegrationAdapter):
                 path = Path(folder) / filename
                 await asyncio.to_thread(path.write_bytes, data)
                 remote = await printer.upload_file(path, remote_name=filename)
-            await printer.start_print(remote)
+            _require_ack(await printer.start_print(remote), f"to print {filename}")
         except Exception:
             await self.close(config)
             raise
@@ -170,6 +178,7 @@ class ElegooAdapter(IntegrationAdapter):
         for key in keys:
             async with self._connection_locks.setdefault(key, asyncio.Lock()):
                 printer = self._connections.pop(key, None)
+                self._polled.pop(key, None)
                 if printer is None:
                     continue
                 mainboard_id = printer.mainboard_id
@@ -197,6 +206,30 @@ class ElegooAdapter(IntegrationAdapter):
             )
             self._connections[key] = printer
             return printer
+
+    async def _fresh_status(self, key: tuple[str, str], printer: Any) -> Any:
+        """Reads a status the printer reported since the last read.
+
+        pycentauri answers a Centauri Carbon 1 with the last status it pushed
+        for as long as the socket stays open. A status already read is waited
+        out through ``watch()``, which also asks a printer whose pushes have
+        stalled for a new one.
+        """
+        status = await printer.status()
+        if status is self._polled.get(key):
+            try:
+                status = await asyncio.wait_for(self._next_status(printer, status), _FRESH_STATUS_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                raise RuntimeError("Elegoo printer stopped reporting its status") from None
+        self._polled[key] = status
+        return status
+
+    async def _next_status(self, printer: Any, read: Any) -> Any:
+        async with aclosing(printer.watch()) as pushed:
+            async for status in pushed:
+                if status is not read:
+                    return status
+        raise RuntimeError("Elegoo printer closed the connection")
 
     async def _discover_mainboard_id(self, host: str) -> str | None:
         resolved = await asyncio.get_running_loop().getaddrinfo(host, None, family=socket.AF_INET)
@@ -230,3 +263,21 @@ class ElegooAdapter(IntegrationAdapter):
         if status in _ERROR:
             return DeviceStatus.ERROR
         return DeviceStatus.UNKNOWN
+
+
+def _require_ack(response: Any, command: str) -> None:
+    """Raises unless the printer acknowledged a command.
+
+    A Centauri Carbon 1 answers every command, and a refused one differs only
+    in a non-zero ``Ack``, which pycentauri hands back without raising.
+
+    Args:
+        response: The message pycentauri returned for the command.
+        command: What was asked, for the error.
+
+    Raises:
+        RuntimeError: If the printer answered with a non-zero Ack.
+    """
+    ack = (response.inner.get("Data") or {}).get("Ack")
+    if ack:
+        raise RuntimeError(f"Elegoo printer refused {command}: Ack {ack}")

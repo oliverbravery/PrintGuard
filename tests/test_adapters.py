@@ -3,6 +3,7 @@ multipart encoding, printer sanitisation and the vision score maths."""
 
 from __future__ import annotations
 
+import asyncio
 import json as jsonlib
 from email.header import decode_header, make_header
 from pathlib import Path
@@ -596,7 +597,8 @@ ELEGOO_MOONRAKER_CONFIG = {"family": "moonraker", "host": "192.168.1.91", "api_k
 class FakeCentauri:
     """pycentauri client stand-in for adapter contract tests."""
 
-    def __init__(self, print_status: int = 13, camera_port: int = 3031) -> None:
+    def __init__(self, print_status: int = 13, camera_port: int = 3031, ack: int = 0) -> None:
+        self.ack = ack
         self.state = SimpleNamespace(
             print_status=print_status,
             progress=42,
@@ -614,20 +616,27 @@ class FakeCentauri:
         self._closed = False
         self.mainboard_id = "mainboard-id"
 
+    def answer(self) -> Any:
+        return SimpleNamespace(inner={"Cmd": 0, "Data": {"Ack": self.ack}})
+
     async def status(self) -> Any:
-        return self.state
+        return SimpleNamespace(**vars(self.state))
 
-    async def set_temperatures(self, **targets: float) -> None:
+    async def set_temperatures(self, **targets: float) -> Any:
         self.targets.append(targets)
+        return self.answer()
 
-    async def pause(self) -> None:
+    async def pause(self) -> Any:
         self.actions.append("pause")
+        return self.answer()
 
-    async def resume(self) -> None:
+    async def resume(self) -> Any:
         self.actions.append("resume")
+        return self.answer()
 
-    async def stop(self) -> None:
+    async def stop(self) -> Any:
         self.actions.append("stop")
+        return self.answer()
 
     async def close(self) -> None:
         self.closed = True
@@ -681,6 +690,63 @@ async def test_elegoo_centauri_actions_enable_control(monkeypatch) -> None:
     for action in (DeviceAction.PAUSE, DeviceAction.RESUME, DeviceAction.CANCEL):
         await INTEGRATIONS["elegoo"].send(None, ELEGOO_CENTAURI_CONFIG, action)
     assert client.actions == ["pause", "resume", "stop"]
+
+
+async def test_elegoo_centauri_refused_commands_raise(monkeypatch) -> None:
+    client = FakeCentauri(ack=1)
+
+    async def start_print(filename, *, storage="local"):
+        return client.answer()
+
+    async def upload_file(path, *, remote_name=None):
+        return remote_name
+
+    client.start_print, client.upload_file = start_print, upload_file
+    monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
+    with pytest.raises(RuntimeError, match="refused pause: Ack 1"):
+        await INTEGRATIONS["elegoo"].send(None, ELEGOO_CENTAURI_CONFIG, DeviceAction.PAUSE)
+    with pytest.raises(RuntimeError, match="refused the bed target"):
+        await INTEGRATIONS["elegoo"].heat(None, ELEGOO_CENTAURI_CONFIG, "bed", 60.0)
+    with pytest.raises(RuntimeError, match="refused to print benchy.gcode"):
+        await INTEGRATIONS["elegoo"].print_file(None, ELEGOO_CENTAURI_CONFIG, "benchy.gcode", b"G1 X1\n")
+
+
+class RepeatingCentauri(FakeCentauri):
+    """A Centauri Carbon 1 client, which answers status() with its last push for ever."""
+
+    def __init__(self, pushes: list[Any]) -> None:
+        super().__init__(print_status=0)
+        self.pushes = pushes
+
+    async def status(self) -> Any:
+        return self.state
+
+    async def watch(self) -> Any:
+        yield self.state
+        for push in self.pushes:
+            self.state = push
+            yield push
+        await asyncio.Event().wait()
+
+
+async def test_elegoo_centauri_waits_out_a_status_it_has_already_read(monkeypatch) -> None:
+    adapter = ElegooAdapter()
+    printing = SimpleNamespace(**{**vars(FakeCentauri().state), "print_status": 13})
+    client = RepeatingCentauri([printing])
+    monkeypatch.setattr(adapter, "_connect_centauri", _fake_centauri(client))
+    assert (await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)).status is DeviceStatus.IDLE
+    assert (await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)).status is DeviceStatus.PRINTING
+
+
+async def test_elegoo_centauri_that_stops_reporting_fails_the_poll(monkeypatch) -> None:
+    adapter = ElegooAdapter()
+    client = RepeatingCentauri([])
+    adapter._connections[adapter._connection_key(ELEGOO_CENTAURI_CONFIG)] = client
+    monkeypatch.setattr("printguard.engine.integrations.elegoo._FRESH_STATUS_TIMEOUT_S", 0.01)
+    assert (await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)).status is DeviceStatus.IDLE
+    with pytest.raises(RuntimeError, match="stopped reporting"):
+        await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    assert client.closed, "the poll that fails drops the connection, so the next one starts again"
 
 
 @pytest.mark.parametrize(
@@ -1137,6 +1203,7 @@ async def test_elegoo_centauri_uploads_then_starts(monkeypatch) -> None:
 
     async def start_print(filename, *, storage="local"):
         steps.append(("start", filename, storage))
+        return client.answer()
 
     client.upload_file = upload_file
     client.start_print = start_print
