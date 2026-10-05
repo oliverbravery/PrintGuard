@@ -20,7 +20,7 @@ from fakes import FakePlatform
 from printguard.engine.engine import Engine
 
 OCTOPRINT = {"provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}
-from printguard.engine.registry import Plugin
+from printguard.engine.registry import Camera, Plugin
 from printguard.server.plugins import Sandbox, WasmPluginRuntime
 
 CALL = {"kind": "event", "event": {"event": "alert", "score": 0.9}, "request": {}, "state": {}, "store": {}}
@@ -381,6 +381,7 @@ async def test_a_worker_reports_progress_and_defects_through_the_alert_channels(
     await engine.start()
     try:
         await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        engine.cameras.add(Camera(id="c1", name="Bench cam", source={"kind": "fake"}, max_fps=15.0))
         await engine.handle({"cmd": "monitor.add", "monitor": {"name": "Bench", "camera_id": "c1"}})
         monitor_id = next(iter(engine.monitors))
         await install_and_accept(engine, REPORTS_MANIFEST, REPORTS)

@@ -78,7 +78,9 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
           <Toggle label="Watch this monitor" on={monitor.enabled} onChange={(v) => updateMonitor(monitor.id, { enabled: v })} />
           {monitor.enabled && monitor.watching === false && (
             <p className="mono text-[0.7rem] text-text-2">
-              standby, printer is {printer?.device_state?.status ?? "not printing"}, inference resumes when it prints
+              {camera
+                ? `standby, printer is ${printer?.device_state?.status ?? "not printing"}, inference resumes when it prints`
+                : "no camera, so nothing is being watched"}
             </p>
           )}
           {monitor.enabled && monitor.watching !== false && printer && !printer.online && (
