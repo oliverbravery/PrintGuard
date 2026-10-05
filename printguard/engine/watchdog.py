@@ -125,7 +125,7 @@ class Watchdog:
         prints, and a monitor that stands down drops its defect streak.
         """
         self._engine.cameras.sync_in_use(self._engine.monitors, self._engine.printers)
-        if self._engine.reviews.settle(self._engine.monitors, self._engine.printers):
+        if self._engine.settle_reviews():
             self._engine.save()
         for monitor in self._engine.monitors.values():
             if not monitor_watching(monitor, self._engine.printers):

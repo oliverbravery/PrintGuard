@@ -43,6 +43,12 @@ class Review:
         started: Wall-clock time of its first frame.
         spacing_s: The gap between spaced frames, doubled each time they are thinned.
         ended: When the print finished, or None while it runs.
+        status: ``running`` while the print runs, ``ready`` once it waits to be
+            reviewed, ``dismissed`` when no review is wanted, ``queued`` while
+            frames wait on the inbox and ``sent`` when all of them are in.
+        submission: What the reviewer chose once they pressed Send: the label
+            of every frame they kept, the printer model they typed, the frames
+            already sent, and the refusal code and retry time when queued.
         frames: The kept frames in capture order, each with its id, time, score,
             kind (alert, near or spaced), stored size and an alert's action.
     """
@@ -52,21 +58,34 @@ class Review:
     started: float
     spacing_s: float
     ended: float | None = None
+    status: str = "running"
+    submission: dict[str, Any] | None = None
     frames: list[dict[str, Any]] = field(default_factory=list)
 
     def of_kind(self, kind: str) -> list[dict[str, Any]]:
         """The kept frames of one kind, in capture order."""
         return [frame for frame in self.frames if frame["kind"] == kind]
 
+    def unsent(self) -> list[dict[str, Any]]:
+        """The frames the reviewer kept that the inbox has not taken yet."""
+        submission = self.submission or {"labels": {}, "sent": []}
+        return [frame for frame in self.frames if frame["id"] in submission["labels"] and frame["id"] not in submission["sent"]]
+
     def public(self) -> dict[str, Any]:
         """Summarises the review for the state event, without its frame list."""
+        submission = self.submission or {}
         return {
             "id": self.id,
             "monitor_id": self.monitor_id,
             "started": self.started,
             "ended": self.ended,
+            "status": self.status,
             "frames": len(self.frames),
             "alerts": len(self.of_kind("alert")),
+            "chosen": len(submission.get("labels", {})),
+            "sent": len(submission.get("sent", [])),
+            "code": submission.get("code"),
+            "retry_at": submission.get("retry_at"),
         }
 
 
@@ -128,7 +147,7 @@ class ReviewLibrary:
         """
         review = self._running(monitor["id"])
         if review and not monitor.get("printer_id") and ts - review.started >= UNLINKED_PRINT_S:
-            review.ended, review = ts, None
+            review.ended, review.status, review = ts, "ready", None
         if review is None:
             review = await self._begin(monitor["id"], ts)
         spaced = review.of_kind("spaced")
@@ -156,12 +175,17 @@ class ReviewLibrary:
         await self._keep(review, frame, {"ts": alert["ts"], "score": alert["score"], "kind": "alert", "action": alert["action"]})
         await self._drop(review, review.of_kind("alert")[:-ALERT_MAX])
 
-    def settle(self, monitors: dict[str, dict[str, Any]], printers: "PrinterRegistry") -> bool:
+    def settle(self, monitors: dict[str, dict[str, Any]], printers: "PrinterRegistry", wanted: bool) -> bool:
         """Ends the running review of every monitor whose print is over.
 
         A print is over once its printer positively reports it is idle or has
         failed, or the monitor is switched off. A pause is part of the same
         print, and a printer that cannot be read keeps the review running.
+
+        Args:
+            monitors: Every monitor record by id.
+            printers: The printer registry.
+            wanted: Whether finished prints should wait to be reviewed.
 
         Returns:
             Whether any review ended.
@@ -173,8 +197,52 @@ class ReviewLibrary:
             if monitor and monitor.get("enabled") and not (printer and printer.reported_status in ENDED_STATUSES):
                 continue
             review.ended = time.time()
+            review.status = "ready" if wanted else "dismissed"
             ended = True
         return ended
+
+    def submit(self, review_id: str, failures: set[str], removed: set[str], printer: str) -> Review:
+        """Records the reviewer's choices for a finished print, ready to send.
+
+        Args:
+            review_id: The review being sent.
+            failures: Ids of the frames that show a failure. Every other kept frame is good.
+            removed: Ids of the frames the reviewer chose not to send.
+            printer: The printer model the reviewer typed, or an empty string.
+
+        Raises:
+            KeyError: If there is no such review.
+            ValueError: If the print is still running, was already sent, or no frame is left to send.
+        """
+        review = self._reviews.get(review_id)
+        if review is None:
+            raise KeyError(f"no review {review_id!r}")
+        if review.status in ("running", "sent"):
+            raise ValueError("a print is reviewed once, after it has finished")
+        labels = {frame["id"]: "failure" if frame["id"] in failures else "good" for frame in review.frames if frame["id"] not in removed}
+        if not labels:
+            raise ValueError("there are no frames left to send")
+        review.submission = {"labels": labels, "printer": printer, "sent": [], "code": None, "retry_at": None}
+        review.status = "queued"
+        return review
+
+    def dismiss(self, review_id: str) -> None:
+        """Stops a finished print waiting to be reviewed, keeping its frames.
+
+        Raises:
+            KeyError: If there is no such review.
+            ValueError: If the print is still running or was already sent.
+        """
+        review = self._reviews.get(review_id)
+        if review is None:
+            raise KeyError(f"no review {review_id!r}")
+        if review.status in ("running", "sent"):
+            raise ValueError("only a finished, unsent print can be dismissed")
+        review.submission, review.status = None, "dismissed"
+
+    def due(self, now: float) -> list[Review]:
+        """The queued reviews whose retry time has passed."""
+        return [review for review in self._reviews.values() if review.status == "queued" and (review.submission or {}).get("retry_at") and review.submission["retry_at"] <= now]
 
     async def forget(self, monitor_id: str) -> None:
         """Deletes every review of a monitor, with their frames."""

@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import logging
+import time
 import zipfile
 from urllib.parse import parse_qs, urlparse
 from contextlib import asynccontextmanager
@@ -19,7 +20,7 @@ import pytest
 from fakes import FakePlatform
 
 from printguard.engine import engine as engine_module
-from printguard.engine import logs, oauth, plugins, reports, reviews, vision, watchdog
+from printguard.engine import feedback, logs, oauth, plugins, reports, reviews, vision, watchdog
 from printguard.engine.engine import EVENT_LOG_LEVELS, Engine
 from printguard.engine.integrations import INTEGRATIONS
 from printguard.engine.printers import PREHEAT_DEFAULTS
@@ -1055,6 +1056,170 @@ async def test_the_oldest_finished_reviews_make_room_for_new_prints(monkeypatch)
     assert len(set(seen)) == 3, "switching a monitor off ends its print"
     assert len(kept) == 2 and seen[0] not in [review["id"] for review in kept], "the oldest finished review is dropped first"
     assert len(platform.files.blobs) == frames, "a dropped review's frames are deleted with it"
+
+
+TOKEN = f"{'a' * 32}.{'b' * 64}"
+
+
+def _inbox(platform: FakePlatform, monkeypatch, refuse=lambda uploads: None) -> list[dict]:
+    """Stands in for the feedback Worker, refusing an upload whenever ``refuse`` returns an answer."""
+    uploads: list[dict] = []
+    passthrough = platform.http
+
+    async def http(method: str, url: str, **request) -> tuple[int, object]:
+        if url == f"{feedback.ENDPOINT}/register":
+            platform.http_calls.append((method, url))
+            return 201, {"token": TOKEN}
+        if url == f"{feedback.ENDPOINT}/frame":
+            answer = refuse(uploads)
+            if answer is not None:
+                return answer
+            uploads.append({"authorization": request["headers"]["Authorization"], "jpeg": request["data"], **json.loads(request["headers"]["X-Frame"])})
+            return 201, {}
+        return await passthrough(method, url, **request)
+
+    monkeypatch.setattr(platform, "http", http)
+    return uploads
+
+
+async def _finished_review(engine: Engine, wait_s: float = 1.0) -> dict:
+    """Lets a print run, ends it by switching its monitor off and on, and returns its frames."""
+    monitor_id = next(iter(engine.monitors))
+    await asyncio.sleep(wait_s)
+    await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+    return await _review(engine, engine.state_event()["reviews"][0]["id"])
+
+
+async def _sent(events: list[dict]) -> dict:
+    for _ in range(100):
+        outcome = next((event for event in reversed(events) if event.get("event") == "review_sent"), None)
+        if outcome:
+            return outcome
+        await asyncio.sleep(0.02)
+    raise AssertionError("the review was never sent")
+
+
+async def test_a_reviewed_print_is_sent_with_its_labels(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    uploads = _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine)
+        alert = next(frame for frame in review["frames"] if frame["kind"] == "alert")
+        spaced = [frame for frame in review["frames"] if frame["kind"] == "spaced"]
+        assert review["status"] == "ready" and len(spaced) >= 2
+        await engine.handle({"cmd": "review.send", "id": review["id"], "failures": [alert["id"]], "removed": [spaced[0]["id"]], "printer": "  Voron   2.4 "})
+        outcome = await _sent(events)
+        state = engine.state_event()
+
+    by_frame = {upload["frame"]: upload for upload in uploads}
+    assert outcome["ok"] and outcome["status"] == "sent" and outcome["sent"] == outcome["chosen"] == len(review["frames"]) - 1
+    assert set(by_frame) == {frame["id"] for frame in review["frames"]} - {spaced[0]["id"]}, "a removed frame is never uploaded"
+    assert by_frame[alert["id"]]["label"] == "failure" and by_frame[spaced[1]["id"]]["label"] == "good"
+    sent = by_frame[alert["id"]]
+    assert sent["authorization"] == f"Bearer {TOKEN}" and sent["jpeg"] == b"\xff\xd8fake"
+    assert (sent["print"], sent["kind"], sent["printer"], sent["provider"], sent["version"]) == (review["id"], "alert", "Voron 2.4", "none", platform.version)
+    assert sent["threshold"] == 0.75 and sent["score"] == alert["score"] and sent["ts"] == alert["ts"]
+    assert state["feedback_hub"] == "a" * 32 and TOKEN not in json.dumps(state), "the state names the hub and never carries its token"
+    assert platform.state["feedback_token"] == TOKEN, "the token is kept so the hub registers once"
+    assert platform.http_calls.count(("POST", f"{feedback.ENDPOINT}/register")) == 1
+
+
+async def test_a_refused_print_waits_and_sends_the_rest_after_the_limit_resets(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.05)
+    platform = FakePlatform(infer_s=0.02)
+    limited = {"until": float("inf")}
+
+    def refuse(uploads: list[dict]):
+        if len(uploads) >= 2 and time.time() < limited["until"]:
+            return 429, {"code": "hub_daily", "retry_at": limited["until"]}
+
+    uploads = _inbox(platform, monkeypatch, refuse)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine)
+        limited["until"] = time.time() + 0.4
+        await engine.handle({"cmd": "review.send", "id": review["id"]})
+        refused = await _sent(events)
+        queued = engine.state_event()["reviews"][0]
+        events.clear()
+        resumed = await _sent(events)
+
+    assert not refused["ok"] and (refused["status"], refused["code"], refused["sent"]) == ("queued", "hub_daily", 2)
+    assert queued["retry_at"] == limited["until"], "the hub is told when the limit resets"
+    assert resumed["ok"] and resumed["sent"] == resumed["chosen"] == len(review["frames"]) and resumed["code"] is None
+    assert sorted(upload["frame"] for upload in uploads) == sorted(frame["id"] for frame in review["frames"]), "no frame is uploaded twice"
+
+
+async def test_an_unreachable_inbox_keeps_the_frames_and_tries_again_later(monkeypatch) -> None:
+    platform = FakePlatform(infer_s=0.02)
+
+    async def unreachable(method: str, url: str, **request) -> tuple[int, object]:
+        raise OSError("no route")
+
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine, 0.4)
+        monkeypatch.setattr(platform, "http", unreachable)
+        await engine.handle({"cmd": "review.send", "id": review["id"]})
+        outcome = await _sent(events)
+
+    assert not outcome["ok"] and (outcome["status"], outcome["code"], outcome["sent"]) == ("queued", "offline", 0)
+    assert outcome["retry_at"] > time.time() + engine_module.FEEDBACK_RETRY_S - 60
+    assert len(platform.files.blobs) == len(review["frames"]), "nothing is lost when the inbox cannot be reached"
+
+
+async def test_an_unrecognised_token_is_replaced_once(monkeypatch) -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.state = {"feedback_token": "stale"}
+    answered = {"stale": False}
+
+    def refuse(uploads: list[dict]):
+        if not answered["stale"]:
+            answered["stale"] = True
+            return 401, {"code": "token"}
+
+    uploads = _inbox(platform, monkeypatch, refuse)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine, 0.4)
+        await engine.handle({"cmd": "review.send", "id": review["id"]})
+        outcome = await _sent(events)
+
+    assert outcome["ok"] and len(uploads) == len(review["frames"])
+    assert platform.state["feedback_token"] == TOKEN and {upload["authorization"] for upload in uploads} == {f"Bearer {TOKEN}"}
+
+
+async def test_a_print_is_reviewed_once_and_only_after_it_ends(monkeypatch) -> None:
+    platform = FakePlatform(infer_s=0.02)
+    _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await asyncio.sleep(0.4)
+        running = engine.state_event()["reviews"][0]
+        await engine.handle({"cmd": "review.send", "id": running["id"], "req_id": 1})
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        await engine.handle({"cmd": "review.dismiss", "id": running["id"]})
+        dismissed = engine.state_event()["reviews"][0]["status"]
+        frames = (await _review(engine, running["id"]))["frames"]
+        await engine.handle({"cmd": "review.send", "id": running["id"], "removed": [frame["id"] for frame in frames], "req_id": 2})
+        await engine.handle({"cmd": "review.send", "id": running["id"]})
+        await _sent(events)
+        await engine.handle({"cmd": "review.send", "id": running["id"], "req_id": 3})
+
+    errors = {event.get("req_id") for event in events if event["event"] == "error"}
+    assert running["status"] == "running" and dismissed == "dismissed", "a dismissed print keeps its frames and can still be sent"
+    assert errors == {1, 2, 3}, "a running print, an empty selection and a second send are all refused"
+
+
+async def test_switching_feedback_off_keeps_only_alert_frames_and_asks_nothing() -> None:
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "sometimes"}, "req_id": 9})
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
+        review = await _finished_review(engine)
+
+    assert any(event["event"] == "error" and event.get("req_id") == 9 for event in events), "an unknown feedback setting is refused"
+    assert {frame["kind"] for frame in review["frames"]} == {"alert"}, "the risk history still gets its alert snapshots"
+    assert review["status"] == "dismissed", "a finished print does not wait for a review nobody asked for"
 
 
 @asynccontextmanager

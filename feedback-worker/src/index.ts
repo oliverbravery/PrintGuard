@@ -15,7 +15,6 @@ const FrameDetails = z.object({
   score: z.number().min(0).max(1),
   threshold: z.number().min(0).max(1),
   ts: z.number(),
-  model: z.string().max(40),
   version: z.string().max(20),
   provider: z.string().max(40),
   printer: z.string().max(80),

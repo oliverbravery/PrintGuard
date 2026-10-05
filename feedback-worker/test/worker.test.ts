@@ -24,7 +24,6 @@ const details = (frame: string, changes: Record<string, unknown> = {}) => ({
   score: 0.12,
   threshold: 0.75,
   ts: 1_791_000_000,
-  model: "protonet-1",
   version: "2.6.0",
   provider: "moonraker",
   printer: "Voron 2.4",
