@@ -13,10 +13,14 @@ from typing import Any
 import httpx
 import numpy as np
 import pytest
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
 
 from printguard.engine import vision
 from printguard.engine.cameras import webrtc_endpoint, whep_endpoint
 from printguard.engine.integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus, IntegrationAdapter
+from printguard.engine.integrations import bambu
+from printguard.engine.integrations.bambu import BambuAdapter
 from printguard.engine.integrations.elegoo import ElegooAdapter
 from printguard.engine.monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor
 from printguard.engine.notifiers import NOTIFIERS
@@ -553,6 +557,178 @@ async def test_bambu_command_payloads(monkeypatch) -> None:
     for action, command in [(DeviceAction.PAUSE, "pause"), (DeviceAction.RESUME, "resume"), (DeviceAction.CANCEL, "stop")]:
         await INTEGRATIONS["bambu"].send(None, BAMBU_CONFIG, action)
         assert published[-1] == {"print": {"sequence_id": "0", "command": command, "param": ""}}
+
+
+BAMBU_FULL_REPORT = {"command": "push_status", "gcode_state": "RUNNING", "mc_percent": 5, "nozzle_temper": 220.0}
+
+
+class FakeBambuPrinter:
+    """paho client stand-in that answers the way a printer's broker does, on the calling thread."""
+
+    answer = "Success"
+    acknowledges = True
+    full_report: dict[str, Any] | None = BAMBU_FULL_REPORT
+    version_modules: list[dict[str, Any]] = [{"name": "ota", "product_name": "Bambu Lab P1S"}]
+    verdict: dict[str, Any] | None = {"result": "success", "reason": ""}
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.requests: list[dict[str, Any]] = []
+        self.subscriptions: list[str] = []
+        self.connected = False
+        self.printers.append(self)
+
+    def username_pw_set(self, username: str, password: str) -> None:
+        self.credentials = (username, password)
+
+    def tls_set_context(self, context: Any) -> None:
+        pass
+
+    def connect(self, host: str, port: int, keepalive: int) -> None:
+        self.address = (host, port)
+
+    def loop_start(self) -> None:
+        answer = ReasonCode(PacketTypes.CONNACK, self.answer)
+        self.connected = not answer.is_failure
+        self.on_connect(self, None, None, answer, None)
+
+    def is_connected(self) -> bool:
+        return self.connected
+
+    def subscribe(self, topic: str) -> None:
+        self.subscriptions.append(topic)
+
+    def report(self, payload: dict[str, Any]) -> None:
+        self.on_message(self, None, SimpleNamespace(payload=jsonlib.dumps(payload).encode()))
+
+    def publish(self, topic: str, payload: str, qos: int = 0) -> Any:
+        request = jsonlib.loads(payload)
+        self.requests.append(request)
+        ((kind, body),) = request.items()
+        if body["command"] == "pushall" and self.full_report:
+            self.report({"print": self.full_report})
+        elif body["command"] == "get_version":
+            self.report({"info": {"command": "get_version", "sequence_id": "0", "module": self.version_modules}})
+        elif kind == "print" and self.verdict:
+            self.report({"print": {**body, "result": "failed", "reason": "someone else's command", "sequence_id": "0"}})
+            self.report({"print": {**body, **self.verdict}})
+        return SimpleNamespace(wait_for_publish=lambda timeout: None, is_published=lambda: self.acknowledges)
+
+    def disconnect(self) -> None:
+        self.connected = False
+
+    def loop_stop(self) -> None:
+        pass
+
+
+@pytest.fixture
+def bambu_printers(monkeypatch) -> list[FakeBambuPrinter]:
+    printers: list[FakeBambuPrinter] = []
+    monkeypatch.setattr(FakeBambuPrinter, "printers", printers, raising=False)
+    monkeypatch.setattr(bambu.mqtt, "Client", FakeBambuPrinter)
+    monkeypatch.setattr(bambu, "_REPLY_TIMEOUT_S", 0.01)
+    return printers
+
+
+def _commands(printer: FakeBambuPrinter) -> list[str]:
+    return [body["command"] for request in printer.requests for body in request.values()]
+
+
+async def test_bambu_holds_one_connection_and_merges_what_changed(bambu_printers) -> None:
+    adapter = BambuAdapter()
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).progress == 5.0
+    (printer,) = bambu_printers
+    printer.report({"print": {"command": "push_status", "mc_percent": 50}})
+    state = await adapter.fetch_state(None, BAMBU_CONFIG)
+    assert (state.status, state.progress) == (DeviceStatus.PRINTING, 50.0), "a P1 report carries only what changed"
+    assert state.public()["nozzle"] == {"actual": 220.0, "target": 0.0}
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    assert len(bambu_printers) == 1, "polls and commands share the connection"
+    assert printer.subscriptions == ["device/01S00A/report"]
+    assert _commands(printer) == ["get_version", "pushall", "pause"], "the full report is asked for once"
+    await adapter.close(BAMBU_CONFIG)
+    assert not printer.connected
+
+
+async def test_bambu_printer_that_goes_silent_is_reconnected_not_believed(bambu_printers, monkeypatch) -> None:
+    adapter = BambuAdapter()
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.PRINTING
+    monkeypatch.setattr(FakeBambuPrinter, "full_report", None)
+    monkeypatch.setattr(bambu, "_SILENCE_LIMIT_S", -1.0)
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.OFFLINE
+    silent, reconnected = bambu_printers[:2]
+    assert not silent.connected and reconnected.connected
+    await adapter.close()
+
+
+async def test_bambu_dropped_connection_is_offline_until_a_full_report(bambu_printers, monkeypatch) -> None:
+    adapter = BambuAdapter()
+    await adapter.fetch_state(None, BAMBU_CONFIG)
+    monkeypatch.setattr(FakeBambuPrinter, "full_report", None)
+    bambu_printers[0].connected = False
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.OFFLINE
+    bambu_printers[1].report({"print": {"command": "push_status", "mc_percent": 60}})
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.OFFLINE, "a change without the full report says nothing of the state"
+    bambu_printers[1].report({"print": {**BAMBU_FULL_REPORT, "gcode_state": "FINISH"}})
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.IDLE
+    await adapter.close()
+
+
+async def test_bambu_refused_connection_raises(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "answer", "Not authorized")
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="refused the connection: Not authorized"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    with pytest.raises(RuntimeError, match="refused the connection"):
+        await adapter.fetch_state(None, BAMBU_CONFIG)
+    assert all("pause" not in _commands(printer) for printer in bambu_printers)
+
+
+async def test_bambu_unacknowledged_command_raises(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "acknowledges", False)
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="did not acknowledge pause"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    await adapter.close()
+
+
+async def test_bambu_command_the_printer_fails_raises(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "verdict", {"result": "failed", "reason": "mqtt message verify failed", "err_code": 84033543})
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="refused pause: mqtt message verify failed"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    with pytest.raises(RuntimeError, match="refused gcode_line"):
+        await adapter.heat(None, BAMBU_CONFIG, "bed", 60.0)
+    await adapter.close()
+
+
+async def test_bambu_command_without_a_verdict_stands_on_the_acknowledgement(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "verdict", None)
+    adapter = BambuAdapter()
+    await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    (pause,) = [body for request in bambu_printers[0].requests for body in request.values() if body["command"] == "pause"]
+    assert pause["sequence_id"] != "0", "a number of its own tells this command's answer from another client's"
+    await adapter.close()
+
+
+@pytest.mark.parametrize(
+    ("product", "url"),
+    [
+        ("Bambu Lab P1S", "file:///sdcard/benchy.3mf"),
+        ("Bambu Lab H2D", "ftp:///benchy.3mf"),
+        ("Bambu Lab H2S", "ftp:///benchy.3mf"),
+        ("Bambu Lab H2C", "ftp:///benchy.3mf"),
+        ("", "file:///sdcard/benchy.3mf"),
+    ],
+)
+async def test_bambu_hands_the_h2_series_an_ftp_url(bambu_printers, monkeypatch, product: str, url: str) -> None:
+    from test_gcode import sliced_3mf
+
+    monkeypatch.setattr(FakeBambuPrinter, "version_modules", [{"name": "esp32", "product_name": ""}, {"name": "ota", "product_name": product}])
+    adapter = BambuAdapter()
+    monkeypatch.setattr(adapter, "_upload", lambda config, filename, data: None)
+    await adapter.print_file(None, BAMBU_CONFIG, "benchy.3mf", sliced_3mf(plate=1))
+    assert bambu_printers[0].requests[-1]["print"]["url"] == url
+    await adapter.close()
 
 
 async def test_bambu_exposes_rtsps_camera_for_x1_h2(monkeypatch) -> None:
@@ -1148,6 +1324,7 @@ async def test_bambu_uploads_over_ftps_then_prints_the_plate(monkeypatch) -> Non
     steps: list[Any] = []
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_upload", lambda config, filename, data: steps.append(("upload", filename, data)))
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_publish", lambda config, payload: steps.append(("publish", payload)))
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_product", lambda config: "Bambu Lab P1S")
     data = sliced_3mf(plate=3)
     await INTEGRATIONS["bambu"].print_file(None, BAMBU_CONFIG, "benchy.3mf", data)
     assert steps[0] == ("upload", "benchy.3mf", data), "the file is on the SD card before the print is asked for"
