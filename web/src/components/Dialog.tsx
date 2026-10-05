@@ -1,7 +1,23 @@
 import { X } from "lucide-react";
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from "react";
 
-let openModals = 0;
+const openModals: HTMLDialogElement[] = [];
+const modalListeners = new Set<() => void>();
+
+function setOpenModals(change: () => void) {
+  change();
+  document.body.style.overflow = openModals.length ? "hidden" : "";
+  modalListeners.forEach((listener) => listener());
+}
+
+function subscribeToModals(listener: () => void) {
+  modalListeners.add(listener);
+  return () => void modalListeners.delete(listener);
+}
+
+export function useTopModal(): HTMLDialogElement | null {
+  return useSyncExternalStore(subscribeToModals, () => openModals.at(-1) ?? null);
+}
 
 export function Modal({
   onClose,
@@ -26,22 +42,28 @@ export function Modal({
     // own focus-return has nothing to restore to by the time cleanup runs.
     const opener = document.activeElement as HTMLElement | null;
     if (!dialog.open) dialog.showModal();
-    if (openModals++ === 0) document.body.style.overflow = "hidden";
+    setOpenModals(() => openModals.push(dialog));
 
     const onCancel = (event: Event) => {
       event.preventDefault();
       onCloseRef.current();
     };
+    let pressedBackdrop = false;
+    const onPress = (event: PointerEvent) => {
+      pressedBackdrop = event.target === dialog;
+    };
     const onLightDismiss = (event: MouseEvent) => {
-      if (event.target === dialog) onCloseRef.current();
+      if (pressedBackdrop && event.target === dialog) onCloseRef.current();
     };
     dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("pointerdown", onPress);
     dialog.addEventListener("click", onLightDismiss);
 
     return () => {
       dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("pointerdown", onPress);
       dialog.removeEventListener("click", onLightDismiss);
-      if (--openModals === 0) document.body.style.overflow = "";
+      setOpenModals(() => openModals.splice(openModals.indexOf(dialog), 1));
       dialog.close();
       opener?.focus?.();
     };
