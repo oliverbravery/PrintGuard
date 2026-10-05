@@ -17,6 +17,9 @@ MATCHING = [
     ("http://192.168.1.50:8080/*", "http://192.168.1.50:8080/status"),
     ("https://example.com/*", "https://example.com:443/a"),
     ("*://*/*", "https://anything.at.all/x"),
+    ("http://[fd00::1]/*", "http://[fd00::1]/status"),
+    ("http://[fd00::1]:8080/*", "http://[FD00::1]:8080/status"),
+    ("https://example.com/v1/*", "https://example.com/v1/a..b/.hidden"),
 ]
 
 REFUSED = [
@@ -28,6 +31,13 @@ REFUSED = [
     ("http://192.168.1.50:8080/*", "http://192.168.1.50/status"),
     ("https://example.com/*", "https://sub.example.com/a"),
     ("*://*/*", "rtsp://camera.local/stream"),
+    ("http://[fd00::1]/*", "http://[fd00::2]/status"),
+    ("https://example.com/v1/*", "https://example.com/v1/../admin"),
+    ("https://example.com/v1/*", "https://example.com/v1/%2e%2e/admin"),
+    ("https://example.com/v1/*", "https://example.com/v1/.%2E/admin"),
+    ("https://example.com/v1/*", "https://example.com/v1/a/./../../admin"),
+    ("https://example.com/v1/*", "https://example.com/v1/..\\admin"),
+    ("https://example.com/v1/*", "https://example.com/v1/.."),
 ]
 
 
