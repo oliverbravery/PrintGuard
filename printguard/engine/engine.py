@@ -1049,6 +1049,9 @@ class Engine:
             raise ValueError("inference runtime must be auto, litert or onnx")
         if settings["feedback"] not in ("ask", "off"):
             raise ValueError("feedback must be ask or off")
+        mqtt_port = settings["mqtt"].get("port") or 0
+        if not (isinstance(mqtt_port, int) and 0 <= mqtt_port <= 65535):
+            raise ValueError("MQTT port must be a whole number from 1 to 65535")
         settings["fault_grace_s"] = clamp_grace(settings["fault_grace_s"])
         settings["preheat"] = sanitise_presets(settings["preheat"])
         if settings["inference_runtime"] != self.settings["inference_runtime"]:
