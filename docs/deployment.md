@@ -166,9 +166,9 @@ like:
 | Permission | What it means for an exposed hub |
 |---|---|
 | **Serve its own pages** | The plugin answers requests under `/plugins/<id>/`. Those responses go out through your proxy like anything else, so whatever it serves is as exposed as the dashboard. It is served into a sandboxed origin, so it can never act as the dashboard |
-| **Authorise every request** | The plugin sees every request to the hub except `/api/health` and its own pages, with its cookie and authorisation headers, and can refuse it. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out |
+| **Authorise every request** | The plugin sees every request to the hub except `/api/health` and its own pages, with its cookie and authorisation headers, and can refuse it. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out. One that fails is disabled and every request is refused until you deal with it |
 
-To start the hub with every plugin switched off, add this and then remove the plugin:
+To start the hub with every plugin switched off, add this and then remove the plugin or enable it again:
 
 ```yaml
     environment:
@@ -201,7 +201,7 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | `*.ingest.de.sentry.io` | Only when you send a bug report |
 | `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
 | Your printers, cameras, notification services and MQTT broker | As you configure them |
-| The addresses a plugin's manifest lists, and the service it signs you in to | Only for a plugin you granted [`net` or `oauth`](plugins.md#permissions) |
+| The addresses a plugin's manifest lists, and the service it signs you in to | Only for a plugin you granted [`net` or `oauth`](plugins.md#permissions). A redirect from one of them is not followed |
 
 ## Environment variables
 
