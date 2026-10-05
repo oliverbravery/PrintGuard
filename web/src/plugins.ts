@@ -106,59 +106,65 @@ export function commandAllowed(command: string, granted: string[], permissions: 
   return owner !== undefined && granted.includes(owner.id);
 }
 
+export function sandboxFrame(
+  url: string,
+  title: string,
+  receive: (data: any) => void,
+  fail: (reason: string) => void,
+): { frame: HTMLIFrameElement; port: MessagePort; started: Promise<void> } {
+  const frame = document.createElement("iframe");
+  const { port1, port2 } = new MessageChannel();
+  frame.src = url;
+  frame.sandbox.add("allow-scripts");
+  frame.allow = "";
+  frame.title = title;
+  port1.onmessage = (message) => receive(message.data);
+  const started = new Promise<void>((resolve) => {
+    const timer = window.setTimeout(() => fail("sandbox did not start"), BOOT_TIMEOUT_MS);
+    let loaded = false;
+    frame.addEventListener("load", () => {
+      if (loaded) return fail("sandbox navigated away");
+      loaded = true;
+      clearTimeout(timer);
+      frame.contentWindow?.postMessage({ t: "port" }, "*", [port2]);
+      resolve();
+    });
+  });
+  return { frame, port: port1, started };
+}
+
 export class PluginHost {
   readonly id: string;
   private frame: HTMLIFrameElement;
+  private port: MessagePort;
   private pending = new Map<number, { resolve: (value: any) => void; reject: (reason: Error) => void; timer: number }>();
   private booted: Promise<void>;
   private dead = false;
 
   constructor(
-    private record: PluginRecord,
-    private code: string,
-    private assets: Record<string, string>,
+    record: PluginRecord,
+    code: string,
+    assets: Record<string, string>,
     private handlers: HostHandlers,
   ) {
     this.id = record.id;
-    this.frame = document.createElement("iframe");
-    this.frame.src = SANDBOX_URL;
-    this.frame.sandbox.add("allow-scripts");
-    this.frame.allow = "";
-    this.frame.title = `${record.manifest.name} sandbox`;
+    const sandbox = sandboxFrame(SANDBOX_URL, `${record.manifest.name} sandbox`, this.receive, (reason) => this.fail(reason));
+    this.frame = sandbox.frame;
+    this.port = sandbox.port;
     this.frame.hidden = true;
     this.frame.style.display = "none";
-    addEventListener("message", this.receive);
     document.body.appendChild(this.frame);
-    this.booted = this.boot();
+    this.booted = sandbox.started.then(() => this.send({ t: "init", code, store: record.config, assets }));
+    this.booted.catch((err: Error) => this.fail(err.message));
   }
 
-  private boot(): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(() => reject(new Error("sandbox did not start")), BOOT_TIMEOUT_MS);
-      const onBooted = (message: MessageEvent) => {
-        if (message.source !== this.frame.contentWindow || message.data?.t !== "booted") return;
-        removeEventListener("message", onBooted);
-        clearTimeout(timer);
-        this.send({ t: "init", code: this.code, store: this.record.config, assets: this.assets })
-          .then(() => resolve())
-          .catch(reject);
-      };
-      addEventListener("message", onBooted);
-    }).catch((err: Error) => {
-      this.fail(err.message);
-      throw err;
-    });
-  }
-
-  private receive = (message: MessageEvent) => {
-    if (message.source !== this.frame.contentWindow) return;
-    const { id, t } = message.data ?? {};
-    const call = this.pending.get(id);
+  private receive = (data: any) => {
+    const call = this.pending.get(data?.id);
     if (!call) return;
-    this.pending.delete(id);
+    this.pending.delete(data.id);
     clearTimeout(call.timer);
-    if (t === "failed") call.reject(new Error(String(message.data.message)));
-    else call.resolve(message.data);
+    if (data.t === "failed") call.reject(new Error(String(data.message)));
+    else call.resolve(data);
   };
 
   private send(payload: Record<string, unknown>): Promise<any> {
@@ -169,7 +175,7 @@ export class PluginHost {
         reject(new Error("plugin stopped answering"));
       }, CALL_TIMEOUT_MS);
       this.pending.set(id, { resolve, reject, timer });
-      this.frame.contentWindow?.postMessage({ ...payload, id }, "*");
+      this.port.postMessage({ ...payload, id });
     });
   }
 
@@ -212,7 +218,7 @@ export class PluginHost {
 
   close(): void {
     this.dead = true;
-    removeEventListener("message", this.receive);
+    this.port.close();
     this.frame.remove();
     for (const call of this.pending.values()) clearTimeout(call.timer);
     this.pending.clear();

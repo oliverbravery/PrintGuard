@@ -127,7 +127,7 @@ interface PgStore {
   pluginPages: Record<string, Record<string, string>>;
   pluginAct(id: string, action: string, arg: unknown): void;
   checkPlugin(id: string): void;
-  mountPanel(id: string, frame: HTMLIFrameElement | null): void;
+  mountPanel(id: string, container: HTMLElement | null): void;
   fetchCatalogue(): void;
   fetchPluginPage(id: string): void;
   installPlugin(source: Record<string, unknown>, zip?: string): void;
@@ -663,14 +663,14 @@ export const useStore = create<PgStore>((set, get) => {
       get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}) });
     },
 
-    mountPanel(id, frame) {
+    mountPanel(id, container) {
       panels.get(id)?.close();
       panels.delete(id);
       const engine = get().engine;
       const plugin = engine?.plugins.find((p) => p.id === id);
       const source = get().pluginPanels[id];
-      if (!frame || !engine || !plugin || !source) return;
-      panels.set(id, new PluginPanelHost(plugin, frame, source.html, source.assets, pluginState(plugin), handlers));
+      if (!container || !engine || !plugin || !source) return;
+      panels.set(id, new PluginPanelHost(plugin, container, source.html, source.assets, pluginState(plugin), handlers));
     },
 
     checkPlugin(id) {

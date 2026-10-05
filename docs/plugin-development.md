@@ -233,6 +233,10 @@ syntax error and there's no network. The `plugin.js` iframe does have a `documen
 frame is hidden and its policy allows no styles or images, so nothing put there is shown. The
 opaque origin refuses storage. The worker has no DOM at all.
 
+Neither frame has `fetch`, `WebSocket` or `RTCPeerConnection`, and a frame made inside one runs
+no script of its own. [What a browser still allows](plugins.md#what-a-browser-still-allows)
+lists what is left.
+
 ### plugin.js
 
 `plugin.render` returns a tree of [nodes](#nodes). PrintGuard draws them with its own
@@ -287,6 +291,10 @@ the `panel` surface.
 ```
 
 It runs in an opaque origin with `connect-src 'none'`, so `pg` is the only way out.
+
+Scripts go in `<script>` elements. An inline handler such as `onclick="..."` is refused, so use
+`addEventListener`. The frame cannot leave the page either: a link or a `location` change to
+another address stops the plugin with "sandbox navigated away".
 
 | On `pg` | |
 |---|---|

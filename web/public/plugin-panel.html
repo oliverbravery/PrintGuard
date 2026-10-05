@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'sha256-/RrjVy+kw5F0QPye+fQCR4aMFlS2ymYQP/4/Z7IU4LI=' 'strict-dynamic' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>PrintGuard plugin panel</title>
     <style>
@@ -18,11 +18,12 @@
       (function () {
         "use strict";
 
-        for (const name of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches"]) {
+        const closed = ["fetch", "fetchLater", "XMLHttpRequest", "WebSocket", "WebSocketStream", "WebTransport", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches"];
+        for (const name of [...closed, ...Object.getOwnPropertyNames(window).filter((name) => name.includes("RTC"))]) {
           try {
             delete window[name];
           } catch {
-            /* frozen on some engines; the policy above is what actually closes these */
+            /* frozen on some engines; the policy above is what actually closes all but WebRTC */
           }
         }
 
@@ -30,10 +31,10 @@
         const assets = new Map();
         let effects = [];
         let store = {};
-        let painted = false;
+        let port = null;
 
         const flush = () => {
-          if (effects.length) parent.postMessage({ t: "effects", effects: effects.splice(0) }, "*");
+          if (effects.length) port.postMessage({ t: "effects", effects: effects.splice(0) });
         };
 
         const push = (effect) => {
@@ -49,7 +50,7 @@
           },
           set store(value) {
             store = value;
-            parent.postMessage({ t: "store", store }, "*");
+            port.postMessage({ t: "store", store });
           },
           on(name, handler) {
             listeners.set(String(name), handler);
@@ -126,22 +127,17 @@
             const height = Math.ceil(document.documentElement.scrollHeight);
             if (height === last) return;
             last = height;
-            parent.postMessage({ t: "size", height }, "*");
+            port.postMessage({ t: "size", height });
           }).observe(document.documentElement);
         }
 
-        addEventListener("message", (message) => {
-          if (message.source !== parent) return;
+        function receive(message) {
           const data = message.data || {};
           try {
-            if (data.t === "hello") {
-              parent.postMessage({ t: "booted" }, "*");
-            } else if (data.t === "init") {
+            if (data.t === "init") {
               store = data.store || {};
               pg.state = data.state || {};
               applyTheme(data.theme);
-              if (painted) return listeners.get("state")?.(pg.state);
-              painted = true;
               for (const [name, blob] of Object.entries(data.assets || {})) assets.set(name, URL.createObjectURL(blob));
               paint(String(data.html || ""));
               reportHeight();
@@ -155,11 +151,15 @@
               listeners.get(String(data.event.event))?.(data.event);
             }
           } catch (err) {
-            parent.postMessage({ t: "failed", message: String((err && err.message) || err) }, "*");
+            port.postMessage({ t: "failed", message: String((err && err.message) || err) });
           }
-        });
+        }
 
-        parent.postMessage({ t: "booted" }, "*");
+        addEventListener("message", (handover) => {
+          if (handover.source !== parent || port || !handover.ports[0]) return;
+          port = handover.ports[0];
+          port.onmessage = receive;
+        });
       })();
     </script>
   </head>
@@ -170,9 +170,23 @@
       it, so the policy above is what holds it: it may paint and script itself,
       it may show the pictures and video it shipped, and it can reach nothing.
 
+      The script above is allowed by its hash, and 'strict-dynamic' lets it add
+      the plugin's own scripts as elements. Nothing else inline runs, so an
+      onclick attribute is refused, and a frame the plugin makes for itself
+      inherits this policy and can run only this same script. That is what makes
+      deleting a global stick: there is no fresh window to take it back from.
+      Change a character of the script and the hash in the policy has to change
+      with it, which the browser console prints.
+
+      WebRTC is the reason. No policy directive governs it in any engine yet,
+      so removing its constructors is the only thing that closes it.
+
       There is no network of its own here, so `pg` is the only way out and every
       call on it is checked against the granted permissions on the other side.
-      That is the same `ctx` a node-tree plugin gets, over a different pipe.
+      That is the same `ctx` a node-tree plugin gets, over a different pipe: a
+      message port PrintGuard hands over once. A page that replaced this one
+      would hold no port, and the dashboard removes the frame the moment it
+      loads anything a second time.
 
       Assets arrive as blobs rather than as base64 or a URL: a blob made here
       belongs to this origin, so the plugin can point an <img> or a <video> at
@@ -181,12 +195,6 @@
       The panel is as tall as it draws itself, which it reports back rather than
       being given, and its background is transparent so it sits on the panel the
       dashboard drew around it.
-
-      The document paints once. PrintGuard re-attaches whenever the panel is
-      redrawn, and a second paint would run the plugin's scripts again on top of
-      the first, so a later init is taken as fresh state instead. The theme
-      arrives with every update, since the user can change it while a panel is
-      open.
     -->
   </body>
 </html>

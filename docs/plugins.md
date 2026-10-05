@@ -156,11 +156,14 @@ A plugin has up to three files, and each runs in a sandbox.
 |---|---|
 | `plugin.js` | A hidden iframe in the dashboard, with an opaque origin and `default-src 'none'` |
 | `panel.html` | A visible iframe with the same origin rules, where its own markup, styles and scripts are allowed |
+
+The dashboard lets a frame load only from the hub and removes one that loads anything a second
+time, so a plugin that sends its frame elsewhere is stopped with "sandbox navigated away".
 | `worker.js` | [QuickJS](https://github.com/quickjs-ng/quickjs) compiled to WebAssembly on the hub, under wasmtime |
 
 | Attack | What stops it |
 |---|---|
-| Take your credentials somewhere | Neither sandbox has sockets. The browser files' policy is `connect-src 'none'`, and the hub file has no WASI network and no filesystem. The only way out is a request through PrintGuard, to addresses the plugin declared. A redirect is never followed, by a request or by a WebSocket |
+| Take your credentials somewhere | Neither sandbox has sockets. The browser files' policy is `connect-src 'none'`, WebRTC is removed from their frames, and the hub file has no WASI network and no filesystem. The only request out is one through PrintGuard, to addresses the plugin declared. A redirect is never followed, by a request or by a WebSocket. [What a browser still allows](#what-a-browser-still-allows) is below |
 | Read your credentials at all | State is cut down to the fields a permission names. Printer configuration, notifier settings, MQTT credentials and API tokens are in no permission. The exceptions are `routes` and `gate`, which see the cookie and authorisation headers of the requests they answer |
 | Read your camera frames | A camera in a plugin's panel is a placeholder PrintGuard fills with its own player, and the video never enters the sandbox. Reading the picture itself is `camera:frames`, which is its own thing to agree to, and a plugin's own pages are refused the live stream |
 | Hang or exhaust the hub | The worker runs against a memory cap, a CPU budget and a 5 second limit per call. A plugin that fails, or answers with anything but its data and a list of effects, is disabled and reported |
@@ -168,6 +171,19 @@ A plugin has up to three files, and each runs in a sandbox.
 | Do something it was not granted | Every command maps to a permission, checked at the sandbox edge before it goes anywhere |
 | Pretend to be PrintGuard | A `plugin.js` has no styling and no markup of its own, and PrintGuard draws what it describes with its own components. A `panel.html` does draw itself, inside a panel carrying the plugin's name. A plugin's own pages are served into a sandboxed origin that is not the dashboard's |
 | Change after review | The manifest and every source file are pinned by SHA-256 at a commit |
+
+### What a browser still allows
+
+The two frames are held by the browser's own rules, and those rules leave three things open.
+
+| Still possible | What it carries |
+|---|---|
+| A frame sends itself to another address on your hub | One request, to the hub. The dashboard removes the frame as soon as the page loads |
+| A frame asks Safari to connect ahead to a host, with `<link rel="preconnect">` | No request and no body. The hostname is the plugin's to choose, so a few bytes can leave in the lookup |
+| A page the plugin serves under `/plugins/<id>/` loads from anywhere | Whatever the plugin's worker put in that page. `routes` is the permission that allows it |
+
+The frame rules are tested in Chromium and in WebKit, which is Safari's engine. Firefox is not
+in the test run.
 
 ## Credentials
 

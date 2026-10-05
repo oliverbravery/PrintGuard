@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { section, togglePinned, toggleHidden } from "../layout";
-import { PANEL_SANDBOX_URL } from "../panel";
 import { useStore } from "../store";
 import type { PluginRecord } from "../types";
 import { PluginNodeView } from "./PluginNode";
@@ -9,23 +8,14 @@ import { SortableItem, type SortableHandle } from "./Sortable";
 function PluginWebview({ plugin }: { plugin: PluginRecord }) {
   const mountPanel = useStore((s) => s.mountPanel);
   const ready = useStore((s) => s.pluginPanels[plugin.id] !== undefined);
-  const frame = useRef<HTMLIFrameElement>(null);
+  const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (ready) mountPanel(plugin.id, frame.current);
+    if (ready) mountPanel(plugin.id, container.current);
     return () => mountPanel(plugin.id, null);
   }, [plugin.id, ready]);
 
-  return (
-    <iframe
-      ref={frame}
-      src={PANEL_SANDBOX_URL}
-      sandbox="allow-scripts"
-      allow=""
-      title={`${plugin.manifest.name} panel`}
-      className="block h-24 w-full border-0 bg-transparent transition-[height] duration-150"
-    />
-  );
+  return <div ref={container} />;
 }
 
 export function PluginPanel({ plugin }: { plugin: PluginRecord }) {

