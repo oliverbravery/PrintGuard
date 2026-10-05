@@ -11,6 +11,7 @@ import {
 export type Refusal = { status: number; code: string; retryAt?: number };
 
 const STORED_BYTES = "stored_bytes";
+const BYTES_SINCE_RECOUNT_BEGAN = "bytes_since_recount_began";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -49,8 +50,12 @@ export class Gate extends DurableObject<Env> {
     this.tally(hub, network, -bytes, -1);
   }
 
-  recount(bytes: number): void {
-    this.ctx.storage.kv.put(STORED_BYTES, bytes);
+  beginRecount(): void {
+    this.ctx.storage.kv.put(BYTES_SINCE_RECOUNT_BEGAN, 0);
+  }
+
+  recount(listedBytes: number): void {
+    this.ctx.storage.kv.put(STORED_BYTES, listedBytes + this.bytesSinceRecountBegan());
     this.ctx.storage.sql.exec("DELETE FROM counts WHERE day < ?", today());
   }
 
@@ -58,8 +63,13 @@ export class Gate extends DurableObject<Env> {
     return this.ctx.storage.kv.get<number>(STORED_BYTES) ?? 0;
   }
 
+  private bytesSinceRecountBegan(): number {
+    return this.ctx.storage.kv.get<number>(BYTES_SINCE_RECOUNT_BEGAN) ?? 0;
+  }
+
   private tally(hub: string, network: string, bytes: number, uploads: number): void {
     this.ctx.storage.kv.put(STORED_BYTES, this.storedBytes() + bytes);
+    this.ctx.storage.kv.put(BYTES_SINCE_RECOUNT_BEGAN, this.bytesSinceRecountBegan() + bytes);
     this.add("hub", hub, uploads);
     this.add("network", network, uploads);
     this.add("everyone", "", uploads);

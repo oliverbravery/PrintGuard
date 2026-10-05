@@ -1,8 +1,11 @@
 import { createScheduledController } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import worker, { networkOf, reminders } from "../src";
+import worker, { expiresSoon, networkOf, reminders } from "../src";
 import {
+  DAY_MS,
+  EXPIRY_DAYS,
+  EXPIRY_WARN_DAYS,
   FRAME_BYTES_MAX,
   REGISTRATIONS_PER_NETWORK,
   STORED_BYTES_MAX,
@@ -32,8 +35,8 @@ const details = (frame: string, changes: Record<string, unknown> = {}) => ({
 
 const frameId = (index: number) => index.toString(16).padStart(12, "0");
 
-const register = (address: string) =>
-  exports.default.fetch(`${ORIGIN}/register`, { method: "POST", headers: { "CF-Connecting-IP": address } });
+const register = (address: string, headers: Record<string, string> = { "Content-Type": "application/json" }) =>
+  exports.default.fetch(`${ORIGIN}/register`, { method: "POST", headers: { "CF-Connecting-IP": address, ...headers }, body: "{}" });
 
 const upload = (token: string, address: string, frame: string, body: Uint8Array = JPEG, changes: Record<string, unknown> = {}) =>
   exports.default.fetch(`${ORIGIN}/frame`, {
@@ -67,10 +70,22 @@ describe("registration", () => {
     expect((await register("203.0.113.2")).status).toBe(201);
   });
 
-  it("counts an IPv6 network by its /64", () => {
-    expect(networkOf("2001:db8:1:2:aaaa:bbbb:cccc:dddd")).toBe(networkOf("2001:db8:1:2::1"));
-    expect(networkOf("2001:db8:1:3::1")).not.toBe(networkOf("2001:db8:1:2::1"));
+  it("counts an IPv6 network by its /48, the most one site is routed", () => {
+    expect(networkOf("2001:db8:1:2:aaaa:bbbb:cccc:dddd")).toBe(networkOf("2001:db8:1:ffff::1"));
+    expect(networkOf("2001:db8:1::")).toBe(networkOf("2001:db8:1:2::1"));
+    expect(networkOf("2001:db8:2:2::1")).not.toBe(networkOf("2001:db8:1:2::1"));
     expect(networkOf("198.51.100.7")).toBe("198.51.100.7");
+  });
+
+  it("turns away a request a web page could send from a visitor's browser, without counting it", async () => {
+    const fromAPage = [
+      await register("203.0.113.3", { "Content-Type": "text/plain" }),
+      await register("203.0.113.3", { "Content-Type": "application/json", Origin: "https://elsewhere.example" }),
+    ];
+    for (let attempt = 0; attempt < REGISTRATIONS_PER_NETWORK; attempt += 1) fromAPage.push(await register("203.0.113.3", { "Content-Type": "text/plain" }));
+    expect(fromAPage.map((response) => response.status)).toEqual(Array(fromAPage.length).fill(403));
+    expect(await code(fromAPage[0])).toBe("browser");
+    expect((await register("203.0.113.3")).status).toBe(201);
   });
 });
 
@@ -111,6 +126,17 @@ describe("uploading a frame", () => {
     expect(refused.status).toBe(429);
     expect(await code(refused)).toBe("hub_daily");
     expect((await upload(await issueToken(env.TOKEN_SECRET), "203.0.113.12", frameId(1000))).status).toBe(201);
+  });
+
+  it("counts a frame sent twice once", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const gate = env.GATE.getByName("gate");
+    await upload(token, "203.0.113.13", frameId(2000));
+    const afterFirst = await gate.storedBytes();
+    expect((await upload(token, "203.0.113.13", frameId(2000))).status).toBe(201);
+    expect(await gate.storedBytes()).toBe(afterFirst);
+    await upload(token, "203.0.113.13", frameId(2000), new Uint8Array([...JPEG, 5, 6]));
+    expect(await gate.storedBytes()).toBe(afterFirst + 2);
   });
 
   it("answers closed when collection is switched off", async () => {
@@ -160,6 +186,27 @@ describe("the daily recount", () => {
     const inBucket = (await env.FRAMES.list()).objects.reduce((bytes, object) => bytes + object.size, 0);
     expect(await env.GATE.getByName("gate").storedBytes()).toBe(inBucket);
     expect(inBucket).toBe(before - JPEG.byteLength);
+  });
+
+  it("keeps the bytes that arrive while the bucket is being listed", async () => {
+    const gate = env.GATE.getByName("recount-race");
+    await gate.reserve("hub", "network", 300);
+    await gate.beginRecount();
+    await gate.reserve("hub", "network", 50);
+    await gate.recount(300);
+    expect(await gate.storedBytes()).toBe(350);
+
+    await gate.beginRecount();
+    await gate.recount(350);
+    expect(await gate.storedBytes()).toBe(350);
+  });
+
+  it("counts a frame as expiring once it is within the warning of the expiry", () => {
+    const now = Date.UTC(2026, 9, 31);
+    const uploadedDaysAgo = (days: number) => new Date(now - days * DAY_MS);
+    expect(expiresSoon(uploadedDaysAgo(EXPIRY_DAYS - EXPIRY_WARN_DAYS), now)).toBe(true);
+    expect(expiresSoon(uploadedDaysAgo(EXPIRY_DAYS - EXPIRY_WARN_DAYS - 1), now)).toBe(false);
+    expect(expiresSoon(uploadedDaysAgo(EXPIRY_DAYS), now)).toBe(true);
   });
 
   it("reminds me when frames are close to expiring or the inbox is nearly full", () => {

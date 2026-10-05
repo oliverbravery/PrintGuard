@@ -58,6 +58,20 @@ own.
 [training frames](docs/feedback.md). Its limits are in `src/limits.ts` and every one has a test.
 Install with `npm ci`, since npm 10 fails to resolve Vitest's peers from scratch.
 
+Only I deploy it. The bucket needs a lifecycle rule matching `EXPIRY_DAYS`, since the Worker only
+counts what is about to expire and the rule is what deletes it:
+
+```bash
+cd feedback-worker
+npx wrangler r2 bucket create printguard-feedback --jurisdiction eu
+npx wrangler r2 bucket lifecycle add printguard-feedback expire-uncollected --expire-days 30 --jurisdiction eu
+npx wrangler r2 bucket lifecycle list printguard-feedback --jurisdiction eu
+npx wrangler deploy --secrets-file <file>   # TOKEN_SECRET, REMINDER_TO and REMINDER_FROM, on the first deploy
+```
+
+Replacing `TOKEN_SECRET` gives every hub a new ID, which orphans the frames sent under the old
+ones from any [deletion request](docs/feedback.md#having-your-frames-deleted).
+
 The browser half of the plugin sandbox is only meaningful in a real engine, so
 `web/tests/sandbox.spec.ts` drives it through Playwright in both chromium and webkit. Run it
 if you touch anything under `web/public/plugin-sandbox.html`, `web/public/plugin-panel.html` or

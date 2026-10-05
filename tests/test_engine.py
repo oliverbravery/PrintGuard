@@ -1082,6 +1082,7 @@ def _inbox(platform: FakePlatform, monkeypatch, refuse=lambda uploads: None) -> 
 
     async def http(method: str, url: str, **request) -> tuple[int, object]:
         if url == f"{feedback.ENDPOINT}/register":
+            assert request.get("json") == {}, "the Worker refuses a registration that is not JSON, which a web page cannot send cross-site"
             platform.http_calls.append((method, url))
             return 201, {"token": TOKEN}
         if url == f"{feedback.ENDPOINT}/frame":
