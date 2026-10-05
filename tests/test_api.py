@@ -7,6 +7,7 @@ import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+from urllib.parse import urlsplit
 
 import httpx
 import numpy as np
@@ -559,7 +560,7 @@ async def test_an_address_that_cannot_be_split_is_refused_and_one_already_stored
         assert (await client.patch("/settings", json={"theme": "dark"}, headers=manage)).status_code == 200
 
         await engine.handle({"cmd": "report.send", "message": "it broke"})
-        envelope = next(r for r in platform.http_requests if "sentry.io" in r["url"])["data"]
+        envelope = next(r for r in platform.http_requests if urlsplit(r["url"]).hostname.endswith(".sentry.io"))["data"]
         assert b"pa[ss" not in envelope and BRACKET_CAMERA.encode() not in envelope
 
 
