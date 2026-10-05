@@ -1244,7 +1244,9 @@ class Engine:
         a newer revision replaces the old bytes and keeps the grants, stored data
         and credentials, as long as it comes from the same place. A bundle from
         anywhere else starts with none of them, and one reaching further than the
-        accepted manifest stands down until the wider list is accepted.
+        accepted manifest stands down until the wider list is accepted. One that
+        signs in at different addresses is signed out as well, so a refresh
+        token is never sent to an endpoint it was not issued by.
         """
         source = dict(message.get("source") or {})
         page: dict[str, str] = {}
@@ -1281,6 +1283,10 @@ class Engine:
                 "plugin %s came from %s and now from %s, so its grants and credentials were dropped",
                 manifest["id"], existing.source, source,
             )
+        secrets = existing.secrets if inherits else {}
+        if inherits and not plugins.same_sign_in(existing.manifest, manifest):
+            secrets = oauth.without_session(secrets)
+            logger.warning("plugin %s signs in somewhere new, so it was signed out", manifest["id"])
         self.plugins.add(
             Plugin(
                 id=manifest["id"],
@@ -1292,7 +1298,7 @@ class Engine:
                 source=source,
                 granted=granted,
                 config=existing.config if inherits else {},
-                secrets=existing.secrets if inherits else {},
+                secrets=secrets,
                 verified=entry is not None,
                 enabled=bool(existing and existing.enabled and plugins.consented(manifest, granted)),
                 installed=time.time(),

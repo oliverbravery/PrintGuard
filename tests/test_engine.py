@@ -1879,6 +1879,28 @@ async def test_an_update_that_reaches_further_stands_the_plugin_down() -> None:
     assert updated.secrets["api_key"] == "s3cr3t", "the same plugin's own credentials were thrown away"
 
 
+@pytest.mark.parametrize("endpoint", ["authorize_url", "token_url"])
+async def test_an_update_that_signs_in_somewhere_else_is_signed_out_and_asked_again(endpoint: str) -> None:
+    """A refresh token goes to the token endpoint, so a new one must not inherit it."""
+    platform = FakePlatform(infer_s=0.02)
+    platform.responses = github_files("a" * 40, SECRET_MANIFEST)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_from_github(engine)
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
+        )
+        engine.plugins.get("vault").secrets = {
+            "api_key": "s3cr3t", "oauth_client_id": "mine-1234", "oauth": "at-1", "oauth_refresh": "rt-1", "oauth_expires": "0",
+        }
+        moved = {**SECRET_MANIFEST, "oauth": {**SECRET_MANIFEST["oauth"], endpoint: "https://collector.example.com/token"}}
+        platform.responses = github_files("b" * 40, moved)
+        await install_from_github(engine)
+        updated = engine.plugins.get("vault")
+
+    assert updated.secrets == {"api_key": "s3cr3t", "oauth_client_id": "mine-1234"}, "a session went to an endpoint that never issued it"
+    assert updated.granted == [] and not updated.enabled, "a new sign-in address ran under the old consent"
+
+
 async def test_a_bundle_from_somewhere_else_inherits_nothing_but_the_id() -> None:
     """An id is not an identity, so a stranger holding one starts with nothing."""
     platform = FakePlatform(infer_s=0.02)

@@ -3,7 +3,7 @@ import { currentLayout } from "./layout";
 import { log } from "./log";
 import type { Finding } from "./lint";
 import { PluginPanelHost } from "./panel";
-import { commandAllowed, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
+import { commandAllowed, LINK_ACTIONS, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
 import { play, playFile } from "./sound";
 import { resumePublishers, stopPublishing } from "./stream";
 import { applyTheme, measureCover } from "./theme";
@@ -292,7 +292,7 @@ export const useStore = create<PgStore>((set, get) => {
         sendSilent(outboundRequest(id, effect.request));
       } else if (effect.kind === "socket" && effect.request) {
         sendSilent(outboundSocket(id, String(effect.action), effect.request));
-      } else if (effect.kind === "link" && effect.request) {
+      } else if (effect.kind === "link" && effect.request && LINK_ACTIONS.includes(String(effect.action))) {
         sendSilent(outboundLink(id, String(effect.action), effect.request));
       } else if (effect.kind === "notify") {
         if (plugin.granted.includes("notify")) {

@@ -286,6 +286,12 @@ need the grant that reads the dashboard.
 """
 
 
+LINK_ACTIONS = ("call", "answer", "publish")
+"""What a ``link`` effect may ask for, each a ``plugin.<action>`` command."""
+
+SIGN_IN_ENDPOINTS = ("authorize_url", "token_url")
+"""Where a manifest's ``oauth`` block sends the user and the tokens."""
+
 UI_EFFECTS: dict[str, str] = {"notify": "notify", "sound": "sound", "background": "background"}
 """Effects a dashboard carries out for a plugin, and the permission each needs.
 
@@ -406,12 +412,30 @@ def same_source(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     return (previous["repo"], previous.get("path", "")) == (current["repo"], current.get("path", ""))
 
 
+def same_sign_in(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Whether two manifests sign in at the same endpoints.
+
+    A stored refresh token is sent to the token endpoint, so an update naming a
+    different one would hand the session to wherever it says.
+
+    Args:
+        previous: The manifest the sign-in was made against.
+        current: The manifest being installed over it.
+
+    Returns:
+        True when the authorise and token addresses are unchanged, or neither
+        manifest signs in to anything.
+    """
+    return all(previous["oauth"].get(key) == current["oauth"].get(key) for key in SIGN_IN_ENDPOINTS)
+
+
 def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     """Whether an update reaches further than the manifest that was accepted.
 
-    Permissions, addresses and the plugins it calls are what the user agreed to,
-    so a change to any of them is a fresh question. Anything not written exactly
-    as before counts as wider, since a narrower-looking pattern can cover more.
+    Permissions, addresses, the plugins it calls and where it signs in are what
+    the user agreed to, so a change to any of them is a fresh question. Anything
+    not written exactly as before counts as wider, since a narrower-looking
+    pattern can cover more.
 
     Args:
         previous: The manifest the grants were given against.
@@ -420,7 +444,9 @@ def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     Returns:
         True when the new manifest asks for anything the old one did not.
     """
-    return any(not set(current[field]) <= set(previous[field]) for field in ("permissions", "urls", "consumes"))
+    return not same_sign_in(previous, current) or any(
+        not set(current[field]) <= set(previous[field]) for field in ("permissions", "urls", "consumes")
+    )
 
 
 def runs_here(platforms: list[str], host: str) -> bool:
@@ -668,7 +694,13 @@ def outbound_link(plugin_id: str, kind: str, request: Any) -> dict[str, Any]:
 
     The id is set last, so a sandbox cannot spread over the command and speak as
     somebody else.
+
+    Raises:
+        ValueError: If the plugin named anything but one of those three, which
+            would otherwise reach any command that starts the same way.
     """
+    if kind not in LINK_ACTIONS:
+        raise ValueError(f"{kind!r} is not a way to talk to another plugin")
     fields = request if isinstance(request, dict) else {}
     return {
         "cmd": f"plugin.{kind}",
@@ -699,7 +731,7 @@ def sanitise_sign_in(raw: Any) -> dict[str, Any]:
     """
     if not isinstance(raw, dict) or not raw:
         return {}
-    endpoints = {key: str(raw.get(key, "")).strip() for key in ("authorize_url", "token_url")}
+    endpoints = {key: str(raw.get(key, "")).strip() for key in SIGN_IN_ENDPOINTS}
     if any("*" in value or urlsplit(value).scheme != "https" or not urlsplit(value).hostname for value in endpoints.values()):
         raise ValueError("oauth needs an https authorize_url and token_url")
     return {
