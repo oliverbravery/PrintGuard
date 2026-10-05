@@ -2,7 +2,7 @@
 
 # Troubleshooting
 
-[Docs](README.md) · [Architecture](architecture.md) · [Printers & cameras](printers.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · **Troubleshooting**
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · **Troubleshooting**
 
 </div>
 
@@ -20,10 +20,10 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `bind: address already in use` for `8000` or `8554` | Another PrintGuard already holds the port, often a desktop app or a container you forgot | Find the holder with `lsof -nP -iTCP:8554 -sTCP:LISTEN` on macOS or Linux, or `netstat -ano \| findstr 8554` on Windows, then stop it. Versions before 2.3.8 could leave the streaming server behind after a crash |
+| `bind: address already in use` for `8000` or `8554` | Another PrintGuard already holds the port, often a desktop app or a container you forgot | Find the holder with `lsof -nP -iTCP:8554 -sTCP:LISTEN` on macOS or Linux, or `netstat -ano \| findstr 8554` on Windows, then stop it. |
 | Dashboard loads but the header shows "Reconnecting" | The engine WebSocket cannot connect, usually a proxy that does not forward WebSockets, or a rewritten `Origin` | Check the proxy forwards upgrade headers, then see [origin checking](deployment.md#origin-checking) |
 | First launch of the Windows desktop app is blocked | The Windows build is unsigned | Choose **More info** and then **Run anyway** |
-| The desktop app opens an empty white window | Its server did not start. 2.3.7 and 2.3.8 on macOS always hit this, because Core ML could not load the model from a data directory whose path contains a space | Update to 2.3.9 or later, where the window reports what failed and shows the end of the log ([logs](#getting-logs-and-diagnostics)) |
+| The desktop app opens to "PrintGuard could not start" | Its server did not start | The window says what failed and shows the end of the log. [Logs](#getting-logs-and-diagnostics) has where the full one is kept |
 | The Windows desktop app closes straight away without a window | Without a GPU driver, as in most virtual machines, Windows offers its Basic Render Driver as a GPU and versions before 2.5.0 crashed running the model on it | Update to 2.5.0 or later, or install the GPU driver |
 | The Windows desktop app shows "PrintGuard could not start" and the log ends in `Immediate exit requested: 'video=dummy'` | 2.4.1 treated the end of its camera listing as a failure | Update to 2.5.0 or later |
 | The website has no live demo, or a `#local` bookmark opens the landing page | Local mode, which ran PrintGuard in a browser tab, was removed in 2.5.0 | Install the desktop app or the Docker image from the [quick start](../README.md#quick-start) |
@@ -33,15 +33,14 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Tile reads **no signal** | The source is unreachable from the hub, or it stopped producing frames | Open the stream URL from the machine running the hub, not from your laptop. In Docker, remember `localhost` means the container, so see [networking caveats](printers.md#networking-caveats) |
+| Tile reads **no signal** | The source is unreachable from the hub, or it stopped producing frames | Open the stream URL from the machine running the hub, not from your laptop. In Docker, remember `localhost` means the container, so see [networking caveats](printers.md#networking-caveats). [Stream URLs](cameras.md#stream-urls) lists what the hub can pull |
 | Camera is **offline** in the registry but the feed works elsewhere | Wrong scheme or path, or a source that needs credentials in the URL | Re-test the URL. RTSP sources are pulled by MediaMTX, so it must reach them too |
 | **This browser** camera will not start | Browsers only allow camera access on secure pages | Serve the hub over HTTPS or open it on `localhost`. [Deployment](deployment.md) covers both |
-| A USB camera plugged into the host never appears | The container was not given it, or it was plugged in after the container started | Add a `devices:` entry for it and `docker compose up -d`. [Cameras plugged into the hub](printers.md#cameras-plugged-into-the-hub) |
+| A USB camera plugged into the host never appears | The container was not given it, or it was plugged in after the container started | Add a `devices:` entry for it and `docker compose up -d`. [Cameras plugged into the hub](cameras.md#cameras-plugged-into-the-hub) |
 | Several USB cameras on one machine drop out or crawl | They share the bus, and an uncompressed feed can take most of it on its own | Prefer cameras that offer MJPEG, which PrintGuard asks for first, and spread them across separate USB controllers |
 | Feed plays but the risk score never moves | The monitor is in standby because its printer positively reports "not printing" | This is by design. See [failing safely](architecture.md#failing-safely) |
 | Risk score keeps moving with the printer sitting idle | The service reports a state PrintGuard cannot read, so the monitor cannot be stood down | This is by design, and the monitor's panel says which state it is getting. A warning goes out once the state has been unreadable for a few seconds |
 | Video is smooth for one camera and choppy for several | The host's sustainable capacity is shared across cameras | Check the **capacity** and **latency** readouts, then [Hardware](hardware.md#how-much-hardware-you-need) |
-| **Capacity** fell sharply after upgrading to 2.3.7 | 2.3.7 ran inference on two workers on hosts that could sustain many more | Fixed in 2.3.8, which measures the worker count. The startup log line `inference ready:` reports what it settled on |
 
 ## Printers
 
@@ -58,17 +57,15 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Too many false alerts | The threshold is too low for your camera and lighting | Raise the threshold on that monitor, and raise the consecutive-frame count so brief blips are ridden out |
-| A reviewed print says it's queued | A [daily limit](feedback.md#limits) on training frames was hit, or the inbox couldn't be reached | Nothing. The frames stay on the hub and send by themselves at the time shown, or press **Try now** |
-| No **Review frames** prompt after a print | The monitor has no printer, so it can't tell a print ended, or the prompt is switched off | Open the print from **Prints** on the monitor's detailed history page, or turn the prompt on in **Settings**, under **Advanced** |
-| Failures caught too late | The opposite | Lower the threshold or the frame count. Watch the risk history on the monitor's detail page to pick a value |
-| Real failures barely move the score | The print is small in the frame, or off to one side of the square the model watches | Crop the camera to a square the print fills, see [framing the print](printers.md#framing-the-print) |
-| No notifications arrive | The channel is off for that monitor, or the channel itself is failing | Send a test alert from **Settings**. Delivery failures raise an `error` event rather than passing silently |
-| A stream of camera offline and back notifications | The feed keeps dropping out. Before 2.4.0 every reconnection announced itself, and the monitor's cooldown only covers defect alerts | Update to 2.4.0, where one unstable episode is one warning. The drop-outs themselves are worth chasing, so check the camera's own connection and, for RTSP or WHEP, that MediaMTX holds the pull |
+| Too many false alerts | The threshold is too low for your camera and lighting | Raise the threshold on that monitor, and raise the consecutive count so brief blips are ridden out. [Choosing values](monitoring.md#choosing-values) |
+| Failures caught too late | The opposite | Lower the threshold or the consecutive count. Read the [risk history](monitoring.md#risk-history) to pick a value |
+| Real failures barely move the score | The print is small in the frame, or off to one side of the square the model watches | Crop the camera to a square the print fills, see [tuning the camera](monitoring.md#tuning-the-camera) |
+| No notifications arrive | **Push notifications** is off on that monitor, which is how a new monitor starts, or the channel itself is failing | Turn it on in the monitor's panel and send a test alert from **Settings**. Delivery failures raise an `error` event rather than passing silently |
+| Warnings about a camera that keeps dropping out | The feed is unstable. One unstable episode is one warning, and the monitor's cooldown only covers defect alerts | Check the camera's own connection and, for RTSP or WHEP, that MediaMTX holds the pull. [Faults and the grace period](notifications.md#faults-and-the-grace-period) |
 | A wireless camera still notifies when it drops out for a few seconds | The fault grace period is shorter than the camera takes to reconnect | Raise **Fault grace period** in the Alerts tab in Settings. It goes up to fifteen minutes, and the dashboard still shows the drop-out as it happens |
 | A warning that the camera dropped out for a share of the last ten minutes | It reconnects quickly enough to clear the grace period every time, so the print is only being watched part of the time | Chase the connection rather than the notification. This one fires once for the whole unstable episode |
-| Pushover alerts arrive during quiet hours | Priority defaults to High, which bypasses them, and it covers every notice including warnings and recoveries | Set it to Normal in the Alerts tab in Settings. [Notifications](printers.md#notifications) |
-| Home Assistant shows nothing | The broker settings are wrong, or discovery is disabled in Home Assistant | Check the Home Assistant tab in Settings and the broker's own log |
+| Pushover alerts arrive during quiet hours | Priority defaults to High, which bypasses them, and it covers every notice including warnings and recoveries | Set it to Normal in the Alerts tab in Settings. [Channels](notifications.md#channels) |
+| Home Assistant shows nothing | The broker settings are wrong, or discovery is disabled in Home Assistant | Check the Home Assistant tab in Settings and the broker's own log. [Home Assistant](api.md#home-assistant) |
 
 ## Plugins
 
@@ -87,7 +84,7 @@ Find the symptom, apply the fix. Every row links to the page that explains the r
 | Symptom | Cause | Fix |
 |---|---|---|
 | An Intel GPU is not used | The standard image leaves the Intel GPU runtime out, the render device was not passed in, or the GPU predates Tiger Lake | Use the `latest-intel` tag and pass `--device /dev/dri`. **compute** reads `intel gpu` when the GPU is in use, and the log lists what the providers offered at start. [Intel GPU](hardware.md#intel-gpu) |
-| PrintGuard keeps a shared host's processor busy | Detection runs as often as the hardware and the cameras allow | Lower **Detection rate** on each camera under **Cameras**. A defect takes longer to confirm at a lower rate |
+| PrintGuard keeps a shared host's processor busy | Detection runs as often as the hardware and the cameras allow | Lower **Detection rate** on each camera under **Cameras**. A defect takes longer to confirm at a lower rate. [Tuning the camera](monitoring.md#tuning-the-camera) |
 | An NVIDIA GPU is not used | Missing Container Toolkit, the container started without the NVIDIA runtime, or the wrong tag | The log names the provider it could not load, then falls back to the CPU. [NVIDIA GPU](hardware.md#nvidia-gpu) |
 | **compute** names a CPU in the Windows desktop app | Windows ML needs the Windows App Runtime 2.x. Versions before 2.5.0 stopped at a prompt to install it instead of starting | Run the x64 installer from [Windows App SDK downloads](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads), then restart PrintGuard |
 | **compute** names a CPU on a machine with an accelerator | No provider was handed the accelerator, so the model stayed on the processor | [Execution providers by platform](hardware.md#execution-providers-by-platform) |
