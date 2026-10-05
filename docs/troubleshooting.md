@@ -1,109 +1,91 @@
 <div align="center">
 
-# Troubleshooting
+# Training frames
 
-[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · [Training frames](feedback.md) · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · **Troubleshooting**
+[Docs](README.md) · [Printers](printers.md) · [Cameras](cameras.md) · [Monitoring](monitoring.md) · [Notifications](notifications.md) · **Training frames** · [Hardware](hardware.md) · [Deployment](deployment.md) · [API & MCP](api.md) · [Plugins](plugins.md) · [Writing plugins](plugin-development.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
 
 </div>
 
-Find the symptom, apply the fix. Every row links to the page that explains the reasoning.
+PrintGuard keeps a few frames from each print on your hub. When a print ends you can label them
+and send them to me, and I use them to train the detection model on more printers, cameras and
+lighting than the public datasets cover. Nothing is sent unless you review a print and press
+Send.
 
-- [Starting up](#starting-up)
-- [Cameras and video](#cameras-and-video)
-- [Printers](#printers)
-- [Detection and alerts](#detection-and-alerts)
-- [Plugins](#plugins)
-- [Acceleration](#acceleration)
-- [Getting logs and diagnostics](#getting-logs-and-diagnostics)
+- [What's kept on your hub](#whats-kept-on-your-hub)
+- [Reviewing a print](#reviewing-a-print)
+- [What's sent](#whats-sent)
+- [Limits](#limits)
+- [Having your frames deleted](#having-your-frames-deleted)
+- [Switching it off](#switching-it-off)
 
-## Starting up
+## What's kept on your hub
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| `bind: address already in use` for `8000` or `8554` | Another PrintGuard already holds the port, often a desktop app or a container you forgot | Find the holder with `lsof -nP -iTCP:8554 -sTCP:LISTEN` on macOS or Linux, or `netstat -ano \| findstr 8554` on Windows, then stop it. |
-| Dashboard loads but the header shows "Reconnecting" | The engine WebSocket cannot connect, usually a proxy that does not forward WebSockets, or a rewritten `Origin` | Check the proxy forwards upgrade headers, then see [origin checking](deployment.md#origin-checking) |
-| First launch of the Windows desktop app is blocked | The Windows build is unsigned | Choose **More info** and then **Run anyway** |
-| The desktop app opens to "PrintGuard could not start" | Its server did not start | The window says what failed and shows the end of the log. [Logs](#getting-logs-and-diagnostics) has where the full one is kept |
-| The Windows desktop app closes straight away without a window | Without a GPU driver, as in most virtual machines, Windows offers its Basic Render Driver as a GPU and versions before 2.5.0 crashed running the model on it | Update to 2.5.0 or later, or install the GPU driver |
-| The Windows desktop app shows "PrintGuard could not start" and the log ends in `Immediate exit requested: 'video=dummy'` | 2.4.1 treated the end of its camera listing as a failure | Update to 2.5.0 or later |
-| The website has no live demo, or a `#local` bookmark opens the landing page | Local mode, which ran PrintGuard in a browser tab, was removed in 2.5.0 | Install the desktop app or the Docker image from the [quick start](../README.md#quick-start) |
-| Container restarts repeatedly | Usually an unwritable `/data` volume | Check the volume mount and its permissions, then read `docker logs printguard` |
-
-## Cameras and video
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| Tile reads **no signal** | The source is unreachable from the hub, or it stopped producing frames | Open the stream URL from the machine running the hub, not from your laptop. In Docker, remember `localhost` means the container, so see [networking caveats](printers.md#networking-caveats). [Stream URLs](cameras.md#stream-urls) lists what the hub can pull |
-| Camera is **offline** in the registry but the feed works elsewhere | Wrong scheme or path, or a source that needs credentials in the URL | Re-test the URL. RTSP sources are pulled by MediaMTX, so it must reach them too |
-| **This browser** camera will not start | Browsers only allow camera access on secure pages | Serve the hub over HTTPS or open it on `localhost`. [Deployment](deployment.md) covers both |
-| A USB camera plugged into the host never appears | The container was not given it, or it was plugged in after the container started | Add a `devices:` entry for it and `docker compose up -d`. [Cameras plugged into the hub](cameras.md#cameras-plugged-into-the-hub) |
-| Several USB cameras on one machine drop out or crawl | They share the bus, and an uncompressed feed can take most of it on its own | Prefer cameras that offer MJPEG, which PrintGuard asks for first, and spread them across separate USB controllers |
-| Feed plays but the risk score never moves | The monitor is in standby because its printer positively reports "not printing" | This is by design. See [failing safely](architecture.md#failing-safely) |
-| Risk score keeps moving with the printer sitting idle | The service reports a state PrintGuard cannot read, so the monitor cannot be stood down | This is by design, and the monitor's panel says which state it is getting. A warning goes out once the state has been unreadable for a few seconds |
-| Video is smooth for one camera and choppy for several | The host's sustainable capacity is shared across cameras | Check the **capacity** and **latency** readouts, then [Hardware](hardware.md#how-much-hardware-you-need) |
-
-## Printers
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| Test fails with *all connection attempts failed* | The hub is in a container, so `localhost` is the container | Use `http://host.docker.internal:5000`, and make the service listen on `0.0.0.0` on Linux hosts. [Details](printers.md#networking-caveats) |
-| Warnings that the printer and camera are offline while the printer is switched off | Before 2.5.1 a restart forgot the printer had been idle, so it watched and warned until the printer came back | Update to 2.5.1. A printer added while switched off still warns, since it has never reported a status |
-| Printer shows `offline` but is printing | The hub cannot reach the service | Monitoring keeps running by design. Fix reachability, then the state clears itself |
-| Pause or cancel did nothing | The service rejected the action | The failure is in the alert, the dashboard error feed and the notification. Check the service's own logs |
-| **Print** is greyed out in the library | The printer is not idle, or the file is tagged for other printers | Wait for the job to finish or cancel it, and tag this printer from the file's row. [Sending prints](printers.md#sending-prints) |
-| A Bambu printer refuses a file | It is not a sliced 3mf, or Developer Mode is off | Export the plate from Bambu Studio or Orca with the gcode included, and enable Developer Mode under Network in Settings |
-
-## Detection and alerts
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| Too many false alerts | The threshold is too low for your camera and lighting | Raise the threshold on that monitor, and raise the consecutive count so brief blips are ridden out. [Choosing values](monitoring.md#choosing-values) |
-| Failures caught too late | The opposite | Lower the threshold or the consecutive count. Read the [risk history](monitoring.md#risk-history) to pick a value |
-| Real failures barely move the score | The print is small in the frame, or off to one side of the square the model watches | Crop the camera to a square the print fills, see [tuning the camera](monitoring.md#tuning-the-camera) |
-| No notifications arrive | **Push notifications** is off on that monitor, which is how a new monitor starts, or the channel itself is failing | Turn it on in the monitor's panel and send a test alert from **Settings**. Delivery failures raise an `error` event rather than passing silently |
-| Warnings about a camera that keeps dropping out | The feed is unstable. One unstable episode is one warning, and the monitor's cooldown only covers defect alerts | Check the camera's own connection and, for RTSP or WHEP, that MediaMTX holds the pull. [Faults and the grace period](notifications.md#faults-and-the-grace-period) |
-| A wireless camera still notifies when it drops out for a few seconds | The fault grace period is shorter than the camera takes to reconnect | Raise **Fault grace period** in the Alerts tab in Settings. It goes up to fifteen minutes, and the dashboard still shows the drop-out as it happens |
-| A warning that the camera dropped out for a share of the last ten minutes | It reconnects quickly enough to clear the grace period every time, so the print is only being watched part of the time | Chase the connection rather than the notification. This one fires once for the whole unstable episode |
-| Pushover alerts arrive during quiet hours | Priority defaults to High, which bypasses them, and it covers every notice including warnings and recoveries | Set it to Normal in the Alerts tab in Settings. [Channels](notifications.md#channels) |
-| A reviewed print says it's queued | A [daily limit](feedback.md#limits) on training frames was hit, or the inbox couldn't be reached | Nothing. The frames stay on the hub and send by themselves at the time shown, or press **Try now** |
-| No **Review frames** prompt after a print | The monitor has no printer, so it can't tell a print ended, or the prompt is switched off | Open the print from **Prints** on the monitor's detailed history page, or turn the prompt on in **Settings**, under **Advanced** |
-| Home Assistant shows nothing | The broker settings are wrong, or discovery is disabled in Home Assistant | Check the Home Assistant tab in Settings and the broker's own log. [Home Assistant](api.md#home-assistant) |
-
-## Plugins
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| A plugin says it is waiting on permissions | It was installed, or updated to ask for more, and you haven't accepted what it asks for | Enable it in the Plugins tab in Settings and accept the list. [Plugins](plugins.md) |
-| A plugin stopped on its own, with a reason | Its sandbox failed, hung or ran out of memory. PrintGuard disables a plugin rather than letting it affect anything else | The reason is on the plugin in the Plugins tab in Settings and in the log. Re-enable it once its author has fixed it |
-| Installing from a repository fails | The path holds no `plugin.json`, the reference does not exist, or GitHub is rate-limiting an unauthenticated request | Check the path points at the plugin's own folder, and try again in a few minutes |
-| A plugin installs as third party rather than verified | The catalogue vouches for different bytes, or does not list it at all | Expected for anything unreviewed. If it should be verified, its catalogue entry needs re-pinning |
-| A plugin's requests fail | The host is not one its manifest declared, or **Reach the internet** is not granted | Both are deliberate. Only its declared hosts are reachable |
-| Nothing floats when a plugin's pop-out is pressed | The feed had not started, or the browser refused it | The toast names the reason. A feed that says "starting stream" has nothing to float yet, so wait for the picture |
-| Locked out of the hub by a plugin | A plugin holding **Authorise every request** is refusing them | Restart with `PRINTGUARD_PLUGINS=off` and remove it. [Deployment](deployment.md#plugins) |
-
-## Acceleration
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| An Intel GPU is not used | The standard image leaves the Intel GPU runtime out, the render device was not passed in, or the GPU predates Tiger Lake | Use the `latest-intel` tag and pass `--device /dev/dri`. **compute** reads `intel gpu` when the GPU is in use, and the log lists what the providers offered at start. [Intel GPU](hardware.md#intel-gpu) |
-| PrintGuard keeps a shared host's processor busy | Detection runs as often as the hardware and the cameras allow | Lower **Detection rate** on each camera under **Cameras**. A defect takes longer to confirm at a lower rate. [Tuning the camera](monitoring.md#tuning-the-camera) |
-| An NVIDIA GPU is not used | Missing Container Toolkit, the container started without the NVIDIA runtime, or the wrong tag | The log names the provider it could not load, then falls back to the CPU. [NVIDIA GPU](hardware.md#nvidia-gpu) |
-| **compute** names a CPU in the Windows desktop app | Windows ML needs the Windows App Runtime 2.x. Versions before 2.5.0 stopped at a prompt to install it instead of starting | Run the x64 installer from [Windows App SDK downloads](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads), then restart PrintGuard |
-| **compute** names a CPU on a machine with an accelerator | No provider was handed the accelerator, so the model stayed on the processor | [Execution providers by platform](hardware.md#execution-providers-by-platform) |
-| Throughput differs from what you expected | Automatic mode picks whichever runtime benchmarks faster on the host | The choice is logged at start. Pin one in the Advanced tab in Settings |
-
-## Getting logs and diagnostics
-
-| Where | How |
+| Frames | How many per print |
 |---|---|
-| Container | `docker logs printguard`, or `docker compose logs -f` |
-| Desktop app | A rotating log file in the app's data directory, path set by `LOG_FILE` |
-| More detail | Set `LOG_LEVEL=DEBUG` for command traces and exception tracebacks |
-| Everything at once | The bug icon in the header, then **Download logs**, which gives you a zip of the sanitised diagnostics bundle and both log tails, with credentials stripped |
+| The frame that fired each alert | The last 40 |
+| The highest scoring frames that didn't alert | 5 |
+| Ordinary frames spread evenly over the print | Up to 19, starting at one a minute |
 
-The same bug dialog sends a report straight to me, anonymously, with the same
-scrubbed contents and an optional email for follow-up. Nothing leaves the machine unless you
-submit it or download it yourself.
+Frames are scaled to 512px and stored in the hub's data directory, so they survive a restart.
+The hub keeps the last 20 prints or 200 MB and drops the oldest first. The alert frames are the
+ones the risk history shows under **Risky moments**.
 
-If you are stuck, open an [issue](https://github.com/oliverbravery/PrintGuard/issues) and
-attach that zip.
+A print ends when its printer reports idle or an error, or when you switch its monitor off, so a
+paused print stays open. A monitor
+with no printer has no way to know a print ended, so it closes one every 24 hours.
+
+## Reviewing a print
+
+When a print ends its monitor shows a button to review the frames from the last print. Older prints are
+listed under **Prints** on the monitor's detailed history page.
+
+![The review sheet with a failed print's frames labelled good, failure and real failure](assets/review.png)
+
+1. Answer whether the print finished fine.
+2. Press any frame to change its label. An alert frame is a real failure or a false alarm, and
+   any other frame is good or a failure.
+3. Use the × on a frame to leave it out.
+4. Add your printer model if you like, then press **Send**.
+
+## What's sent
+
+- The frames you kept, with the label you gave each one.
+- Each frame's risk score, time and which of the three kinds above it is.
+- A random ID for the print and for each frame.
+- The monitor's alert threshold.
+- The type of printer connection, such as `moonraker`, and the printer model if you typed one.
+- The PrintGuard version.
+- A random ID for your hub, issued the first time you send.
+
+No names, addresses, camera URLs or credentials are sent. Frames go to a private Cloudflare R2
+bucket in the EU through [a small Worker](../feedback-worker) you can read. I download them,
+re-encode them and delete them from the bucket, and anything I haven't collected is deleted
+after 30 days. They are used only to train PrintGuard's detection model.
+
+## Limits
+
+The inbox runs on Cloudflare's free tier, which has a fixed amount of room, so the Worker caps
+what it takes. A frame that hits a limit stays on your hub and sends by itself once the limit resets, unless
+20 newer prints or 200 MB push its print out first.
+
+| Limit | Value | What you see |
+|---|---|---|
+| One hub | 60 frames a day | "You've sent as many frames as one PrintGuard can in a day." |
+| One network | 120 frames a day, and 3 new hubs | "Your network has sent as many frames as it can today." |
+| Everyone | 1,000 frames a day | "PrintGuard has had all the frames it can take today." |
+| The inbox | 5 GB | "The inbox for training frames is full." |
+| One frame | 150 KB | Nothing. The hub shrinks the frame once and skips it if it's still too big |
+
+Daily limits reset at midnight UTC, and the review sheet shows that time in your own time zone.
+A print that is waiting has **Try now** and **Cancel sending** on its sheet.
+
+## Having your frames deleted
+
+Your hub ID is in **Settings**, under **Advanced**, once you've sent a print. Ask by
+[raising an issue on GitHub](https://github.com/oliverbravery/PrintGuard/issues/new) with that
+ID and I'll delete every frame sent under it. The ID is random and says nothing about you.
+
+## Switching it off
+
+Turn off **Ask me to review frames after a print** in **Settings**, under **Advanced**. The hub
+then keeps only alert frames, for the risk history, and never prompts.

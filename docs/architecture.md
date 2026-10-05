@@ -258,7 +258,7 @@ printer closes its print after a day.
 |---|---|---|
 | `alert` | The last 40 | The frame that fired each alert, which is what the risk history gallery shows |
 | `near` | The top 5 | The highest scores under the threshold, at least a minute apart |
-| `spaced` | 10 to 20 | One per interval, and every other one is dropped and the interval doubled at 20, so a long print keeps no more than a short one |
+| `spaced` | Up to 19 | One per interval, and every other one is dropped and the interval doubled at 20, so a long print keeps no more than a short one |
 
 The hub holds the last 20 prints or 200 MB and drops the oldest finished print first. The
 `state` snapshot carries only a count per print, and `review.get` returns one print's frames.
