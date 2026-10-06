@@ -676,7 +676,7 @@ Four things keep a frame from sending out what it is handed, and
 | `frame-src 'self'` on the dashboard, in `web/index.html` | A frame navigating itself to another host, or to a `data:` or `blob:` page |
 | The dashboard removes a frame on its second `load` | A frame that navigated within the hub staying alive |
 | State travels over a `MessagePort` transferred once at boot | A page that replaced the sandbox document hearing anything |
-| The bootstrap script is allowed by hash, with no `'unsafe-inline'` | A nested frame running its own script to get back the WebRTC constructors the bootstrap deleted. No engine has a policy directive for WebRTC |
+| The bootstrap script is allowed by hash, with no `'unsafe-inline'` or `'strict-dynamic'`, and a panel's own scripts run as `blob:` scripts so no script loads from an address | A remote script reading the panel's state, and a nested frame running its own script to get back the WebRTC constructors the bootstrap deleted. No engine has a policy directive for WebRTC |
 
 The hash covers the inline script in each of `web/public/plugin-sandbox.html` and
 `plugin-panel.html`, so an edit to either script needs the new hash in that file's policy. The

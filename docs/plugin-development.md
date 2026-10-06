@@ -312,7 +312,7 @@ It runs in an opaque origin with `connect-src 'none'`, so `pg` is the only way o
 muted loop included.
 
 A `<script>` runs wherever it sits in the markup. An inline handler such as `onclick="..."` is
-refused, so use `addEventListener`. The frame cannot leave the page either: a link or a
+refused, so use `addEventListener`. A `<script src>` is refused too, as is `import()` of an address, so put the code inline. The frame cannot leave the page either: a link or a
 `location` change to another address stops the plugin with "sandbox navigated away".
 
 | On `pg` | |
