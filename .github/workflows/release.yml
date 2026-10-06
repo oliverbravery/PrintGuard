@@ -147,8 +147,8 @@ jobs:
             hit {print}
           ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
           test -s "$RUNNER_TEMP/release-notes.md"
-      - name: Draft the release, so it is not the latest until the desktop builds are attached
-        run: gh release create "v${VERSION}" --draft --target "$GITHUB_SHA" --title "v${VERSION}" --notes-file "$RUNNER_TEMP/release-notes.md"
+      - name: Draft the release once, so it is not the latest until the desktop builds are attached
+        run: gh release view "v${VERSION}" >/dev/null 2>&1 || gh release create "v${VERSION}" --draft --target "$GITHUB_SHA" --title "v${VERSION}" --notes-file "$RUNNER_TEMP/release-notes.md"
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
