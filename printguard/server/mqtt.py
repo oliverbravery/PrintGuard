@@ -354,6 +354,9 @@ class MqttBridge:
     async def _session(self, config: dict[str, Any]) -> None:
         base = base_topic(config)
         prefix = discovery_prefix(config)
+        for name, topic in (("base_topic", base), ("discovery_prefix", prefix)):
+            if "+" in topic or "#" in topic:
+                raise ValueError(f"MQTT {name} cannot contain + or #")
         signature = _signature(config)
         tls_context = ssl.create_default_context() if config.get("tls") else None
         async with aiomqtt.Client(
@@ -370,11 +373,11 @@ class MqttBridge:
             self._reported.clear()
             self._state = {}
             logger.info("Home Assistant MQTT bridge connected to %s", config["host"])
+            await client.publish(status_topic(base), "online", qos=1, retain=True)
+            await client.subscribe(f"{base}/monitor/+/+/set", qos=1)
             if self._outage is not None:
                 self._outage = None
                 self._engine.emit({"event": "warning", "message": "Home Assistant MQTT reconnected", "recovered": True})
-            await client.publish(status_topic(base), "online", qos=1, retain=True)
-            await client.subscribe(f"{base}/monitor/+/+/set", qos=1)
             self._engine.add_sink(self._sink)
             tasks = [
                 asyncio.ensure_future(self._publish_loop(client, base, prefix, signature)),

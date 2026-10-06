@@ -17,13 +17,14 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
-from pydantic import BaseModel, ConfigDict
+from pydantic import AfterValidator, BaseModel, ConfigDict
 
 from ..engine.engine import REQUEST_TIMEOUT_S, Engine
 from ..engine.integrations import INTEGRATIONS
 from ..engine.notifiers import NOTIFIERS
 from ..engine.reports import is_url, scrub_url, scrub_urls
 from ..engine.tokens import SCOPE_ORDER, expand_scope, hash_secret
+from .events import require_finite
 from .platform import OPEN_WAIT_S
 from .prints import PrintUpload, capped, file_response, receive_print
 
@@ -105,10 +106,13 @@ def get_engine(request: Request) -> Engine:
     return request.app.state.engine
 
 
+FiniteObject = Annotated[dict[str, Any], AfterValidator(require_finite)]
+
+
 class PrinterFields(BaseModel):
     name: str | None = None
     provider: str | None = None
-    config: dict[str, Any] | None = None
+    config: FiniteObject | None = None
 
 
 class _FiniteNumbers(BaseModel):
@@ -153,14 +157,14 @@ class CameraPatch(_FiniteNumbers):
 
 class ProviderTest(BaseModel):
     provider: str
-    config: dict[str, Any] = {}
+    config: FiniteObject = {}
 
 
 class SettingsPatch(BaseModel):
-    notifiers: dict[str, dict[str, Any]] | None = None
-    mqtt: dict[str, Any] | None = None
+    notifiers: dict[str, FiniteObject] | None = None
+    mqtt: FiniteObject | None = None
     inference_runtime: Literal["auto", "litert", "onnx"] | None = None
-    preheat: list[dict[str, Any]] | None = None
+    preheat: list[FiniteObject] | None = None
 
 
 class ActionBody(BaseModel):

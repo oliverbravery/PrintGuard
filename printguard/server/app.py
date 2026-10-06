@@ -35,7 +35,7 @@ from ..engine import logs, oauth
 from ..engine.engine import Engine
 from ..engine.urls import DEFAULT_PORTS, LOCAL_HOSTNAMES, LOCAL_SUFFIXES
 from .api import ApiAuth, build_api_app
-from .events import ConflatedEventQueue
+from .events import ConflatedEventQueue, encode_event, parse_json
 from .mcp import build_mcp_app
 from .mediamtx import EmbeddedMediaMTX
 from .mqtt import MqttBridge
@@ -69,10 +69,13 @@ def normalised_origin(origin: str) -> str:
 
     Returns:
         Its scheme and host in lower case, with the port left off when it is
-        the scheme's own.
+        the scheme's own and a trailing dot on the host dropped.
+
+    Raises:
+        ValueError: If the origin has a port that is not a number or a malformed address.
     """
     parts = urlsplit(origin.strip())
-    host = parts.hostname or ""
+    host = (parts.hostname or "").removesuffix(".")
     port = "" if parts.port in (None, DEFAULT_PORTS.get(parts.scheme)) else f":{parts.port}"
     return f"{parts.scheme}://{f'[{host}]' if ':' in host else host}{port}"
 
@@ -99,8 +102,11 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str], *, required: b
     origin = connection.headers.get("origin")
     if not origin:
         return not required
-    if normalised_origin(origin) in allowed:
-        return True
+    try:
+        if normalised_origin(origin) in allowed:
+            return True
+    except ValueError:
+        return False
     host = connection.headers.get("x-forwarded-host") or connection.headers.get("host")
     return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
 
@@ -115,7 +121,7 @@ def parse_command(text: str | None) -> dict[str, Any] | None:
         The command, or None when the frame is not a JSON object.
     """
     try:
-        command = json.loads(text or "")
+        command = parse_json(text or "")
     except ValueError:
         return None
     return command if isinstance(command, dict) else None
@@ -137,7 +143,7 @@ def host_trusted(host: str, named: set[str]) -> bool:
         True when the hub answers to that host.
     """
     try:
-        name = (urlsplit(f"//{host}").hostname or "").lower()
+        name = (urlsplit(f"//{host}").hostname or "").lower().removesuffix(".")
     except ValueError:
         return False
     try:
@@ -207,6 +213,7 @@ PLUGIN_REQUEST_HEADERS = ("cookie", "authorization", "accept", "content-type", "
 PLUGIN_RESPONSE_HEADERS = ("set-cookie", "location", "cache-control")
 PLUGIN_BODY_LIMIT = 64 * 1024
 SOCKET_COMMANDS_IN_FLIGHT = 16
+WEBSOCKET_MAX_BYTES = 24 * 1024 * 1024
 PLUGIN_PAGE_CSP = (
     "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; "
     "font-src data:; connect-src 'none'; form-action 'self'; base-uri 'none'; sandbox allow-forms allow-scripts; frame-ancestors 'none'"
@@ -240,6 +247,24 @@ def plugin_request(connection: HTTPConnection, method: str, body: str | None = N
         "headers": {k: v for k, v in connection.headers.items() if k.lower() in PLUGIN_REQUEST_HEADERS},
         "body": body,
     }
+
+
+def plugin_answer_fault(answer: dict[str, Any]) -> str | None:
+    """Finds what is wrong with the status or headers a plugin's route answered with.
+
+    Args:
+        answer: What the plugin's route handler returned.
+
+    Returns:
+        A reason the plugin could not have meant it, or None when both are usable.
+    """
+    status = answer.get("status", 200)
+    if type(status) is not int or not 100 <= status <= 599:
+        return "its route answered with a status that is not a whole number from 100 to 599"
+    headers = answer.get("headers")
+    if headers is not None and not (isinstance(headers, dict) and all(isinstance(value, str) for value in headers.values())):
+        return "its route answered with headers that are not an object of text"
+    return None
 
 
 def create_app() -> FastAPI:
@@ -367,10 +392,13 @@ def create_app() -> FastAPI:
         answer = await runtime.serve(plugin_id, plugin_request(request, request.method, text))
         if answer is None:
             raise HTTPException(404, f"plugin {plugin_id!r} serves no routes")
-        headers = {k: str(v) for k, v in (answer.get("headers") or {}).items() if k.lower() in PLUGIN_RESPONSE_HEADERS}
+        if fault := plugin_answer_fault(answer):
+            app.state.engine.plugin_failed(plugin_id, fault)
+            raise HTTPException(502, f"plugin {plugin_id!r} stopped: {fault}")
+        headers = {k: v for k, v in (answer.get("headers") or {}).items() if k.lower() in PLUGIN_RESPONSE_HEADERS}
         return Response(
             str(answer.get("body", "")),
-            status_code=int(answer.get("status", 200)),
+            status_code=answer.get("status", 200),
             media_type=str(answer.get("type", "text/plain")),
             headers={**headers, "Content-Security-Policy": PLUGIN_PAGE_CSP, "X-Content-Type-Options": "nosniff"},
         )
@@ -445,7 +473,7 @@ def create_app() -> FastAPI:
 
         async def pump() -> None:
             while True:
-                await websocket.send_text(json.dumps(await queue.get()))
+                await websocket.send_text(encode_event(await queue.get()))
 
         async def receive() -> None:
             slots = asyncio.Semaphore(SOCKET_COMMANDS_IN_FLIGHT)
@@ -574,7 +602,7 @@ def main() -> None:
     the root handlers, and without access logs - per-request lines for the
     HLS polling would drown the tail that bug reports attach.
     """
-    uvicorn.run(create_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), log_config=None, access_log=False)
+    uvicorn.run(create_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), log_config=None, access_log=False, ws_max_size=WEBSOCKET_MAX_BYTES)
 
 
 if __name__ == "__main__":

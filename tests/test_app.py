@@ -15,7 +15,7 @@ import pytest
 
 from printguard.server import app as app_module
 from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app, host_trusted
-from printguard.server.events import ConflatedEventQueue
+from printguard.server.events import ConflatedEventQueue, parse_json
 
 
 class AsyncContent(httpx.AsyncByteStream):
@@ -805,3 +805,123 @@ async def test_a_print_whose_file_is_gone_is_a_404_that_names_no_path(tmp_path) 
                 assert gone.status_code == 404 and str(tmp_path) not in gone.text, path
     finally:
         await engine.stop()
+
+
+async def test_the_engine_socket_refuses_a_command_carrying_nan_and_never_sends_one() -> None:
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+
+    engine = Engine(FakePlatform())
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    try:
+        async with Tab(app) as tab:
+            tab.send(text='{"cmd": "settings.update", "patch": {"mqtt": {"keepalive": NaN}}}')
+            await tab.until("error")
+        assert "keepalive" not in (engine.settings.get("mqtt") or {})
+        for message in tab._sent:
+            parse_json(message.get("text") or "{}")
+    finally:
+        await engine.stop()
+
+
+def test_an_event_holding_nan_cannot_be_written_to_a_dashboard() -> None:
+    from printguard.server.events import encode_event
+
+    assert encode_event({"event": "state", "n": 1.5}) == '{"event": "state", "n": 1.5}'
+    with pytest.raises(ValueError):
+        encode_event({"event": "state", "settings": {"mqtt": {"keepalive": float("nan")}}})
+
+
+@pytest.mark.parametrize("origin", ["http://test:abc", "http://test:99999", "http://[::1"])
+async def test_an_origin_that_cannot_be_read_is_refused_not_answered_with_a_crash(monkeypatch, origin: str) -> None:
+    async with named_hub(monkeypatch) as (app, client, _told):
+        headers = {"host": "test", "origin": origin}
+        assert (await client.post("/api/prints?filename=a.stl", content=b"solid", headers=headers)).status_code == 403
+        assert (await client.post("/api/prints/inspect?ext=gcode", content=b"G28", headers=headers)).status_code == 403
+        assert (await client.get("/hls/camera-one/index.m3u8", headers=headers)).status_code == 403
+        assert await handshake_answer(app, "/api/ws", headers) == "websocket.close"
+        assert await handshake_answer(app, "/api/publish/cam", headers) == "websocket.close"
+
+
+@pytest.mark.parametrize("host", ["localhost.", "localhost.:8000", "printguard.local.", "192.168.1.20.:8000", "hub.example.com."])
+def test_a_host_written_with_a_trailing_dot_is_the_same_host(host: str) -> None:
+    assert host_trusted(host, {"hub.example.com"})
+
+
+def test_a_trailing_dot_does_not_make_a_public_name_trusted() -> None:
+    assert not host_trusted("evil.example.", {"hub.example.com"})
+
+
+async def test_an_origin_entry_with_a_trailing_dot_still_names_the_hub(monkeypatch) -> None:
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", "https://hub.example.com.")
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/api/health", headers={"host": "hub.example.com"})).status_code == 200
+        assert (await client.get("/api/health", headers={"host": "hub.example.com."})).status_code == 200
+        upload = await client.post("/api/prints?filename=a.stl", content=b"solid", headers={"host": "printguard:8000", "origin": "https://hub.example.com"})
+        assert upload.status_code == 400, "the origin was refused, where the file should have been"
+
+
+def test_the_hub_takes_a_websocket_message_big_enough_for_a_plugin_zip(monkeypatch) -> None:
+    """A 12 MiB zip travels as base64 in one frame, which uvicorn's own 16 MiB limit already closes."""
+    served: dict = {}
+    monkeypatch.setattr(app_module.uvicorn, "run", lambda app, **options: served.update(options))
+    app_module.main()
+
+    assert served["ws_max_size"] == app_module.WEBSOCKET_MAX_BYTES
+    assert app_module.WEBSOCKET_MAX_BYTES > 12 * 1024 * 1024 * 4 // 3
+
+
+def test_the_desktop_app_serves_the_same_websocket_limit(monkeypatch) -> None:
+    pytest.importorskip("pystray")
+    pytest.importorskip("webview")
+    from printguard.server import desktop
+
+    configs: list[dict] = []
+    monkeypatch.setattr(desktop.uvicorn, "Config", lambda app, **options: configs.append(options))
+    monkeypatch.setattr(desktop.uvicorn, "Server", lambda config: SimpleNamespace())
+    desktop._Server(8000)
+
+    assert configs[0]["ws_max_size"] == app_module.WEBSOCKET_MAX_BYTES
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"status": "abc"},
+        {"status": "201"},
+        {"status": True},
+        {"status": 99},
+        {"status": 600},
+        {"status": 200.5},
+        {"status": None},
+        {"headers": "set-cookie: a=1"},
+        {"headers": ["set-cookie"]},
+        {"headers": {"set-cookie": 1}},
+    ],
+)
+async def test_a_plugin_route_answering_with_a_bad_status_or_headers_is_that_plugin_failing(answer: dict) -> None:
+    failed: list[tuple[str, str]] = []
+    app = app_with(StubRuntime(answer={"body": "x", **answer}))
+    app.state.engine.plugin_failed = lambda plugin_id, reason: failed.append((plugin_id, reason))
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/plugins/accounts/login")
+
+    assert response.status_code == 502 and "accounts" in response.text
+    assert [plugin_id for plugin_id, _ in failed] == ["accounts"] and failed[0][1]
+
+
+async def test_a_plugin_route_answering_without_a_status_or_headers_is_served() -> None:
+    failed: list[str] = []
+    app = app_with(StubRuntime(answer={"body": "x", "headers": None}))
+    app.state.engine.plugin_failed = lambda plugin_id, reason: failed.append(plugin_id)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/plugins/accounts/login")
+
+    assert response.status_code == 200 and not failed
