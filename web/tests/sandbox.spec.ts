@@ -619,6 +619,41 @@ test("a sound plays for a plugin granted it", async ({ page }) => {
   expect(await page.evaluate(() => (window as any).__tones)).toBeGreaterThan(0);
 });
 
+test("a sound unlocks on the touch that iOS counts, not on the first touch that it does not", async ({ page }) => {
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__resumes = 0;
+    win.__unlocked = false;
+    win.AudioContext = class {
+      state = "suspended";
+      currentTime = 0;
+      destination = {};
+      resume() {
+        win.__resumes += 1;
+        this.state = win.__unlocked ? "running" : "suspended";
+        return Promise.resolve();
+      }
+      createGain() {
+        return { gain: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (node: any) => node };
+      }
+      createOscillator() {
+        return { type: "", frequency: { setValueAtTime() {} }, connect: (node: any) => node, start() {}, stop() {} };
+      }
+    };
+  });
+  await dashboardWithPlugin(page, NOISY, ["sound"]);
+  await expect(page.getByText("drawn")).toBeVisible();
+  const gesture = (type: string) => page.evaluate((type) => (window.dispatchEvent(new Event(type)), (window as any).__resumes), type);
+
+  const beforeTouch = await gesture("pointerdown");
+  await page.evaluate(() => ((window as any).__unlocked = true));
+  const afterTouchEnd = await gesture("touchend");
+  const afterLater = await gesture("click");
+
+  expect(afterTouchEnd).toBeGreaterThan(beforeTouch);
+  expect(afterLater).toBe(afterTouchEnd);
+});
+
 test("a sound stays quiet for a plugin that was not granted it", async ({ page }) => {
   await silentAudio(page);
   await dashboardWithPlugin(page, NOISY, ["state:read"]);
