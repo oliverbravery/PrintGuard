@@ -372,3 +372,52 @@ async def test_a_bridge_stops_when_the_broker_has_already_gone(monkeypatch: pyte
         await asyncio.wait_for(bridge.stop(), 2)
     finally:
         await engine.stop()
+
+
+def _warnings(engine: Engine) -> list[tuple[str, bool]]:
+    return [(event["message"], event["recovered"]) for event in engine.recent_events() if event["event"] == "warning"]
+
+
+async def test_a_broker_that_takes_the_connection_but_refuses_the_subscription_warns_once(monkeypatch) -> None:
+    """Each attempt connected, cleared the outage and said reconnected, then failed and said unavailable again."""
+    broker, engine, bridge = await _bridged(monkeypatch, {"enabled": True, "host": "broker"})
+
+    async def refuse(*_: Any, **__: Any) -> None:
+        raise mqtt.aiomqtt.MqttError("Could not subscribe")
+
+    attempts = 0
+
+    def connect(**options: Any) -> FakeBroker:
+        nonlocal attempts
+        attempts += 1
+        return broker.client(**options)
+
+    monkeypatch.setattr(mqtt.aiomqtt, "Client", connect)
+    monkeypatch.setattr(broker, "subscribe", refuse)
+    try:
+        await _until(lambda: attempts > 5)
+        warnings = _warnings(engine)
+    finally:
+        await bridge.stop()
+        await engine.stop()
+
+    assert warnings == [("Home Assistant MQTT unavailable: Could not subscribe", False)]
+
+
+@pytest.mark.parametrize("setting", ["base_topic", "discovery_prefix"])
+@pytest.mark.parametrize("topic", ["print+guard", "a/#"])
+async def test_a_topic_with_a_wildcard_is_a_bad_setting_reported_once_and_never_connected(monkeypatch, setting: str, topic: str) -> None:
+    config: dict[str, Any] = {"enabled": True, "host": "broker", setting: topic}
+    broker, engine, bridge = await _bridged(monkeypatch, config)
+    try:
+        await _until(lambda: _warnings(engine))
+        await asyncio.sleep(0.1)
+        warnings = _warnings(engine)
+        assert warnings == [(f"Home Assistant MQTT unavailable: MQTT {setting} cannot contain + or #", False)]
+        assert not broker.identifiers, "the bridge connected with a topic the broker client refuses to publish to"
+
+        config[setting] = "printguard"
+        await _until(lambda: ONLINE in broker.published)
+    finally:
+        await bridge.stop()
+        await engine.stop()
