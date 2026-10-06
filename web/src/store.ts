@@ -247,6 +247,8 @@ function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: (wa
   };
 }
 
+const RECONNECTING = "The hub is reconnecting, so that wasn't sent. Try again in a moment.";
+
 export const useStore = create<PgStore>((set, get) => {
   let droppedWhileBooting = 0;
 
@@ -337,6 +339,9 @@ export const useStore = create<PgStore>((set, get) => {
     codeRequests.clear();
     for (const path of publishRequests.values()) registeredPublishers.add(path);
     publishRequests.clear();
+    configWrites.clear();
+    for (const tab of signInTabs.values()) tab?.close();
+    signInTabs.clear();
     set((s) => ({
       pending: {},
       discovering: false,
@@ -352,9 +357,16 @@ export const useStore = create<PgStore>((set, get) => {
       clearTimeout(updateTimers[key]);
       flushKey(key);
     }
+    for (const id of writingConfigs.keys()) writeConfig(id);
   };
   const savedConfigs = new Map<string, string>();
   const writingConfigs = new Map<string, string>();
+  const configWrites = new Map<string, string>();
+  const codeDigests = new Map<string, string>();
+
+  const writeConfig = (id: string) => {
+    configWrites.set(sendSilent({ cmd: "plugin.update", id, patch: { config: JSON.parse(writingConfigs.get(id)!) } }), id);
+  };
 
   const panels = new Map<string, PluginPanelHost>();
 
@@ -375,8 +387,10 @@ export const useStore = create<PgStore>((set, get) => {
     for (const effect of effects) {
       if (effect.kind === "command" && effect.cmd) {
         const name = String(effect.cmd.cmd);
-        if (commandAllowed(name, plugin.granted, engine.plugin_permissions)) sendSilent(effect.cmd);
-        else get().toast("error", `${plugin.manifest.name} tried to run ${name} without permission`);
+        if (!commandAllowed(name, plugin.granted, engine.plugin_permissions)) {
+          get().toast("error", `${plugin.manifest.name} tried to run ${name} without permission`);
+        } else if (get().reconnecting) get().toast("error", RECONNECTING);
+        else sendSilent(effect.cmd);
       } else if (effect.kind === "http" && effect.request) {
         sendSilent(outboundRequest(id, effect.request));
       } else if (effect.kind === "socket" && effect.request) {
@@ -411,7 +425,7 @@ export const useStore = create<PgStore>((set, get) => {
       if (savedConfigs.get(id) === serialised) return;
       savedConfigs.set(id, serialised);
       writingConfigs.set(id, serialised);
-      sendSilent({ cmd: "plugin.update", id, patch: { config } });
+      writeConfig(id);
     },
     onFailure: (id: string, failure: string) => {
       dropHosts((hosted) => hosted === id);
@@ -428,7 +442,34 @@ export const useStore = create<PgStore>((set, get) => {
     }
   };
 
+  const forgetPlugin = (id: string, keepPage: boolean) => {
+    dropHosts((hosted) => hosted === id);
+    panels.get(id)?.close();
+    panels.delete(id);
+    for (const url of Object.values(get().pluginAssets[id] ?? {})) URL.revokeObjectURL(url);
+    for (const [reqId, requested] of codeRequests) if (requested === id) codeRequests.delete(reqId);
+    codeDigests.delete(id);
+    const drop = <T>(record: Record<string, T>) => withoutKeys(record, [id]);
+    set((s) => ({
+      pluginPanels: drop(s.pluginPanels),
+      pluginFindings: drop(s.pluginFindings),
+      pluginAssets: drop(s.pluginAssets),
+      pluginTrees: drop(s.pluginTrees),
+      pluginViews: drop(s.pluginViews),
+      pluginPages: keepPage ? s.pluginPages : drop(s.pluginPages),
+    }));
+  };
+
   const syncPlugins = (engine: EngineState) => {
+    const held = new Set([...hosts.keys(), ...panels.keys(), ...codeDigests.keys(), ...Object.keys(get().pluginPages), ...Object.keys(get().pluginAssets)]);
+    for (const id of held) {
+      const plugin = engine.plugins.find((p) => p.id === id);
+      if (!plugin) {
+        forgetPlugin(id, false);
+        writingConfigs.delete(id);
+        savedConfigs.delete(id);
+      } else if (codeDigests.has(id) && codeDigests.get(id) !== JSON.stringify(plugin.digests)) forgetPlugin(id, true);
+    }
     const wanted = new Set(engine.plugins.filter((p) => p.enabled && p.files.includes("plugin.js")).map((p) => p.id));
     dropHosts((id) => !wanted.has(id));
     if (get().background && !engine.plugins.some((p) => p.id === get().background?.id && p.enabled)) showBackground(null);
@@ -529,6 +570,7 @@ export const useStore = create<PgStore>((set, get) => {
       case "state": {
         clearPending(event.req_id);
         publishRequests.delete(event.req_id);
+        configWrites.delete(event.req_id);
         const server = event as EngineState;
         if (get().engine && get().engine!.version !== server.version) {
           location.reload();
@@ -579,6 +621,7 @@ export const useStore = create<PgStore>((set, get) => {
       case "plugin_code": {
         if (codeRequests.get(event.req_id) !== event.id) break;
         codeRequests.delete(event.req_id);
+        codeDigests.set(event.id, JSON.stringify(get().engine?.plugins.find((p) => p.id === event.id)?.digests));
         void readPlugin(event.id, event.sources);
         startPlugin(event.id, event.sources, event.assets ?? {});
         break;
@@ -679,6 +722,8 @@ export const useStore = create<PgStore>((set, get) => {
         }
         signInTabs.get(event.req_id)?.close();
         signInTabs.delete(event.req_id);
+        writingConfigs.delete(configWrites.get(event.req_id) ?? "");
+        configWrites.delete(event.req_id);
         const optimistic = event.req_id != null ? settle(get().optimistic, event.req_id) : get().optimistic;
         const engine = lastSnapshot ? applyOptimistic(lastSnapshot, optimistic) : get().engine;
         if (engine) applyTheme(engine.settings?.theme ?? "system", engine.settings?.themes ?? [], engine.settings?.glass);
@@ -817,7 +862,7 @@ export const useStore = create<PgStore>((set, get) => {
         if (removed && typeof cmd.id === "string") dropUpdate(`${removed}:${cmd.id}`);
         return req_id;
       }
-      get().toast("error", "The hub is reconnecting, so that wasn't sent. Try again in a moment.");
+      get().toast("error", RECONNECTING);
       return null;
     },
 

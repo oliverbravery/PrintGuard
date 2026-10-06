@@ -113,7 +113,7 @@ export function reachesLocal(pattern: string): boolean {
   return rule !== null && (rule.host === "*" || isLocalAddress(rule.host.replace(/^\*\./, "any.")));
 }
 
-export function webUrl(raw: string): string | null {
+function webUrl(raw: string): string | null {
   try {
     const url = new URL(String(raw));
     return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;

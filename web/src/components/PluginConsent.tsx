@@ -45,7 +45,7 @@ export function PermissionList({ plugin, permissions }: { plugin: { manifest: Pl
                     ))}
                 </ul>
               )}
-              {permission.id === "oauth" && (
+              {permission.id === "oauth" && plugin.manifest.oauth.authorize_url && (
                 <>
                   <span className="block text-text-2">{plugin.manifest.oauth.label}</span>
                   <SignInAddresses oauth={plugin.manifest.oauth} />
@@ -88,7 +88,7 @@ function Findings({ plugin }: { plugin: PluginRecord }) {
 
   useEffect(() => {
     checkPlugin(plugin.id);
-  }, [plugin.id]);
+  }, [plugin.id, findings === undefined]);
 
   if (findings === undefined) return <span className="block text-[0.7rem] text-text-2">Reading its code…</span>;
   if (findings.length === 0) {

@@ -85,7 +85,7 @@
       "name": "Spotify",
       "description": "Puts the current cover behind the dashboard, with the track and the transport in a panel.",
       "author": "oliverbravery",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "icon": "icon.png",
       "media": [
         "shots/dashboard.jpg"
@@ -101,10 +101,10 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/spotify",
-      "ref": "ab94738f9ac0ce9ae14aef781602728337361652",
+      "ref": "97ca80ac09c7e746a87cd3ed9db747bdcd505bd7",
       "digests": {
-        "plugin.json": "6531ffe400068aca00c600db15dbb2c31d5c88dd04f5f3452380af582cebe61f",
-        "panel.html": "4bb60dbc85dd9000161aeffbb92e639c925ed7b017eca8c53628d59d8cae6ca5"
+        "plugin.json": "d6c5d54ebcc26744b8cea68d72aee67a925a24cb2186874a89f80bf3cdd5d3e2",
+        "panel.html": "d052ea07869b4a076ab3902df42449c82dd6fa9fe10325c651fe05005bca2256"
       }
     }
   ]

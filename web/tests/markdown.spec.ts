@@ -84,6 +84,31 @@ test("a README's images and links resolve against its repository", async ({ page
   expect(html).toContain('<a href="https://example.com/" target="_blank" rel="noreferrer">site</a>');
 });
 
+test("a plugin README draws pictures from its own repository and from nowhere else", async ({ page }) => {
+  const { html } = await rendered(
+    page,
+    [
+      "![own](docs/shot.png) ![up](../shared.png) ![inline](data:image/gif;base64,R0lGODlhAQABAAAAACw=)",
+      "![tracker](https://tracker.example/pixel.gif) ![probe](http://192.168.1.1/logo.png) ![scheme-less](//tracker.example/p.gif)",
+      "![other repo](https://raw.githubusercontent.com/x/y/abc/shot.png)",
+    ].join("\n\n"),
+    { base: README, imagePrefixes: ["https://raw.githubusercontent.com/o/r/abc/"] },
+  );
+  expect([...html.matchAll(/src="([^"]*)"/g)].map((match) => match[1])).toEqual([
+    "https://raw.githubusercontent.com/o/r/abc/plugin/docs/shot.png",
+    "https://raw.githubusercontent.com/o/r/abc/shared.png",
+    "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
+  ]);
+});
+
+test("an imported plugin README draws only the pictures it carries", async ({ page }) => {
+  const { html } = await rendered(page, "![carried](shot.png) ![away](https://tracker.example/p.gif) ![hub](/api/v1/state)", {
+    sources: { "shot.png": "data:image/png;base64,AAAA" },
+    imagePrefixes: [],
+  });
+  expect([...html.matchAll(/src="([^"]*)"/g)].map((match) => match[1])).toEqual(["data:image/png;base64,AAAA"]);
+});
+
 test("release notes open their relative links on GitHub at that release", async ({ page }) => {
   const release = {
     version: "2.5.1",

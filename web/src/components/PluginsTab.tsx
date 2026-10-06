@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fromBase64, renderMarkdown } from "../markdown";
-import { pluginFile, runsHere } from "../plugins";
+import { pluginFile, repositoryFiles, runsHere } from "../plugins";
 import { useStore } from "../store";
 import type { CatalogueEntry, PluginManifest, PluginRecord } from "../types";
 import { ConsentDialog, PermissionList } from "./PluginConsent";
@@ -81,10 +81,7 @@ function InstallButton({ entry, installed }: { entry: CatalogueEntry; installed:
     <button
       className="btn btn-primary shrink-0"
       disabled={installed || !here || isPending("plugin.install")}
-      onClick={(event) => {
-        event.stopPropagation();
-        installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref });
-      }}
+      onClick={() => installPlugin({ kind: "github", repo: entry.repo, path: entry.path ?? "", ref: entry.ref })}
     >
       {installed ? "Installed" : "Install"}
     </button>
@@ -97,7 +94,7 @@ function EnableToggle({ plugin }: { plugin: PluginRecord }) {
   const [consenting, setConsenting] = useState(false);
   const accepted = plugin.manifest.permissions.every((p) => plugin.granted.includes(p));
   return (
-    <span onClick={(event) => event.stopPropagation()}>
+    <>
       <Toggle
         label={`Enable ${plugin.manifest.name}`}
         hideLabel
@@ -109,7 +106,7 @@ function EnableToggle({ plugin }: { plugin: PluginRecord }) {
       {consenting && (
         <ConsentDialog plugin={plugin} permissions={permissions} onClose={() => setConsenting(false)} />
       )}
-    </span>
+    </>
   );
 }
 
@@ -147,22 +144,18 @@ function PluginCard({ item, onOpen }: { item: StoreItem; onOpen: () => void }) {
   }, [plugin?.id]);
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      className="flex cursor-pointer items-center gap-3 rounded border border-line-0 bg-ink-1 p-3 text-left transition-colors hover:border-accent"
-      onClick={onOpen}
-      onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && (event.preventDefault(), onOpen())}
-    >
+    <div className="relative flex items-center gap-3 rounded border border-line-0 bg-ink-1 p-3 text-left transition-colors hover:border-accent has-[:focus-visible]:border-accent">
       <PluginIcon url={plugin ? installedIcon(plugin, page) : pluginFile(entry!, entry!.icon)} name={name} size={44} />
       <div className="min-w-0 flex-1 space-y-0.5">
-        <span className="block truncate text-xs text-text-0">
-          {name}
-          {attention && <span className="chip chip-bad ml-2">needs attention</span>}
+        <span className="flex items-center gap-2 text-xs text-text-0">
+          <button className="min-w-0 cursor-pointer truncate text-left after:absolute after:inset-0" onClick={onOpen}>
+            {name}
+          </button>
+          {attention && <span className="chip chip-bad">needs attention</span>}
         </span>
         <span className="clamp-2 block text-[0.7rem] leading-snug text-text-2">{description}</span>
       </div>
-      {plugin ? <EnableToggle plugin={plugin} /> : <InstallButton entry={entry!} installed={false} />}
+      <span className="relative">{plugin ? <EnableToggle plugin={plugin} /> : <InstallButton entry={entry!} installed={false} />}</span>
     </div>
   );
 }
@@ -191,7 +184,7 @@ function PluginPage({
   platforms: string[] | undefined;
   action?: ReactNode;
   media: { src: string; href?: string }[];
-  readme: { text: string; base?: string; skip?: string[]; sources?: Record<string, string> } | null | undefined;
+  readme: { text: string; base?: string; skip?: string[]; sources?: Record<string, string>; imagePrefixes: string[] } | null | undefined;
   fallback: string;
   manifest: PluginManifest;
   origin: string;
@@ -251,6 +244,7 @@ function PluginPage({
               dropTitle: true,
               skip: readme.skip ?? [],
               sources: readme.sources ?? {},
+              imagePrefixes: readme.imagePrefixes,
             }),
           }}
         />
@@ -309,11 +303,11 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
       ? undefined
       : fetched === null
         ? null
-        : { text: fetched, base: pluginFile(plugin.source, "README.md") ?? undefined, skip: manifest.media ?? [] }
+        : { text: fetched, base: pluginFile(plugin.source, "README.md") ?? undefined, skip: manifest.media ?? [], imagePrefixes: [repositoryFiles({ repo: plugin.source.repo!, ref: plugin.source.ref! })] }
     : page === undefined
       ? undefined
       : stored
-        ? { text: fromBase64(stored), skip: manifest.media ?? [], sources }
+        ? { text: fromBase64(stored), skip: manifest.media ?? [], sources, imagePrefixes: [] }
         : null;
 
   return (
@@ -424,7 +418,7 @@ function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; inst
       readme={
         readme == null
           ? readme
-          : { text: readme, base: pluginFile(entry, "README.md") ?? undefined, skip: entry.media ?? [] }
+          : { text: readme, base: pluginFile(entry, "README.md") ?? undefined, skip: entry.media ?? [], imagePrefixes: [repositoryFiles(entry)] }
       }
       fallback={entry.description ?? ""}
       manifest={manifest}

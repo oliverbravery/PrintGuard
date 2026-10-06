@@ -135,7 +135,7 @@ A plugin needs at least one of the three source files.
 | `tick_s` | How often its worker runs anyway, 5 to 86400 seconds. Under 5 switches the timer off |
 
 A permission without a reason, `urls` without `net`, a [local address](#addresses) (a wildcard
-over a local suffix included) without `net:local`, `oauth` without the `oauth` permission, or `provides` and `consumes` without their
+over a local suffix included) without `net:local`, `oauth` without the `oauth` permission, the `oauth` permission without `oauth`, or `provides` and `consumes` without their
 link permission each refuse the install.
 
 ### Reasons
@@ -155,7 +155,7 @@ The README is shown as Markdown and little else. Headings, paragraphs, lists, li
 code, tables and blockquotes are kept, with `align` on a table cell or paragraph and `width` and
 `height` on an image. Any other HTML is dropped and its text kept, so forms, `<details>`, video,
 inline SVG, `style`, `class` and task-list checkboxes do not render. In a repository install,
-relative links and images resolve against the README's own folder at the pinned commit. A zip's
+relative links and images resolve against the README's own folder at the pinned commit, and an image from outside the repository does not load. A zip's
 README has no address to resolve against, so its relative links go nowhere and only an image
 the manifest lists in `media` shows, in the gallery.
 
@@ -314,7 +314,7 @@ It runs in an opaque origin with `connect-src 'none'`, so `pg` is the only way o
 muted loop included.
 
 A `<script>` runs wherever it sits in the markup. An inline handler such as `onclick="..."` is
-refused, so use `addEventListener`. The frame cannot leave the page either: a link or a
+refused, so use `addEventListener`. A `<script src>` is refused too, as is `import()` of an address, so put the code inline. The frame cannot leave the page either: a link or a
 `location` change to another address stops the plugin with "sandbox navigated away".
 
 | On `pg` | |

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'sha256-EyaOxOOPXp1N3GLJbxOgQmrEwSkZamkPIseKxXxOeS4=' 'strict-dynamic' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'sha256-dtuQ7yKK0S3qxH4Q9/r9EdMvr7gUG23Ad1izvxcYJzo=' blob: 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>PrintGuard plugin panel</title>
     <style>
@@ -102,10 +102,24 @@
           document.head.appendChild(policy);
         }
 
+        const SCRIPT_TYPES = ["", "module", "text/javascript", "application/javascript"];
+
         function paint(html) {
           const range = document.createRange();
           range.selectNodeContents(document.body);
-          document.body.append(range.createContextualFragment(html));
+          const fragment = range.createContextualFragment(html);
+          const loaded = [];
+          for (const script of fragment.querySelectorAll("script")) {
+            if (script.hasAttribute("src") || !SCRIPT_TYPES.includes(script.type)) continue;
+            const blobScript = document.createElement("script");
+            blobScript.type = script.type;
+            blobScript.async = false;
+            blobScript.src = URL.createObjectURL(new Blob([script.textContent], { type: "text/javascript" }));
+            loaded.push(new Promise((resolve) => (blobScript.onload = blobScript.onerror = resolve)));
+            script.replaceWith(blobScript);
+          }
+          document.body.append(fragment);
+          return Promise.all(loaded);
         }
 
         let themed = null;
@@ -131,7 +145,7 @@
           }).observe(document.documentElement);
         }
 
-        function receive(message) {
+        async function receive(message) {
           const data = message.data || {};
           try {
             if (data.t === "init") {
@@ -141,7 +155,7 @@
               applyTheme(data.theme);
               if (!data.sound) silenceMedia();
               for (const [name, blob] of Object.entries(data.assets || {})) assets.set(name, URL.createObjectURL(blob));
-              paint(String(data.html || ""));
+              await paint(String(data.html || ""));
               reportHeight();
               listeners.get("ready")?.(pg.state);
             } else if (data.t === "state") {
@@ -160,7 +174,8 @@
         addEventListener("message", (handover) => {
           if (handover.source !== parent || port || !handover.ports[0]) return;
           port = handover.ports[0];
-          port.onmessage = receive;
+          let queue = Promise.resolve();
+          port.onmessage = (message) => (queue = queue.then(() => receive(message)));
         });
       })();
     </script>
@@ -172,13 +187,15 @@
       it, so the policy above is what holds it: it may paint and script itself,
       it may show the pictures and video it shipped, and it can reach nothing.
 
-      The script above is allowed by its hash, and 'strict-dynamic' lets it add
-      the plugin's own scripts as elements. Nothing else inline runs, so an
-      onclick attribute is refused, and a frame the plugin makes for itself
-      inherits this policy and can run only this same script. That is what makes
-      deleting a global stick: there is no fresh window to take it back from.
-      Change a character of the script and the hash in the policy has to change
-      with it, which the browser console prints.
+      The script above is allowed by its hash. The plugin's own inline scripts
+      are turned into blobs as it is drawn, which the policy allows, so no
+      script can load from an address, so a remote <script src>, a script element
+      the plugin makes for one and import() of one are all refused.
+      Nothing else inline runs, so an onclick attribute is refused, and a frame
+      the plugin makes for itself inherits this policy and can run only this
+      same script. That is what makes deleting a global stick: there is no fresh
+      window to take it back from. Change a character of the script and the hash
+      in the policy has to change with it, which the browser console prints.
 
       WebRTC is the reason. No policy directive governs it in any engine yet,
       so removing its constructors is the only thing that closes it.

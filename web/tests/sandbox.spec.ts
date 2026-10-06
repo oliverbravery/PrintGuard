@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
 
 const PROBE = `
@@ -21,9 +23,10 @@ async function runInFrame(
   messages: Record<string, unknown>[],
   until: string,
   pause = 0,
+  quiet = 0,
 ) {
   return page.evaluate(
-    ([url, messages, until, pause]) =>
+    ([url, messages, until, pause, quiet]) =>
       new Promise<any>((resolve, reject) => {
         const frame = document.createElement("iframe");
         const { port1, port2 } = new MessageChannel();
@@ -39,13 +42,20 @@ async function runInFrame(
           },
           { once: true },
         );
+        const effects: unknown[] = [];
+        let settle: ReturnType<typeof setTimeout>;
         port1.onmessage = (event) => {
-          if (event.data.t === "failed" || event.data.t === until) resolve(event.data);
+          if (event.data.t === "failed" || (event.data.t === until && !quiet)) resolve(event.data);
+          else if (event.data.t === until) {
+            effects.push(...event.data.effects);
+            clearTimeout(settle);
+            settle = setTimeout(() => resolve({ t: until, effects }), quiet);
+          }
         };
         document.body.appendChild(frame);
         setTimeout(() => reject(new Error("sandbox never answered")), 5000);
       }),
-    [url, messages, until, pause] as const,
+    [url, messages, until, pause, quiet] as const,
   );
 }
 
@@ -53,7 +63,7 @@ const runInSandbox = (page: import("@playwright/test").Page, code: string, state
   runInFrame(page, "plugin-sandbox.html", [{ id: 1, t: "init", code, store: {} }, { id: 2, t: "state", state }], "result", pause);
 
 const runInPanel = (page: import("@playwright/test").Page, html: string, sound = false) =>
-  runInFrame(page, "plugin-panel.html", [{ t: "init", html, assets: {}, state: {}, theme: {}, store: {}, sound }], "effects");
+  runInFrame(page, "plugin-panel.html", [{ t: "init", html, assets: {}, state: {}, theme: {}, store: {}, sound }], "effects", 0, 200);
 
 test("a plugin runs in an opaque origin with no way out", async ({ page }) => {
   await page.goto("/");
@@ -200,6 +210,35 @@ test("a panel's script runs inside an element", async ({ page }) => {
   const result = await runInPanel(page, `<div><p>drawn</p><script>pg.log("nested")</script></div><script>pg.log("after")</script>`);
 
   expect(result.effects.map((effect: any) => effect.text)).toEqual(["nested", "after"]);
+});
+
+test("a panel can load no script from an address, however it asks", async ({ page }) => {
+  const asked: string[] = [];
+  const collector = createServer((request, response) => {
+    asked.push(request.url ?? "");
+    response.writeHead(200, { "content-type": "text/javascript", "access-control-allow-origin": "*" });
+    response.end(`pg.log("remote ran")`);
+  });
+  await new Promise<void>((resolve) => collector.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(collector.address() as AddressInfo).port}`;
+
+  await page.goto("/");
+  const result = await runInPanel(
+    page,
+    `<script src="${origin}/parsed.js"></script>
+<script>
+  const made = document.createElement("script");
+  made.src = "${origin}/made.js";
+  document.head.appendChild(made);
+  import("${origin}/imported.js").catch(() => {});
+  setTimeout(() => pg.log("done"), 800);
+</script>`,
+  );
+  await page.waitForTimeout(500);
+  collector.close();
+
+  expect(result.effects.map((effect: any) => effect.text)).toEqual(["done"]);
+  expect(asked).toEqual([]);
 });
 
 const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
@@ -376,11 +415,20 @@ test("the Spotify panel asks Spotify nothing until it is signed in, and stops wh
   expect(await spotifyRequests(page)).toBe(asked);
 });
 
-test("a rejected Spotify token asks to reconnect rather than for something to play", async ({ page }) => {
+test("a rejected Spotify token stops the polling and asks to disconnect and connect again", async ({ page }) => {
   const panel = await spotifyPanel(page, ["oauth_client_id", "oauth"]);
   await page.evaluate(() => (window as any).__pgEvent({ event: "http", id: "pip", tag: "player", status: 401, body: null }));
 
-  await expect(panel.getByText("Reconnect Spotify in the Plugins tab in Settings.")).toBeVisible();
+  await expect(panel.getByText("Sign-in rejected")).toBeVisible();
+  await expect(panel.getByText("Disconnect, then Connect again in Settings.")).toBeVisible();
+  const asked = await spotifyRequests(page);
+  await page.waitForTimeout(1500);
+  expect(await spotifyRequests(page)).toBe(asked);
+
+  await holdSecrets(page, ["oauth_client_id"]);
+  await expect(panel.getByText("Not connected")).toBeVisible();
+  await holdSecrets(page, ["oauth_client_id", "oauth"]);
+  await expect.poll(() => spotifyRequests(page)).toBeGreaterThan(asked);
 });
 
 test("the consent dialog names where a plugin signs in and where it gets its tokens", async ({ page }) => {
@@ -578,6 +626,41 @@ test("a sound plays for a plugin granted it", async ({ page }) => {
 
   await expect(page.getByText("drawn")).toBeVisible();
   expect(await page.evaluate(() => (window as any).__tones)).toBeGreaterThan(0);
+});
+
+test("a sound unlocks on the touch that iOS counts, not on the first touch that it does not", async ({ page }) => {
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__resumes = 0;
+    win.__unlocked = false;
+    win.AudioContext = class {
+      state = "suspended";
+      currentTime = 0;
+      destination = {};
+      resume() {
+        win.__resumes += 1;
+        this.state = win.__unlocked ? "running" : "suspended";
+        return Promise.resolve();
+      }
+      createGain() {
+        return { gain: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (node: any) => node };
+      }
+      createOscillator() {
+        return { type: "", frequency: { setValueAtTime() {} }, connect: (node: any) => node, start() {}, stop() {} };
+      }
+    };
+  });
+  await dashboardWithPlugin(page, NOISY, ["sound"]);
+  await expect(page.getByText("drawn")).toBeVisible();
+  const gesture = (type: string) => page.evaluate((type) => (window.dispatchEvent(new Event(type)), (window as any).__resumes), type);
+
+  const beforeTouch = await gesture("pointerdown");
+  await page.evaluate(() => ((window as any).__unlocked = true));
+  const afterTouchEnd = await gesture("touchend");
+  const afterLater = await gesture("click");
+
+  expect(afterTouchEnd).toBeGreaterThan(beforeTouch);
+  expect(afterLater).toBe(afterTouchEnd);
 });
 
 test("a sound stays quiet for a plugin that was not granted it", async ({ page }) => {

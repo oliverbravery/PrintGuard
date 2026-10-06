@@ -4,6 +4,7 @@ const MAX_TONES = 24;
 const MAX_MS = 4000;
 const SHAPES = ["sine", "square", "sawtooth", "triangle"];
 const LATE_MS = 1000;
+const GESTURES = ["pointerdown", "pointerup", "touchend", "click", "keydown"];
 
 let context: AudioContext | null = null;
 
@@ -22,7 +23,11 @@ export function play(tones: PluginTone[]): void {
 }
 
 function resumedByGesture(audio: AudioContext): AudioContext {
-  for (const gesture of ["pointerdown", "keydown"]) window.addEventListener(gesture, () => void audio.resume(), { once: true });
+  const resume = () =>
+    void audio.resume().then(() => {
+      if (audio.state === "running") for (const gesture of GESTURES) window.removeEventListener(gesture, resume);
+    });
+  for (const gesture of GESTURES) window.addEventListener(gesture, resume);
   return audio;
 }
 

@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/oliverbravery/PrintGuard/main/plugins/plugin.schema.json",
   "id": "spotify",
   "name": "Spotify",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Puts the current cover behind the dashboard, with the track and the transport in a panel.",
   "author": "oliverbravery",
   "homepage": "https://github.com/oliverbravery/PrintGuard/tree/main/plugins/spotify",
