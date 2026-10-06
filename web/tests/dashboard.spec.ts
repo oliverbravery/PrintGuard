@@ -275,6 +275,29 @@ test("opening the history asks only for the snapshots near the screen", async ({
   await expect.poll(asked).toContain("s89");
 });
 
+test("a failure card at the narrowest phone keeps its time and score inside the card", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await dashboard(page, { engine: engine({ reviews: [review({ frames: 1 })] }), reviewId: "r1" });
+  await emit(page, { event: "review", ...review({ frames: 1 }), frames: [{ id: "a1", ts: 120, score: 0.9, kind: "alert", action: "pause", size: 1 }] });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "No, it failed" }).click();
+
+  const card = (await sheet.locator(".panel").filter({ hasText: "Real failure" }).boundingBox())!;
+  const score = (await sheet.locator(".label", { hasText: "90%" }).boundingBox())!;
+  expect(score.x).toBeGreaterThanOrEqual(card.x);
+  expect(score.x + score.width).toBeLessThanOrEqual(card.x + card.width);
+});
+
+test("sheets and the page keep clear of the right safe area", async ({ page }) => {
+  await dashboard(page);
+  const insets = await page.evaluate(() =>
+    [".app", ".sheet"].map((selector) =>
+      [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules]).some((rule) => rule instanceof CSSStyleRule && rule.selectorText === selector && rule.cssText.includes("safe-area-inset-right")),
+    ),
+  );
+  expect(insets).toEqual([true, true]);
+});
+
 test("review frames whose pictures were lost to a reconnect are asked for again", async ({ page }) => {
   await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
   await emit(page, { event: "review", ...review(), frames: [{ id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 }] });
@@ -862,6 +885,12 @@ test("two printers tagged in quick succession are both sent, without a printer t
   await expect.poll(lastUpdate).toEqual({ printer_ids: ["p1", "p2"] });
 });
 
+test("a printer that cannot print a file is named in the text, not only a hover title", async ({ page }) => {
+  await dashboard(page, library([printFile({ id: "f3", name: "Plate", filename: "plate.3mf", ext: "3mf" })]));
+
+  await expect(page.getByText("MK4, Mini can't print .3mf files.")).toBeVisible();
+});
+
 test("removing or sending one file leaves the other rows' buttons alone", async ({ page }) => {
   await dashboard(page, library([printFile(), printFile({ id: "f2", name: "Vase", uploaded: 0, meta: { time_s: 7190 } })]));
   await expect(page.getByText("2h 0m")).toBeVisible();
@@ -1412,6 +1441,17 @@ test("a print that kept no frames is not offered for review, and a snapshot is o
 test("a tile behind a panel says its feed is paused", async ({ page }) => {
   await dashboard(page, { detailId: "m1" });
   await expect(page.locator("article").getByText("feed paused")).toBeAttached();
+});
+
+test("a camera with no Remove says why in the text", async ({ page }) => {
+  const owned = camera({ id: "c2", name: "Printer cam", printer_id: "p1" });
+  const declared = camera({ id: "c3", name: "Passed in", declared: true });
+  const printers = [{ id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true, device_state: null }];
+  await dashboard(page, { dialog: "cameras", engine: engine({ cameras: [owned, declared], printers }) });
+
+  await expect(page.getByText("Passed in by the deployment, remove its devices entry to remove this camera.")).toBeVisible();
+  await page.getByRole("tab", { name: "Printer cameras" }).click();
+  await expect(page.getByText("Managed by its printer integration, remove the printer to remove this camera.")).toBeVisible();
 });
 
 test("camera and settings controls are named, and toggle buttons say which is selected", async ({ page }) => {
