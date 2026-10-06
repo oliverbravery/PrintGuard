@@ -41,6 +41,13 @@ Open the printer registry, choose the service, fill in the form and press **Test
 before saving. A printer with a starred field left blank is not saved, and the error names the
 field. A key or password the service rejects fails the test with that as the reason, and so does
 an address that answers but not as the service's API does, or a PrusaLink one that redirects.
+
+A saved key, password or access code is never shown again. Its field is empty and reads
+"Saved. Leave blank to keep it". Type in it to replace the saved one, or press **Clear** and
+save to remove it. **Test connection** on a saved printer uses the saved one while the field is
+blank. Changing the printer's address needs the key or password typed again, since a saved one
+is only kept for the address it was saved with.
+
 Then bind
 it to a monitor and choose whether a sustained defect alerts you, pauses the print or cancels it.
 

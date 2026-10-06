@@ -203,7 +203,8 @@ in the test run.
 ## Credentials
 
 A plugin can set a credential and never read one back. Printer passwords, notifier keys and API
-tokens go in and do not come out.
+tokens go in and do not come out. A plugin with `printer:manage` or `settings` can test a saved
+printer or alert channel with its saved key, at the address it was saved with.
 
 Its own credentials work the same way. A plugin that needs a key shows a field for it on its
 page in the Plugins tab, once it's enabled. Paste the value there and PrintGuard holds it and fills it in as the

@@ -224,7 +224,7 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | Check | Why |
 |---|---|
 | No router port-forwards for `8000`, `8554` or `1935` | The hub has no authentication of its own |
-| Only admit people you would hand the printer to | There are no per-user roles, so anyone who authenticates sees every camera and controls every printer. The dashboard's WebSocket also carries the stored credentials that the REST API and MCP server redact |
+| Only admit people you would hand the printer to | There are no per-user roles, so anyone who authenticates sees every camera and controls every printer. They can replace a saved key or password but can't read one back, since [no stored secret leaves the hub](api.md#the-resource-model) |
 | Bind ports to `127.0.0.1` when a proxy on the same host is the only client | Keeps the app unreachable except through the proxy |
 | Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback, and the hub proxies HLS out through `:8000`. The control API only answers the hub's own login, but the HLS muxer takes none |
 | List in `PRINTGUARD_ORIGINS` only the addresses you open the hub at | Every name in it is one a web page may reach the hub under. See [host and origin checking](#host-and-origin-checking) |
