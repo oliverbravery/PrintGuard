@@ -346,16 +346,22 @@ plugin.on("alert", (event, ctx) => {
 plugin.on("tick", (event, ctx) => ctx.log(`${ctx.store.alerts || 0} alerts so far`));
 ```
 
-That needs `alert` in `events` and a `tick_s`.
+That needs `alert` in `events`, a `tick_s` and `state:read`, since an `alert` event only reaches a
+plugin that holds it.
 
 A worker still busy with the last event is skipped, so a slow plugin drops events instead of
 falling behind. One that fails or runs past its limits is disabled and reported, and so is one
 whose answer is not the store and effects PrintGuard asked for, such as a worker that has
 redefined `toJSON` on a built-in prototype.
 
-A worker has `plugin` and the JavaScript built-ins in scope and nothing else. There is no
-`console` or `print`, so log with `ctx.log`. A call ends when your handler returns, so a promise
-or an `import()` never resolves.
+A worker has `plugin`, the JavaScript built-ins and QuickJS's own `atob`, `btoa`, `performance`,
+`navigator` and `queueMicrotask` in scope. There is no `console` or `print`, so log with
+`ctx.log`, and no timers or `fetch`. A call ends when your handler returns, so a promise or a
+`queueMicrotask` callback never runs and an `import()` never resolves.
+
+A worker saves only the keys it added, changed or deleted, over whatever is stored by the time
+it returns. Two writers touching different keys don't undo each other, and on the same key the
+last write wins.
 
 ## The ctx API
 
@@ -427,7 +433,7 @@ manifest's `events` names it. `tick` is the exception. It is the worker's own ti
 | `warning` | A watchdog condition, and its recovery | `monitor_id`, `message`, `recovered` | `state:read` |
 | `device` | A printer's status changed | `printer_id`, `status`, `progress`, `job`, `remaining_s`, `nozzle`, `bed` | `state:read` |
 | `error` | Anything that failed | `message` | `state:read` |
-| `state` | The full snapshot, once a second | Everything your permissions allow | `state:read` |
+| `state` | The full snapshot, once a second. `plugin.js` and `panel.html` also hear the one a command ends with | Everything your permissions allow | `state:read` |
 | `tick` | Your worker's own timer | Nothing | A `tick_s` |
 
 An event with a permission in the last column is dropped for a plugin that does not hold it.
@@ -449,8 +455,9 @@ plugin.on("result", (event, ctx) => {
 });
 ```
 
-That needs `printer:control` and `notify`, and it acts on a single frame. A monitor waits for a
-streak, so this will be twitchier. Count consecutive hits in `ctx.store` to match it.
+That needs `result` in `events`, `state:read`, `printer:control` and `notify`, and it acts on a
+single frame. A monitor waits for a streak, so this will be twitchier. Count consecutive hits in
+`ctx.store` to match it.
 
 ## Nodes
 
