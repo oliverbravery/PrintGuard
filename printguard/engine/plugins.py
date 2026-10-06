@@ -840,8 +840,9 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
         path the manifest uses.
 
     Raises:
-        ValueError: If the zip is unreadable, carries no manifest, or declares
-            more than a plugin may ship, which is refused before it is unpacked.
+        ValueError: If the zip is unreadable, carries no manifest or one that
+            is not an object, or declares more than a plugin may ship, which is
+            refused before it is unpacked.
     """
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
@@ -861,15 +862,17 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
         return archive.read(entry)
 
     manifest = json.loads(read(MANIFEST_FILE, MAX_SOURCE_BYTES))
+    if not isinstance(manifest, dict):
+        raise ValueError(f"{MANIFEST_FILE} is not a JSON object")
     sources = {name: read(name, MAX_SOURCE_BYTES).decode("utf-8", "replace") for name in SOURCE_FILES if name in entries}
-    declared = {str(name).strip().lower() for name in manifest.get("assets", []) if isinstance(manifest, dict)}
+    declared = {str(name).strip().lower() for name in manifest.get("assets", [])}
     assets: dict[str, bytes] = {}
     total = 0
     for name in sorted(declared & entries.keys()):
         total = within_budget(name, archive.getinfo(entries[name]).file_size, total)
         assets[name] = archive.read(entries[name])
     listed = [str(manifest.get("icon", "")).strip().lower(), README_FILE]
-    listed += [str(shot).strip().lower() for shot in manifest.get("media", []) if isinstance(manifest, dict)]
+    listed += [str(shot).strip().lower() for shot in manifest.get("media", [])]
     named = set(archive.namelist())
     page: dict[str, bytes] = {}
     total = 0

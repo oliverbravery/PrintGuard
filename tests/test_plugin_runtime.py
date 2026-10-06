@@ -731,3 +731,17 @@ async def test_an_update_that_cannot_read_a_source_file_fails_rather_than_droppi
         assert sorted(engine.plugins.get("two-halves").sources) == sorted(set(files) - {name})
     finally:
         await engine.stop()
+
+
+def zipped(members: dict[str, str], compression: int = zipfile.ZIP_DEFLATED) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression) as archive:
+        for name, body in members.items():
+            archive.writestr(name, body)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("manifest", ["[]", "null", '"text"', "7"])
+def test_a_manifest_that_is_not_an_object_is_refused_cleanly(manifest: str) -> None:
+    with pytest.raises(ValueError, match="not a JSON object"):
+        engine_plugins.unpack(zipped({"plugin.json": manifest, "plugin.js": "plugin.render(() => null);"}))
