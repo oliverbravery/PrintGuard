@@ -162,8 +162,8 @@
       el("cover").src = image;
       pg.background(image);
     } else if (event.tag === "player") {
-      if (event.status === 204 || !event.body || !event.body.item) idle("Start something on any of your devices.");
-      else if (event.status === 401) idle("Reconnect Spotify in the Plugins tab in Settings.");
+      if (event.status === 401) idle("Reconnect Spotify in the Plugins tab in Settings.");
+      else if (event.status === 204 || !event.body || !event.body.item) idle("Start something on any of your devices.");
       else shown(event.body.item, event.body.is_playing === true);
     }
   });
