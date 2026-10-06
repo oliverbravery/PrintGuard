@@ -432,3 +432,11 @@ def test_a_3mf_stored_without_compression_is_still_read() -> None:
     with zipfile.ZipFile(packed, "w", zipfile.ZIP_STORED) as archive:
         archive.writestr("Metadata/plate_1.gcode", PRUSA)
     assert gcode.inspect(packed.getvalue(), "3mf").meta["slicer"] == "PrusaSlicer 2.8.1"
+
+
+def test_an_empty_file_is_refused() -> None:
+    for ext in ("gcode", "bgcode", "3mf"):
+        with pytest.raises(ValueError):
+            gcode.inspect(b"", ext)
+    with pytest.raises(ValueError, match="empty"):
+        gcode.inspect(b"", "gcode")

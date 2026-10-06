@@ -592,6 +592,9 @@ async def test_dashboard_upload_is_same_origin_and_feeds_the_viewer(tmp_path) ->
             assert engine.prints.get(print_id).name == "Boat"
             cold = await client.post("/api/prints?filename=benchy.gcode&bed=60", content=PRUSA, headers={**octet, "origin": "http://test"})
             assert cold.status_code == 400 and "never heats the bed" in cold.json()["detail"]
+            empty = await client.post("/api/prints?filename=empty.gcode", content=b"", headers={**octet, "origin": "http://test"})
+            assert empty.status_code == 400 and "empty" in empty.json()["detail"]
+            assert len(list(engine.prints.values())) == 1
 
             text = await client.get(f"/api/prints/{print_id}/gcode")
             assert text.status_code == 200 and text.content == PRUSA and text.headers["content-type"].startswith("text/plain")

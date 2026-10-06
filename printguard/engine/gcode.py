@@ -106,9 +106,12 @@ def inspect(data: bytes, ext: str) -> Sliced:
         What the file says about itself.
 
     Raises:
-        ValueError: If a 3mf carries no sliced plate, a bgcode file is not one or
-            is cut short, or either unpacks to more than a sliced file should.
+        ValueError: If the file is empty, a 3mf carries no sliced plate, a bgcode
+            file is not one or is cut short, or either unpacks to more than a
+            sliced file should.
     """
+    if not data:
+        raise ValueError("this file is empty")
     if ext == "3mf":
         plate, gcode = plate_gcode(data)
         sliced = _text(gcode)
