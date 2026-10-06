@@ -574,6 +574,126 @@ test("a plugin in the store is opened by its name and installed by its own butto
   await expect(page.getByRole("heading", { name: "Player" })).toBeVisible();
 });
 
+const demoPlugin = (over = {}) => ({
+  id: "demo",
+  manifest: {
+    id: "demo", name: "Demo", version: "1.0.0", description: "", author: "", homepage: "", permissions: ["state:read", "printer:control"], reasons: {},
+    surfaces: ["panel"], platforms: [], assets: [], urls: [], secrets: {}, provides: {}, consumes: [], oauth: {}, events: [], tick_s: 0,
+  },
+  files: ["plugin.js"], digests: { "plugin.js": "aaa" }, source: { kind: "github", repo: "o/r", ref: "c0ffee1" },
+  granted: ["state:read", "printer:control"], config: {}, secrets_set: [], verified: false, enabled: true, installed: 1, failure: null, ...over,
+});
+
+const withPlugins = (plugins: unknown[]) =>
+  engine({
+    plugins,
+    plugin_permissions: [
+      { id: "state:read", label: "Read", description: "", fields: {} },
+      { id: "printer:control", label: "Control", description: "", commands: ["printer.action"] },
+    ],
+    plugin_assets: { png: "image/png" },
+  });
+
+const showing = (value: string) => `plugin.action((name, arg, ctx) => { ctx.store.picked = [arg]; });
+plugin.render((ctx) => ({ type: "text", value: "${value}" + JSON.stringify(ctx.store) }));`;
+
+const askedForCode = async (page: Page) => {
+  await expect.poll(() => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "plugin.code").length)).toBeGreaterThan(0);
+  return page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "plugin.code").at(-1).req_id);
+};
+
+const drawn = (page: Page) => page.evaluate(() => (window as any).__pg.getState().pluginTrees.demo?.value);
+
+async function runningDemo(page: Page) {
+  await dashboard(page);
+  await emit(page, { event: "state", ...withPlugins([demoPlugin()]) });
+  await emit(page, { event: "plugin_code", id: "demo", sources: { "plugin.js": showing("v1") }, assets: {}, req_id: await askedForCode(page) });
+  await expect.poll(() => drawn(page)).toBe("v1{}");
+}
+
+test("an updated plugin restarts on its new code and is read again for the consent dialog", async ({ page }) => {
+  await runningDemo(page);
+  const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "plugin.code").length);
+  const before = await asked();
+  await page.evaluate(() => (window as any).__pg.getState().checkPlugin("demo"));
+  await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().pluginFindings))).toEqual(["demo"]);
+
+  await emit(page, { event: "state", ...withPlugins([demoPlugin({ digests: { "plugin.js": "bbb" } })]) });
+  await expect.poll(asked).toBe(before + 1);
+  expect(await page.evaluate(() => Object.keys((window as any).__pg.getState().pluginFindings))).toEqual([]);
+
+  await emit(page, { event: "plugin_code", id: "demo", sources: { "plugin.js": showing("v2") }, assets: {}, req_id: await askedForCode(page) });
+  await expect.poll(() => drawn(page)).toBe("v2{}");
+});
+
+test("a removed plugin leaves nothing of its own behind and frees its files", async ({ page }) => {
+  await dashboard(page);
+  await page.evaluate(() => {
+    const revoked: string[] = [];
+    const revoke = URL.revokeObjectURL.bind(URL);
+    URL.revokeObjectURL = (url) => (revoked.push(url), revoke(url));
+    (window as any).__revoked = revoked;
+  });
+  await emit(page, { event: "state", ...withPlugins([demoPlugin()]) });
+  await emit(page, { event: "plugin_page", id: "demo", page: { "README.md": "" } });
+  await emit(page, {
+    event: "plugin_code", id: "demo", sources: { "plugin.js": showing("v1") }, assets: { "a.png": "iVBORw0KGgo=" }, req_id: await askedForCode(page),
+  });
+  await expect.poll(() => drawn(page)).toBe("v1{}");
+
+  await emit(page, { event: "state", ...withPlugins([]) });
+  const held = await page.evaluate(() => {
+    const state = (window as any).__pg.getState();
+    return ["pluginTrees", "pluginViews", "pluginAssets", "pluginPages", "pluginFindings", "pluginPanels"].flatMap((key) => Object.keys(state[key]));
+  });
+  expect(held).toEqual([]);
+  expect(await page.evaluate(() => (window as any).__revoked.length)).toBe(1);
+});
+
+test("a plugin's stored data written while the hub is away is sent when it is back", async ({ page }) => {
+  const { sockets, commands } = await hub(page, undefined, withPlugins([demoPlugin()]));
+  const code = commands.find((c) => c.cmd === "plugin.code");
+  sockets[0].send(JSON.stringify({ event: "plugin_code", id: "demo", sources: { "plugin.js": showing("v1") }, assets: {}, req_id: code.req_id }));
+  await expect.poll(() => drawn(page)).toBe("v1{}");
+
+  await sockets[0].close();
+  await expect(page.getByRole("status").getByText("reconnecting")).toBeVisible();
+  await page.evaluate(() => (window as any).__pg.getState().pluginAct("demo", "pick", "bench"));
+  await expect.poll(() => drawn(page)).toBe('v1{"picked":["bench"]}');
+  await expect.poll(() => commands.filter((c) => c.cmd === "plugin.update").length, { timeout: 8000 }).toBe(1);
+  expect(commands.find((c) => c.cmd === "plugin.update").patch).toEqual({ config: { picked: ["bench"] } });
+});
+
+test("a refused write of a plugin's stored data lets the sandbox take what the hub holds", async ({ page }) => {
+  await runningDemo(page);
+  await page.evaluate(() => (window as any).__pg.getState().pluginAct("demo", "pick", "bench"));
+  await expect.poll(() => drawn(page)).toBe('v1{"picked":["bench"]}');
+  const written = await page.evaluate(() => (window as any).__sent.find((c: any) => c.cmd === "plugin.update"));
+
+  await emit(page, { event: "error", message: "refused", req_id: written.req_id });
+  await emit(page, { event: "state", ...withPlugins([demoPlugin({ config: { picked: ["shelf"] } })]) });
+  await expect.poll(() => drawn(page)).toBe('v1{"picked":["shelf"]}');
+});
+
+test("a plugin sign-in tab that the hub never answered is closed when the connection drops", async ({ page, context }) => {
+  const { sockets } = await hub(page);
+  const opened = context.waitForEvent("page");
+  await page.evaluate(() => (window as any).__pg.getState().signIn("demo"));
+  const tab = await opened;
+
+  await sockets[0].close();
+  await expect.poll(() => tab.isClosed()).toBe(true);
+});
+
+test("a button a plugin draws says so when its command could not be sent", async ({ page }) => {
+  await runningDemo(page);
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: true }));
+  await emit(page, { event: "plugin_effect", id: "demo", effect: { kind: "command", cmd: { cmd: "printer.action", id: "p1", action: "pause" } } });
+
+  await expect(page.getByText("The hub is reconnecting, so that wasn't sent")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "printer.action").length)).toBe(0);
+});
+
 test("a feed the browser cannot stream itself is asked for again after it fails", async ({ page }) => {
   let asked = 0;
   await page.addInitScript(() => {

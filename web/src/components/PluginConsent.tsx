@@ -88,7 +88,7 @@ function Findings({ plugin }: { plugin: PluginRecord }) {
 
   useEffect(() => {
     checkPlugin(plugin.id);
-  }, [plugin.id]);
+  }, [plugin.id, findings === undefined]);
 
   if (findings === undefined) return <span className="block text-[0.7rem] text-text-2">Reading its code…</span>;
   if (findings.length === 0) {
