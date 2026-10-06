@@ -67,6 +67,7 @@ export interface Printer {
   name: string;
   provider: string;
   config: Record<string, string>;
+  secrets_set?: string[];
   device_state?: DeviceState | null;
   online: boolean;
 }
@@ -193,6 +194,8 @@ export interface SchemaProperty {
   default?: string;
 }
 
+export type AdapterConfig = Record<string, string | null>;
+
 export interface AdapterMeta {
   id: string;
   label: string;
@@ -214,7 +217,7 @@ export interface MqttConfig {
   host?: string;
   port?: number;
   username?: string;
-  password?: string;
+  password?: string | null;
   tls?: boolean;
   base_topic?: string;
   discovery_prefix?: string;
@@ -409,6 +412,7 @@ export interface EngineState {
     preheat: PreheatPreset[];
     feedback: "ask" | "off";
   };
+  secrets_set?: { notifiers: Record<string, string[]>; mqtt: string[] };
   tokens: ApiToken[];
   stats: EngineStats;
   integrations: AdapterMeta[];

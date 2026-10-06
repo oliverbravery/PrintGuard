@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { type SettingsTabId, useStore } from "../store";
+import { savedChannels, type SettingsTabId, useStore } from "../store";
+import { useSubmit } from "../submit";
 import { applyTheme, beginPreview, endPreview, GLASS_DEFAULT, PALETTES } from "../theme";
 import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
 import { CopyButton } from "./CopyButton";
@@ -7,7 +8,8 @@ import { Dialog } from "./Dialog";
 import { PluginsTab } from "./PluginsTab";
 import { SettingsFooter } from "./SettingsFooter";
 import { SaveStatus } from "./SaveStatus";
-import { SchemaForm } from "./SchemaForm";
+import { SchemaForm, withoutSecrets } from "./SchemaForm";
+import { SecretInput } from "./SecretInput";
 import { SchemePicker } from "./SchemePicker";
 import { TestRow } from "./TestRow";
 import { Slider } from "./Slider";
@@ -45,7 +47,13 @@ export function SettingsDialog() {
     updateSettings,
     settingsTab,
   } = useStore();
-  const [notifiers, setNotifiers] = useState(engine?.settings.notifiers ?? {});
+  const [notifiers, setNotifiers] = useState(() => savedChannels(engine));
+  const saveChannels = useSubmit(() =>
+    setNotifiers((draft) =>
+      Object.fromEntries(Object.entries(draft).map(([id, config]) => [id, withoutSecrets(engine?.notifiers.find((n) => n.id === id), config)])),
+    ),
+  );
+  const saveBroker = useSubmit(() => setMqtt(({ password: _sent, ...draft }) => draft));
   const updateCheck = engine?.settings.update_check ?? true;
   const [mqtt, setMqtt] = useState<MqttConfig>(engine?.settings.mqtt ?? {});
   const setMqttField = (key: keyof MqttConfig, value: MqttConfig[keyof MqttConfig]) => setMqtt({ ...mqtt, [key]: value });
@@ -208,6 +216,7 @@ export function SettingsDialog() {
                       <SchemaForm
                         meta={meta}
                         value={notifiers[meta.id]}
+                        saved={engine?.secrets_set?.notifiers[meta.id]}
                         onChange={(config) => setNotifiers({ ...notifiers, [meta.id]: config })}
                       />
                       <TestRow
@@ -233,10 +242,15 @@ export function SettingsDialog() {
             <button
               className="btn btn-primary w-full"
               disabled={isPending("settings.update")}
-              onClick={() => send({ cmd: "settings.update", patch: { notifiers } })}
+              onClick={() => saveChannels.submit({ cmd: "settings.update", patch: { notifiers } })}
             >
               {isPending("settings.update") ? "Saving…" : "Save channels"}
             </button>
+            {saveChannels.error && (
+              <span role="alert" className="chip chip-message chip-bad">
+                {saveChannels.error}
+              </span>
+            )}
             <span className="text-[0.7rem] text-text-2 block">
               Channels hold credentials, so they apply on Save rather than automatically.
             </span>
@@ -276,9 +290,9 @@ export function SettingsDialog() {
                     onChange={(e) => setMqttField("port", e.target.value ? Number(e.target.value) : undefined)}
                   />
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <input
-                    className="field flex-1"
+                    className="field flex-1 basis-32"
                     aria-label="Username"
                     autoCapitalize="none"
                     autoCorrect="off"
@@ -286,13 +300,13 @@ export function SettingsDialog() {
                     value={mqtt.username ?? ""}
                     onChange={(e) => setMqttField("username", e.target.value)}
                   />
-                  <input
-                    className="field flex-1"
-                    type="password"
+                  <SecretInput
+                    name="password"
                     aria-label="Password"
                     placeholder="Password (optional)"
-                    value={mqtt.password ?? ""}
-                    onChange={(e) => setMqttField("password", e.target.value)}
+                    saved={engine?.secrets_set?.mqtt.includes("password") ?? false}
+                    value={mqtt.password}
+                    onChange={(password) => setMqttField("password", password)}
                   />
                 </div>
                 <div className="flex gap-2">
@@ -325,10 +339,15 @@ export function SettingsDialog() {
             <button
               className="btn btn-primary w-full"
               disabled={isPending("settings.update")}
-              onClick={() => send({ cmd: "settings.update", patch: { mqtt } })}
+              onClick={() => saveBroker.submit({ cmd: "settings.update", patch: { mqtt } })}
             >
               {isPending("settings.update") ? "Saving…" : "Save broker settings"}
             </button>
+            {saveBroker.error && (
+              <span role="alert" className="chip chip-message chip-bad">
+                {saveBroker.error}
+              </span>
+            )}
             <span className="text-[0.7rem] text-text-2 block">
               Broker settings open a live connection, so they apply on Save rather than automatically.
             </span>
