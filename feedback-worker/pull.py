@@ -54,7 +54,9 @@ def sanitised(raw: bytes) -> bytes | None:
     except Exception:
         return None
     clean = io.BytesIO()
-    image.convert("RGB").save(clean, "JPEG", quality=JPEG_QUALITY)
+    pixels = image.convert("RGB")
+    pixels.info.clear()
+    pixels.save(clean, "JPEG", quality=JPEG_QUALITY)
     return clean.getvalue()
 
 

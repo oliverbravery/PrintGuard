@@ -89,3 +89,16 @@ def test_a_frame_over_the_pixel_cap_is_discarded_before_it_is_decoded(pull: type
     assert pull.sanitised(jpeg((5780, 5780), quality=10)) is None
     assert pull.sanitised(jpeg((4096, 4096), quality=10)) is not None
 
+
+def test_the_clean_copy_carries_nothing_the_uploader_chose(pull: types.ModuleType) -> None:
+    exif = Image.Exif()
+    exif[0x010F] = "EXIF-MAKE-MARKER"
+    raw = jpeg(comment=b"COMMENT-MARKER", exif=exif.tobytes(), icc_profile=b"ICC-MARKER" * 20, xmp=b"<x:xmpmeta>XMP-MARKER</x:xmpmeta>")
+    assert b"COMMENT-MARKER" in raw
+
+    clean = pull.sanitised(raw)
+
+    assert clean is not None
+    assert not any(marker in clean for marker in (b"COMMENT-MARKER", b"EXIF-MAKE-MARKER", b"ICC-MARKER", b"XMP-MARKER"))
+    assert "comment" not in Image.open(io.BytesIO(clean)).info
+
