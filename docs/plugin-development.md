@@ -231,7 +231,7 @@ somewhere private is caught.
 ## The three halves
 
 Each source file is one half of a plugin, and all three share one store. A `panel.html` reads
-the store as it was when the panel opened, so it doesn't see what the other two write after
+the store as it was when the panel was drawn, so it doesn't see what the other two write after
 that.
 
 | | `plugin.js` | `panel.html` | `worker.js` |
@@ -243,12 +243,12 @@ that.
 | `render`, `action` | Yes | No | No |
 | `on`, `serve` | Yes | `on` only | Yes |
 | `route`, `gate` | No | No | Yes |
-| Keeps top-level values | Until the dashboard reloads | Until the dashboard reloads | Never, each call gets a fresh VM |
+| Keeps top-level values | Until the dashboard reloads | Until the dashboard reloads, or the panel is redrawn, as toggling Customise does | Never, each call gets a fresh VM |
 
 `plugin.js` and `worker.js` each run inside a function with `plugin` in scope. `import` is a
-syntax error and there's no network. The `plugin.js` iframe does have a `document`, but the
-frame is hidden and its policy allows no styles or images, so nothing put there is shown. The
-opaque origin refuses storage. The worker has no DOM at all.
+syntax error and there's no network. Treat `plugin.js` as having no DOM. Its iframe does have a
+`document`, but the frame is hidden and its policy allows no styles or images, so nothing put
+there is shown. The opaque origin refuses storage. The worker has no DOM at all.
 
 Neither frame has `fetch`, `WebSocket` or `RTCPeerConnection`, and a frame made inside one runs
 no script of its own. [What a browser still allows](plugins.md#what-a-browser-still-allows)
@@ -259,8 +259,8 @@ lists what is left.
 `plugin.render` returns a tree of [nodes](#nodes). PrintGuard draws them with its own
 components, so a plugin matches the dashboard and inherits the user's theme.
 
-`render` runs on every state change and after every action, so keep it a plain function of the
-`ctx` it is handed. On the `monitor` and `settings` surfaces it is called once more per
+`render` runs on every state change and after every action and every event it hooks, so keep it
+a plain function of the `ctx` it is handed. On the `monitor` and `settings` surfaces it is called once more per
 monitor, with `ctx.target` naming which and `ctx.surface` naming where. It runs whether or not
 there is a panel, and returning `null` draws nothing.
 
@@ -307,20 +307,23 @@ the `panel` surface.
 </script>
 ```
 
-It runs in an opaque origin with `connect-src 'none'`, so `pg` is the only way out.
+It runs in an opaque origin with `connect-src 'none'`, so `pg` is the only way out. The
+`<video>` needs the `sound` permission, since a panel without it can play no audio or video, a
+muted loop included.
 
-Scripts go in `<script>` elements. An inline handler such as `onclick="..."` is refused, so use
-`addEventListener`. The frame cannot leave the page either: a link or a `location` change to
-another address stops the plugin with "sandbox navigated away".
+A `<script>` runs wherever it sits in the markup. An inline handler such as `onclick="..."` is
+refused, so use `addEventListener`. The frame cannot leave the page either: a link or a
+`location` change to another address stops the plugin with "sandbox navigated away".
 
 | On `pg` | |
 |---|---|
 | `pg.on("ready", fn)` | Called with the state once the panel is drawn |
 | `pg.on("state", fn)` | Called with the state on every change |
 | `pg.state` | The last state, for reading outside a handler |
+| `pg.secrets` | The names of the secrets the plugin holds, as a list. Never their values |
 | `pg.store` | Your own data. It saves when you assign the whole object, so `pg.store = { ...pg.store, on: true }` |
 | `pg.theme` | The dashboard's colours and fonts, by custom property name |
-| `pg.asset(name)` | A URL for a file you shipped, good inside your panel only |
+| `pg.asset(name)` | A URL for a file you shipped, good inside your panel only. Audio and video from it play only with `sound` |
 
 The dashboard's colours and fonts are also set as the custom properties it uses itself, so
 `var(--color-accent)` is the accent the user picked. The background is transparent and the
