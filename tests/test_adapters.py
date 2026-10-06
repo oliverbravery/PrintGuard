@@ -7,6 +7,7 @@ import asyncio
 import json as jsonlib
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from email.header import decode_header, make_header
 from pathlib import Path
 from types import SimpleNamespace
@@ -727,6 +728,30 @@ async def test_bambu_dropped_connection_is_offline_until_a_full_report(bambu_pri
     assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.OFFLINE, "a change without the full report says nothing of the state"
     bambu_printers[1].report({"print": {**BAMBU_FULL_REPORT, "gcode_state": "FINISH"}})
     assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.IDLE
+    await adapter.close()
+
+
+async def test_bambu_never_waits_for_the_pool_inference_runs_on(bambu_printers) -> None:
+    release = threading.Event()
+    busy = ThreadPoolExecutor(max_workers=1)
+    asyncio.get_running_loop().set_default_executor(busy)
+    stuck = asyncio.get_running_loop().run_in_executor(None, release.wait)
+    adapter = BambuAdapter()
+    try:
+        state = await asyncio.wait_for(adapter.fetch_state(None, BAMBU_CONFIG), 2.0)
+        assert state.status is DeviceStatus.PRINTING
+    finally:
+        release.set()
+        await stuck
+        await adapter.close()
+        busy.shutdown()
+
+
+async def test_bambu_that_never_reports_says_to_check_the_serial(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "full_report", None)
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="check the serial number"):
+        await adapter.fetch_state(None, BAMBU_CONFIG)
     await adapter.close()
 
 

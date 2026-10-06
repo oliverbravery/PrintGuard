@@ -42,7 +42,8 @@ import socket
 import ssl
 import threading
 import time
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable
 
 import paho.mqtt.client as mqtt
 
@@ -59,6 +60,8 @@ _REPLY_TIMEOUT_S = 5.0
 _DEADLINE_S = 12.0
 _KEEPALIVE_S = 30
 _SILENCE_LIMIT_S = 60.0
+_THREADS = ThreadPoolExecutor(max_workers=16, thread_name_prefix="bambu")
+"""Every blocking call into the printer, so printers that are switched off hold these threads and never the default pool inference shares."""
 
 _STATUS_MAP = {
     "running": DeviceStatus.PRINTING,
@@ -99,6 +102,10 @@ def _tls_context() -> ssl.SSLContext:
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     return context
+
+
+async def _blocking(call: Callable[..., Any], *args: Any) -> Any:
+    return await asyncio.get_running_loop().run_in_executor(_THREADS, call, *args)
 
 
 class _Session:
@@ -255,6 +262,7 @@ class BambuAdapter(IntegrationAdapter):
     def __init__(self) -> None:
         self._sessions: dict[tuple[str, str, str], _Session] = {}
         self._session_locks: dict[tuple[str, str, str], threading.Lock] = {}
+        self._reported: set[tuple[str, str, str]] = set()
 
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
         """Normalises gcode_state from the printer's latest merged report.
@@ -266,8 +274,7 @@ class BambuAdapter(IntegrationAdapter):
         being as ready for one as after FINISH, so both read as idle. A fault
         the printer stops for mid-job is reported as PAUSE.
         """
-        loop = asyncio.get_running_loop()
-        report = await asyncio.wait_for(loop.run_in_executor(None, self._pull_report, config), _DEADLINE_S)
+        report = await asyncio.wait_for(_blocking(self._pull_report, config), _DEADLINE_S)
         if not report:
             return DeviceState(DeviceStatus.OFFLINE)
         matched = _STATUS_MAP.get(str(report.get("gcode_state", "")).lower(), DeviceStatus.UNKNOWN)
@@ -291,14 +298,12 @@ class BambuAdapter(IntegrationAdapter):
                 answers that it failed, as it does with Developer Mode off.
         """
         payload = {"print": {"sequence_id": "0", "command": _COMMANDS[action], "param": ""}}
-        loop = asyncio.get_running_loop()
-        await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
+        await asyncio.wait_for(_blocking(self._publish, config, payload), _DEADLINE_S)
 
     async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
         """Sets a heater target with the M104 or M140 line Bambu Studio sends over gcode_line."""
         payload = {"print": {"sequence_id": "0", "command": "gcode_line", "param": f"{_HEATER_GCODE[heater]} S{target:g}\n"}}
-        loop = asyncio.get_running_loop()
-        await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
+        await asyncio.wait_for(_blocking(self._publish, config, payload), _DEADLINE_S)
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
         """Uploads a sliced 3mf to the SD card over FTPS and prints its first plate.
@@ -312,9 +317,8 @@ class BambuAdapter(IntegrationAdapter):
         long as it takes and each step of it times out on its socket.
         """
         plate, _ = plate_gcode(data)
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._upload, config, filename, data)
-        product = await asyncio.wait_for(loop.run_in_executor(None, self._product, config), _DEADLINE_S)
+        await _blocking(self._upload, config, filename, data)
+        product = await asyncio.wait_for(_blocking(self._product, config), _DEADLINE_S)
         payload = {
             "print": {
                 **_PROJECT_FILE,
@@ -323,7 +327,7 @@ class BambuAdapter(IntegrationAdapter):
                 "subtask_name": filename.rsplit(".", 1)[0],
             }
         }
-        await asyncio.wait_for(loop.run_in_executor(None, self._publish, config, payload), _DEADLINE_S)
+        await asyncio.wait_for(_blocking(self._publish, config, payload), _DEADLINE_S)
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Exposes the chamber camera over whichever transport the model serves.
@@ -338,18 +342,17 @@ class BambuAdapter(IntegrationAdapter):
         access_code = str(config.get("access_code", ""))
         if not host:
             return []
-        loop = asyncio.get_running_loop()
-        fingerprint = await loop.run_in_executor(None, self._rtsps_fingerprint, host)
+        fingerprint = await _blocking(self._rtsps_fingerprint, host)
         if fingerprint:
             url = f"rtsps://{_USERNAME}:{access_code}@{host}:{_RTSP_PORT}/streaming/live/1"
             return [{"key": "chamber", "name": "Chamber camera", "source": {"kind": "url", "url": url, "fingerprint": fingerprint}}]
-        if await loop.run_in_executor(None, self._port_open, host, _CAMERA_PORT):
+        if await _blocking(self._port_open, host, _CAMERA_PORT):
             return [{"key": "chamber", "name": "Chamber camera", "source": {"kind": "bambu", "host": host, "access_code": access_code}}]
         return []
 
     async def close(self, config: dict[str, Any] | None = None) -> None:
         """Disconnects one printer's MQTT session, or every session."""
-        await asyncio.to_thread(self._drop, config)
+        await _blocking(self._drop, config)
 
     def _rtsps_fingerprint(self, host: str) -> str | None:
         context = _tls_context()
@@ -456,12 +459,24 @@ class BambuAdapter(IntegrationAdapter):
             with self._session_locks.setdefault(key, threading.Lock()):
                 if only is not None and self._sessions.get(key) is not only:
                     continue
+                if only is None:
+                    self._reported.discard(key)
                 session = self._sessions.pop(key, None)
                 if session is not None:
                     session.close()
 
     def _pull_report(self, config: dict[str, Any]) -> dict[str, Any] | None:
-        return self._session(config).report()
+        """Reads the report, or raises when a connection that was accepted has never had one from the printer.
+
+        The broker accepts any serial, and only the printer's own reports show whether it is the right one.
+        """
+        report = self._session(config).report()
+        key = self.connection_key(config)
+        if report is not None:
+            self._reported.add(key)
+        elif key not in self._reported:
+            raise RuntimeError("Bambu printer accepted the connection but has sent nothing, so check the serial number")
+        return report
 
     def _product(self, config: dict[str, Any]) -> str:
         return self._session(config).product()
