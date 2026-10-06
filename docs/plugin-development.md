@@ -67,8 +67,8 @@ push.
 
 ## The manifest
 
-`plugin.json` says what the plugin is and everything it asks for. Only `id` and `version` are
-required, and a key PrintGuard does not recognise is dropped.
+`plugin.json` is a JSON object saying what the plugin is and everything it asks for. Only `id`
+and `version` are required, and a key PrintGuard does not recognise is dropped.
 
 ```
 my-plugin/
@@ -127,15 +127,15 @@ A plugin needs at least one of the three source files.
 | `platforms` | Where it runs. Leaving it out means everywhere |
 | `assets` | Files it ships beside its code |
 | `urls` | The only addresses it may reach. Needs `net` |
-| `secrets` | Up to 8 credentials the user fills in, each a short name against a line saying what it is |
+| `secrets` | Up to 8 credentials the user fills in, each a name of 1 to 40 lowercase letters, digits, underscores or hyphens against a line saying what it is, cut at 200 characters |
 | `oauth` | A sign-in PrintGuard runs for it. Needs `oauth` |
-| `provides` | Up to 8 channels it answers other plugins on. Needs `link:provide` |
+| `provides` | Up to 8 channels it answers other plugins on, each a name of 2 to 40 lowercase letters, digits or hyphens, starting and ending with a letter or digit, against a line saying what it answers. Needs `link:provide` |
 | `consumes` | Up to 16 `plugin-id:channel` names it calls. Needs `link:consume` |
 | `events` | The events that wake it |
 | `tick_s` | How often its worker runs anyway, 5 to 86400 seconds. Under 5 switches the timer off |
 
-A permission without a reason, `urls` without `net`, a [local address](#addresses) without
-`net:local`, `oauth` without the `oauth` permission, or `provides` and `consumes` without their
+A permission without a reason, `urls` without `net`, a [local address](#addresses) (a wildcard
+over a local suffix included) without `net:local`, `oauth` without the `oauth` permission, or `provides` and `consumes` without their
 link permission each refuse the install.
 
 ### Reasons
@@ -147,15 +147,17 @@ what your plugin does with it, not what the permission is.
 
 `icon`, `media` and a `README.md` are how a plugin presents itself. The icon sits beside its
 name, the media images open the plugin's page as a gallery, and the README renders under them
-the way GitHub renders it, relative image paths included. For a repository install these files
-are read from the repository at the pinned commit. A zip carries them inside it. Either way
-they add nothing to what runs, which is why an SVG is allowed here and not in `assets`.
+the way GitHub renders it. For a repository install these files are read from the repository
+at the pinned commit. A zip carries them inside it. Either way they add nothing to what runs,
+which is why an SVG is allowed here and not in `assets`.
 
 The README is shown as Markdown and little else. Headings, paragraphs, lists, links, images,
 code, tables and blockquotes are kept, with `align` on a table cell or paragraph and `width` and
 `height` on an image. Any other HTML is dropped and its text kept, so forms, `<details>`, video,
-inline SVG, `style`, `class` and task-list checkboxes do not render. Relative links and images
-resolve against the README's own folder.
+inline SVG, `style`, `class` and task-list checkboxes do not render. In a repository install,
+relative links and images resolve against the README's own folder at the pinned commit. A zip's
+README has no address to resolve against, so its relative links go nowhere and only an image
+the manifest lists in `media` shows, in the gallery.
 
 ### Surfaces
 
@@ -221,9 +223,10 @@ A URL with a `.` or `..` segment in its path matches no pattern, percent-encoded
 A pattern on this machine or the network around it needs `net:local` as well as `net`. That is
 any address that is not a public one, `localhost`, or a name ending `.local`, `.lan`,
 `.home`, `.home.arpa`, `.internal` or `.localhost`. A wildcard host counts, since it covers
-both. So does an address in any spelling a browser takes, such as `127.1` or `2130706433`. When
-a request leaves, PrintGuard resolves the name and checks the address it resolves to, so a
-public name pointing somewhere private is caught.
+both, and so does a wildcard over one of those suffixes, such as `*.local`. An address in any
+spelling a browser takes counts too, such as `127.1` or `2130706433`. When a request leaves,
+PrintGuard resolves the name and checks the address it resolves to, so a public name pointing
+somewhere private is caught.
 
 ## The three halves
 
