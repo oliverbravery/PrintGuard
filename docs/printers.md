@@ -39,8 +39,8 @@ channels.
 
 Open the printer registry, choose the service, fill in the form and press **Test connection**
 before saving. A printer with a starred field left blank is not saved, and the error names the
-field. A key or password the service rejects fails the test with that as the reason. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
-print or cancels it.
+field. A key or password the service rejects fails the test with that as the reason. Then bind
+it to a monitor and choose whether a sustained defect alerts you, pauses the print or cancels it.
 
 Linked printers report job name, progress, temperatures and state on every monitor that uses
 them, and they gate inference. Monitoring runs while a printer reports it is printing and stands
@@ -53,10 +53,10 @@ watched and warns you. See [failing safely](architecture.md#failing-safely).
 
 | Service | Authentication | [Exposes a camera](cameras.md#printer-cameras) |
 |---|---|---|
-| [OctoPrint](https://octoprint.org) | API key | Yes, its webcam stream |
-| [Klipper via Moonraker](https://moonraker.readthedocs.io) | Optional API key | Yes, its configured webcams |
-| [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code, or Moonraker API key | Centauri chamber camera, or Moonraker's configured webcams |
-| [Prusa via PrusaLink](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest, user `maker` unless you set another | No local stream |
+| [OctoPrint](https://octoprint.org) | An application key, from Settings then Application Keys in OctoPrint | Yes, its webcam stream |
+| [Klipper (Moonraker)](https://moonraker.readthedocs.io) | None on a trusted LAN. Otherwise add the hub's address to `trusted_clients` under `[authorization]` in `moonraker.conf`, or enter an API key | Yes, its configured webcams |
+| [Elegoo](https://github.com/ELEGOO-3D/elegoo-link) | Access code on a Centauri Carbon 2, or an optional Moonraker API key | Centauri chamber camera, or Moonraker's configured webcams |
+| [Prusa (PrusaLink)](https://help.prusa3d.com/guide/wi-fi-and-prusa-connect-link-setup-core-one-mk4-s-mk3-9-mk3-5-xl-mini_413293) | HTTP Digest, user `maker` unless you set another | No local stream |
 | [Bambu Lab](https://github.com/Doridian/OpenBambuAPI) | Access code and serial | Chamber camera |
 
 <details>
@@ -65,11 +65,12 @@ watched and warns you. See [failing safely](architecture.md#failing-safely).
 Bambu printers speak MQTT over TLS rather than HTTP.
 
 1. On the printer, enable **LAN Only Mode**, then **Developer Mode** under
-   Network in Settings. This opens the MQTT channel.
+   Network in Settings. Developer Mode is what lets PrintGuard pause, cancel, heat or start a
+   print.
 2. Note the access code shown there, and the serial number under Device in Settings.
 3. Register the printer with its IP address, serial number and access code.
 
-The chamber camera is registered automatically: RTSP on the X1 and H2 series, or the
+The chamber camera is registered automatically: RTSPS on port 322 on the X1 and H2 series, or the
 proprietary port 6000 protocol on the A1 and P1 series. The form links Bambu's
 [Enable LAN Mode](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode) guide.
 
@@ -81,11 +82,11 @@ target or print start, and PrintGuard reports that command as failed.
 </details>
 
 <details>
-<summary><b>Elegoo</b>: two families, Centauri and Neptune/OrangeStorm</summary>
+<summary><b>Elegoo</b>: two families, Centauri Carbon and Neptune or OrangeStorm</summary>
 
 Choose the family that matches your printer:
 
-**Centauri** covers the Centauri Carbon and Centauri Carbon 2. PrintGuard detects which
+**Centauri Carbon 1 / 2** covers the Centauri Carbon and Centauri Carbon 2. PrintGuard detects which
 local protocol the printer speaks and registers its chamber camera automatically.
 
 - Carbon 2: enable **LAN Only Mode** in its network settings and use the access code shown
@@ -95,7 +96,7 @@ local protocol the printer speaks and registers its chamber camera automatically
 While a Carbon 2 starts up, loads or unloads filament, levels or calibrates outside a print,
 PrintGuard shows its state as unknown and a monitor stays as it was.
 
-**Neptune/OrangeStorm** covers the Neptune 4 Pro, Plus and Max, the OrangeStorm Giga, and
+**Neptune 4 / OrangeStorm Giga** covers the Neptune 4 Pro, Plus and Max, the OrangeStorm Giga, and
 any other Elegoo printer running Moonraker. PrintGuard uses the stock Moonraker service on
 port `7125`, accepts an API key if you set one and registers the webcams Moonraker lists.
 
@@ -134,7 +135,7 @@ filament and temperatures. Every other print temperature the slicer set moves by
 temperatures a start gcode probes or wipes at stay put. A file sliced with several filaments shows
 the one its first layer prints with and moves only that filament's temperatures, and nothing moves
 past 350°C on the nozzle or 150°C on the bed. A file whose slicer lists no print
-temperatures has every one of its set-points moved. Binary gcode keeps the temperatures it
+temperatures has every set-point above zero moved. Binary gcode keeps the temperatures it
 was sliced with.
 
 Each file keeps the preview, estimated time, filament and printer model its slicer wrote into it.
@@ -153,18 +154,19 @@ report idle at the moment you press **Print**, so nothing lands on top of a runn
 | Service | Takes | How it starts |
 |---|---|---|
 | OctoPrint | `.gcode`, `.gco`, `.g` | Uploaded to local storage, selected and printed |
-| Klipper via Moonraker | `.gcode`, `.gco`, `.g` | Uploaded to the gcodes root and printed |
-| Elegoo | `.gcode` | Centauri: uploaded to internal storage and started. Neptune and OrangeStorm: through Moonraker |
-| Prusa via PrusaLink | `.gcode`, `.bgcode` | Put onto the first writable storage, the USB stick or local storage on a Raspberry Pi, and printed after upload |
+| Klipper (Moonraker) | `.gcode`, `.gco`, `.g` | Uploaded to the gcodes root and printed |
+| Elegoo | `.gcode` | Centauri Carbon: uploaded to internal storage and started. Neptune and OrangeStorm: through Moonraker |
+| Prusa (PrusaLink) | `.gcode`, `.bgcode` | Put onto the first writable storage, the USB stick or local storage on a Raspberry Pi, and printed after upload |
 | Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the printer's storage over FTPS, then the first plate is started over MQTT |
 
 A file the service stores but doesn't start, or a start the printer refuses, is reported as a
 failed print.
 
-A file is sent under its library name, cut to 60 characters with anything outside plain letters,
-digits, dots and dashes turned into `_`. Rename it first if the printer's own file list matters
-to you. PrusaLink replaces a file of the same name already on the printer. A file can be up to
-512 MB. A file whose gcode is over 32 MB isn't drawn in the browser, since parsing it takes
+A file is sent under its library name, with each run of anything outside plain letters, digits,
+dots, dashes and underscores turned into one `_` and the name before the extension cut to 60
+characters. Rename it first if the printer's own file list matters to you. PrusaLink replaces a
+file of the same name already on the printer. A file can be up to 512 MB, and a 3mf whose gcode
+unpacks to more than that is refused. A file whose gcode is over 32 MB isn't drawn in the browser, since parsing it takes
 about nine times its size in memory, so it has no 3D view and no drawn preview. It uploads and
 prints as usual, and the hub still reads its print time, filament and temperatures. A smaller
 file the browser can't draw, such as on a device with no WebGL, uploads without a drawn preview
@@ -174,7 +176,7 @@ be blank too, where PrusaSlicer compressed them.
 
 A Bambu print uses the settings sliced into the file, with bed levelling on, flow and vibration
 calibration off, and filament from the external spool, not an AMS. Starting a 3mf
-needs Developer Mode, the same switch the MQTT connection needs. A project exported without its
+needs Developer Mode, as a pause or cancel does. A project exported without its
 gcode is refused at upload. A Bambu printer keeps reporting a cancelled or failed job as failed until
 the next one starts, which PrintGuard shows as idle, so clear the bed before you press **Print**.
 
@@ -192,9 +194,9 @@ heater off.
 | Service | Reads temperatures | Sets targets |
 |---|---|---|
 | OctoPrint | Yes | Yes, through its tool and bed endpoints, for the first nozzle |
-| Klipper via Moonraker | Yes | Yes, with `SET_HEATER_TEMPERATURE` |
+| Klipper (Moonraker) | Yes | Yes, with `SET_HEATER_TEMPERATURE` |
 | Elegoo | Yes | Yes, on both families |
-| Prusa via PrusaLink | Yes | No, PrusaLink has no endpoint for it |
+| Prusa (PrusaLink) | Yes | No, PrusaLink has no endpoint for it |
 | Bambu Lab | Yes | Yes, as the `M104` and `M140` lines Bambu Studio sends |
 
 A target is capped at 350 °C for the nozzle and 150 °C for the bed, and the printer's own
