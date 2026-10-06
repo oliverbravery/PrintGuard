@@ -106,9 +106,12 @@ def inspect(data: bytes, ext: str) -> Sliced:
         What the file says about itself.
 
     Raises:
-        ValueError: If a 3mf carries no sliced plate, a bgcode file is not one or
-            is cut short, or either unpacks to more than a sliced file should.
+        ValueError: If the file is empty, a 3mf carries no sliced plate, a bgcode
+            file is not one or is cut short, or either unpacks to more than a
+            sliced file should.
     """
+    if not data:
+        raise ValueError("this file is empty")
     if ext == "3mf":
         plate, gcode = plate_gcode(data)
         sliced = _text(gcode)
@@ -193,10 +196,14 @@ def _unpacked(archive: zipfile.ZipFile, name: str) -> bytes:
     understates it would otherwise be unpacked whole before it was refused.
 
     Raises:
-        ValueError: If the file declares more than the cap.
+        ValueError: If the file declares more than the cap or is stored
+            with a compression other than deflate, which cannot be bounded.
         zipfile.BadZipFile: If it holds more than it declares.
     """
-    declared = archive.getinfo(name).file_size
+    info = archive.getinfo(name)
+    if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+        raise ValueError(f"{name} in this 3mf uses a compression PrintGuard does not read")
+    declared = info.file_size
     if declared > MAX_MEMBER_BYTES:
         raise ValueError(f"{name} in this 3mf unpacks to more than {MAX_MEMBER_BYTES // 1024 // 1024} MB")
     with archive.open(name) as member:
@@ -395,6 +402,8 @@ def _blocks(data: bytes) -> Sliced:
             room -= len(body)
             if room < 0:
                 raise ValueError(f"the metadata and previews of this binary gcode inflates to more than {MAX_BLOCK_BYTES // 1024 // 1024} MB")
+            if not inflater.eof:
+                raise zlib.error("a deflated block ends before its stream does")
         elif compression:
             continue
         if kind == _BGCODE_THUMBNAIL:
