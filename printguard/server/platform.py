@@ -943,11 +943,20 @@ class ServerPlatform:
             The saved state, or nothing on a first boot. A file that will not
             parse is moved aside before the hub starts empty, so the next save
             cannot overwrite what is left of it.
+
+        Raises:
+            RuntimeError: If the file is there and the hub may not read it,
+                saying whose it has to be.
         """
         try:
             return json.loads(self._state_path.read_text())
         except FileNotFoundError:
             return {}
+        except PermissionError as exc:
+            raise RuntimeError(
+                f"{self._state_path} could not be read ({exc}), so the hub cannot start. "
+                "The data directory and the files in it have to belong to the user the hub runs as"
+            ) from None
         except ValueError as exc:
             kept = self._state_path.with_suffix(".json.corrupt")
             self._state_path.replace(kept)

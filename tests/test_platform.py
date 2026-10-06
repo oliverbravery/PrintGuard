@@ -692,3 +692,15 @@ def test_a_sliver_of_a_frame_is_not_scaled_up_whole_before_it_is_cropped(monkeyp
     assert vision.preprocess(np.zeros((2, 4000, 3), dtype=np.uint8), assets).shape == (1, 3, 224, 224)
     assert vision.preprocess(np.zeros((720, 1280, 3), dtype=np.uint8), assets).shape == (1, 3, 224, 224)
     assert resized == [(1024, 256), (455, 256)]
+
+
+def test_a_state_file_the_hub_may_not_read_says_whose_it_has_to_be(tmp_path, monkeypatch) -> None:
+    """A bare PermissionError traceback does not tell anyone the data directory has the wrong owner."""
+
+    def denied(path: Path, *args: object, **kwargs: object) -> str:
+        raise PermissionError(errno.EACCES, "Permission denied", str(path))
+
+    monkeypatch.setattr(Path, "read_text", denied)
+    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
+    with pytest.raises(RuntimeError, match="state.json could not be read .*belong to the user the hub runs as"):
+        ServerPlatform.load_state(holder)
