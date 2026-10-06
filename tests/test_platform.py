@@ -834,26 +834,81 @@ def test_a_live_view_listener_that_never_answers_fails_the_push_instead_of_stall
     from printguard.server.publish import H264Push
 
     monkeypatch.setattr("printguard.server.publish.PUSH_TIMEOUT_US", 500_000)
-    outcome: list[BaseException | None] = []
+    outcomes: list[Exception | None] = []
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
-        push = H264Push(f"rtsp://127.0.0.1:{listener.getsockname()[1]}/cam", 15)
+        push = H264Push(f"rtsp://127.0.0.1:{listener.getsockname()[1]}/cam", 15, 60.0, outcomes.append)
         frame = av.VideoFrame.from_ndarray(np.zeros((240, 320, 3), dtype=np.uint8), format="rgb24")
+        push.send(frame)
+        deadline = time.monotonic() + 15
+        while not outcomes and time.monotonic() < deadline:
+            time.sleep(0.05)
+        push.close()
 
-        def send() -> None:
-            try:
-                push.send(frame)
-                outcome.append(None)
-            except BaseException as exc:
-                outcome.append(exc)
+    assert isinstance(outcomes[0], av.error.FFmpegError), "the push never gave up on a listener that does not answer"
 
-        thread = threading.Thread(target=send, daemon=True)
+
+def test_a_browser_camera_push_to_a_listener_that_never_answers_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The remux had no timeout, so a MediaMTX that accepted and never replied held its thread for good."""
+    from printguard.server.publish import ChunkStream, remux
+
+    recording = io.BytesIO()
+    with av.open(recording, "w", format="matroska") as container:
+        stream = container.add_stream("mjpeg", rate=15)
+        stream.width, stream.height, stream.pix_fmt = 64, 48, "yuvj420p"
+        frame = av.VideoFrame.from_ndarray(np.zeros((48, 64, 3), dtype=np.uint8), format="rgb24")
+        for pts in range(5):
+            frame.pts = pts
+            for packet in stream.encode(frame):
+                container.mux(packet)
+    chunks = ChunkStream()
+    chunks.feed(recording.getvalue())
+    chunks.feed(None)
+    monkeypatch.setattr("printguard.server.publish.PUSH_TIMEOUT_US", 500_000)
+    outcome: list[BaseException] = []
+
+    def push(url: str) -> None:
+        try:
+            remux(chunks, url)
+        except BaseException as exc:
+            outcome.append(exc)
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        thread = threading.Thread(target=push, args=(f"rtsp://127.0.0.1:{listener.getsockname()[1]}/cam",), daemon=True)
         thread.start()
         thread.join(15)
 
-    assert not thread.is_alive(), "the push never gave up on a listener that does not answer"
+    assert not thread.is_alive(), "the remux never gave up on a listener that does not answer"
     assert isinstance(outcome[0], av.error.FFmpegError)
+
+
+async def test_a_live_view_that_stops_answering_never_delays_the_frames_detection_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each retry blocked the capture thread for the push's whole timeout, so a camera gave a frame half the time."""
+
+    def stalls(self: object, frame: object) -> None:
+        time.sleep(1.0)
+        raise av.error.TimeoutError(errno.ETIMEDOUT, "Operation timed out")
+
+    monkeypatch.setattr("printguard.server.publish.H264Push._encode", stalls)
+    monkeypatch.setattr("printguard.server.platform.RECONNECT_DELAY_S", 0.1)
+    monkeypatch.setattr(_MjpegPipe, "opened", 0)
+    reported: list[tuple[str, bool]] = []
+    source = AVSource(_MjpegPipe, "rtsp://127.0.0.1:9/cam1", report=lambda message, recovered: reported.append((message, recovered)))
+    try:
+        deadline = time.monotonic() + 15
+        while not source.online and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        started = source._seq
+        await asyncio.sleep(2.5)
+        gained = source._seq - started
+    finally:
+        source.close()
+
+    assert gained > 40, f"capture delivered {gained} frames in 2.5 s while the live view stalled"
+    assert len(reported) == 1, "the dashboard is told once per outage"
 
 
 async def test_a_stored_file_is_readable_only_by_whoever_runs_the_hub(tmp_path: Path) -> None:

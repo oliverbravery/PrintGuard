@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -424,10 +425,13 @@ def test_published_frames_share_one_single_threaded_scaler(monkeypatch, scalers)
     monkeypatch.setattr(
         publish.av, "open", Mock(return_value=SimpleNamespace(add_stream=Mock(return_value=stream), mux=Mock()))
     )
-    push = publish.H264Push("rtsp://mediamtx/camera", 30)
+    push = publish.H264Push("rtsp://mediamtx/camera", 30, 3.0)
 
-    for _ in range(3):
+    for sent in range(3):
         push.send(SimpleNamespace(width=64, height=48))
+        while stream.encode.call_count <= sent:
+            time.sleep(0.01)
+    push.close()
 
     assert [scaler.calls for scaler in scalers] == [[("yuv420p", 1)] * 3]
 

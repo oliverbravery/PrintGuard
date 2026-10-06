@@ -333,9 +333,9 @@ class AVSource:
     bespoke protocol, e.g. Bambu's chamber camera). When publish_url is set,
     each decoded frame is also transcoded to H.264 and pushed there, so sources
     MediaMTX cannot pull itself reach viewers as HLS. A push that fails costs
-    the live view alone: capture carries on feeding detection, the failure is
-    reported once through ``report``, and the push is tried again every
-    RECONNECT_DELAY_S. ``finished`` is called from the reader's thread as it ends,
+    the live view alone: it runs on a thread of its own, so capture carries on
+    feeding detection, the failure is reported once through ``report``, and the
+    push is tried again every RECONNECT_DELAY_S. ``finished`` is called from the reader's thread as it ends,
     and ``shown_as`` is the address errors name when the source is one the hub
     made up, such as the MediaMTX path a pulled camera is read from.
 
@@ -380,7 +380,6 @@ class AVSource:
         self._monitoring = True
         self._demand_until = 0.0
         self._publish_failed = False
-        self._publish_retry_at = 0.0
         self._wake = threading.Event()
         self._wake.set()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -452,7 +451,9 @@ class AVSource:
                     self.fps = min(60.0, declared)
                 if self._publish_url:
                     rate = stream.guessed_rate or stream.average_rate
-                    push = H264Push(self._publish_url, int(rate) if rate and 0 < rate <= 60 else 15)
+                    push = H264Push(
+                        self._publish_url, int(rate) if rate and 0 < rate <= 60 else 15, RECONNECT_DELAY_S, self._published
+                    )
                 self._decode(container, stream, push)
             except Exception as exc:
                 self.last_error = self._without_credentials(str(exc))
@@ -498,7 +499,7 @@ class AVSource:
                     self._latest = (frame, float(self._seq), time.time())
                     self.online = True
                     if push is not None:
-                        self._publish(push, frame)
+                        push.send(frame)
                     if not self.fps and time.monotonic() >= warmup_until:
                         samples.append(time.monotonic())
                         measured_for = samples[-1] - samples[0]
@@ -510,21 +511,13 @@ class AVSource:
                     return
                 time.sleep(0.02)
 
-    def _publish(self, push: H264Push, frame: av.VideoFrame) -> None:
-        """Pushes a frame to the live view, leaving capture running when that fails."""
-        if time.monotonic() < self._publish_retry_at:
-            return
-        try:
-            push.send(frame)
-        except av.error.FFmpegError as exc:
-            push.close()
-            self._publish_retry_at = time.monotonic() + RECONNECT_DELAY_S
-            if not self._publish_failed:
-                self._publish_failed = True
-                self.last_error = f"live view unavailable: {exc}"
-                self._report(f"{self.last_error}. Detection carries on without it", False)
-            return
-        if self._publish_failed:
+    def _published(self, error: Exception | None) -> None:
+        """Takes what became of a frame sent to the live view, from the push's thread."""
+        if error is not None and not self._publish_failed:
+            self._publish_failed = True
+            self.last_error = f"live view unavailable: {error}"
+            self._report(f"{self.last_error}. Detection carries on without it", False)
+        elif error is None and self._publish_failed:
             self._publish_failed = False
             self._report("live view restored", True)
 
