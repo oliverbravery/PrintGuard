@@ -35,6 +35,7 @@ from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
 from .plugins import WasmPluginRuntime
 from .publish import H264Push
+from .state_file import StateFile, data_directory_refused
 
 FPS_SAMPLE_FRAMES = 25
 FPS_SAMPLE_S = 5.0
@@ -70,20 +71,6 @@ only card, version, capabilities and device_caps."""
 CLASSIFY_MAX_PIXELS = 50_000_000
 """Most pixels a supplied image may have: a few kilobytes of JPEG can describe a
 frame that decodes to gigabytes, and an 8K frame is 33 million."""
-
-STATE_SECTIONS: dict[str, type | tuple[type, ...]] = {
-    "cameras": list,
-    "printers": list,
-    "prints": list,
-    "monitors": list,
-    "reviews": list,
-    "tokens": list,
-    "plugins": list,
-    "settings": dict,
-    "feedback_token": (str, type(None)),
-}
-"""What the engine saves under each top-level key of the state file, so one
-holding anything else is treated as damaged."""
 
 SOCKET_TIMEOUT_S = 10.0
 SOCKET_MAX_BYTES = 256 * 1024
@@ -740,7 +727,11 @@ class ServerPlatform:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
         self.host = deployment(update_asset is not None)
-        data_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            data_dir.mkdir(parents=True, exist_ok=True)
+            self.files = DiskFileStore(data_dir / "prints")
+        except PermissionError as exc:
+            raise data_directory_refused(data_dir, f"{exc.filename} could not be created", exc) from None
         self._model_dir = model_dir
         self._inference: Inference | None = None
         self.workers = 1
@@ -748,15 +739,16 @@ class ServerPlatform:
         meta = json.loads((model_dir / "metadata.json").read_text())
         protos = json.loads((model_dir / "prototypes.json").read_text())["prototypes"]
         self.assets = vision.assets_from_dicts(meta, protos)
-        self._state_path = data_dir / "state.json"
         self._client = httpx.AsyncClient(follow_redirects=True)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client, mediamtx_login)
         self._sources: dict[str, AVSource] = {}
         self._closing: dict[str, AVSource] = {}
         self._notices: list[Notice] = []
+        self._state_file = StateFile(
+            data_dir / "state.json", lambda message, recovered: self._notices.append(Notice(message, recovered))
+        )
         self._declares_devices = os.environ.get("PRINTGUARD_CAMERAS") == "auto"
         self.plugin_runtime = None if os.environ.get("PRINTGUARD_PLUGINS") == "off" else WasmPluginRuntime()
-        self.files = DiskFileStore(data_dir / "prints")
         if self.plugin_runtime is None:
             logger.warning("plugins are disabled by PRINTGUARD_PLUGINS=off")
 
@@ -780,7 +772,8 @@ class ServerPlatform:
         )
 
     async def close(self) -> None:
-        """Releases the HTTP client, and the inference workers once a runtime is up."""
+        """Writes any state still queued, then releases the HTTP client and the inference workers once a runtime is up."""
+        await asyncio.to_thread(self._state_file.flush)
         await self._client.aclose()
         if self._inference is not None:
             self._inference.close()
@@ -1016,53 +1009,11 @@ class ServerPlatform:
     def load_state(self) -> dict[str, Any]:
         """Reads persisted engine state from the data directory.
 
-        Returns:
-            The saved state, or nothing on a first boot. A file that will not
-            parse, or parses to something the engine never saves, is moved
-            aside before the hub starts empty, so the next save cannot
-            overwrite what is left of it.
-
         Raises:
-            RuntimeError: If the file is there and the hub may not read it,
-                saying whose it has to be.
+            RuntimeError: If the data directory is one the hub's user may not use.
         """
-        try:
-            state = json.loads(self._state_path.read_text())
-            if not isinstance(state, dict):
-                raise ValueError(f"it holds {type(state).__name__}, not an object")
-            for section, expected in STATE_SECTIONS.items():
-                if section in state and not isinstance(state[section], expected):
-                    raise ValueError(f"its {section} are {type(state[section]).__name__}")
-            return state
-        except FileNotFoundError:
-            return {}
-        except PermissionError as exc:
-            raise RuntimeError(
-                f"{self._state_path} could not be read ({exc}), so the hub cannot start. "
-                "The data directory and the files in it have to belong to the user the hub runs as"
-            ) from None
-        except ValueError as exc:
-            kept = self._state_path.with_suffix(".json.corrupt")
-            self._state_path.replace(kept)
-            logger.error("%s is damaged (%s), so the hub is starting empty. The file is kept as %s", self._state_path, exc, kept)
-            return {}
+        return self._state_file.load()
 
     def save_state(self, state: dict[str, Any]) -> None:
-        """Atomically writes engine state to the data directory, owner-readable only.
-
-        It holds printer passwords, notifier keys, API token hashes and whatever
-        credentials plugins have been given, so the temporary file is created
-        with that mode and held to it before anything is written: anything else
-        leaves a window where it is readable by everybody on the host. One left
-        behind by a hub that was killed mid-write keeps the mode it had, which
-        is why creating it that way is not enough. It is synced to disk before
-        the rename too, or a power cut can leave the new name pointing at a
-        file with nothing in it.
-        """
-        tmp = self._state_path.with_suffix(".tmp")
-        with open(tmp, "w", opener=partial(os.open, mode=0o600)) as handle:
-            tmp.chmod(0o600)
-            handle.write(json.dumps(state, indent=2))
-            handle.flush()
-            os.fsync(handle.fileno())
-        tmp.replace(self._state_path)
+        """Queues engine state to be written to the data directory, off the event loop."""
+        self._state_file.save(state)

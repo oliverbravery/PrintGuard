@@ -316,57 +316,6 @@ def test_measured_concurrency_tracks_scaling() -> None:
     assert _measure_concurrency(serialises)[0] == 1
 
 
-def test_the_state_file_is_readable_only_by_whoever_runs_the_hub(tmp_path) -> None:
-    """It holds printer passwords, API token hashes and plugin credentials."""
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    ServerPlatform.save_state(holder, {"printers": [{"config": {"password": "hunter2"}}]})
-
-    assert oct((tmp_path / "state.json").stat().st_mode)[-3:] == "600"
-    assert not (tmp_path / "state.tmp").exists(), "the temporary file was left behind"
-
-
-def test_the_state_file_is_never_readable_by_anyone_else_while_it_is_written(tmp_path, monkeypatch) -> None:
-    """The temporary file holds every secret from the first byte, not only once it is renamed.
-
-    One a killed hub left behind keeps the mode it had, so it is held to the
-    mode as well as created with it.
-    """
-    modes: list[str] = []
-    monkeypatch.setattr("printguard.server.platform.os.fsync", lambda descriptor: modes.append(oct((tmp_path / "state.tmp").stat().st_mode)[-3:]))
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    ServerPlatform.save_state(holder, {"printers": [{"config": {"password": "hunter2"}}]})
-    (tmp_path / "state.tmp").write_text("left by a hub that was killed")
-    (tmp_path / "state.tmp").chmod(0o644)
-    ServerPlatform.save_state(holder, {"printers": []})
-
-    assert modes == ["600", "600"]
-
-
-def test_the_state_file_reaches_the_disk_before_it_takes_the_name(tmp_path, monkeypatch) -> None:
-    """A rename without a sync can survive a power cut pointing at an empty file."""
-    synced: list[int] = []
-    monkeypatch.setattr("printguard.server.platform.os.fsync", lambda descriptor: synced.append((tmp_path / "state.tmp").stat().st_size))
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    ServerPlatform.save_state(holder, {"printers": []})
-
-    assert synced == [(tmp_path / "state.json").stat().st_size]
-
-
-def test_a_damaged_state_file_is_kept_rather_than_overwritten(tmp_path, caplog) -> None:
-    """Starting empty in silence loses every printer and reopens anonymous reads of the API."""
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    assert ServerPlatform.load_state(holder) == {}
-    assert not caplog.records, "a first boot has no state file and nothing to say about it"
-
-    (tmp_path / "state.json").write_text('{"printers": [{"id": "p1"')
-    assert ServerPlatform.load_state(holder) == {}
-    ServerPlatform.save_state(holder, {})
-
-    assert (tmp_path / "state.json.corrupt").read_text() == '{"printers": [{"id": "p1"'
-    assert [record.levelname for record in caplog.records] == ["ERROR"]
-    assert "state.json.corrupt" in caplog.text
-
-
 @pytest.mark.parametrize(
     ("answer", "reached", "outcome"),
     [
@@ -699,18 +648,6 @@ def test_a_sliver_of_a_frame_is_not_scaled_up_whole_before_it_is_cropped(monkeyp
     assert resized == [(1024, 256), (455, 256)]
 
 
-def test_a_state_file_the_hub_may_not_read_says_whose_it_has_to_be(tmp_path, monkeypatch) -> None:
-    """A bare PermissionError traceback does not tell anyone the data directory has the wrong owner."""
-
-    def denied(path: Path, *args: object, **kwargs: object) -> str:
-        raise PermissionError(errno.EACCES, "Permission denied", str(path))
-
-    monkeypatch.setattr(Path, "read_text", denied)
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    with pytest.raises(RuntimeError, match="state.json could not be read .*belong to the user the hub runs as"):
-        ServerPlatform.load_state(holder)
-
-
 SVG_STREAM = b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="blue"/></svg>'
 
 
@@ -768,34 +705,6 @@ async def test_an_image_with_more_pixels_than_the_cap_is_refused_before_it_is_de
     assert await ServerPlatform.decode_jpeg(holder, jpeg(101)) is None
     assert decoded == []
     assert (await ServerPlatform.decode_jpeg(holder, jpeg(100))).shape == (100, 100, 3)
-
-
-@pytest.mark.parametrize(
-    "saved",
-    ["null", "[]", '"state"', '{"settings": "x"}', '{"cameras": {"cam1": {}}}', '{"feedback_token": 5}', '{"tokens": null}'],
-)
-def test_a_state_file_of_the_wrong_shape_is_kept_like_one_that_will_not_parse(tmp_path, caplog, saved: str) -> None:
-    """Valid JSON that is not what the engine saves started an empty hub, or ended the start with an AttributeError."""
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    (tmp_path / "state.json").write_text(saved)
-
-    assert ServerPlatform.load_state(holder) == {}
-    ServerPlatform.save_state(holder, {})
-
-    assert (tmp_path / "state.json.corrupt").read_text() == saved
-    assert [record.levelname for record in caplog.records] == ["ERROR"]
-    assert "state.json.corrupt" in caplog.text
-
-
-def test_a_state_file_of_the_shape_the_engine_saves_is_read(tmp_path) -> None:
-    state = {
-        "cameras": [], "printers": [], "prints": [], "monitors": [], "reviews": [], "tokens": [], "plugins": [],
-        "settings": {}, "feedback_token": None,
-    }
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    (tmp_path / "state.json").write_text(json.dumps(state))
-
-    assert ServerPlatform.load_state(holder) == state
 
 
 async def test_a_quiet_device_is_released_when_its_camera_stands_down(monkeypatch: pytest.MonkeyPatch) -> None:
