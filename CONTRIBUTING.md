@@ -80,6 +80,11 @@ npx wrangler deploy --secrets-file <file>   # TOKEN_SECRET, REMINDER_TO and REMI
 Replacing `TOKEN_SECRET` gives every hub a new ID, which orphans the frames sent under the old
 ones from any [deletion request](docs/feedback.md#having-your-frames-deleted).
 
+Every request, including a refused one, counts against the account's free Workers requests, and
+the Worker can't stop that. Put a rate limiting rule on the route in the Cloudflare dashboard
+(Security, WAF, Rate limiting rules) so a flood is dropped before it runs the Worker. The
+`ratelimits` namespace IDs in `wrangler.jsonc` must not be used by another Worker on the account.
+
 The browser half of the plugin sandbox is only meaningful in a real engine, so
 `web/tests/sandbox.spec.ts` drives it through Playwright in both chromium and webkit. Run it
 if you touch anything under `web/public/plugin-sandbox.html`, `web/public/plugin-panel.html`,

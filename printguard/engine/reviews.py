@@ -146,10 +146,11 @@ class ReviewLibrary:
             Whether the kept frames changed.
         """
         score = round(score, 4)
+        stops = self._stops
         review = self._running(monitor["id"]) or await self._begin(monitor["id"], ts)
         spaced = review.of_kind("spaced")
         if not spaced or ts - spaced[-1]["ts"] >= review.spacing_s:
-            await self._keep(review, frame, {"ts": ts, "score": score, "kind": "spaced"})
+            await self._keep(review, frame, {"ts": ts, "score": score, "kind": "spaced"}, stops)
             if len(spaced) + 1 >= SPACED_MAX:
                 await self._drop(review, review.of_kind("spaced")[1::2])
                 review.spacing_s *= 2
@@ -161,7 +162,7 @@ class ReviewLibrary:
         outscored = neighbour or (min(near, key=lambda kept: kept["score"]) if len(near) >= NEAR_MAX else None)
         if outscored and score <= outscored["score"]:
             return False
-        await self._keep(review, frame, {"ts": ts, "score": score, "kind": "near"})
+        await self._keep(review, frame, {"ts": ts, "score": score, "kind": "near"}, stops)
         if outscored:
             await self._drop(review, [outscored])
         return True
@@ -169,7 +170,7 @@ class ReviewLibrary:
     async def keep_alert(self, monitor_id: str, alert: dict[str, Any], frame: Frame) -> None:
         """Keeps the frame that fired an alert in the monitor's running print."""
         review = self._running(monitor_id) or await self._begin(monitor_id, alert["ts"])
-        await self._keep(review, frame, {"ts": alert["ts"], "score": alert["score"], "kind": "alert", "action": alert["action"]})
+        await self._keep(review, frame, {"ts": alert["ts"], "score": alert["score"], "kind": "alert", "action": alert["action"]}, self._stops)
         await self._drop(review, review.of_kind("alert")[:-ALERT_MAX])
 
     def settle(self, monitors: dict[str, dict[str, Any]], printers: "PrinterRegistry", responding: set[str], wanted: bool) -> bool:
@@ -284,9 +285,8 @@ class ReviewLibrary:
     def _stored_bytes(self) -> int:
         return sum(frame["size"] for review in self._reviews.values() for frame in review.frames)
 
-    async def _keep(self, review: Review, frame: Frame, record: dict[str, Any]) -> None:
-        """Stores a frame, unless its review was deleted or the review switched off while the file was being written."""
-        stops = self._stops
+    async def _keep(self, review: Review, frame: Frame, record: dict[str, Any], stops: int) -> None:
+        """Stores a frame, unless its review was deleted or the review was switched off since ``stops`` was read."""
         small = await asyncio.to_thread(vision.shrink, frame.rgb, SHORTEST_PX)
         jpeg = await self._platform.encode_jpeg(small)
         if not jpeg:

@@ -2805,6 +2805,32 @@ async def test_two_prints_beginning_at_the_cap_do_not_evict_the_same_review(monk
     assert len(platform.files.blobs) == sum(review["frames"] for review in library.public()), "an evicted review's frame was left behind"
 
 
+async def test_a_print_beginning_while_the_review_is_switched_off_keeps_no_frame(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "REVIEW_MAX", 1)
+    platform = FakePlatform()
+    library = reviews.ReviewLibrary(platform)
+    frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
+    monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
+    await library.sample(monitor, frame, 0.1, 0.0)
+    library.settle({"m": monitor}, {}, set(), True)
+    remove = platform.files.remove
+    evicting = asyncio.Event()
+
+    async def slow_remove(key: str) -> None:
+        evicting.set()
+        await asyncio.sleep(0.1)
+        await remove(key)
+
+    monkeypatch.setattr(platform.files, "remove", slow_remove)
+    sampling = asyncio.create_task(library.sample(monitor, frame, 0.1, 100.0))
+    await evicting.wait()
+    await library.stop_asking()
+    await sampling
+
+    assert [review["frames"] for review in library.public()] == [0], "a frame was kept after the review was switched off"
+    assert not platform.files.blobs, "the frame's file stayed on disk"
+
+
 async def test_a_print_with_no_frames_kept_does_not_wait_for_a_review(monkeypatch) -> None:
     platform = FakePlatform(infer_s=0.02)
     monkeypatch.setattr(platform.files, "store", _disk_full)
@@ -2896,6 +2922,14 @@ async def test_a_reviewed_print_is_sent_with_its_labels(monkeypatch) -> None:
     assert state["feedback_hub"] == "a" * 32 and TOKEN not in json.dumps(state), "the state names the hub and never carries its token"
     assert platform.state["feedback_token"] == TOKEN, "the token is kept so the hub registers once"
     assert platform.http_calls.count(("POST", f"{feedback.ENDPOINT}/register")) == 1
+
+
+def test_a_typed_printer_model_is_cut_to_what_the_inbox_takes() -> None:
+    assert feedback.printer_model(None) == ""
+    assert feedback.printer_model("  Voron \n 2.4\t") == "Voron 2.4"
+    assert feedback.printer_model("Ender\x1b[2J\x00 3\x7f") == "Ender[2J 3"
+    assert feedback.printer_model("Prusa \u00e9\u4e2d") == "Prusa \u00e9\u4e2d"
+    assert len(feedback.printer_model("a" * 200)) == feedback.PRINTER_MODEL_MAX
 
 
 async def test_a_refused_print_waits_and_sends_the_rest_after_the_limit_resets(monkeypatch) -> None:

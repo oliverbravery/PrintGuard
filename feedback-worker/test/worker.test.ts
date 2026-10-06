@@ -1,6 +1,6 @@
 import { createScheduledController, runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import worker, { expiresSoon, networkOf, reminders } from "../src";
 import type { Reservation } from "../src/gate";
 import {
@@ -99,7 +99,7 @@ const gateState = () =>
 
 const hubCount = async (hub: string) => (await gateState()).rows.find(({ scope, key }) => scope === "hub" && key === hub)?.n;
 
-const NEW = { bytes: 10, uploads: 1 };
+const NEW = { bytes: 10, uploads: 1, day: new Date().toISOString().slice(0, 10) };
 
 const code = async (response: Response) => ((await response.json()) as { code: string }).code;
 
@@ -185,7 +185,7 @@ describe("uploading a frame", () => {
     const labels = ["printer", "provider", "version"];
     const refusals = [];
     for (const [index, name] of labels.entries()) {
-      for (const bad of ["a\u0000b", "a\r\nx-amz-meta-label: failure", "tab\there"]) {
+      for (const bad of ["a\u0000b", "a\r\nx-amz-meta-label: failure", "tab\there", "=?utf-8?q?=1B[2J=0Ainjected?=", "=?utf-8?b?G1sySg==?="]) {
         refusals.push(await upload(token, "203.0.113.15", frameId(8000 + index), JPEG, { [name]: bad }));
       }
     }
@@ -249,50 +249,107 @@ describe("two requests for one frame at once", () => {
     const hub = token.split(".")[0];
     const racing = holdingPuts(env.FRAMES);
     const raced = { ...env, FRAMES: racing.bucket };
-    const holder = worker.fetch(frameRequest(token, "203.0.113.60", frameId(7000)), raced).then(
+    const holder = worker.fetch(frameRequest(token, "203.0.113.60", frameId(7000), JPEG, { label: "good", printer: "first" }), raced).then(
       (response) => response.status,
       () => "failed",
     );
     await until(() => racing.pending.length === 1);
-    const duplicate = worker.fetch(frameRequest(token, "198.51.100.9", frameId(7000)), raced);
-    await until(() => racing.pending.length === 2);
+    const duplicate = await worker.fetch(frameRequest(token, "198.51.100.9", frameId(7000), new Uint8Array([...JPEG, 9, 9]), { label: "failure", printer: "second" }), raced);
     return { hub, puts: racing.pending, holder, duplicate };
   };
 
-  const expectCountedOnce = async (hub: string) => {
-    expect((await env.FRAMES.list({ prefix: hub })).objects.map((object) => object.size)).toEqual([JPEG.byteLength]);
+  it("answers the second request as held without writing, so the first send's bytes and labels stand", async () => {
+    const { hub, puts, holder, duplicate } = await startRace();
+    expect(duplicate.status).toBe(201);
+    expect(puts).toHaveLength(1);
+    await puts[0].finish();
+    expect(await holder).toBe(201);
+
+    const stored = await env.FRAMES.get(`${hub}/aaaaaaaaaaaa/${frameId(7000)}.jpg`);
+    expect(stored!.size).toBe(JPEG.byteLength);
+    expect(stored!.customMetadata).toMatchObject({ label: "good", printer: "first" });
     expect(await hubCount(hub)).toBe(1);
-    const { stored } = await gateState();
-    const inBucket = (await env.FRAMES.list()).objects.reduce((bytes, object) => bytes + object.size, 0);
-    expect(stored).toBe(inBucket);
-  };
-
-  it("keeps the frame counted when the first write fails after the second one lands", async () => {
-    const { hub, puts, holder, duplicate } = await startRace();
-    await puts[1].finish();
-    expect((await duplicate).status).toBe(201);
-    await puts[0].finish(PUT_REFUSED);
-    expect(await holder).toBe("failed");
-    await expectCountedOnce(hub);
+    const { stored: storedBytes } = await gateState();
+    expect(storedBytes).toBe((await env.FRAMES.list()).objects.reduce((bytes, object) => bytes + object.size, 0));
   });
 
-  it("counts the frame when the first write fails before the second one lands", async () => {
-    const { hub, puts, holder, duplicate } = await startRace();
+  it("takes the count back when the write fails", async () => {
+    const { hub, puts, holder } = await startRace();
     await puts[0].finish(PUT_REFUSED);
     expect(await holder).toBe("failed");
-    await puts[1].finish();
-    expect((await duplicate).status).toBe(201);
-    await expectCountedOnce(hub);
-  });
-
-  it("takes the count back when every write fails", async () => {
-    const { hub, puts, holder, duplicate } = await startRace();
-    await puts[0].finish(PUT_REFUSED);
-    await puts[1].finish(PUT_REFUSED);
-    expect(await holder).toBe("failed");
-    await expect(duplicate).rejects.toThrow();
     expect((await env.FRAMES.list({ prefix: hub })).objects).toEqual([]);
     expect(await hubCount(hub)).toBe(0);
+  });
+
+  it("leaves an object that is already in the bucket as it is and counts nothing for the send", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const hub = token.split(".")[0];
+    const key = `${hub}/aaaaaaaaaaaa/${frameId(7100)}.jpg`;
+    await env.FRAMES.put(key, new Uint8Array([...JPEG, 1]), { customMetadata: { label: "failure" } });
+    const before = await gateState();
+
+    const response = await upload(token, "203.0.113.61", frameId(7100), JPEG, { label: "good" });
+
+    expect(response.status).toBe(201);
+    expect((await env.FRAMES.head(key))!.customMetadata).toEqual({ label: "failure" });
+    expect(await hubCount(hub)).toBe(0);
+    expect((await gateState()).stored).toBe(before.stored);
+  });
+});
+
+describe("a day boundary", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("takes a reservation back from the day it was made on, not the new one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2030-03-01T23:59:59.900Z"));
+    const gate = env.GATE.getByName("midnight");
+    const reservation = (await gate.reserve("hub", "network", "frame", 10)) as Reservation;
+    vi.setSystemTime(new Date("2030-03-02T00:00:00.100Z"));
+
+    await gate.release("hub", "network", "frame", reservation);
+    await runInDurableObject(gate, (_gate, state) => {
+      const days = state.storage.sql.exec<{ day: string; scope: string; n: number }>("SELECT day, scope, n FROM counts WHERE scope = 'hub'").toArray();
+      expect(days).toEqual([{ day: "2030-03-01", scope: "hub", n: 0 }]);
+    });
+    expect(await gate.storedBytes()).toBe(0);
+  });
+});
+
+describe("a request that is refused", () => {
+  const untouched = new Proxy(
+    {},
+    {
+      get: (_target, property) => {
+        throw new Error(`${String(property)} was reached`);
+      },
+    },
+  );
+
+  it("costs no gate or bucket call when the hub sends faster than the rate", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const tooFast = { limit: async () => ({ success: false }) };
+    const response = await worker.fetch(frameRequest(token, "203.0.113.70", frameId(7200)), { ...env, FRAME_RATE: tooFast, GATE: untouched, FRAMES: untouched } as unknown as typeof env);
+    expect(response.status).toBe(429);
+    expect(await code(response)).toBe("rate_limited");
+    expect(Number(response.headers.get("Retry-After"))).toBeGreaterThan(0);
+  });
+
+  it("costs no gate call when a network registers faster than the rate", async () => {
+    const tooFast = { limit: async () => ({ success: false }) };
+    const response = await worker.fetch(
+      new Request(`${ORIGIN}/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
+      { ...env, REGISTER_RATE: tooFast, GATE: untouched } as unknown as typeof env,
+    );
+    expect(response.status).toBe(429);
+    expect(await code(response)).toBe("rate_limited");
+  });
+
+  it("costs no bucket call when the hub is at its daily limit", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    for (let sent = 0; sent < UPLOADS_PER_HUB; sent += 1) await upload(token, "203.0.113.71", frameId(7300 + sent));
+    const refused = await worker.fetch(frameRequest(token, "203.0.113.71", frameId(7399)), { ...env, FRAMES: untouched } as unknown as typeof env);
+    expect(await code(refused)).toBe("hub_daily");
   });
 });
 
@@ -316,14 +373,14 @@ describe("the gate", () => {
   it("counts one frame once when two requests for it both find the bucket empty", async () => {
     const gate = env.GATE.getByName("same-frame");
     expect(await gate.reserve("hub", "network", "frame", 10)).toEqual(NEW);
-    expect(await gate.reserve("hub", "network", "frame", 10)).toEqual({ bytes: 0, uploads: 0 });
+    expect(await gate.reserve("hub", "network", "frame", 10)).toEqual({ ...NEW, bytes: 0, uploads: 0 });
     expect(await gate.storedBytes()).toBe(10);
-    expect(await gate.reserve("hub", "network", "frame", 12)).toEqual({ bytes: 0, uploads: 0 });
+    expect(await gate.reserve("hub", "network", "frame", 12)).toEqual({ ...NEW, bytes: 0, uploads: 0 });
     expect(await gate.storedBytes()).toBe(10);
 
     await gate.release("hub", "network", "other", (await gate.reserve("hub", "network", "other", 30)) as Reservation);
     expect(await gate.storedBytes()).toBe(10);
-    expect(await gate.reserve("hub", "network", "other", 30)).toEqual({ bytes: 30, uploads: 1 });
+    expect(await gate.reserve("hub", "network", "other", 30)).toEqual({ ...NEW, bytes: 30 });
   });
 
   it("never lets the stored bytes pass the cap, and frees room when a write is released or the bucket is recounted", async () => {
@@ -334,9 +391,9 @@ describe("the gate", () => {
     expect(await gate.reserve("hub", "network", "second", 1)).toEqual({ status: 507, code: "storage_full" });
 
     await gate.release("hub", "network", "first", filling);
-    expect(await gate.reserve("hub", "network", "first", 100)).toEqual({ bytes: 100, uploads: 1 });
+    expect(await gate.reserve("hub", "network", "first", 100)).toEqual({ ...NEW, bytes: 100 });
     await gate.recount(0);
-    expect(await gate.reserve("hub", "network", "third", FRAME_BYTES_MAX)).toEqual({ bytes: FRAME_BYTES_MAX, uploads: 1 });
+    expect(await gate.reserve("hub", "network", "third", FRAME_BYTES_MAX)).toEqual({ ...NEW, bytes: FRAME_BYTES_MAX });
   });
 });
 

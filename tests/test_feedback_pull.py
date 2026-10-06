@@ -79,6 +79,11 @@ def test_a_label_in_rfc_2047_is_decoded(pull: types.ModuleType) -> None:
     assert pull.labels({"printer": "=?utf-8?b?UHJ1c2EgTUs0?="}) == {"printer": "Prusa MK4"}
 
 
+def test_a_label_loses_its_control_characters_even_when_they_were_encoded(pull: types.ModuleType) -> None:
+    assert pull.labels({"printer": "=?utf-8?q?=1B[2J=0Ainjected?="}) == {"printer": "[2Jinjected"}
+    assert pull.labels({"printer": "a\x00b\x7f"}) == {"printer": "ab"}
+
+
 def test_a_frame_sent_again_after_a_pull_leaves_one_row(pull: types.ModuleType, tmp_path: Path) -> None:
     pull.pull(Bucket({key(1): (jpeg(), labels(label="good"))}), tmp_path)
     pull.pull(Bucket({key(1): (jpeg(), labels(label="failure"))}), tmp_path)
@@ -110,3 +115,22 @@ def test_an_object_that_is_not_a_frame_key_is_discarded_and_does_not_stop_the_pu
     assert pull.pull(bucket, tmp_path) == (1, 1)
 
     assert bucket.objects == {}
+
+
+@pytest.mark.parametrize("stray", ["../../escaped.jpg", f"{HUB}/../../escaped.jpg", f"../{PRINT}/{1:012x}.jpg", f"{HUB.upper()}/{PRINT}/{1:012x}.jpg", f"{HUB}/{PRINT}/{1:012x}.png"])
+def test_a_key_that_could_leave_the_dataset_is_discarded_unwritten(pull: types.ModuleType, tmp_path: Path, stray: str) -> None:
+    out = tmp_path / "level1" / "dataset"
+    bucket = Bucket({stray: (jpeg(), labels())})
+
+    assert pull.pull(bucket, out) == (0, 1)
+
+    assert bucket.objects == {}
+    assert [path for path in tmp_path.rglob("*") if path.suffix == ".jpg"] == []
+
+
+def test_a_label_named_like_the_rows_own_field_cannot_replace_it(pull: types.ModuleType, tmp_path: Path) -> None:
+    pull.pull(Bucket({key(1): (jpeg(), {**labels(), "hub": "someone-else", "file": "../../x", "print": "p", "uploaded": "never"})}), tmp_path)
+
+    row = json.loads((tmp_path / "frames.jsonl").read_text())
+
+    assert (row["hub"], row["print"], row["file"], row["uploaded"]) == (HUB, PRINT, f"{HUB}/{PRINT}/{1:012x}.jpg", UPLOADED.isoformat())
