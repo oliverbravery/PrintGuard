@@ -39,6 +39,7 @@ export interface Camera {
   in_use: boolean;
   online: boolean;
   standby: boolean;
+  reason?: string | null;
   last_result: InferenceResult | null;
 }
 

@@ -202,7 +202,7 @@ Events, engine to UI:
 | `cameras`, `printers`, `prints`, `tokens`, `plugins` | The public record of everything in each registry. A token's is its name, scope and hint, never its hash, and a plugin's leaves out its code and the values of its credentials. A printer's `config` goes without its secret fields, which its `secrets_set` names where one is stored, and a camera's `source` without a Bambu access code. Every address in either is scrubbed of its login |
 | `monitors` | Each monitor's settings with `watching`, its latest `result` and, once it has alerted, its `alert` |
 | `reviews`, `feedback_hub` | A count of the frames kept from each print with its review status, and the public half of the hub's training inbox token |
-| `startup_warnings` | Strings for what start found wrong: a GPU skipped, a setting reset, a record dropped with its reason, one a past version accepted that this one refuses. They are kept until the hub restarts, since nobody is connected to hear the `warning` event, and the dashboard toasts each once per page load |
+| `startup_warnings` | Strings for what start found wrong: a GPU skipped, a setting reset to its default, a record dropped with its reason, one a past version accepted that this one refuses. They are kept until the hub restarts, since nobody is connected to hear the `warning` event, and the dashboard toasts each once per page load |
 | `settings` | Notifier configs without their secret fields, MQTT without its password, theme, custom themes, glass, layout, inference runtime, catalogue URL, grace period, preheat presets, and whether to check for updates and ask for print reviews |
 | `secrets_set` | The names of the stored secret fields of each notifier and of MQTT, as `{"notifiers": {provider: [...]}, "mqtt": [...]}`. A form reads it to say a field is saved |
 | `stats` | `inference_device`, `infer_ms` and `capacity_fps` from the scheduler |
@@ -271,7 +271,8 @@ added or updated, so neither command waits on a camera opening, and on demand th
 service loses the cameras the old one exposed. One printer is
 reconciled by one caller at a time, and a camera whose source changed with the printer's
 connection details is attached again at the new address with its name and tuning kept. A
-stream already registered by hand stays the one camera on it. A
+stream already registered by hand, or being opened by a command still waiting on it, stays the one camera on it, and a printer
+moved onto one leaves its camera where it was with a warning. A
 printer whose connection details change also loses the status last read through the old ones,
 so its monitors watch until the new address answers. Such
 cameras cannot be removed on their own and are dropped with their printer. See
@@ -789,7 +790,8 @@ printguard/
     engine.py        the command handlers, events, state snapshot and background loops
     platform.py      the Platform, FrameSource, FileStore and PluginRuntime protocols
     registry.py      registered resources: cameras, printers, prints, tokens and plugins
-    bounds.py        the one clamp every sanitiser uses, refusing NaN and Infinity
+    bounds.py        the one clamp every sanitiser uses, refusing NaN, Infinity, text and booleans
+    settings.py      what each stored setting may hold, checked on a settings command and when saved ones are read at start
     appearance.py    the shape of the theme, custom themes, glass and layout the dashboard saves
     cameras.py       camera settings: defaults, clamps and WebRTC URL detection
     monitors.py      monitor config: a camera + printer pairing and its thresholds

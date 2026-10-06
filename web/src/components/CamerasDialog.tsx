@@ -50,6 +50,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
         <div className="min-w-0 grow basis-40 leading-tight">
           <div className="text-sm font-medium truncate">{camera.name}</div>
           <div className="mono text-[0.62rem] text-text-2 truncate">{sourceLabel(camera.source)}</div>
+          {camera.reason && <div className="text-[0.68rem] text-bad">{camera.reason}</div>}
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <span className="mono text-[0.68rem] text-text-1">{camera.max_fps.toFixed(0)} fps</span>

@@ -15,7 +15,9 @@ export function sourceLabel(source: CameraSource): string {
 }
 
 export function cameraStatus(camera: Camera): string {
-  return camera.online ? "online" : camera.standby ? "standby" : "offline";
+  if (camera.online) return "online";
+  if (camera.standby) return "standby";
+  return camera.reason ? `offline: ${camera.reason}` : "offline";
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -52,6 +54,11 @@ function CameraCard({ camera }: { camera: Camera }) {
       <div className="order-1 min-w-0 flex-1 leading-tight sm:flex-none sm:w-36">
         <div className="display text-sm font-semibold truncate">{camera.name}</div>
         <div className="mono text-[0.6rem] text-text-2 truncate">{sourceLabel(camera.source)}</div>
+        {camera.reason && (
+          <div className="text-[0.6rem] text-bad truncate" title={camera.reason}>
+            {camera.reason}
+          </div>
+        )}
       </div>
       {handle ? (
         <button

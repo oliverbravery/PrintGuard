@@ -77,7 +77,7 @@ The URL has to be one the hub can reach. In Docker, `localhost` is the container
 A stream registers only once it has delivered a frame, which the hub waits 25 seconds for.
 Otherwise adding it fails with `no frames from camera` and the reason, with any credentials
 removed, and `no decoder for this stream` means the address serves something that isn't video,
-such as an SVG. A camera's address can't be edited afterwards, so remove it and add it again to
+such as an SVG. A saved camera that can't be opened shows offline with the same reason on its entry, and keeps trying. A camera's address can't be edited afterwards, so remove it and add it again to
 change it. An address the bundled MediaMTX refuses fails with `PrintGuard can't use that address`
 and its reason.
 

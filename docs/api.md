@@ -113,9 +113,10 @@ or `notify_test` event as it was sent, `event` and `req_id` included.
 | `504` | The engine did not finish in time |
 
 A field a body doesn't list is ignored, a field of the body sent as `null` is left as it was,
-and a number outside its range is moved to the nearest end of it. Two are refused instead, a
-heater target outside 0 to 350 for the nozzle or 0 to 150 for the bed, or one that isn't a
-number, and an `mqtt` `port` that isn't a whole number from 1 to 65535.
+and a number outside its range is moved to the nearest end of it. A number sent as text or `true`
+is refused with a `422`, never converted. Three more are refused instead of moved, a
+heater target outside 0 to 350 for the nozzle or 0 to 150 for the bed, an `mqtt` `port` that isn't
+a whole number from 1 to 65535 and `mqtt` enabled with no `host`.
 
 The engine sets how long each command may take, so the REST API, MCP server and plugins all wait
 the same:
@@ -285,7 +286,7 @@ the MQTT integration set up in Home Assistant and no custom component.
 4. Press **Save broker settings**. The devices appear under the MQTT integration.
 
 Leave the port blank for `1883`, or `8883` with TLS. A port that isn't a whole number from 1 to
-65535 is refused. With TLS the broker's certificate has to be
+65535 is refused, and so is turning it on with no host. With TLS the broker's certificate has to be
 one the hub's system trusts, so a self-signed one is refused.
 
 | Entity | Type | Appears |
@@ -410,6 +411,7 @@ The camera object, from `GET /cameras` and `GET /cameras/{id}`:
   "detect_fps": 60.0,                                       // cap on target_fps, set by the user
   "inferring": true, "in_use": true, "online": true,        // health
   "standby": false,                                         // no monitor is watching it and nobody is viewing it
+  "reason": null,                                           // why it could not be opened, until it opens
   "last_result": {                                          // latest classification (per FRAME)
     "prediction": "success",                                //   "success" | "failure" | "unknown"
     "distances": { "success": 0.48, "failure": 1.64 },      //   distance to each class prototype

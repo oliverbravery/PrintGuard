@@ -90,6 +90,7 @@ The model only watches a square of each camera's view. Until you crop a camera t
 middle of the frame, so on a wide camera the sides of the bed go unwatched. Crop it to a square
 the print fills, leaving a little room: the model trims a sixteenth off each edge of the square
 before it scores it. Rotation is applied first, so you draw the crop on the picture as you see it.
+A crop that runs off the frame is moved back inside it.
 
 Detection normally runs as often as the hardware and the camera allow. Lower **Detection rate**
 to cut the load PrintGuard puts on a shared host. A defect takes longer to confirm at a lower
