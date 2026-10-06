@@ -304,18 +304,48 @@ const stoodDown = (e: EngineState) => {
 
 const NOTIFIERS = [
   {
-    id: "ntfy", label: "ntfy", docs_url: "",
-    schema: { properties: { url: { type: "string", title: "Topic URL", placeholder: "https://ntfy.sh/my-prints" } }, required: ["url"] },
+    id: "ntfy", label: "ntfy", docs_url: "https://docs.ntfy.sh/publish/", setup_url: "https://docs.ntfy.sh/subscribe/phone/",
+    setup_hint: "Subscribe to your topic in the ntfy app to receive alerts. Use a hard-to-guess name, anyone with it can read; protected topics need an access token.",
+    schema: {
+      properties: {
+        url: { type: "string", title: "Topic URL", secret: true, placeholder: "https://ntfy.sh/my-printers" },
+        token: { type: "string", title: "Access token (optional)", secret: true, placeholder: "Leave blank for open topics" },
+      },
+      required: ["url"],
+    },
   },
   {
-    id: "pushover", label: "Pushover", docs_url: "",
-    schema: { properties: { api_token: { type: "string", title: "Application API token", secret: true }, user_key: { type: "string", title: "User key", secret: true } }, required: ["api_token", "user_key"] },
+    id: "pushover", label: "Pushover", docs_url: "https://pushover.net/api", setup_url: "https://pushover.net/apps/build",
+    setup_hint: "Create an application at pushover.net/apps/build for its API token. Your user key is on the Pushover dashboard, and the app is a one-off purchase per platform.",
+    schema: {
+      properties: {
+        api_token: { type: "string", title: "Application API token", secret: true, placeholder: "From pushover.net/apps/build" },
+        user_key: { type: "string", title: "User key", secret: true, placeholder: "From your Pushover dashboard" },
+        priority: {
+          type: "string", title: "Priority (applies to every notice)", default: "1", enum: ["-2", "-1", "0", "1"],
+          enum_labels: ["Lowest - no notification, badge only", "Low - notifies without a sound", "Normal - respects your quiet hours", "High - bypasses your quiet hours"],
+        },
+      },
+      required: ["api_token", "user_key"],
+    },
   },
   {
-    id: "telegram", label: "Telegram", docs_url: "",
-    schema: { properties: { token: { type: "string", title: "Bot token", secret: true }, chat_id: { type: "string", title: "Chat ID" } }, required: ["token", "chat_id"] },
+    id: "telegram", label: "Telegram", docs_url: "https://core.telegram.org/bots/api", setup_url: "https://core.telegram.org/bots/tutorial",
+    setup_hint: "Create a bot with @BotFather to get its token, then message the bot and read your chat ID from @userinfobot.",
+    schema: {
+      properties: {
+        bot_token: { type: "string", title: "Bot token", secret: true, placeholder: "From @BotFather" },
+        chat_id: { type: "string", title: "Chat ID", placeholder: "From @userinfobot, e.g. 123456789" },
+      },
+      required: ["bot_token", "chat_id"],
+    },
   },
-  { id: "discord", label: "Discord", docs_url: "", schema: { properties: { webhook: { type: "string", title: "Webhook URL" } }, required: ["webhook"] } },
+  {
+    id: "discord", label: "Discord", docs_url: "https://discord.com/developers/docs/resources/webhook#execute-webhook",
+    setup_url: "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks",
+    setup_hint: "Create a webhook under Server Settings > Integrations > Webhooks and copy its URL.",
+    schema: { properties: { webhook_url: { type: "string", title: "Webhook URL", secret: true, placeholder: "https://discord.com/api/webhooks/…" } }, required: ["webhook_url"] },
+  },
 ];
 
 const DESK = { width: 1000, height: 820 } as const;
@@ -362,7 +392,8 @@ const CROPS: Crop[] = [
     target: (page) => page.locator("#settings-panel-alerts"),
     mutate: (e) => {
       e.notifiers = NOTIFIERS as never;
-      e.settings.notifiers = { ntfy: { url: "https://ntfy.sh/my-prints" } };
+      e.settings.notifiers = { ntfy: {} };
+      e.secrets_set = { notifiers: { ntfy: ["url"] }, mqtt: [] };
     },
   },
   {
