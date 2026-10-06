@@ -12,7 +12,7 @@ training.
 
 ```bash
 uv sync                                   # Python engine + hub server (use uv, never pip)
-uv run printguard                         # hub on :8000 (MediaMTX is bundled into the image; for video in dev: brew install mediamtx && MEDIAMTX_BINARY=$(which mediamtx) uv run printguard)
+uv run printguard                         # hub on :8000 (MediaMTX is bundled into the image; for video in dev: brew install mediamtx, 1.19.0 or newer, && MEDIAMTX_BINARY=$(which mediamtx) uv run printguard)
 cd web && npm install && npm run dev      # UI hot-reload on :5173, proxied to :8000
 
 uv run pytest                             # engine simulation + adapter contract tests
@@ -47,7 +47,8 @@ essentials a change must respect:
   `_handlers` map and broadcasts events to subscribed transport "sinks". `state_event()`
   is the full snapshot the UI renders; any new engine-owned data the UI needs is added
   there. The UI is **presentation-only** - it never holds logic the engine should own, and
-  it reaches the engine over one WebSocket (`/api/ws`).
+  it reaches the engine over one WebSocket (`/api/ws`), bar a sliced file's bytes, which go to
+  `POST /api/prints`.
 
 - **Resources vs monitors.** A **camera** (video source) and a **printer** (control-service
   connection) are registered resources, created/deleted only in their registry. A
@@ -77,15 +78,15 @@ essentials a change must respect:
   in that module is the single policy both sides apply.
 
 - **The programmatic surface adds no logic.** The REST API (`server/api.py`, `/api/v1`) and MCP
-  server (`server/mcp.py`, `/mcp`) are thin transports over `engine.request()`, scoped by
-  cumulative `read ⊂ control ⊂ manage` tokens. The Home Assistant MQTT bridge
+  server (`server/mcp.py`, `/mcp`) are thin transports over the engine, with every command going
+  through `engine.request()`, scoped by cumulative `read ⊂ control ⊂ manage` tokens. The Home Assistant MQTT bridge
   (`server/mqtt.py`) is a third such transport: it consumes engine events via `add_sink` and
   routes inbound commands through `engine.request()`, publishing one Home Assistant device
   per monitor via MQTT discovery (config in `settings.mqtt`, gated by broker access). None
   add logic, so they cannot drift from the dashboard.
 
 - **Fail safe, fail loud.** A monitor's `watching` state gates inference; only a *positive*
-  "not printing" stands it down (losing the signal keeps watching). Nothing on the alert
+  "not printing" stands it down (losing the signal keeps the last answer). Nothing on the alert
   path swallows errors - failed printer actions, notifier failures and dropped feeds emit
   `error`/`warning` events. See `engine/watchdog.py`.
 

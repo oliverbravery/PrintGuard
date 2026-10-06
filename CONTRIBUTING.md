@@ -18,7 +18,7 @@ hub server runs it, and everything the engine's own logic needs from hardware, t
 
 ```bash
 uv sync                              # Python engine + hub server
-uv run printguard                    # hub on :8000 (MediaMTX is bundled into the image; for video in dev, brew install mediamtx, 1.19.0 or newer, and set MEDIAMTX_BINARY=$(which mediamtx))
+uv run printguard                    # hub on :8000 (MediaMTX is bundled into the image. For video in dev, brew install mediamtx, 1.19.0 or newer, and set MEDIAMTX_BINARY=$(which mediamtx))
 cd web && npm install && npm run dev # UI with hot reload on :5173, proxied to :8000
 cd web && npm run site               # the GitHub Pages landing page in web/site, with hot reload
 ```
@@ -152,7 +152,7 @@ npx playwright install chromium      # one-time: fetch the browser binary
 npm run screenshots                  # renders docs/assets/*.png, web/public/guide/*.jpg and plugins/*/shots
 ```
 
-Each image is one entry in `SCENES` in `web/screenshots/capture.spec.ts`; add a scene there
+Each image is one entry in `SCENES` in `web/screenshots/capture.spec.ts`. Add a scene there
 to capture a new screen. A scene naming `plugins` runs those plugins from `plugins/` in the real
 sandbox, so a screenshot shows what the code actually draws.
 
@@ -295,7 +295,7 @@ The heading at the top of [CHANGELOG.md](CHANGELOG.md) is in
 ```markdown
 ## [X.Y.Z] - YYYY-MM-DD
 
-### Added | Changed | Fixed | Removed
+### Added | Changed | Fixed | Removed | Security
 
 - What changed, written for someone deciding whether to pull the new image.
 ```
