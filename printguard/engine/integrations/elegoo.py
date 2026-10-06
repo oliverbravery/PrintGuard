@@ -89,10 +89,11 @@ class ElegooAdapter(IntegrationAdapter):
 
     def __init__(self) -> None:
         self._moonraker = KlipperAdapter()
-        self._connections: dict[tuple[str, str], Any] = {}
-        self._connection_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._connections: dict[tuple[str, str, str], Any] = {}
+        self._connection_locks: dict[tuple[str, str, str], asyncio.Lock] = {}
         self._mainboard_ids: dict[str, str] = {}
-        self._polled: dict[tuple[str, str], Any] = {}
+        self._polled: dict[tuple[str, str, str], Any] = {}
+        self._abandoned: set[asyncio.Task[None]] = set()
 
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
         """Reads and normalises the active print state.
@@ -184,7 +185,7 @@ class ElegooAdapter(IntegrationAdapter):
         if config is None:
             self._connection_locks.clear()
 
-    async def _drop(self, key: tuple[str, str], only: Any = None) -> None:
+    async def _drop(self, key: tuple[str, str, str], only: Any = None) -> None:
         """Closes a printer's connection.
 
         Args:
@@ -236,16 +237,32 @@ class ElegooAdapter(IntegrationAdapter):
             if printer is not None and printer.mainboard_id:
                 self._mainboard_ids[key[0]] = printer.mainboard_id
             mainboard_id = self._mainboard_ids.get(key[0]) or await self._discover_mainboard_id(key[0])
-            printer = await pycentauri.connect_auto(
-                key[0],
-                access_code=key[1] or None,
-                enable_control=True,
-                mainboard_id=mainboard_id,
-            )
+            printer = await self._open_centauri(key, mainboard_id)
             self._connections[key] = printer
             return printer
 
-    async def _fresh_status(self, key: tuple[str, str], printer: Any) -> Any:
+    async def _open_centauri(self, key: tuple[str, str, str], mainboard_id: str | None) -> Any:
+        """Connects, and closes the connection if the caller is cancelled while it opens.
+
+        pycentauri starts a Centauri Carbon 2's MQTT thread before the
+        handshake and cleans up after a failure but not after a cancellation,
+        so the connect runs to its own end and an abandoned one is closed.
+        """
+        opening = asyncio.ensure_future(pycentauri.connect_auto(key[0], access_code=key[1] or None, enable_control=True, mainboard_id=mainboard_id))
+        try:
+            return await asyncio.shield(opening)
+        except asyncio.CancelledError:
+            opening.add_done_callback(self._close_abandoned)
+            raise
+
+    def _close_abandoned(self, opening: asyncio.Future[Any]) -> None:
+        if opening.cancelled() or opening.exception():
+            return
+        closing = asyncio.ensure_future(opening.result().close())
+        self._abandoned.add(closing)
+        closing.add_done_callback(self._abandoned.discard)
+
+    async def _fresh_status(self, key: tuple[str, str, str], printer: Any) -> Any:
         """Reads a status the printer reported since the last read.
 
         pycentauri answers a Centauri Carbon 1 with the last status it pushed
@@ -276,9 +293,9 @@ class ElegooAdapter(IntegrationAdapter):
         printers = await pycentauri.discover(timeout=1.0, retries=2)
         return next((printer.mainboard_id for printer in printers if printer.host in addresses and printer.mainboard_id), None)
 
-    def connection_key(self, config: dict[str, Any]) -> tuple[str, str]:
-        """A Centauri connection is one host under one access code."""
-        return str(config.get("host")), str(config.get("access_code") or "")
+    def connection_key(self, config: dict[str, Any]) -> tuple[str, str, str]:
+        """A connection is one host under one access code and family, so a test with the family switched is its own."""
+        return str(config.get("host")), str(config.get("access_code") or ""), str(config.get("family"))
 
     def _family(self, config: dict[str, Any]) -> str:
         family = str(config["family"])

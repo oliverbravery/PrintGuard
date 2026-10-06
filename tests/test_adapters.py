@@ -1216,6 +1216,30 @@ async def test_elegoo_centauri_reuses_one_connection(monkeypatch) -> None:
     assert client.closed
 
 
+async def test_a_cancelled_centauri_connect_closes_what_it_went_on_to_open(monkeypatch) -> None:
+    adapter = ElegooAdapter()
+    client = FakeCentauri()
+    opened = asyncio.Event()
+
+    async def connect_auto(host: str, **kwargs: Any) -> FakeCentauri:
+        await asyncio.sleep(0.05)
+        opened.set()
+        return client
+
+    async def discover_mainboard_id(host: str) -> None:
+        return None
+
+    monkeypatch.setattr(adapter, "_discover_mainboard_id", discover_mainboard_id)
+    monkeypatch.setattr("pycentauri.connect_auto", connect_auto)
+    asked = asyncio.create_task(adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG))
+    await asyncio.sleep(0.01)
+    asked.cancel()
+    await opened.wait()
+    await asyncio.sleep(0.01)
+    await asyncio.gather(*adapter._abandoned)
+    assert client.closed and not adapter._connections
+
+
 async def test_elegoo_centauri_reconnects_after_failure(monkeypatch) -> None:
     adapter = ElegooAdapter()
 

@@ -989,6 +989,11 @@ async def test_testing_from_the_edit_form_keeps_the_connection_the_printer_is_us
         elsewhere = {**stored, "host": "10.0.0.10"}
         await engine.handle({"cmd": "printer.test", "provider": "elegoo", "config": elsewhere})
         assert closed == [elsewhere]
+        closed.clear()
+        await engine.handle({"cmd": "printer.update", "id": next(iter(engine.printers.items)), "patch": {"config": {**stored, "family": "moonraker"}}})
+        closed.clear()
+        await engine.handle({"cmd": "printer.test", "provider": "elegoo", "config": stored})
+        assert closed == [stored], "a Centauri test beside a printer registered as Moonraker left its connection open"
 
 
 async def test_a_requested_action_waits_as_long_as_the_printers_service_can_take(monkeypatch) -> None:
