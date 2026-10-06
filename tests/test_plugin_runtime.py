@@ -680,6 +680,20 @@ async def test_a_worker_that_changes_one_key_does_not_undo_a_save_to_another_mad
         await engine.stop()
 
 
+async def test_events_emitted_in_one_step_do_not_each_start_a_call_on_a_busy_worker(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, SLOW_MANIFEST, SLOW_WORKER)
+        engine.emit({"event": "alert", "monitor_id": "m", "score": 0.9, "action": "none"})
+        engine.emit({"event": "result", "monitor_id": "m", "camera_id": "c", "score": 0.1})
+        await asyncio.sleep(1.0)
+
+        assert engine.plugins.get("slow").config == {}, "a worker still busy with one event was handed the next"
+    finally:
+        await engine.stop()
+
+
 async def test_a_worker_that_changes_its_store_still_has_it_saved(runtime: WasmPluginRuntime) -> None:
     engine = Engine(HostedPlatform(runtime))
     await engine.start()

@@ -243,6 +243,7 @@ class WasmPluginRuntime:
                 continue
             seen = plugins.project_event(event, plugin.granted)
             if seen:
+                self._busy.add(plugin.id)
                 asyncio.ensure_future(self._invoke(sandbox, "event", event=seen))
 
     async def reload(self, running: list[Plugin], failed_gates: set[str]) -> None:
