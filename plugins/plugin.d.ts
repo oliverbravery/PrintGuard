@@ -275,6 +275,8 @@ declare global {
   interface PluginPanel extends Omit<PluginContext, "target" | "surface" | "assets"> {
     /** The dashboard's theme, the same custom properties it sets on its own `:root`. */
     theme: Record<string, string>;
+    /** The names of the secrets your plugin holds, never their values. `oauth` is there once the user has signed in. */
+    secrets: string[];
     /** Called once the panel is drawn, then on every state change and every event you named. */
     on<K extends keyof PluginEvents | "ready" | "state">(
       event: K,
