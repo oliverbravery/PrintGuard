@@ -10,6 +10,7 @@ changing a permission, a surface or an event, and commit what it writes.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -154,7 +155,7 @@ def schema() -> dict:
                 "type": "array",
                 "uniqueItems": True,
                 "description": "The only addresses ctx.http and ctx.socket may reach, each a match pattern of scheme://host/path. Naming a private or loopback address needs the net:local permission as well as net.",
-                "items": {"type": "string", "pattern": urls.PATTERN.pattern},
+                "items": {"type": "string", "pattern": re.sub(r"\(\?P<\w+>", "(", urls.PATTERN.pattern)},
             },
             "events": {
                 "type": "array",
