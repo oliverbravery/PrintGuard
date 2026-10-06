@@ -72,7 +72,8 @@ async function storeFrame(request: Request, env: Env): Promise<Response> {
   const network = await callerNetwork(request, env);
   const { print, frame, ...labels } = details.data;
   const key = `${hub}/${print}/${frame}.jpg`;
-  const reserved = await gate.reserve(hub, network, key, jpeg.byteLength, (await env.FRAMES.head(key))?.size ?? 0);
+  if (await env.FRAMES.head(key)) return Response.json({}, { status: 201 });
+  const reserved = await gate.reserve(hub, network, key, jpeg.byteLength);
   if ("code" in reserved) return refuse(reserved);
   try {
     await env.FRAMES.put(key, jpeg, {
