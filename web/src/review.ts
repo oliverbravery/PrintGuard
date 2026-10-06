@@ -24,6 +24,7 @@ export function waitingMessage(review: ReviewSummary): string {
   const after = review.retry_at ? ` after ${clock(review.retry_at)}` : "";
   if (review.code && review.code in DAILY_LIMITS) return `${DAILY_LIMITS[review.code]} The rest are saved and will send${after}.`;
   if (review.code === "storage_full") return "The inbox for training frames is full. Yours are saved and will send when there's room.";
+  if (review.code === "rate_limited") return "The training inbox is busy. Your frames are saved and will send in a minute.";
   if (review.code === "closed") return "PrintGuard isn't collecting frames at the moment. Yours are saved.";
   return "Couldn't reach the feedback server. Your frames are saved, so you can try again.";
 }
