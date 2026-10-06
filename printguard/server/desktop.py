@@ -577,7 +577,7 @@ def main() -> None:
     The window runs in a child process; closing it leaves the tray and the hub
     server running so the printer stays watched, and the tray's Quit exits. Opened while
     another copy is already running or still starting, it shows that copy's dashboard in the
-    browser and exits.
+    browser and exits. On macOS, opening the running app again opens its window.
     """
     _configure_environment()
     _set_windows_app_id()
