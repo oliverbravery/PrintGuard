@@ -594,11 +594,11 @@ async def test_sending_back_what_was_read_keeps_the_secrets_a_read_leaves_out() 
         )
 
         settings = (await client.get("/state", headers=manage)).json()["settings"]
-        settings["mqtt"]["host"] = "other-broker"
+        settings["mqtt"]["tls"] = True
         patched = await client.patch("/settings", json={"notifiers": settings["notifiers"], "mqtt": settings["mqtt"]}, headers=manage)
         assert patched.status_code == 200, patched.text
         assert engine.settings["notifiers"]["ntfy"] == BASIC_NTFY
-        assert engine.settings["mqtt"] == {"host": "other-broker", "password": "mq-secret"}
+        assert engine.settings["mqtt"] == {"host": "broker", "tls": True, "password": "mq-secret"}
 
         printer = (await client.get(f"/printers/{printer_id}", headers=manage)).json()
         renamed = await client.patch(f"/printers/{printer_id}", json={"name": "Renamed", "config": printer["config"]}, headers=manage)
@@ -700,3 +700,51 @@ async def test_print_upload_is_capped(tmp_path, monkeypatch) -> None:
         too_big = await client.post("/prints?filename=big.gcode", content=b"G1 X1\n" * 10, headers=manage)
         assert too_big.status_code == 413
         assert not list(tmp_path.iterdir()), "nothing of an oversized upload is kept"
+
+
+async def test_a_body_is_not_read_for_a_caller_the_route_refuses() -> None:
+    async with api(("read",)) as (client, _engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        chunks_read = 0
+
+        async def body():
+            nonlocal chunks_read
+            for _ in range(8):
+                chunks_read += 1
+                yield b" " * 1024 * 1024
+
+        json_body = {"Content-Type": "application/json"}
+        assert (await client.patch("/settings", content=body(), headers=json_body)).status_code == 401
+        under_scoped = {**json_body, "Authorization": f"Bearer {tokens['read']}"}
+        assert (await client.patch("/settings", content=body(), headers=under_scoped)).status_code == 403
+        assert chunks_read == 0
+
+
+async def test_a_stored_secret_is_not_kept_for_an_address_that_changed() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        mqtt = {"host": "broker", "password": "mq-secret"}
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": BASIC_NTFY}, "mqtt": mqtt}})
+
+        moved = await client.patch(f"/printers/{printer_id}", json={"config": {"base_url": "http://elsewhere.example"}}, headers=manage)
+        assert moved.status_code == 400 and "api_key" in moved.json()["detail"]
+        assert engine.printers.get(printer_id).config == OCTOPRINT["config"]
+
+        for moved_broker in ({"host": "elsewhere.example"}, {"host": "broker", "port": 8883}, {"host": "broker", "port": 8883, "password": ""}):
+            assert (await client.patch("/settings", json={"mqtt": moved_broker}, headers=manage)).status_code == 400
+        moved_topic = {"notifiers": {"ntfy": {"url": "https://elsewhere.example/topic"}}}
+        assert (await client.patch("/settings", json=moved_topic, headers=manage)).status_code == 400
+        assert engine.settings["mqtt"] == mqtt and engine.settings["notifiers"]["ntfy"] == BASIC_NTFY
+
+        resent = {"base_url": "http://elsewhere.example", "api_key": "another"}
+        assert (await client.patch(f"/printers/{printer_id}", json={"config": resent}, headers=manage)).status_code == 200
+        assert engine.printers.get(printer_id).config == resent
+        assert (await client.patch("/settings", json={"mqtt": {"host": "elsewhere.example", "password": None}}, headers=manage)).status_code == 200
+        assert engine.settings["mqtt"] == {"host": "elsewhere.example", "password": ""}
+
+
+async def test_the_read_surface_does_not_list_the_api_tokens() -> None:
+    async with api(("read", "manage")) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        assert len(engine.state_event()["tokens"]) == 2
+        for scope in ("read", "manage"):
+            state = (await client.get("/state", headers={"Authorization": f"Bearer {tokens[scope]}"})).json()
+            assert "tokens" not in state

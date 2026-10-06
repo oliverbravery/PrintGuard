@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import hmac
 import logging
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Awaitable, Callable, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict
 
 from ..engine.engine import REQUEST_TIMEOUT_S, Engine
@@ -68,17 +69,36 @@ class ApiAuth:
         return None
 
 
-async def scope_guard(request: Request) -> None:
-    """Rejects requests whose token does not cover the matched route's scope."""
-    auth: ApiAuth = request.app.state.api_auth
-    granted = auth.resolve(request.headers.get("authorization"), request.app.state.engine.token_scopes())
-    if granted is None:
-        logger.warning("rejected API request with missing or invalid token: %s %s", request.method, request.url.path)
-        raise HTTPException(401, "missing or invalid token", {"WWW-Authenticate": "Bearer"})
-    required = route_scope(getattr(request.scope.get("route"), "tags", None))
-    if required not in granted:
-        logger.warning("rejected API request lacking %s scope: %s %s", required, request.method, request.url.path)
-        raise HTTPException(403, f"requires {required} scope")
+class ScopedRoute(APIRoute):
+    """A route that checks the caller's token before anything of the request is read.
+
+    A dependency runs after FastAPI has read and parsed the body, so a caller
+    with no token could have the hub take in a body of any size first.
+    """
+
+    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+        """Wraps the route's handler in the scope check."""
+        handler = super().get_route_handler()
+
+        async def guarded(request: Request) -> Response:
+            """Rejects a request whose token does not cover this route's scope.
+
+            Raises:
+                HTTPException: 401 for a missing or invalid token, 403 for one
+                    whose scope is too narrow.
+            """
+            auth: ApiAuth = request.app.state.api_auth
+            granted = auth.resolve(request.headers.get("authorization"), request.app.state.engine.token_scopes())
+            if granted is None:
+                logger.warning("rejected API request with missing or invalid token: %s %s", request.method, request.url.path)
+                raise HTTPException(401, "missing or invalid token", {"WWW-Authenticate": "Bearer"})
+            required = route_scope(self.tags)
+            if required not in granted:
+                logger.warning("rejected API request lacking %s scope: %s %s", required, request.method, request.url.path)
+                raise HTTPException(403, f"requires {required} scope")
+            return await handler(request)
+
+        return guarded
 
 
 def get_engine(request: Request) -> Engine:
@@ -256,11 +276,17 @@ def _public_config(config: dict[str, Any], adapter: Any) -> dict[str, Any]:
     return scrub_urls({key: value for key, value in config.items() if key not in _secret_keys(adapter)})
 
 
+ADDRESS_FIELDS = ("base_url", "host", "port", "url")
+"""The config fields that say where a stored secret is sent."""
+
+
 def _stored_secrets(config: dict[str, Any], stored: dict[str, Any], secrets: set[str]) -> dict[str, Any]:
     """Puts back the credentials a client could not have read.
 
     A read gives a config with its secret fields dropped and its URLs scrubbed,
-    so a client that edits one and sends it back has neither.
+    so a client that edits one and sends it back has neither. A secret is only
+    put back for the address it was stored with, or an edit could point a
+    printer or the broker somewhere else and have the hub present the key there.
 
     Args:
         config: The config a client sent.
@@ -271,11 +297,19 @@ def _stored_secrets(config: dict[str, Any], stored: dict[str, Any], secrets: set
         The client's config, with each secret field it left out or blank and
         each URL it sent back scrubbed taken from the stored one. A secret
         field sent as null is cleared, which is the one way to remove one.
+
+    Raises:
+        HTTPException: 400 when the address changed and a stored secret was
+            left out or blank.
     """
     kept = {key: stored[key] for key in secrets if key in stored and config.get(key, "") == ""}
     cleared = {key: "" for key in secrets if key in config and config[key] is None}
     unscrubbed = {key: stored[key] for key, value in config.items() if is_url(stored.get(key)) and value == scrub_url(stored[key])}
-    return {**config, **kept, **cleared, **unscrubbed}
+    merged = {**config, **kept, **cleared, **unscrubbed}
+    held = sorted(key for key, value in kept.items() if value)
+    if held and any(merged.get(field) != stored.get(field) for field in ADDRESS_FIELDS):
+        raise HTTPException(400, f"send {' and '.join(held)} again, since a stored secret is only kept for the address it was saved with")
+    return merged
 
 
 def _public_printer(printer: dict[str, Any]) -> dict[str, Any]:
@@ -303,9 +337,12 @@ def public_state(engine: Engine) -> dict[str, Any]:
     not know, whose secret fields nothing declares, is left out whole. A
     plugin's store is left out
     whatever the token's scope, since a plugin may keep a session or anything
-    else it was told in it, and nothing on this surface writes one.
+    else it was told in it, and nothing on this surface writes one. The API
+    tokens are left out as well, since only the dashboard issues and revokes
+    them and a read token has no call to list the others.
     """
     state = engine.state_event()
+    del state["tokens"]
     state["plugins"] = [{key: value for key, value in plugin.items() if key != "config"} for plugin in state["plugins"]]
     state["printers"] = [_public_printer(printer) for printer in state["printers"]]
     state["cameras"] = [_public_camera(camera) for camera in state["cameras"]]
@@ -325,8 +362,8 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         title="PrintGuard API",
         version="1",
         summary="Monitor and control 3D printers through PrintGuard.",
-        dependencies=[Depends(scope_guard)],
     )
+    api.router.route_class = ScopedRoute
     api.state.api_auth = auth
 
     @api.exception_handler(RuntimeError)

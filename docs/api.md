@@ -290,11 +290,13 @@ did not say, and `thumbnail` is the media type of its preview or `null`.
 > notifier this version doesn't know is left out. Only the dashboard's own WebSocket, behind
 > your proxy, receives them.
 >
-> What a plugin has stored is left out of `/state` as well, whatever the token's scope.
+> What a plugin has stored and the list of API tokens are left out of `/state` as well, whatever
+> the token's scope.
 >
 > You can send a config back as you read it. A secret field you leave out or blank, and an
 > address you send back unchanged, keep the stored value. To clear a secret such as the MQTT
-> password, send it as `null`.
+> password, send it as `null`. A change to `base_url`, `host`, `port` or `url` is a `400` unless
+> the secrets are sent again with it, so a stored key only goes to the address it was saved with.
 
 Every integration is normalised to one shape, so a printer reads and controls the same way
 regardless of its service:
