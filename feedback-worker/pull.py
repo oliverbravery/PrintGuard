@@ -103,7 +103,14 @@ def pull(client: Any, out: Path) -> tuple[int, int]:
                 rows.flush()
                 kept += 1
             client.delete_object(Bucket=BUCKET, Key=key)
+    _keep_latest_rows(out / "frames.jsonl")
     return kept, discarded
+
+
+def _keep_latest_rows(path: Path) -> None:
+    """Leaves one row for each file, the newest, since a frame sent again after a pull replaces its JPEG."""
+    latest = {json.loads(row)["file"]: row for row in path.read_text().splitlines()}
+    path.write_text("".join(f"{row}\n" for row in latest.values()))
 
 
 def main() -> None:
