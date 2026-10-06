@@ -531,6 +531,49 @@ test("a plugin check that was never sent is asked again", async ({ page }) => {
   expect(asked).toBe(1);
 });
 
+const CATALOGUED_SIGN_IN = {
+  id: "player", name: "Player", version: "1.0.0", author: "someone", description: "Shows what is playing.", icon: "icon.png", media: [],
+  repo: "someone/player", path: "", ref: "a".repeat(40), permissions: ["net", "oauth"], platforms: [], surfaces: ["panel"], digests: {},
+};
+
+const withCatalogue = async (page: Page) => {
+  await page.route("https://raw.githubusercontent.com/**", (route) => route.fulfill({ status: 404, body: "" }));
+  await dashboard(page, {
+    engine: engine({
+      plugin_permissions: [
+        { id: "net", label: "Reach the internet", description: "", urls: true },
+        { id: "oauth", label: "Sign in", description: "" },
+      ],
+    }),
+  });
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await emit(page, { event: "catalogue", plugins: [CATALOGUED_SIGN_IN] });
+};
+
+test("the store page of a plugin that signs in draws before its manifest has arrived", async ({ page }) => {
+  await withCatalogue(page);
+  await page.getByRole("button", { name: "Player", exact: true }).click();
+
+  await expect(page.getByRole("heading", { name: "Player" })).toBeVisible();
+  await expect(page.getByText("Sign in at")).toBeHidden();
+  await expect(page.getByText("hit an error")).toBeHidden();
+});
+
+test("a plugin in the store is opened by its name and installed by its own button", async ({ page }) => {
+  await withCatalogue(page);
+  const card = page.locator("div", { has: page.getByRole("button", { name: "Install" }) }).filter({ hasText: "Shows what is playing." }).last();
+
+  expect(await card.getAttribute("role")).toBeNull();
+  expect(await card.locator("[role=button] button, button button").count()).toBe(0);
+  await card.getByRole("button", { name: "Install" }).click();
+  expect((await sent(page, "plugin.install")).source.repo).toBe("someone/player");
+  await expect(page.getByRole("heading", { name: "Player" })).toBeHidden();
+
+  await page.getByRole("button", { name: "Player", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Player" })).toBeVisible();
+});
+
 test("a feed the browser cannot stream itself is asked for again after it fails", async ({ page }) => {
   let asked = 0;
   await page.addInitScript(() => {
