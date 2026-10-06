@@ -9,7 +9,7 @@ import {
 } from "./limits";
 
 export type Refusal = { status: number; code: string; retryAt?: number };
-export type Reservation = { bytes: number; uploads: number };
+export type Reservation = { bytes: number; uploads: number; day: string };
 
 const STORED_BYTES = "stored_bytes";
 const BYTES_SINCE_RECOUNT_BEGAN = "bytes_since_recount_began";
@@ -34,34 +34,27 @@ export class Gate extends DurableObject<Env> {
   }
 
   register(network: string): Refusal | null {
-    if (this.count("registrations", network) >= REGISTRATIONS_PER_NETWORK) return untilTomorrow("network_daily");
-    this.add("registrations", network, 1);
+    const day = today();
+    if (this.count(day, "registrations", network) >= REGISTRATIONS_PER_NETWORK) return untilTomorrow("network_daily");
+    this.add(day, "registrations", network, 1);
     return null;
   }
 
   reserve(hub: string, network: string, frame: string, bytes: number): Refusal | Reservation {
-    if (this.count("frame", frame) > 0) return { bytes: 0, uploads: 0 };
-    if (this.count("hub", hub) >= UPLOADS_PER_HUB) return untilTomorrow("hub_daily");
-    if (this.count("network", network) >= UPLOADS_PER_NETWORK) return untilTomorrow("network_daily");
-    if (this.count("everyone", "") >= UPLOADS_PER_DAY) return untilTomorrow("global_daily");
+    const day = today();
+    if (this.count(day, "frame", frame) > 0) return { bytes: 0, uploads: 0, day };
+    if (this.count(day, "hub", hub) >= UPLOADS_PER_HUB) return untilTomorrow("hub_daily");
+    if (this.count(day, "network", network) >= UPLOADS_PER_NETWORK) return untilTomorrow("network_daily");
+    if (this.count(day, "everyone", "") >= UPLOADS_PER_DAY) return untilTomorrow("global_daily");
     if (this.storedBytes() + bytes > STORED_BYTES_MAX) return { status: 507, code: "storage_full" };
-    this.tally(hub, network, bytes, 1);
-    this.add("frame", frame, bytes);
-    return { bytes, uploads: 1 };
+    this.tally(day, hub, network, bytes, 1);
+    this.add(day, "frame", frame, bytes);
+    return { bytes, uploads: 1, day };
   }
 
-  release(hub: string, network: string, frame: string, reservation: Reservation): void {
-    if (reservation.uploads === 0 || this.count("stored", frame) > 0) return;
-    this.tally(hub, network, -reservation.bytes, -reservation.uploads);
-    this.add("frame", frame, -reservation.bytes);
-  }
-
-  stored(hub: string, network: string, frame: string, bytes: number): void {
-    if (this.count("frame", frame) === 0) {
-      this.tally(hub, network, bytes, 1);
-      this.add("frame", frame, bytes);
-    }
-    this.add("stored", frame, 1);
+  release(hub: string, network: string, frame: string, { bytes, uploads, day }: Reservation): void {
+    this.tally(day, hub, network, -bytes, -uploads);
+    this.add(day, "frame", frame, -bytes);
   }
 
   beginRecount(minimumGapMs: number): boolean {
@@ -84,25 +77,25 @@ export class Gate extends DurableObject<Env> {
     return this.ctx.storage.kv.get<number>(BYTES_SINCE_RECOUNT_BEGAN) ?? 0;
   }
 
-  private tally(hub: string, network: string, bytes: number, uploads: number): void {
+  private tally(day: string, hub: string, network: string, bytes: number, uploads: number): void {
     this.ctx.storage.kv.put(STORED_BYTES, this.storedBytes() + bytes);
     this.ctx.storage.kv.put(BYTES_SINCE_RECOUNT_BEGAN, this.bytesSinceRecountBegan() + bytes);
-    this.add("hub", hub, uploads);
-    this.add("network", network, uploads);
-    this.add("everyone", "", uploads);
+    this.add(day, "hub", hub, uploads);
+    this.add(day, "network", network, uploads);
+    this.add(day, "everyone", "", uploads);
   }
 
-  private count(scope: string, key: string): number {
+  private count(day: string, scope: string, key: string): number {
     const rows = this.ctx.storage.sql
-      .exec<{ n: number }>("SELECT n FROM counts WHERE day = ? AND scope = ? AND key = ?", today(), scope, key)
+      .exec<{ n: number }>("SELECT n FROM counts WHERE day = ? AND scope = ? AND key = ?", day, scope, key)
       .toArray();
     return rows[0]?.n ?? 0;
   }
 
-  private add(scope: string, key: string, by: number): void {
+  private add(day: string, scope: string, key: string, by: number): void {
     this.ctx.storage.sql.exec(
       "INSERT INTO counts (day, scope, key, n) VALUES (?, ?, ?, ?) ON CONFLICT (day, scope, key) DO UPDATE SET n = n + excluded.n",
-      today(),
+      day,
       scope,
       key,
       by,

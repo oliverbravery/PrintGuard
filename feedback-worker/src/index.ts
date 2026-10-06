@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { Gate, type Refusal } from "./gate";
-import { DAY_MS, EXPIRY_DAYS, EXPIRY_WARN_DAYS, FRAME_BYTES_MAX, RECOUNT_GAP_MS, STORED_BYTES_MAX, STORED_BYTES_WARN } from "./limits";
+import { DAY_MS, EXPIRY_DAYS, EXPIRY_WARN_DAYS, FRAME_BYTES_MAX, RATE_PERIOD_S, RECOUNT_GAP_MS, STORED_BYTES_MAX, STORED_BYTES_WARN } from "./limits";
 import { hubOf, issueToken, keyed } from "./token";
 
 export { Gate };
 
 const frameId = z.string().regex(/^[0-9a-f]{12}$/);
-const label = (maxLength: number) => z.string().max(maxLength).regex(/^\P{Cc}*$/u);
+const label = (maxLength: number) =>
+  z.string().max(maxLength).regex(/^\P{Cc}*$/u).refine((value) => !/=\?.*\?=/s.test(value));
 
 const FrameDetails = z.object({
   print: frameId,
@@ -50,9 +51,13 @@ const parseDetails = (header: string | null) => {
 const sentByABrowser = (request: Request) =>
   request.headers.has("Origin") || request.headers.get("Content-Type") !== "application/json";
 
+const tooFast = (): Refusal => ({ status: 429, code: "rate_limited", retryAt: Math.ceil(Date.now() / 1000) + RATE_PERIOD_S });
+
 async function register(request: Request, env: Env): Promise<Response> {
   if (sentByABrowser(request)) return refuse({ status: 403, code: "browser" });
-  const refusal = await env.GATE.getByName("gate").register(await callerNetwork(request, env));
+  const network = await callerNetwork(request, env);
+  if (!(await env.REGISTER_RATE.limit({ key: network })).success) return refuse(tooFast());
+  const refusal = await env.GATE.getByName("gate").register(network);
   if (refusal) return refuse(refusal);
   return Response.json({ token: await issueToken(env.TOKEN_SECRET) }, { status: 201 });
 }
@@ -60,6 +65,7 @@ async function register(request: Request, env: Env): Promise<Response> {
 async function storeFrame(request: Request, env: Env): Promise<Response> {
   const hub = await hubOf((request.headers.get("Authorization") ?? "").replace(/^Bearer /, ""), env.TOKEN_SECRET);
   if (!hub) return refuse({ status: 401, code: "token" });
+  if (!(await env.FRAME_RATE.limit({ key: hub })).success) return refuse(tooFast());
   const declaredBytes = Number(request.headers.get("Content-Length"));
   if (!(declaredBytes > 0)) return refuse({ status: 411, code: "length" });
   if (declaredBytes > FRAME_BYTES_MAX) return refuse({ status: 413, code: "too_large" });
@@ -73,14 +79,16 @@ async function storeFrame(request: Request, env: Env): Promise<Response> {
   const network = await callerNetwork(request, env);
   const { print, frame, ...labels } = details.data;
   const key = `${hub}/${print}/${frame}.jpg`;
-  if (await env.FRAMES.head(key)) return Response.json({}, { status: 201 });
   let reserved = await gate.reserve(hub, network, key, jpeg.byteLength);
   if ("code" in reserved && reserved.code === "storage_full" && (await recountBucket(env, RECOUNT_GAP_MS))) {
     reserved = await gate.reserve(hub, network, key, jpeg.byteLength);
   }
   if ("code" in reserved) return refuse(reserved);
+  if (reserved.uploads === 0) return Response.json({}, { status: 201 });
+  let written: R2Object | null;
   try {
-    await env.FRAMES.put(key, jpeg, {
+    written = await env.FRAMES.put(key, jpeg, {
+      onlyIf: { etagDoesNotMatch: "*" },
       httpMetadata: { contentType: "image/jpeg" },
       customMetadata: Object.fromEntries(Object.entries(labels).map(([name, value]) => [name, String(value)])),
     });
@@ -88,7 +96,7 @@ async function storeFrame(request: Request, env: Env): Promise<Response> {
     await gate.release(hub, network, key, reserved);
     throw error;
   }
-  if (reserved.uploads === 0) await gate.stored(hub, network, key, jpeg.byteLength);
+  if (!written) await gate.release(hub, network, key, reserved);
   return Response.json({}, { status: 201 });
 }
 
