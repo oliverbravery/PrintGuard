@@ -459,7 +459,7 @@ frames show a failure and which were left out, and
 `platform.http` to the Worker in [`feedback-worker/`](../feedback-worker), one frame per
 request. The upload runs as a background task and its progress rides in the `state` snapshot.
 It is deliberately absent from the REST API, the MCP server and the plugin permission table,
-so frames only leave the hub when a person presses Send in the dashboard.
+so training frames only leave the hub when a person presses Send in the dashboard.
 
 | `status` | Meaning |
 |---|---|
@@ -586,7 +586,7 @@ the scheduler's at the top of [`engine/scheduler.py`](../printguard/engine/sched
 | `STATE_TICK_S` | 1 s | The ticker that broadcasts `state`, settles finished prints, sends queued reviews and collects platform notices |
 | `REATTACH_EVERY_TICKS` | 10 | The ticks between tries at a camera with no source |
 | `RESULT_EVENT_INTERVAL_S` | 0.2 s | The gap between `result` events for one monitor |
-| `REQUEST_TIMEOUT_S` | 15 s | How long `engine.request()` waits, on every transport. `_time_allowed` adds the adapter's `slow_action_s` for a printer action or heater target, `CAMERA_OPEN_WAIT_S` for `camera.add`, that four times over for `printer.cameras.refresh`, and `RUNTIME_DRAIN_TIMEOUT_S` plus `RUNTIME_LOAD_ALLOWANCE_S` for a runtime switch |
+| `REQUEST_TIMEOUT_S` | 15 s | How long `engine.request()` waits, which the REST API, MCP server, plugins and Home Assistant bridge all call. The dashboard's socket calls `engine.handle()` and waits as long as a command takes. `_time_allowed` adds the adapter's `slow_action_s` for a printer action or heater target, `CAMERA_OPEN_WAIT_S` for `camera.add`, that four times over for `printer.cameras.refresh`, and `RUNTIME_DRAIN_TIMEOUT_S` plus `RUNTIME_LOAD_ALLOWANCE_S` for a runtime switch |
 | `CAMERA_OPEN_WAIT_S`, `CAMERAS_OPENED_IN_TURN` | 25 s, 4 | What a camera gets to give a first frame, and how many of one printer's the refresh allows for |
 | `RUNTIME_LOAD_ALLOWANCE_S` | 60 s | What loading the model after a runtime switch is allowed, on top of the drain |
 | `RECENT_EVENTS_MAX` | 100 | The alert, warning and error events `recent_events()` keeps |

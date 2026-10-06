@@ -81,7 +81,7 @@ Authorization: Bearer pg_Zr8...agent
 | Token state | Behaviour |
 |---|---|
 | No tokens issued, the default | The surface is read-only and trusts whatever fronts it. Control and management stay closed |
-| Any token issued | A valid bearer is required for every request, and its scope decides what it reaches. MCP answers `401` before a session opens and hides the tools a token cannot use. The schema at `/api/v1/docs`, `/api/v1/redoc` and `/api/v1/openapi.json` describes the API and holds nothing from your hub, so it stays open |
+| Any token issued | A valid bearer is required for every request, and its scope decides what it reaches. MCP answers `401` before a session opens and hides the tools a token cannot use. The schema at `/api/v1/openapi.json` describes the API and holds nothing from your hub, so it stays open |
 
 > [!IMPORTANT]
 > Only a hash of a token is stored, beside its first 10 characters as a hint, so a lost token
@@ -95,7 +95,7 @@ Authorization: Bearer pg_Zr8...agent
 
 Base path `/api/v1`. JSON in and out, except the camera frame and alert snapshot, which are
 `image/jpeg`, the print file download, and the frame and print file you upload as a raw body.
-The interactive OpenAPI schema is served at `/api/v1/docs` and `/api/v1/redoc`.
+The OpenAPI schema is served at `/api/v1/openapi.json`. There are no interactive docs pages, so the hub loads nothing from a third party.
 
 Adding or removing a camera, printer or monitor returns the collection, as do removing a print
 file and `/cameras/refresh-printers`. Every other change returns the one thing it changed, which
@@ -130,6 +130,8 @@ the same:
 | `/prints/{id}/start` | 600 s, while the file is sent to the printer |
 | Any other change, and the risk history | 15 s |
 
+The dashboard's socket applies none of these and waits as long as a command takes.
+
 A hub opened at a name it doesn't know, such as a public domain, answers `403` to every
 request, this API included, until that name is in
 [`PRINTGUARD_ORIGINS`](deployment.md#host-and-origin-checking).
@@ -149,7 +151,7 @@ request, this API included, until that name is in
 | `GET` | `/cameras` | List cameras with rate, health and latest classification |
 | `GET` | `/cameras/{id}` | One camera |
 | `GET` | `/cameras/{id}/frame` | Freshest frame as `image/jpeg`. `404` while the camera is on standby or offline, since it has no current frame |
-| `POST` | `/classify` | Classify a supplied frame, body `image/jpeg` of up to 32 MB and 50 megapixels. No registered camera needed. A larger one, or one that can't be decoded, is a `400` |
+| `POST` | `/classify` | Classify a supplied frame, body `image/jpeg` of up to 32 MB and 50 megapixels. No registered camera needed. A file over 32 MB is a `413`, and one over 50 megapixels or that can't be decoded is a `400` |
 | `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
 | `GET` | `/prints/{id}` | One print file |
 | `GET` | `/prints/{id}/file` | Download a print file as the library keeps it |
