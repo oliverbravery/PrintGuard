@@ -630,7 +630,8 @@ filled in.
 
 For a service with a sign-in, declare `oauth` and PrintGuard runs the authorisation code flow
 with PKCE and no client secret. The access token arrives as `{{secret.oauth}}` and is refreshed
-before it expires.
+before it expires. When the provider refuses the refresh token the plugin is signed out, so
+`pg.secrets` stops listing `oauth` and its requests fail until the user signs in again.
 
 ```json
 "permissions": ["net", "oauth"],
@@ -756,7 +757,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | What | Limit |
 |---|---|
 | Source file | 256 KB each |
-| Zip | 12 MB. The dashboard refuses a larger file before sending it. A compression other than stored or deflate is refused |
+| Zip | 12 MB. The dashboard refuses a larger file before sending it and the hub refuses one again, and stops reading a file at its limit however small the zip says it is. A compression other than stored or deflate is refused |
 | Asset | 4 MB each, 12 MB across a plugin. An install is refused at the file that passes either |
 | README in a zip | 64 KB. A larger one is left out, and so is an image over 4 MB, and the plugin installs without it |
 | Media | 8 images |

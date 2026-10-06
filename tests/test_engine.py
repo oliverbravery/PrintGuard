@@ -9,9 +9,12 @@ import hashlib
 import io
 import json
 import logging
+import struct
 import threading
 import time
+import tracemalloc
 import zipfile
+import zlib
 from urllib.parse import parse_qs, urlparse
 from contextlib import asynccontextmanager
 
@@ -1294,6 +1297,7 @@ async def test_a_command_that_changes_nothing_stored_saves_nothing_and_answers_o
 
 async def test_plugins_read_as_disabled_while_the_hub_runs_none() -> None:
     platform = FakePlatform()
+    platform.plugin_runtime = None
     engine = Engine(platform)
     await engine.start()
     await install_demo(engine)
@@ -1301,6 +1305,30 @@ async def test_plugins_read_as_disabled_while_the_hub_runs_none() -> None:
     assert not engine.state_event()["plugins"][0]["enabled"], "the dashboard would keep running a plugin the hub has switched off"
     platform.plugin_runtime = object()
     assert engine.state_event()["plugins"][0]["enabled"]
+
+
+async def test_a_plugin_the_hub_runs_none_of_is_answered_on_nothing_it_asks_for() -> None:
+    platform = FakePlatform()
+    platform.responses["https://hooks.example.com/x"] = (200, {"ok": 1})
+    engine = Engine(platform)
+    await engine.start()
+    manifest = {**MANIFEST, "permissions": ["net", "notify", "link:provide"], "reasons": dict.fromkeys(["net", "notify", "link:provide"], "to test"), "provides": {"feed": "a feed"}}
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
+    await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": manifest["permissions"], "enabled": True}})
+    platform.plugin_runtime = None
+    platform.http_calls.clear()
+
+    for command in (
+        {"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/x"},
+        {"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "t", "url": "wss://hooks.example.com/x"},
+        {"cmd": "plugin.effect", "id": "demo", "effect": {"kind": "notify", "text": "hi"}},
+        {"cmd": "plugin.publish", "id": "demo", "channel": "feed", "body": {}},
+    ):
+        with pytest.raises(RuntimeError, match="may not|not answering|is answering"):
+            await engine.request(command)
+
+    assert not platform.http_calls and not platform.sockets, "an installed plugin still reached the network with plugins off"
+    await engine.stop()
 
 
 async def test_zip_install_keeps_its_page_and_serves_it_on_request() -> None:
@@ -3705,6 +3733,41 @@ async def test_an_update_that_reaches_further_stands_the_plugin_down() -> None:
     assert updated.secrets["api_key"] == "s3cr3t", "the same plugin's own credentials were thrown away"
 
 
+async def test_a_reinstalled_repository_whose_address_changed_only_in_case_keeps_running() -> None:
+    """2.5.0 stored every pattern lowercased, and the reinstall that fixes a capital in a path must not cost the user their consent."""
+    platform = FakePlatform(infer_s=0.02)
+    spelt = {**SECRET_MANIFEST, "urls": ["https://api.example.com/bot*/sendMessage"]}
+    platform.responses = github_files("a" * 40, spelt)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_from_github(engine)
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
+        )
+        saved = engine.plugins.get("vault")
+        saved.manifest = {**saved.manifest, "urls": [url.lower() for url in saved.manifest["urls"]]}
+        await install_from_github(engine)
+        reinstalled = engine.plugins.get("vault")
+
+    assert reinstalled.enabled and reinstalled.granted == SECRET_MANIFEST["permissions"], "a pattern spelt with a capital switched the plugin off"
+
+
+async def test_a_zip_reinstalled_over_itself_keeps_its_stored_data_and_credentials() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file", "filename": "vault.zip"}, "zip": plugin_zip(SECRET_MANIFEST)})
+        await engine.handle({"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "config": {"chat": "42"}}})
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file", "filename": "vault.zip"}, "zip": plugin_zip(SECRET_MANIFEST)})
+        kept = engine.plugins.get("vault")
+        wider = {**SECRET_MANIFEST, "urls": [*SECRET_MANIFEST["urls"], "https://collector.example.com/*"]}
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file", "filename": "vault.zip"}, "zip": plugin_zip(wider)})
+        widened = engine.plugins.get("vault")
+
+    assert kept.secrets["api_key"] == "s3cr3t" and kept.config == {"chat": "42"}, "a reinstall threw away what the user had typed"
+    assert kept.granted == [], "a zip has no identity, so its permissions are asked again"
+    assert widened.secrets == {} and widened.config == {}, "a zip that reached further inherited what an earlier one was given"
+
+
 @pytest.mark.parametrize("endpoint", ["authorize_url", "token_url"])
 async def test_an_update_that_signs_in_somewhere_else_is_signed_out_and_asked_again(endpoint: str) -> None:
     """A refresh token goes to the token endpoint, so a new one must not inherit it."""
@@ -4120,6 +4183,24 @@ async def test_an_expiring_access_token_is_renewed_before_the_request_goes_out()
     assert plugin.secrets["oauth_refresh"] == "rt-2", "a rotated refresh token was thrown away"
 
 
+async def test_a_refused_refresh_token_signs_the_plugin_out_once_and_the_provider_is_not_called_again() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.responses["https://auth.example.com/token"] = (400, {"error": "invalid_grant"})
+    asked = {"cmd": "plugin.http", "id": "vault", "url": "https://api.example.com/v1/me", "headers": {"Authorization": "Bearer {{secret.oauth}}"}}
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        plugin = engine.plugins.get("vault")
+        plugin.secrets = {"oauth_client_id": "mine-1234", "oauth": "stale", "oauth_refresh": "rt-1", "oauth_expires": "0"}
+        with pytest.raises(RuntimeError, match="signed out"):
+            await engine.request(asked)
+        with pytest.raises(RuntimeError, match="not signed in yet"):
+            await engine.request(asked)
+        refreshes = [url for method, url in platform.http_calls if url == "https://auth.example.com/token"]
+
+    assert plugin.secrets == {"oauth_client_id": "mine-1234"}, "the panel would keep polling on a token nobody can renew"
+    assert len(refreshes) == 1, "a refused refresh token was sent to the provider again"
+
+
 async def test_a_plugin_reaches_the_whole_command_table_it_was_granted() -> None:
     """Every command a permission names dispatches, so the table cannot rot."""
     unreachable = [command for command in plugins.PERMISSION_COMMANDS if command not in Engine(FakePlatform())._handlers]
@@ -4386,13 +4467,40 @@ def test_a_zip_declaring_more_than_a_plugin_may_ship_is_refused_before_it_is_unp
         for name in names:
             archive.writestr(name, bytes(plugins.MAX_ASSET_BYTES))
     unpacked: list[int] = []
-    read = zipfile.ZipFile.read
-    monkeypatch.setattr(zipfile.ZipFile, "read", lambda archive, name: unpacked.append(len(data := read(archive, name))) or data)
+    read = zipfile.ZipExtFile.read
+    monkeypatch.setattr(zipfile.ZipExtFile, "read", lambda member, size=-1: unpacked.append(len(data := read(member, size))) or data)
 
     with pytest.raises(ValueError, match="a3.txt takes the plugin past"):
         plugins.unpack(buffer.getvalue())
 
     assert sum(unpacked) <= plugins.MAX_ASSETS_BYTES + 2 * plugins.MAX_SOURCE_BYTES, "assets were unpacked past the total before it was checked"
+
+
+def test_a_zip_over_the_most_a_plugin_may_be_is_refused_before_it_is_opened() -> None:
+    with pytest.raises(ValueError, match="over 12 MB"):
+        plugins.unpack(bytes(plugins.MAX_ZIP_BYTES + 1))
+
+
+def test_a_manifest_that_understates_its_size_is_not_inflated_whole() -> None:
+    manifest = json.dumps(MANIFEST).encode()
+    padded = manifest + b" " * (64 * 1024 * 1024)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        archive.writestr("plugin.json", padded)
+    raw = bytearray(buffer.getvalue())
+    crc = zlib.crc32(manifest)
+    struct.pack_into("<I", raw, 14, crc)
+    struct.pack_into("<I", raw, 22, len(manifest))
+    struct.pack_into("<I", raw, raw.rfind(b"PK\x01\x02") + 16, crc)
+    struct.pack_into("<I", raw, raw.rfind(b"PK\x01\x02") + 24, len(manifest))
+    tracemalloc.start()
+    try:
+        plugins.unpack(bytes(raw))
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+    assert peak < 4 * 1024 * 1024, f"{peak // 1024 // 1024} MB was inflated for a manifest that declared {len(manifest)} bytes"
 
 
 def test_a_zip_keeps_no_more_page_files_than_a_plugin_may_ship() -> None:

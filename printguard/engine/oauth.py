@@ -48,6 +48,10 @@ DEFAULT_LIFETIME_S = 3600.0
 MAX_LIFETIME_S = 366 * 86400.0
 
 
+class SignInRefused(RuntimeError):
+    """A provider answered a sign-in or a renewal with a 400 or 401, which is it refusing the grant for good."""
+
+
 def _urlsafe(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
@@ -160,6 +164,9 @@ class OAuthFlows:
         Returns:
             The secrets to store, or None when the one held is still good or
             there is nothing to refresh with.
+
+        Raises:
+            SignInRefused: If the provider no longer honours the refresh token.
         """
         if not held.get(REFRESH) or time.time() < float(held.get(EXPIRES) or 0) - REFRESH_MARGIN_S:
             return None
@@ -180,6 +187,8 @@ class OAuthFlows:
             data=urlencode(form).encode(),
             follow_redirects=False,
         )
+        if status in (400, 401):
+            raise SignInRefused(f"{provider['label']} refused the sign-in ({status})")
         if status >= 400 or not isinstance(body, dict) or not body.get("access_token"):
             raise RuntimeError(f"{provider['label']} refused the sign-in ({status})")
         try:

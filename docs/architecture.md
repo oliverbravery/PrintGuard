@@ -708,7 +708,8 @@ method, path and query. A refusal is never cached. A plugin its runtime cannot k
 disabled with the reason, dropped from the runtime and has its sockets closed.
 
 `PRINTGUARD_PLUGINS=off` starts with every plugin off, and the state snapshot reports each as
-disabled so the dashboard stops its half too. [Plugins](plugins.md) covers installing
+disabled so the dashboard stops its half too. The engine answers no request, socket, effect or
+message a plugin sends for itself while it is off. [Plugins](plugins.md) covers installing
 them and [what each permission grants](plugins.md#permissions), and
 [writing plugins](plugin-development.md) covers the API.
 

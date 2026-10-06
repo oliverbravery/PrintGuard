@@ -142,6 +142,18 @@ async def test_an_answer_at_the_cap_arrives_whole(gzipped: bool) -> None:
     assert asked == ["gzip"], "the plugin asked for an encoding nothing here can count while it inflates"
 
 
+@pytest.mark.parametrize("body", ['{"temp": 1e999}', '{"temp": NaN}', "[Infinity]"])
+async def test_an_answer_holding_a_number_json_does_not_allow_is_handed_over_as_text(body: str) -> None:
+    """A dashboard drops its socket on an event it cannot parse, so this must never reach one as a number."""
+    platform = FakePlatform()
+    over_httpx(platform, lambda request: httpx.Response(200, content=body.encode()))
+    async with engine_with(platform, manifest("net", urls=[f"{API}/v1/*"])) as engine:
+        answer = await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/feed"})
+
+    assert next(e["body"] for e in answer if e["event"] == "http") == body
+    json.dumps(answer, allow_nan=False)
+
+
 async def test_a_compressed_answer_is_refused_while_it_inflates() -> None:
     """48 MB of zeros is 47 KB of gzip, and httpx inflates each chunk whole before handing it over."""
     bomb = gzip.compress(bytes(48 * 1024 * 1024))
@@ -462,6 +474,14 @@ def test_an_update_that_answers_on_a_new_channel_or_asks_for_a_new_scope_is_wide
     assert not plugins.widens(accepted, declared(provides={}, oauth={**sign_in, "scopes": []}))
     assert plugins.widens(accepted, declared(provides={"status": "what is playing", "queue": "what is next"}))
     assert plugins.widens(accepted, declared(oauth={**sign_in, "scopes": ["read", "write"]}))
+
+
+def test_an_address_that_differs_only_in_the_case_of_its_path_is_not_wider() -> None:
+    saved = plugins.sanitise_manifest(manifest("net", urls=["https://api.telegram.org/bot*/sendmessage"]))
+    reinstalled = plugins.sanitise_manifest(manifest("net", urls=["https://api.telegram.org/bot*/sendMessage"]))
+
+    assert not plugins.widens(saved, reinstalled)
+    assert plugins.widens(saved, plugins.sanitise_manifest(manifest("net", urls=["https://api.telegram.org/bot*/getUpdates"])))
 
 
 async def test_a_plugin_that_fails_is_handed_back_to_its_runtime_without_it() -> None:

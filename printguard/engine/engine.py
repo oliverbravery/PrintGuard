@@ -1789,7 +1789,9 @@ class Engine:
         a newer revision replaces the old bytes and keeps the grants, stored data
         and credentials, as long as it comes from the same place. A bundle from
         anywhere else starts with none of them, and one reaching further than the
-        accepted manifest stands down until the wider list is accepted. One that
+        accepted manifest stands down until the wider list is accepted. A zip
+        over a zip keeps its stored data and credentials, but is accepted again,
+        unless it reaches further than the one it replaces. One that
         signs in at different addresses is signed out as well, so a refresh
         token is never sent to an endpoint it was not issued by.
         """
@@ -1821,15 +1823,17 @@ class Engine:
         entry = plugins.verified_by(self.catalogue, manifest["id"], digests)
         existing = self.plugins.get(manifest["id"])
         inherits = existing is not None and plugins.same_source(existing.source, source)
-        accepted = inherits and not plugins.widens(existing.manifest, manifest)
+        widened = existing is not None and plugins.widens(existing.manifest, manifest)
+        accepted = inherits and not widened
         granted = [p for p in (existing.granted if accepted else []) if p in manifest["permissions"]]
-        if existing is not None and not inherits:
+        keeps_data = inherits or (existing is not None and not widened and existing.source.get("kind") == source["kind"] == "file")
+        if existing is not None and not keeps_data:
             logger.warning(
                 "plugin %s came from %s and now from %s, so its grants and credentials were dropped",
                 manifest["id"], existing.source, source,
             )
-        secrets = existing.secrets if inherits else {}
-        if inherits and not plugins.same_sign_in(existing.manifest, manifest):
+        secrets = existing.secrets if keeps_data else {}
+        if keeps_data and not plugins.same_sign_in(existing.manifest, manifest):
             secrets = oauth.without_session(secrets)
             logger.warning("plugin %s signs in somewhere new, so it was signed out", manifest["id"])
         self.plugins.add(
@@ -1842,7 +1846,7 @@ class Engine:
                 digests=digests,
                 source=source,
                 granted=granted,
-                config=existing.config if inherits else {},
+                config=existing.config if keeps_data else {},
                 secrets=secrets,
                 verified=entry is not None,
                 enabled=bool(existing and existing.enabled and plugins.consented(manifest, granted)),
@@ -1919,14 +1923,23 @@ class Engine:
             raise LookupError(f"no plugin {message['id']}")
         self.emit({"event": "plugin_page", "id": plugin.id, "page": plugin.page, "req_id": message.get("req_id")})
 
+    def _running_plugin(self, plugin_id: str) -> Plugin | None:
+        """The plugin with this id, if it is enabled and the hub has a runtime to run it.
+
+        Every command a plugin sends for itself goes through this, so a hub
+        started with plugins off answers none of them, whatever is installed.
+        """
+        plugin = self.plugins.get(plugin_id)
+        return plugin if plugin and plugin.enabled and self.platform.plugin_runtime is not None else None
+
     def _networked(self, plugin_id: str) -> Plugin:
         """The plugin a network request belongs to, if it is running and holds the grant.
 
         Raises:
-            PermissionError: If it is not installed, not enabled or lacks ``net``.
+            PermissionError: If it is not installed, not running or lacks ``net``.
         """
-        plugin = self.plugins.get(plugin_id)
-        if not plugin or not plugin.enabled or not plugin.may("net"):
+        plugin = self._running_plugin(plugin_id)
+        if not plugin or not plugin.may("net"):
             raise PermissionError("plugin may not reach the network")
         return plugin
 
@@ -2038,8 +2051,8 @@ class Engine:
             PermissionError: If it is not installed, not running, or offers
                 nothing by that name.
         """
-        plugin = self.plugins.get(plugin_id)
-        if plugin is None or not plugin.enabled or not plugin.may("link:provide"):
+        plugin = self._running_plugin(plugin_id)
+        if plugin is None or not plugin.may("link:provide"):
             raise PermissionError(f"no plugin {plugin_id!r} is answering other plugins")
         if channel not in plugin.manifest["provides"]:
             raise PermissionError(f"{plugin_id} does not offer {channel!r}")
@@ -2051,7 +2064,7 @@ class Engine:
         Both ends declared it. The caller named the plugin and channel, and the
         answering plugin offers that channel.
         """
-        caller = self.plugins.get(message["id"])
+        caller = self._running_plugin(message["id"])
         to, channel = str(message.get("to", "")), str(message.get("channel", ""))
         if not caller or not caller.may("link:consume") or f"{to}:{channel}" not in caller.manifest["consumes"]:
             raise PermissionError(f"plugin {message['id']} did not declare {to}:{channel}")
@@ -2158,13 +2171,25 @@ class Engine:
         """Renews a plugin's access token before a request goes out on it.
 
         One renewal runs at a time for a plugin, so a request that waited on it
-        finds the new token rather than spending the refresh token again.
+        finds the new token rather than spending the refresh token again. A
+        provider that no longer honours the refresh token signs the plugin out,
+        so later requests ask for a sign-in without calling the provider again
+        and the panel sees it is no longer signed in.
+
+        Raises:
+            RuntimeError: If the provider refused the refresh token.
         """
         if not plugin.manifest["oauth"]:
             return
         async with self._sign_in_refreshes[plugin.id]:
             held = plugin.secrets
-            renewed = await self.oauth.refreshed(self._provider(plugin), held)
+            try:
+                renewed = await self.oauth.refreshed(self._provider(plugin), held)
+            except oauth.SignInRefused as exc:
+                plugin.secrets = oauth.without_session(plugin.secrets)
+                self.save()
+                self._broadcast(self.state_event())
+                raise RuntimeError(f"{exc}, so {plugin.id} was signed out") from None
             if renewed is not None:
                 plugin.secrets = {**plugin.secrets, **{key: value for key, value in renewed.items() if held.get(key) != value}}
                 self.save()
@@ -2179,7 +2204,7 @@ class Engine:
                 or asks for something no dashboard performs.
             ValueError: If the effect is larger than one has any business being.
         """
-        plugin = self.plugins.get(str(message.get("id", "")))
+        plugin = self._running_plugin(str(message.get("id", "")))
         effect = message.get("effect") if isinstance(message.get("effect"), dict) else {}
         needed = plugins.UI_EFFECTS.get(str(effect.get("kind", "")))
         if plugin is None or needed is None or not plugin.may(needed):

@@ -32,6 +32,7 @@ from ..engine.adapters import redirect_message
 from ..engine.platform import Frame, Notice, Redirects
 from ..engine.reports import scrub_url, url_secrets
 from .bambu_camera import open_bambu_jpeg_stream
+from .events import parse_json, require_finite
 from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
 from .plugins import WasmPluginRuntime
@@ -606,12 +607,12 @@ def _parsed(content: bytes, encoding: str | None, binary: bool) -> Any:
 
     Returns:
         Base64 for a binary reply, parsed JSON where the body is JSON, and the
-        text otherwise.
+        text otherwise, a body holding NaN or Infinity included.
     """
     if binary:
         return base64.b64encode(content).decode()
     try:
-        return json.loads(content)
+        return require_finite(parse_json(content))
     except ValueError:
         return content.decode(encoding or "utf-8", "replace")
 

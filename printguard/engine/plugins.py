@@ -28,6 +28,7 @@ MANIFEST_FILE = "plugin.json"
 SOURCE_FILES = ("plugin.js", "worker.js", "panel.html")
 MAX_ASSET_BYTES = 4 * 1024 * 1024
 MAX_ASSETS_BYTES = 12 * 1024 * 1024
+MAX_ZIP_BYTES = 12 * 1024 * 1024
 SURFACES = ("panel", "monitor", "settings")
 MAX_SOURCE_BYTES = 256 * 1024
 MAX_CONFIG_BYTES = 16 * 1024
@@ -440,7 +441,8 @@ def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     where it signs in and the scopes it asks for there are what the user agreed
     to, so a change to any of them is a fresh question. Anything not written
     exactly as before counts as wider, since a narrower-looking pattern can
-    cover more.
+    cover more, apart from the letter case of an address, which 2.5.0 stored
+    lowercased.
 
     Args:
         previous: The manifest the grants were given against.
@@ -452,7 +454,8 @@ def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     return (
         not same_sign_in(previous, current)
         or not set(current["oauth"].get("scopes", [])) <= set(previous["oauth"].get("scopes", []))
-        or any(not set(current[field]) <= set(previous[field]) for field in ("permissions", "urls", "consumes", "provides"))
+        or any(not set(current[field]) <= set(previous[field]) for field in ("permissions", "consumes", "provides"))
+        or not {url.lower() for url in current["urls"]} <= {url.lower() for url in previous["urls"]}
     )
 
 
@@ -841,10 +844,12 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
 
     Raises:
         ValueError: If the zip is unreadable, carries no manifest or one that
-            is not an object, uses a compression other than stored or deflate,
-            or declares more than a plugin may ship, which is refused before
-            it is unpacked.
+            is not an object, is over 12 MB, uses a compression other than
+            stored or deflate, or holds a file that inflates past what a plugin
+            may ship.
     """
+    if len(data) > MAX_ZIP_BYTES:
+        raise ValueError(f"this zip is over {MAX_ZIP_BYTES // 1024 // 1024} MB")
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
@@ -858,11 +863,16 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
         raise ValueError(f"bundle has no {MANIFEST_FILE}")
     prefix = entries[MANIFEST_FILE][: -len(MANIFEST_FILE)]
 
+    def read_capped(entry: str, cap: int) -> bytes | None:
+        with archive.open(entry) as member:
+            content = member.read(cap + 1)
+        return content if len(content) <= cap else None
+
     def read(name: str, cap: int) -> bytes:
-        entry = entries[name]
-        if archive.getinfo(entry).file_size > cap:
+        content = read_capped(entries[name], cap)
+        if content is None:
             raise ValueError(f"{name} is larger than {cap // 1024} KB")
-        return archive.read(entry)
+        return content
 
     manifest = json.loads(read(MANIFEST_FILE, MAX_SOURCE_BYTES))
     if not isinstance(manifest, dict):
@@ -872,8 +882,10 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
     assets: dict[str, bytes] = {}
     total = 0
     for name in sorted(declared & entries.keys()):
-        total = within_budget(name, archive.getinfo(entries[name]).file_size, total)
-        assets[name] = archive.read(entries[name])
+        cap = min(MAX_ASSET_BYTES, MAX_ASSETS_BYTES - total)
+        content = read_capped(entries[name], cap)
+        total = within_budget(name, cap + 1 if content is None else len(content), total)
+        assets[name] = content
     listed = [str(manifest.get("icon", "")).strip().lower(), README_FILE]
     listed += [str(shot).strip().lower() for shot in manifest.get("media", [])]
     named = set(archive.namelist())
@@ -882,11 +894,11 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
     for path in listed:
         entry = f"{prefix}{path}"
         if path and path not in page and entry in named:
-            size = archive.getinfo(entry).file_size
             cap = MAX_README_BYTES if path == README_FILE else MAX_ASSET_BYTES
-            if size <= cap and total + size <= MAX_ASSETS_BYTES:
-                page[path] = archive.read(entry)
-                total += size
+            content = read_capped(entry, min(cap, MAX_ASSETS_BYTES - total))
+            if content is not None:
+                page[path] = content
+                total += len(content)
     return manifest, sources, assets, page
 
 
