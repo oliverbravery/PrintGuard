@@ -9,6 +9,7 @@ import { useSettingsFooter } from "./SettingsFooter";
 import { Toggle } from "./Toggle";
 
 const REPO_HINT = "owner/repo, or owner/repo/path@branch";
+const MAX_ZIP_BYTES = 12 * 1024 * 1024;
 
 function parseRepo(raw: string): Record<string, unknown> | null {
   const [location, ref] = raw.trim().replace(/^https:\/\/github\.com\//, "").split("@");
@@ -577,7 +578,9 @@ export function PluginsTab() {
           onChange={async (event) => {
             const chosen = event.target.files?.[0];
             event.target.value = "";
-            if (chosen) installPlugin({ kind: "file", filename: chosen.name }, await readZip(chosen));
+            if (!chosen) return;
+            if (chosen.size > MAX_ZIP_BYTES) return toast("error", `${chosen.name} is over 12 MB, the most a plugin can be`);
+            installPlugin({ kind: "file", filename: chosen.name }, await readZip(chosen));
           }}
         />
         <span className="text-[0.7rem] text-text-2">A zipped folder with plugin.json and plugin.js or worker.js.</span>

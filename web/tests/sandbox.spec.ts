@@ -416,6 +416,15 @@ test("the consent dialog names where a plugin signs in and where it gets its tok
   await expect(dialog.getByText("Tokens from tokens.elsewhere.test/api/token")).toBeVisible();
 });
 
+test("a plugin zip over 12 MB is refused before it is sent", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP);
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await page.locator("input[type=file]").setInputFiles({ name: "big.zip", mimeType: "application/zip", buffer: Buffer.alloc(12 * 1024 * 1024 + 1) });
+
+  await expect(page.getByText("big.zip is over 12 MB, the most a plugin can be")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__sent.filter((cmd: any) => cmd.cmd === "plugin.install").length)).toBe(0);
+});
+
 const LEAVES = {
   "plugin.js": (to: string) =>
     `plugin.render((ctx) => { if (ctx.state.monitors[0].alert) location.href = "${to}?state=" + encodeURIComponent(JSON.stringify(ctx.state)); return { type: "text", value: "drawn" }; });`,
