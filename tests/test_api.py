@@ -159,9 +159,8 @@ async def test_read_surface_strips_linked_service_secrets() -> None:
         assert "api_key" not in listed[0]["config"]
         assert "api_key" not in one["config"]
 
-        full = engine.state_event()
-        assert full["printers"][0]["config"]["api_key"] == "k"
-        assert full["settings"]["notifiers"]["telegram"]["bot_token"] == "T"
+        assert engine.printers.get(printer_id).config["api_key"] == "k"
+        assert engine.settings["notifiers"]["telegram"]["bot_token"] == "T"
 
 
 async def test_a_notifier_nobody_knows_is_neither_stored_nor_read_back() -> None:

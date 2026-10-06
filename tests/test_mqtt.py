@@ -179,10 +179,12 @@ class FakeBroker:
 
     def __init__(self) -> None:
         self.identifiers: list[str] = []
+        self.passwords: list[str | None] = []
         self.published: list[tuple[str, Any, bool]] = []
 
     def client(self, **options: Any) -> "FakeBroker":
         self.identifiers.append(options["identifier"])
+        self.passwords.append(options["password"])
         return self
 
     async def __aenter__(self) -> "FakeBroker":
@@ -421,3 +423,21 @@ async def test_a_topic_with_a_wildcard_is_a_bad_setting_reported_once_and_never_
     finally:
         await bridge.stop()
         await engine.stop()
+
+
+async def test_the_bridge_signs_in_with_the_password_the_snapshot_leaves_out(monkeypatch) -> None:
+    """The bridge hears the same redacted state as every transport, so the password has to come from the settings."""
+    broker, engine, bridge = await _bridged(monkeypatch, {})
+    bridge._get_config = lambda: engine.settings["mqtt"]
+    try:
+        await engine.handle({"cmd": "settings.update", "patch": {"mqtt": {"enabled": True, "host": "broker", "password": "mq-s3cret-pass"}}})
+        await _until(lambda: ONLINE in broker.published)
+        shown = engine.state_event()
+        await engine.handle({"cmd": "settings.update", "patch": {"mqtt": {**shown["settings"]["mqtt"], "username": "pg"}}})
+        await _until(lambda: broker.published.count(ONLINE) == 2)
+    finally:
+        await bridge.stop()
+        await engine.stop()
+
+    assert "password" not in shown["settings"]["mqtt"] and shown["secrets_set"]["mqtt"] == ["password"]
+    assert broker.passwords == ["mq-s3cret-pass", "mq-s3cret-pass"]
