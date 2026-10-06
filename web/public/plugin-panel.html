@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'sha256-/RrjVy+kw5F0QPye+fQCR4aMFlS2ymYQP/4/Z7IU4LI=' 'strict-dynamic' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'sha256-EyaOxOOPXp1N3GLJbxOgQmrEwSkZamkPIseKxXxOeS4=' 'strict-dynamic' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>PrintGuard plugin panel</title>
     <style>
@@ -18,7 +18,7 @@
       (function () {
         "use strict";
 
-        const closed = ["fetch", "fetchLater", "XMLHttpRequest", "WebSocket", "WebSocketStream", "WebTransport", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches"];
+        const closed = ["fetch", "fetchLater", "XMLHttpRequest", "WebSocket", "WebSocketStream", "WebTransport", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches", "AudioContext", "webkitAudioContext", "speechSynthesis"];
         for (const name of [...closed, ...Object.getOwnPropertyNames(window).filter((name) => name.includes("RTC"))]) {
           try {
             delete window[name];
@@ -45,6 +45,7 @@
         const pg = {
           state: {},
           theme: {},
+          secrets: [],
           get store() {
             return store;
           },
@@ -94,18 +95,17 @@
         };
         window.pg = pg;
 
+        function silenceMedia() {
+          const policy = document.createElement("meta");
+          policy.httpEquiv = "Content-Security-Policy";
+          policy.content = "media-src 'none'";
+          document.head.appendChild(policy);
+        }
+
         function paint(html) {
-          const parsed = new DOMParser().parseFromString(html, "text/html");
-          for (const style of parsed.head.querySelectorAll("style, link")) document.head.appendChild(style);
-          for (const node of [...parsed.body.childNodes]) {
-            if (node.nodeName !== "SCRIPT") {
-              document.body.appendChild(node);
-              continue;
-            }
-            const script = document.createElement("script");
-            script.textContent = node.textContent;
-            document.body.appendChild(script);
-          }
+          const range = document.createRange();
+          range.selectNodeContents(document.body);
+          document.body.append(range.createContextualFragment(html));
         }
 
         let themed = null;
@@ -137,14 +137,16 @@
             if (data.t === "init") {
               store = data.store || {};
               pg.state = data.state || {};
+              pg.secrets = data.secrets || [];
               applyTheme(data.theme);
+              if (!data.sound) silenceMedia();
               for (const [name, blob] of Object.entries(data.assets || {})) assets.set(name, URL.createObjectURL(blob));
               paint(String(data.html || ""));
               reportHeight();
               listeners.get("ready")?.(pg.state);
             } else if (data.t === "state") {
               pg.state = data.state || {};
-              if (data.store) store = data.store;
+              pg.secrets = data.secrets || [];
               applyTheme(data.theme);
               listeners.get("state")?.(pg.state);
             } else if (data.t === "event") {
@@ -187,6 +189,10 @@
       message port PrintGuard hands over once. A page that replaced this one
       would hold no port, and the dashboard removes the frame the moment it
       loads anything a second time.
+
+      Audio and video from blobs play only for a plugin granted `sound`. A policy
+      can only be tightened once it is set, so the page starts open and the script
+      closes it as it starts.
 
       Assets arrive as blobs rather than as base64 or a URL: a blob made here
       belongs to this origin, so the plugin can point an <img> or a <video> at

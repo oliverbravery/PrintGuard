@@ -52,8 +52,8 @@ async function runInFrame(
 const runInSandbox = (page: import("@playwright/test").Page, code: string, state: unknown = {}, pause = 0) =>
   runInFrame(page, "plugin-sandbox.html", [{ id: 1, t: "init", code, store: {} }, { id: 2, t: "state", state }], "result", pause);
 
-const runInPanel = (page: import("@playwright/test").Page, html: string) =>
-  runInFrame(page, "plugin-panel.html", [{ t: "init", html, assets: {}, state: {}, theme: {}, store: {} }], "effects");
+const runInPanel = (page: import("@playwright/test").Page, html: string, sound = false) =>
+  runInFrame(page, "plugin-panel.html", [{ t: "init", html, assets: {}, state: {}, theme: {}, store: {}, sound }], "effects");
 
 test("a plugin runs in an opaque origin with no way out", async ({ page }) => {
   await page.goto("/");
@@ -188,6 +188,50 @@ test("a panel's inline handler is refused, and its scripts still run", async ({ 
   expect(result.effects.map((effect: any) => effect.text)).toEqual(["script"]);
 });
 
+test("a panel's script runs before any markup", async ({ page }) => {
+  await page.goto("/");
+  const result = await runInPanel(page, `<script>pg.log("first")</script><div id="app"></div><script>pg.log("last")</script>`);
+
+  expect(result.effects.map((effect: any) => effect.text)).toEqual(["first", "last"]);
+});
+
+test("a panel's script runs inside an element", async ({ page }) => {
+  await page.goto("/");
+  const result = await runInPanel(page, `<div><p>drawn</p><script>pg.log("nested")</script></div><script>pg.log("after")</script>`);
+
+  expect(result.effects.map((effect: any) => effect.text)).toEqual(["nested", "after"]);
+});
+
+const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+
+const SOUND_PROBE = `<script>
+  const refused = [];
+  document.addEventListener("securitypolicyviolation", (event) => refused.push(event.violatedDirective));
+  const audio = document.createElement("audio");
+  audio.src = "${SILENT_WAV}";
+  document.body.appendChild(audio);
+  audio.load();
+  setTimeout(() => pg.log(JSON.stringify({
+    context: typeof AudioContext + typeof webkitAudioContext,
+    speech: typeof speechSynthesis,
+    refused: refused.map((directive) => directive.split("-")[0]),
+  })), 500);
+</script>`;
+
+test("a panel without the sound permission can make no sound", async ({ page }) => {
+  await page.goto("/");
+  const said = JSON.parse((await runInPanel(page, SOUND_PROBE)).effects[0].text);
+
+  expect(said).toEqual({ context: "undefinedundefined", speech: "undefined", refused: ["media"] });
+});
+
+test("a panel granted sound may play the audio it shipped, and still has no audio context", async ({ page }) => {
+  await page.goto("/");
+  const said = JSON.parse((await runInPanel(page, SOUND_PROBE, true)).effects[0].text);
+
+  expect(said).toEqual({ context: "undefinedundefined", speech: "undefined", refused: [] });
+});
+
 const PIP = `
 plugin.action((name, arg, ctx) => {
   if (name === "toggle") ctx.store.picked = [arg];
@@ -245,6 +289,7 @@ async function dashboardWithPlugin(
   surfaces = PLUGIN.manifest.surfaces,
   assets: Record<string, string> = {},
   file = "plugin.js",
+  secretsSet: string[] = [],
 ) {
   await page.addInitScript(() => {
     class Offline extends EventTarget {
@@ -257,7 +302,7 @@ async function dashboardWithPlugin(
   await page.goto("/");
   await page.waitForFunction(() => Boolean((window as any).__pg.getState().link));
   await page.evaluate(
-    ({ plugin, permissions, code, granted, surfaces, monitor, assets, file }) => {
+    ({ plugin, permissions, code, granted, surfaces, monitor, assets, file, secretsSet }) => {
       const win = window as any;
       const sent: any[] = [];
       win.__sent = sent;
@@ -276,9 +321,9 @@ async function dashboardWithPlugin(
           printers: [], prints: [], reviews: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
           settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
           stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
-          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result"] }, granted, files: [file] }],
+          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result", "http"] }, granted, files: [file], secrets_set: secretsSet }],
           plugin_permissions: permissions,
-          plugin_events: { state: [], result: ["monitor_id", "prediction"] },
+          plugin_events: { state: [], result: ["monitor_id", "prediction"], http: ["tag", "status", "body"] },
           plugin_assets: { png: "image/png", txt: "text/plain", mp3: "audio/mpeg" },
         },
       });
@@ -286,7 +331,7 @@ async function dashboardWithPlugin(
       const request = sent.find((c) => c.cmd === "plugin.code");
       win.__pgEvent({ event: "plugin_code", id: "pip", sources: { [file]: code }, assets, req_id: request?.req_id });
     },
-    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets, file },
+    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets, file, secretsSet },
   );
   if (file === "panel.html") await expect(page.locator("iframe[title='Picture in picture panel']")).toBeAttached();
   else await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().pluginTrees).length)).toBeGreaterThan(0);
@@ -296,6 +341,88 @@ test("a panel.html draws itself in a frame of its own", async ({ page }) => {
   await dashboardWithPlugin(page, "<p>drawn by the panel</p>", ["state:read"], ["panel"], {}, "panel.html");
 
   await expect(page.frameLocator("iframe[title='Picture in picture panel']").getByText("drawn by the panel")).toBeVisible();
+});
+
+const SPOTIFY_PANEL = readFileSync(new URL("../../plugins/spotify/panel.html", import.meta.url), "utf8");
+
+const holdSecrets = (page: import("@playwright/test").Page, secretsSet: string[]) =>
+  page.evaluate((secretsSet) => {
+    const win = window as any;
+    const engine = win.__pg.getState().engine;
+    win.__pgEvent({ event: "state", ...engine, plugins: engine.plugins.map((plugin: any) => ({ ...plugin, secrets_set: secretsSet })) });
+  }, secretsSet);
+
+const spotifyRequests = (page: import("@playwright/test").Page) =>
+  page.evaluate(() => (window as any).__sent.filter((cmd: any) => cmd.cmd === "plugin.http").length);
+
+const spotifyPanel = async (page: import("@playwright/test").Page, secretsSet: string[]) => {
+  await dashboardWithPlugin(page, SPOTIFY_PANEL, ["net", "oauth", "background"], ["panel"], {}, "panel.html", secretsSet);
+  return page.frameLocator("iframe[title='Picture in picture panel']");
+};
+
+test("the Spotify panel asks Spotify nothing until it is signed in, and stops when it is disconnected", async ({ page }) => {
+  const panel = await spotifyPanel(page, ["oauth_client_id"]);
+  await expect(panel.getByText("Not connected")).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(await spotifyRequests(page)).toBe(0);
+
+  await holdSecrets(page, ["oauth_client_id", "oauth"]);
+  await expect.poll(() => spotifyRequests(page)).toBeGreaterThan(0);
+
+  await holdSecrets(page, ["oauth_client_id"]);
+  await expect(panel.getByText("Connect Spotify in the Plugins tab in Settings.")).toBeVisible();
+  const asked = await spotifyRequests(page);
+  await page.waitForTimeout(1000);
+  expect(await spotifyRequests(page)).toBe(asked);
+});
+
+test("a rejected Spotify token asks to reconnect rather than for something to play", async ({ page }) => {
+  const panel = await spotifyPanel(page, ["oauth_client_id", "oauth"]);
+  await page.evaluate(() => (window as any).__pgEvent({ event: "http", id: "pip", tag: "player", status: 401, body: null }));
+
+  await expect(panel.getByText("Reconnect Spotify in the Plugins tab in Settings.")).toBeVisible();
+});
+
+test("the consent dialog names where a plugin signs in and where it gets its tokens", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP);
+  await page.evaluate(() => {
+    const win = window as any;
+    const engine = win.__pg.getState().engine;
+    const oauth = {
+      label: "Spotify",
+      authorize_url: "https://login.elsewhere.test/authorize",
+      token_url: "https://tokens.elsewhere.test/api/token",
+      register_url: "",
+      scopes: [],
+    };
+    win.__pg.setState({
+      engine: {
+        ...engine,
+        plugin_permissions: [...engine.plugin_permissions, { id: "oauth", label: "Sign in", description: "" }],
+        plugins: engine.plugins.map((plugin: any) => ({
+          ...plugin,
+          enabled: false,
+          granted: [],
+          manifest: { ...plugin.manifest, permissions: ["oauth"], oauth },
+        })),
+      },
+    });
+    win.__pg.getState().openSettings("plugins");
+  });
+  await page.getByRole("switch", { name: "Enable Picture in picture" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Enable Picture in picture" });
+  await expect(dialog.getByText("Sign in at login.elsewhere.test/authorize")).toBeVisible();
+  await expect(dialog.getByText("Tokens from tokens.elsewhere.test/api/token")).toBeVisible();
+});
+
+test("a plugin zip over 12 MB is refused before it is sent", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP);
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await page.locator("input[type=file]").setInputFiles({ name: "big.zip", mimeType: "application/zip", buffer: Buffer.alloc(12 * 1024 * 1024 + 1) });
+
+  await expect(page.getByText("big.zip is over 12 MB, the most a plugin can be")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__sent.filter((cmd: any) => cmd.cmd === "plugin.install").length)).toBe(0);
 });
 
 const LEAVES = {

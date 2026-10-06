@@ -424,7 +424,7 @@ export const useStore = create<PgStore>((set, get) => {
     }
     for (const [id, panel] of panels) {
       const plugin = engine.plugins.find((p) => p.id === id);
-      if (plugin) panel.update(pluginState(plugin));
+      if (plugin) panel.update(pluginState(plugin), plugin.secrets_set);
     }
   };
 

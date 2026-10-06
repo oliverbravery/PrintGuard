@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "../store";
 import type { PluginRecord } from "../types";
 import { NewTab } from "./NewTab";
+import { SignInAddresses } from "./PluginConsent";
 
 export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
   const send = useStore((s) => s.send);
@@ -31,6 +32,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
           <code className="mono block select-all break-all rounded border border-line-0 bg-ink-2 px-2 py-1 text-[0.65rem] text-text-1">
             {redirect}
           </code>
+          <SignInAddresses oauth={plugin.manifest.oauth} />
         </div>
       )}
       {names.map((name) => (
