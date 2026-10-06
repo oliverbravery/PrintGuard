@@ -66,7 +66,7 @@ export function Feed({
       />
       {useCanvas && <canvas ref={canvasRef} className="absolute inset-0 m-auto" />}
       {(!camera || !playing) && (
-        <div className="feed-veil absolute inset-0 grid place-items-center bg-ink-0/85 z-[2] pointer-events-none">
+        <div className="absolute inset-0 grid place-items-center bg-ink-0/85 z-[2] pointer-events-none">
           <span className="mono text-[0.65rem] tracking-[0.2em] text-text-2 uppercase">
             {!camera ? "no camera bound" : !active ? "feed paused" : refused ? "" : camera.standby || camera.online ? "starting stream" : "no signal"}
           </span>

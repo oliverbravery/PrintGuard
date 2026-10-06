@@ -309,6 +309,10 @@ body {
 .chip-bad { color: var(--color-bad); border-color: color-mix(in srgb, var(--color-bad) 45%, transparent); }
 .chip-accent { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 50%, transparent); }
 
+.app {
+  padding-right: env(safe-area-inset-right);
+}
+
 .app-nav {
   position: fixed;
   z-index: 30;
@@ -737,6 +741,10 @@ dialog.modal::backdrop {
 .modal-sheet {
   align-items: stretch;
   justify-content: flex-end;
+}
+
+.sheet {
+  padding-right: env(safe-area-inset-right);
 }
 
 .slide-in {

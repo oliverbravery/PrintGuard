@@ -34,6 +34,11 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const owner = camera.printer_id ? engine?.printers.find((p) => p.id === camera.printer_id) : null;
   const managed = Boolean(owner) || Boolean(camera.declared);
+  const removalHint = owner
+    ? "Managed by its printer integration, remove the printer to remove this camera."
+    : camera.declared
+      ? "Passed in by the deployment, remove its devices entry to remove this camera."
+      : null;
   const detectFpsCeiling = Math.min(UNCAPPED_DETECT_FPS, Math.ceil(camera.max_fps));
 
   useEffect(() => {
@@ -56,10 +61,8 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
           {camera.source.path && published.has(camera.source.path) && (
             <span className="chip chip-accent">publishing</span>
           )}
-          {owner && <span className="chip" title="Managed by its printer integration, remove the printer to remove this camera">via {owner.name}</span>}
-          {camera.declared && (
-            <span className="chip" title="Passed in by the deployment, remove its devices entry to remove this camera">passed in</span>
-          )}
+          {owner && <span className="chip">via {owner.name}</span>}
+          {camera.declared && <span className="chip">passed in</span>}
           <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
             {open ? "Hide" : "Edit"}
           </button>
@@ -73,6 +76,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             </button>
           )}
         </div>
+        {removalHint && <p className="basis-full text-[0.66rem] text-text-2">{removalHint}</p>}
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">

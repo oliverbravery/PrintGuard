@@ -1,11 +1,13 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { alertOutcome, GROUP_S, groupBuckets, HISTORY_BUCKET_MS, PERIODS, type Period } from "../history";
 import { statusText } from "../review";
+import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Monitor, Snapshot } from "../types";
-import { Modal, Sheet } from "./Dialog";
+import { Sheet } from "./Dialog";
 import { DefectBars, RiskBandChart } from "./RiskChart";
 import { riskColor, RiskGauge } from "./RiskGauge";
+import { SnapshotLightbox } from "./SnapshotLightbox";
 
 function ago(ts: number, now: number): string {
   const s = Math.max(0, now - ts);
@@ -34,14 +36,9 @@ function StatTile({ label, value }: { label: string; value: string }) {
 }
 
 function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId: string; snap: Snapshot; threshold: number; now: number; onOpen: () => void }) {
-  const url = useStore((s) => s.snapshotCache[snap.id]);
-  const fetchSnapshot = useStore((s) => s.fetchSnapshot);
-  const reconnecting = useStore((s) => s.reconnecting);
-  useEffect(() => {
-    if (!reconnecting) fetchSnapshot(monitorId, snap.id);
-  }, [monitorId, snap.id, reconnecting]);
+  const { ref, url } = useLazySnapshot<HTMLButtonElement>(monitorId, snap.id);
   return (
-    <button type="button" onClick={onOpen} className="panel group relative block overflow-hidden text-left" aria-label={`Snapshot at ${(snap.score * 100).toFixed(0)}% risk, ${ago(snap.ts, now)}`}>
+    <button ref={ref} type="button" onClick={onOpen} className="panel group relative block overflow-hidden text-left" aria-label={`Snapshot at ${(snap.score * 100).toFixed(0)}% risk, ${ago(snap.ts, now)}`}>
       <div className="aspect-video bg-ink-0">
         {url ? (
           <img src={url} alt="" className="h-full w-full object-cover" />
@@ -71,8 +68,6 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
   const [period, setPeriod] = useState<Period>("1h");
   const [sortByScore, setSortByScore] = useState(false);
   const [enlarged, setEnlarged] = useState<Snapshot | null>(null);
-  const enlargedUrl = useStore((s) => (enlarged ? s.snapshotCache[enlarged.id] : undefined));
-  const enlargedCaption = useId();
   const history = historyData[monitor.id];
   const close = () => openStats(null);
 
@@ -183,20 +178,17 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
       </div>
 
       {enlarged && (
-        <Modal onClose={() => setEnlarged(null)} labelledBy={enlargedCaption}>
-          <button
-            type="button"
-            className="fixed inset-0 grid place-items-center bg-ink-0/90 p-6"
-            onClick={() => setEnlarged(null)}
-            aria-label="Close snapshot"
-          >
-            {enlargedUrl && <img src={enlargedUrl} alt="" className="max-h-full max-w-full object-contain" />}
-            <span id={enlargedCaption} className="mono absolute left-6 top-6 text-sm" style={{ color: riskColor(enlarged.score, monitor.threshold) }}>
+        <SnapshotLightbox
+          snapshotId={enlarged.id}
+          color={riskColor(enlarged.score, monitor.threshold)}
+          onClose={() => setEnlarged(null)}
+          caption={
+            <>
               {(enlarged.score * 100).toFixed(0)}% · {history && ago(enlarged.ts, history.now)}
               {alertOutcome(enlarged.action) && ` · ${alertOutcome(enlarged.action)}`}
-            </span>
-          </button>
-        </Modal>
+            </>
+          }
+        />
       )}
     </Sheet>
   );

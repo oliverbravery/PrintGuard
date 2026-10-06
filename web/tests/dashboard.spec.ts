@@ -241,6 +241,63 @@ test("a review answered before its frames arrive still marks the alert frames, a
   expect(await page.evaluate(() => (window as any).__pg.getState().snapshotCache)).toEqual({});
 });
 
+test("a review frame shows whole whatever its shape and any frame opens full size", async ({ page }) => {
+  const square = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"/>')}`;
+  const frames = [
+    { id: "s1", ts: 60, score: 0.1, kind: "spaced", size: 1 },
+    { id: "a1", ts: 120, score: 0.9, kind: "alert", action: "pause", size: 1 },
+  ];
+  await dashboard(page, { engine: engine({ reviews: [review({ frames: 2 })] }), reviewId: "r1", snapshotCache: { s1: square, a1: square } });
+  await emit(page, { event: "review", ...review({ frames: 2 }), frames });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "Yes" }).click();
+  await expect(sheet.locator("img")).toHaveCount(2);
+  expect(await sheet.locator("img").first().evaluate((img) => getComputedStyle(img).objectFit)).toBe("contain");
+
+  await sheet.getByRole("button", { name: /^Enlarge frame 1 of 2 at/ }).click();
+  const enlarged = page.getByRole("dialog", { name: /10%/ });
+  await expect(enlarged.locator("img")).toHaveAttribute("src", square);
+  await page.keyboard.press("Escape");
+  await expect(enlarged).toBeHidden();
+  await expect(sheet).toBeVisible();
+});
+
+test("opening the history asks only for the snapshots near the screen", async ({ page }) => {
+  await dashboard(page, { statsMonitorId: "m1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · history" });
+  const snaps = Array.from({ length: 90 }, (_, index) => ({ id: `s${index}`, ts: 1_700_000_000 - index, score: 0.9, action: "failed" }));
+  await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_100, buckets: [], snaps, alerts: [], stats: {} });
+  const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "snapshot.get").map((c: any) => c.id));
+  await expect.poll(async () => (await asked()).length).toBeGreaterThan(0);
+  expect((await asked()).length).toBeLessThan(30);
+
+  await sheet.getByRole("button", { name: /Snapshot at 90% risk/ }).last().scrollIntoViewIfNeeded();
+  await expect.poll(asked).toContain("s89");
+});
+
+test("a failure card at the narrowest phone keeps its time and score inside the card", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await dashboard(page, { engine: engine({ reviews: [review({ frames: 1 })] }), reviewId: "r1" });
+  await emit(page, { event: "review", ...review({ frames: 1 }), frames: [{ id: "a1", ts: 120, score: 0.9, kind: "alert", action: "pause", size: 1 }] });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "No, it failed" }).click();
+
+  const card = (await sheet.locator(".panel").filter({ hasText: "Real failure" }).boundingBox())!;
+  const score = (await sheet.locator(".label", { hasText: "90%" }).boundingBox())!;
+  expect(score.x).toBeGreaterThanOrEqual(card.x);
+  expect(score.x + score.width).toBeLessThanOrEqual(card.x + card.width);
+});
+
+test("sheets and the page keep clear of the right safe area", async ({ page }) => {
+  await dashboard(page);
+  const insets = await page.evaluate(() =>
+    [".app", ".sheet"].map((selector) =>
+      [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules]).some((rule) => rule instanceof CSSStyleRule && rule.selectorText === selector && rule.cssText.includes("safe-area-inset-right")),
+    ),
+  );
+  expect(insets).toEqual([true, true]);
+});
+
 test("review frames whose pictures were lost to a reconnect are asked for again", async ({ page }) => {
   await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
   await emit(page, { event: "review", ...review(), frames: [{ id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 }] });
@@ -828,6 +885,12 @@ test("two printers tagged in quick succession are both sent, without a printer t
   await expect.poll(lastUpdate).toEqual({ printer_ids: ["p1", "p2"] });
 });
 
+test("a printer that cannot print a file is named in the text, not only a hover title", async ({ page }) => {
+  await dashboard(page, library([printFile({ id: "f3", name: "Plate", filename: "plate.3mf", ext: "3mf" })]));
+
+  await expect(page.getByText("MK4, Mini can't print .3mf files.")).toBeVisible();
+});
+
 test("removing or sending one file leaves the other rows' buttons alone", async ({ page }) => {
   await dashboard(page, library([printFile(), printFile({ id: "f2", name: "Vase", uploaded: 0, meta: { time_s: 7190 } })]));
   await expect(page.getByText("2h 0m")).toBeVisible();
@@ -930,10 +993,10 @@ test("a theme started from dark keeps dark text on its accent", async ({ page })
   expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--color-on-accent"))).toBe("#0b0c0a");
 });
 
-test("glass keeps status colours readable over a bright picture, blurs behind a sheet and forgets a picture that fails to load", async ({ page }) => {
+test("glass keeps status colours readable and distinct over a bright picture, blurs behind a sheet and forgets a picture that fails to load", async ({ page }) => {
   await dashboard(page, { detailId: "m1" });
   await emit(page, { event: "state", ...engine({ settings: { ...engine().settings, theme: "glass" } }) });
-  const lowestRatio = await page.evaluate(async () => {
+  const { lowestRatio, colours } = await page.evaluate(async () => {
     const loaded = performance.getEntriesByType("resource").find((entry) => entry.name.includes("/src/theme.ts"))!.name;
     const { measureCover } = await import(/* @vite-ignore */ loaded);
     const picture = document.createElement("canvas");
@@ -946,15 +1009,21 @@ test("glass keeps status colours readable over a bright picture, blurs behind a 
     const [tone, , , tint] = document.documentElement.style.getPropertyValue("--glass-surface").match(/[\d.]+/g)!.map(Number);
     const surface = linear(tint * (tone / 255) + (1 - tint));
     const probe = document.body.appendChild(document.createElement("span"));
-    return Math.min(
-      ...["accent", "ok", "warn", "bad"].map((token) => {
-        probe.style.color = `var(--color-${token})`;
-        const status = luminance(getComputedStyle(probe).color.match(/[\d.]+/g)!.slice(0, 3).map((channel) => Number(channel) / 255));
+    const colours = ["accent", "ok", "warn", "bad"].map((token) => {
+      probe.style.color = `var(--color-${token})`;
+      return getComputedStyle(probe).color;
+    });
+    const lowestRatio = Math.min(
+      ...colours.map((colour) => {
+        const status = luminance(colour.match(/[\d.]+/g)!.slice(0, 3).map((channel) => Number(channel) / 255));
         return (Math.max(status, surface) + 0.05) / (Math.min(status, surface) + 0.05);
       }),
     );
+    return { lowestRatio, colours };
   });
   expect(lowestRatio).toBeGreaterThanOrEqual(4.5);
+  expect(new Set(colours).size).toBe(4);
+  expect(colours).not.toContain("rgb(255, 255, 255)");
   await expect(page.getByRole("dialog", { name: "Prusa" }).locator("aside")).not.toHaveCSS("backdrop-filter", "none");
 
   const tint = await page.evaluate(async () => {
@@ -1372,6 +1441,17 @@ test("a print that kept no frames is not offered for review, and a snapshot is o
 test("a tile behind a panel says its feed is paused", async ({ page }) => {
   await dashboard(page, { detailId: "m1" });
   await expect(page.locator("article").getByText("feed paused")).toBeAttached();
+});
+
+test("a camera with no Remove says why in the text", async ({ page }) => {
+  const owned = camera({ id: "c2", name: "Printer cam", printer_id: "p1" });
+  const declared = camera({ id: "c3", name: "Passed in", declared: true });
+  const printers = [{ id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true, device_state: null }];
+  await dashboard(page, { dialog: "cameras", engine: engine({ cameras: [owned, declared], printers }) });
+
+  await expect(page.getByText("Passed in by the deployment, remove its devices entry to remove this camera.")).toBeVisible();
+  await page.getByRole("tab", { name: "Printer cameras" }).click();
+  await expect(page.getByText("Managed by its printer integration, remove the printer to remove this camera.")).toBeVisible();
 });
 
 test("camera and settings controls are named, and toggle buttons say which is selected", async ({ page }) => {

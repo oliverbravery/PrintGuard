@@ -39,7 +39,7 @@ export function useVideoStream(
   return { streaming, refused };
 }
 
-export function adjust(data: ImageData, brightness: number, contrast: number, sharpness: number): void {
+function adjust(data: ImageData, brightness: number, contrast: number, sharpness: number): void {
   const px = data.data;
   const w = data.width;
   const h = data.height;
