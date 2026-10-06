@@ -647,8 +647,9 @@ them the redirect URI to give the provider and links `register_url`.
 
 `authorize_url` and `token_url` are each one `https` address with no wildcards. An
 `authorize_url` may carry a query of its own, which is kept. A `token_url`
-on this machine or the network around it needs `net:local`. An update that changes either one
-signs its users out and has to be accepted again.
+on this machine or the network around it needs `net:local`. The consent dialog lists both
+addresses, and an update that changes either one signs its users out and has to be accepted
+again.
 
 ## Talking to other plugins
 
