@@ -62,8 +62,8 @@ _TEMPERATURE_KEYS = {
 _USAGE_KEYS = ("total filament length [mm]", "filament used [mm]", "total filament weight [g]", "filament used [g]")
 _DEGREES = rb"\d+(?:\.\d+)?"
 _SETPOINT = {
-    "nozzle": re.compile(rb"(\nM10[49]\b[^;\n]*?[ \t]S)(" + _DEGREES + rb")"),
-    "bed": re.compile(rb"(\nM1[49]0\b[^;\n]*?[ \t]S)(" + _DEGREES + rb")"),
+    "nozzle": re.compile(rb"(\nM10[49]\b[^;\n]*?[ \t][SR])(" + _DEGREES + rb")"),
+    "bed": re.compile(rb"(\nM1[49]0\b[^;\n]*?[ \t][SR])(" + _DEGREES + rb")"),
 }
 _MACRO = re.compile(rb"^[A-Za-z_]{2}[A-Za-z0-9_]*[ \t][^;\n]*", re.M)
 _MACRO_PARAM = {
@@ -187,10 +187,20 @@ def plate_gcode(data: bytes) -> tuple[int, bytes]:
 
 
 def _unpacked(archive: zipfile.ZipFile, name: str) -> bytes:
-    """Reads one file out of a 3mf, refusing one that would unpack past the cap."""
-    if archive.getinfo(name).file_size > MAX_MEMBER_BYTES:
+    """Reads one file out of a 3mf, refusing one that would unpack past the cap.
+
+    No more is inflated than the size the archive declares, since a file that
+    understates it would otherwise be unpacked whole before it was refused.
+
+    Raises:
+        ValueError: If the file declares more than the cap.
+        zipfile.BadZipFile: If it holds more than it declares.
+    """
+    declared = archive.getinfo(name).file_size
+    if declared > MAX_MEMBER_BYTES:
         raise ValueError(f"{name} in this 3mf unpacks to more than {MAX_MEMBER_BYTES // 1024 // 1024} MB")
-    return archive.read(name)
+    with archive.open(name) as member:
+        return member.read(declared)
 
 
 def _replace_plate(data: bytes, rewrite: Callable[[bytes], bytes]) -> bytes:

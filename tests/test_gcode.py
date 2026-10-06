@@ -8,6 +8,7 @@ import base64
 import hashlib
 import io
 import struct
+import tracemalloc
 import zipfile
 import zlib
 
@@ -389,3 +390,27 @@ def test_temperatures_that_cannot_move_are_refused() -> None:
         gcode.retemper(b"M109 S215\nG1 X1\n", "gcode", {"bed": 60})
     with pytest.raises(ValueError, match="above 0"):
         gcode.retemper(PRUSA_HEATED, "gcode", {"nozzle": 0})
+
+
+def test_a_wait_written_with_r_moves_with_its_set_point() -> None:
+    """Marlin waits on ``M109 R`` and ``M190 R`` too, and one left behind holds the print at the old temperature."""
+    moved = gcode.retemper(b"M140 S60\nM190 R60\nM104 S200\nM109 R200\nG1 X1\n", "gcode", {"nozzle": 230, "bed": 70})
+    assert moved == b"M140 S70\nM190 R70\nM104 S230\nM109 R230\nG1 X1\n"
+    assert gcode.inspect(b"M190 R60\nM109 R200\nG1 X1\n", "gcode").meta["nozzle"] == 200.0
+
+
+def test_a_plate_that_understates_its_size_is_not_unpacked_whole() -> None:
+    """The cap reads the size the archive declares, so no more than that may be inflated."""
+    packed = io.BytesIO()
+    with zipfile.ZipFile(packed, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("Metadata/plate_1.gcode", b"G1 X1 Y1 E1\n" * (32 * 1024 * 1024 // 12))
+    raw = bytearray(packed.getvalue())
+    struct.pack_into("<I", raw, raw.rfind(b"PK\x01\x02") + 24, 1024)
+    tracemalloc.start()
+    try:
+        with pytest.raises(ValueError, match="not a zip archive"):
+            gcode.plate_gcode(bytes(raw))
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 4 * 1024 * 1024, f"{peak // 1024 // 1024} MB was inflated for a plate that declared 1 KB"
