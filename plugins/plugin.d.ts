@@ -122,7 +122,7 @@ declare global {
     printers?: PluginPrinter[];
   }
 
-  /** The events a worker can hook, and what each one carries. */
+  /** The events `plugin.js` and `worker.js` can hook, and what each one carries. */
   interface PluginEvents {
     /** The answer to one of your own `ctx.http` calls, carrying the `tag` you named it with. */
     http: { event: "http"; tag: string; status: number; body: unknown };
@@ -242,8 +242,8 @@ declare global {
   }
 
   /**
-   * Registers what your plugin does. `render` and `action` are the panel half
-   * in `plugin.js`, the rest are the worker half in `worker.js`.
+   * Registers what your plugin does. `render` and `action` are for `plugin.js`
+   * alone, `route` and `gate` for `worker.js` alone, and `on` and `serve` work in either.
    */
   interface PluginApi {
     /**
@@ -254,13 +254,13 @@ declare global {
     render(view: (ctx: PluginContext) => PluginNode | null): void;
     /** Handles a press or a choice, named by the node's `action` and given its `arg`. */
     action(handler: (name: string, arg: any, ctx: PluginContext) => void): void;
-    /** Wakes the worker on an engine event. Name it in the manifest's `events` too, or it never fires. */
+    /** Hooks an engine event, in `plugin.js` or `worker.js`. Name it in the manifest's `events` too, or it never fires. */
     on<K extends keyof PluginEvents>(event: K, handler: (event: PluginEvents[K], ctx: PluginContext) => void): void;
     /** Answers everything under `/plugins/<id>/` on the hub. Needs `routes`, and pages are served into a sandboxed origin. */
     route(handler: (request: PluginRequest, ctx: PluginContext) => PluginResponse): void;
     /** Approves or refuses every other request to the hub. Needs `gate`, and anything but `true` refuses. */
     gate(handler: (request: PluginRequest, ctx: PluginContext) => boolean): void;
-    /** Answers another plugin asking on one of the channels your manifest offers. Needs `link:provide`. */
+    /** Answers another plugin asking on one of the channels your manifest offers, from `plugin.js` or `worker.js`. Needs `link:provide`. */
     serve(handler: (request: PluginEvents["call"], ctx: PluginContext) => unknown): void;
   }
 
