@@ -1307,6 +1307,26 @@ test("pause, resume and cancel are each enabled only when the printer's state al
   }
 });
 
+test("a heater target typed or stored above the limit is never sent as it is", async ({ page }) => {
+  const heater = { actual: 21, target: 0 };
+  const printer = {
+    id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
+    device_state: { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: heater, bed: heater },
+  };
+  const settings = { ...engine().settings, preheat: [{ name: "PLA", nozzle: 400, bed: 200 }] };
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })], settings }), detailId: "m1" });
+  const panel = page.getByRole("dialog", { name: "Prusa" });
+  await panel.getByRole("button", { name: /^PLA/ }).click();
+  expect(await sent(page, "printer.heat")).toMatchObject({ nozzle: 350, bed: 150 });
+
+  await panel.getByRole("button", { name: "Edit" }).click();
+  const nozzle = panel.getByRole("spinbutton", { name: "PLA nozzle target" });
+  await nozzle.fill("999");
+  await nozzle.blur();
+  await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
+  expect((await sent(page, "settings.update")).patch.preheat).toEqual([{ name: "PLA", nozzle: 350, bed: 150 }]);
+});
+
 test("the header wraps instead of scrolling the page when a chip is added at its tightest widths", async ({ page }) => {
   const state = { reconnecting: true, engine: engine({ update: { available: true, latest: "9.9.9" } }) };
   for (const width of [640, 1024]) {
