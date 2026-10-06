@@ -1115,6 +1115,18 @@ const library = (prints: unknown[]) => {
   };
 };
 
+test("the print library does not squeeze its list into a strip on a phone held sideways", async ({ page }) => {
+  await page.setViewportSize({ width: 667, height: 375 });
+  await dashboard(page, library([printFile({ id: "a", name: "First" }), printFile({ id: "b", name: "Second" }), printFile({ id: "c", name: "Third" })]));
+  const scrollers = await page.evaluate(() =>
+    [...document.querySelectorAll("dialog *")]
+      .filter((el) => getComputedStyle(el).overflowY === "auto" && el.scrollHeight > el.clientHeight + 1)
+      .map((el) => el.clientHeight),
+  );
+  expect(scrollers.length).toBeGreaterThan(0);
+  expect(Math.min(...scrollers)).toBeGreaterThan(200);
+});
+
 test("two printers tagged in quick succession are both sent, without a printer that is gone", async ({ page }) => {
   await dashboard(page, library([printFile({ printer_ids: ["gone"] })]));
   await expect(page.getByText("none of its printers is registered")).toBeVisible();

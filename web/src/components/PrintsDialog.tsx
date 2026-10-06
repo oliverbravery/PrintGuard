@@ -121,7 +121,7 @@ export function PrintsDialog() {
   const prints = library.filter((p) => !filter || p.printer_ids.includes(filter)).sort((a, b) => b.uploaded - a.uploaded);
   return (
     <Dialog title="Print library" size="wide" fixed onClose={close}>
-      <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="flex h-full min-h-0 flex-col gap-4 [@media(max-height:30rem)]:overflow-y-auto">
         <div className="space-y-2.5">
           <DropZone />
           {uploads.map((upload) => (
@@ -157,7 +157,7 @@ export function PrintsDialog() {
             </select>
           )}
         </div>
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto [@media(max-height:30rem)]:flex-none [@media(max-height:30rem)]:overflow-visible">
           {prints.map((print) => (
             <PrintRow key={print.id} print={print} />
           ))}
