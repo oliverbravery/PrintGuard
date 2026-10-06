@@ -1291,6 +1291,22 @@ test("a preset temperature can be cleared and retyped, and pause is off for a pa
   expect((await sent(page, "settings.update")).patch.preheat).toEqual([{ name: "PLA", nozzle: 210, bed: 60 }]);
 });
 
+test("pause, resume and cancel are each enabled only when the printer's state allows them", async ({ page }) => {
+  const heater = { actual: 21, target: 0 };
+  const printer = (status: string) => ({
+    id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
+    device_state: { status, progress: 40, job: "benchy", remaining_s: 60, nozzle: heater, bed: heater },
+  });
+  const expected: Record<string, boolean[]> = { idle: [true, false, false], printing: [true, false, true], paused: [false, true, true] };
+  for (const [status, [pause, resume, cancel]] of Object.entries(expected)) {
+    await dashboard(page, { engine: engine({ printers: [printer(status)], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
+    const panel = page.getByRole("dialog", { name: "Prusa" });
+    await expect(panel.getByRole("button", { name: "pause" })).toBeEnabled({ enabled: pause });
+    await expect(panel.getByRole("button", { name: "resume" })).toBeEnabled({ enabled: resume });
+    await expect(panel.getByRole("button", { name: "cancel" })).toBeEnabled({ enabled: cancel });
+  }
+});
+
 test("the header wraps instead of scrolling the page when a chip is added at its tightest widths", async ({ page }) => {
   const state = { reconnecting: true, engine: engine({ update: { available: true, latest: "9.9.9" } }) };
   for (const width of [640, 1024]) {

@@ -197,6 +197,7 @@ export function PrinterControls({ printer }: { printer: Printer }) {
   const heating = isPending("printer.heat");
   const heat = (targets: Partial<Record<HeaterName, number>>) => send({ cmd: "printer.heat", id: printer.id, ...targets });
   const heaters = HEATERS.filter((name) => state?.[name]);
+  const permitted = { pause: state?.status !== "paused", resume: state?.status === "paused", cancel: activeJob(state) };
 
   return (
     <div className="space-y-4">
@@ -216,7 +217,7 @@ export function PrinterControls({ printer }: { printer: Printer }) {
           <button
             key={name}
             className={`btn ${name === "cancel" ? "btn-danger" : ""}`}
-            disabled={acting || (name === "pause" && state?.status === "paused")}
+            disabled={acting || !permitted[name]}
             onClick={() => {
               setAction(name);
               send({ cmd: "printer.action", id: printer.id, action: name });
