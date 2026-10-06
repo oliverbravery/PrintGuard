@@ -1531,7 +1531,7 @@ class Engine:
             logger.warning("bug report failed to send", exc_info=True)
             self.emit({"event": "report_sent", "ok": False, "error": logs.describe(exc), "req_id": message.get("req_id")})
 
-    async def send_alerts(self, title: str, body: str, image: bytes | None) -> None:
+    async def send_alerts(self, title: str, body: str, image: bytes | None, urgent: bool = True) -> None:
         """Delivers a message through every configured notification channel.
 
         The channels are sent to together and each is given NOTIFY_TIMEOUT_S,
@@ -1542,12 +1542,13 @@ class Engine:
             title: Short headline the channel shows first.
             body: The detail beneath it.
             image: JPEG snapshot to attach, where the channel carries one.
+            urgent: Whether the notice should interrupt, which a recovery does not.
         """
 
         async def deliver(notifier_id: str, config: dict[str, Any]) -> None:
             try:
                 async with asyncio.timeout(NOTIFY_TIMEOUT_S):
-                    await NOTIFIERS[notifier_id].send(self.platform.http, config, title, body, image)
+                    await NOTIFIERS[notifier_id].send(self.platform.http, config, title, body, image, urgent=urgent)
             except Exception as exc:
                 logger.debug("notifier %s delivery traceback", notifier_id, exc_info=True)
                 self.emit({"event": "error", "message": f"{NOTIFIERS[notifier_id].label} notification failed: {logs.describe(exc)}"})

@@ -459,7 +459,7 @@ class Watchdog:
         self._last_warned[key] = time.monotonic()
         self._engine.emit({"event": "warning", "monitor_id": monitor["id"], "message": message, "recovered": recovered})
         if monitor.get("notify"):
-            self._schedule(f"the warning for '{monitor['name']}'", self._engine.send_alerts(f"PrintGuard {'recovered' if recovered else 'warning'}", message, None))
+            self._schedule(f"the warning for '{monitor['name']}'", self._engine.send_alerts(f"PrintGuard {'recovered' if recovered else 'warning'}", message, None, urgent=not recovered))
 
     async def on_score(self, monitor: dict[str, Any], frame: Frame, score: float) -> None:
         """Advances the defect streak for a monitor and triggers responses.

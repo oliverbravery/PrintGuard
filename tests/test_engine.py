@@ -1533,6 +1533,51 @@ async def test_brief_outage_reattaches_without_notifying(monkeypatch) -> None:
         assert not _pushes(platform), "an outage inside the grace period pushed a notification"
 
 
+def _recording_notifier(real):
+    class Recorder(type(real)):
+        def __init__(self) -> None:
+            self.sent: list[tuple[str, bool]] = []
+
+        async def send(self, http, config, title, body, image, *, urgent: bool = True) -> None:
+            self.sent.append((title, urgent))
+
+    return Recorder()
+
+
+async def test_a_recovery_is_sent_quietly_and_a_fault_or_defect_is_urgent(monkeypatch) -> None:
+    from printguard.engine import engine as engine_module
+    from printguard.engine.notifiers import NOTIFIERS
+
+    notifier = _recording_notifier(NOTIFIERS["ntfy"])
+    monkeypatch.setitem(NOTIFIERS, "ntfy", notifier)
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    monkeypatch.setattr(watchdog, "RESTART_AFTER_S", 10.0)
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.05)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}, "fault_grace_s": 0.05}})
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True, "consecutive": 1}})
+        camera = next(iter(engine.cameras.values()))
+        source = camera.frame_source
+        source.online = False
+        await asyncio.sleep(0.4)
+        source.online = True
+        camera.frame_source = source
+        for _ in range(100):
+            if any(event.get("event") == "warning" and event["recovered"] for event in events):
+                break
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(0.1)
+
+    by_title = {title: urgent for title, urgent in notifier.sent}
+    assert by_title["PrintGuard warning"] is True, "a fault was sent quietly"
+    assert by_title["PrintGuard recovered"] is False, "a recovery rang as urgent"
+    assert any(title.startswith("PrintGuard: ") and urgent for title, urgent in notifier.sent), "a defect alert was not urgent"
+
+
 async def test_sustained_outage_keeps_reminding(monkeypatch) -> None:
     from printguard.engine import engine as engine_module
 
