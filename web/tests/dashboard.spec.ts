@@ -1069,10 +1069,8 @@ test("a report attachment is picked from a button, and the picker is left empty 
   await dashboard(page, { dialog: "report" });
   const screenshot = { name: "shot.png", mimeType: "image/png", buffer: Buffer.from("png") };
   const attach = page.getByRole("button", { name: "Attach screenshots" });
-  await attach.focus();
-  await expect(attach).toBeFocused();
   const chooser = page.waitForEvent("filechooser");
-  await page.keyboard.press("Enter");
+  await attach.press("Enter");
   await (await chooser).setFiles(screenshot);
   await expect(page.getByText("shot.png")).toBeVisible();
   await expect(page.locator('input[type="file"]')).toHaveJSProperty("value", "");
