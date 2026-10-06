@@ -53,7 +53,7 @@ The Plugins tab in Settings lists what you have installed and what the catalogue
 |---|---|
 | The catalogue | Open a plugin's page for its screenshots, README and the permissions it will ask for, then install from there |
 | A GitHub repository | Paste `owner/repo`, or `owner/repo/path@branch` for one inside a larger repo. A full `https://github.com/owner/repo` URL works too, and so does `@tag` or `@sha` in place of a branch |
-| A file | Import a `.zip` of the plugin's folder |
+| A file | Import a `.zip` of the plugin's folder, up to 12 MB |
 
 An install or update from a repository fails with GitHub's status if a plugin file can't be read,
 and only a 404 means the plugin has no such file.
@@ -166,7 +166,7 @@ A plugin has up to three files, and each runs in a sandbox.
 | File | Runs in |
 |---|---|
 | `plugin.js` | A hidden iframe in the dashboard, with an opaque origin and `default-src 'none'` |
-| `panel.html` | A visible iframe with the same origin rules, where its own markup, styles and scripts are allowed |
+| `panel.html` | A visible iframe with the same origin rules, where its own markup, styles and inline scripts are allowed |
 | `worker.js` | [QuickJS](https://github.com/quickjs-ng/quickjs) compiled to WebAssembly on the hub, under wasmtime |
 
 The dashboard lets a frame load only from the hub and removes one that loads anything a second
