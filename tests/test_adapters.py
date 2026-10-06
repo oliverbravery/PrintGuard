@@ -1322,6 +1322,29 @@ async def test_prusa_behind_a_redirect_names_where_it_went() -> None:
             await INTEGRATIONS["prusa"].fetch_state(None, config)
 
 
+async def test_prusa_upload_behind_a_redirect_names_where_it_went() -> None:
+    server, config = await _prusa_answering("301 Moved Permanently", "Location: https://printer.local/\r\n")
+    async with server:
+        with pytest.raises(RuntimeError, match=r"redirects to https://printer\.local"):
+            await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G28")
+
+
+@pytest.mark.parametrize(("answer", "said"), [("404 Not Found", "PrusaLink did not answer like its API: HTTP 404"), ("200 OK", "PrusaLink did not answer like its API$")])
+async def test_prusa_that_answers_like_something_else_says_so(answer: str, said: str) -> None:
+    server, config = await _prusa_answering(answer)
+    async with server:
+        with pytest.raises(RuntimeError, match=said):
+            await INTEGRATIONS["prusa"].fetch_state(None, config)
+
+
+async def test_prusa_refusing_a_pause_says_the_printer_is_in_the_way(monkeypatch) -> None:
+    server, config = await _prusa_answering("409 Conflict")
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_job", _prusa_job({"id": 7, "state": "PAUSED"}))
+    async with server:
+        with pytest.raises(RuntimeError, match="HTTP 409"):
+            await INTEGRATIONS["prusa"].send(None, config, DeviceAction.PAUSE)
+
+
 async def test_prusa_answering_with_an_error_names_the_status() -> None:
     server, config = await _prusa_answering("502 Bad Gateway")
     async with server:
@@ -1332,7 +1355,10 @@ async def test_prusa_answering_with_an_error_names_the_status() -> None:
 @pytest.mark.parametrize(
     ("job", "printer_state", "expected"),
     [
-        ({"id": 1, "state": "ATTENTION"}, "ATTENTION", DeviceStatus.PAUSED),
+        ({"id": 1, "state": "ATTENTION"}, "ATTENTION", DeviceStatus.UNKNOWN),
+        ({"id": 1, "state": "PAUSED"}, "ATTENTION", DeviceStatus.UNKNOWN),
+        ({"id": 1, "state": "PAUSED"}, "PAUSED", DeviceStatus.PAUSED),
+        ({"id": 1, "state": "PRINTING"}, "ATTENTION", DeviceStatus.PRINTING),
         ({"id": 1, "state": "BUSY"}, "BUSY", DeviceStatus.UNKNOWN),
         ({"id": 1, "state": "READY"}, "READY", DeviceStatus.IDLE),
         (None, "IDLE", DeviceStatus.IDLE),
@@ -1340,7 +1366,7 @@ async def test_prusa_answering_with_an_error_names_the_status() -> None:
         (None, "FINISHED", DeviceStatus.IDLE),
         (None, "ERROR", DeviceStatus.ERROR),
         (None, "BUSY", DeviceStatus.UNKNOWN),
-        (None, "ATTENTION", DeviceStatus.PAUSED),
+        (None, "ATTENTION", DeviceStatus.UNKNOWN),
         (None, "PRINTING", DeviceStatus.PRINTING),
         (None, "PAUSED", DeviceStatus.PAUSED),
     ],

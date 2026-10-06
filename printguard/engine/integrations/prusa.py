@@ -19,14 +19,16 @@ Printer-side setup (enabling PrusaLink, the password): https://help.prusa3d.com/
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
 import httpx
 from pyprusalink import PrusaLink
 from pyprusalink.client import DigestAuthWorkaround
-from pyprusalink.types import InvalidAuth
+from pyprusalink.types import Conflict, InvalidAuth, NotFound
 
+from ..adapters import redirect_message
 from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 
 _USERNAME = "maker"
@@ -39,7 +41,7 @@ _TLS = httpx.create_ssl_context()
 _STATUS_MAP = {
     "PRINTING": DeviceStatus.PRINTING,
     "PAUSED": DeviceStatus.PAUSED,
-    "ATTENTION": DeviceStatus.PAUSED,
+    "ATTENTION": DeviceStatus.UNKNOWN,
     "FINISHED": DeviceStatus.IDLE,
     "STOPPED": DeviceStatus.IDLE,
     "IDLE": DeviceStatus.IDLE,
@@ -47,7 +49,10 @@ _STATUS_MAP = {
     "ERROR": DeviceStatus.ERROR,
     "BUSY": DeviceStatus.UNKNOWN,
 }
-"""The printer's states, which PrusaLink on a Raspberry Pi also gives as the job's state, and the job's own."""
+"""The printer's states, which PrusaLink on a Raspberry Pi also gives as the job's state, and the job's own.
+
+Buddy firmware shows a warning dialog over a print that keeps running and reports it as ATTENTION, or as a PAUSED
+job, so neither says the print stopped."""
 
 
 def _username(config: dict[str, Any]) -> str:
@@ -56,8 +61,7 @@ def _username(config: dict[str, Any]) -> str:
 
 def _failure(response: httpx.Response) -> str:
     if response.is_redirect:
-        source, target = (f"{url.scheme}://{url.netloc.decode()}" for url in (response.url, response.url.join(response.headers["location"])))
-        return f"{source} redirects to {target}. Use the address it redirects to"
+        return redirect_message(response)
     return f"PrusaLink answered HTTP {response.status_code}"
 
 
@@ -125,8 +129,11 @@ class PrusaAdapter(IntegrationAdapter):
             return DeviceState(idle, **heaters)
         file = job.get("file") or {}
         remaining = job.get("time_remaining")
+        job_status = _STATUS_MAP.get(str(job.get("state", "")).upper(), DeviceStatus.UNKNOWN)
+        if job_status is DeviceStatus.PAUSED and str(printer.get("state", "")).upper() == "ATTENTION":
+            job_status = DeviceStatus.UNKNOWN
         return DeviceState(
-            _STATUS_MAP.get(str(job.get("state", "")).upper(), DeviceStatus.UNKNOWN),
+            job_status,
             float(job.get("progress") or 0.0),
             file.get("display_name") or file.get("name"),
             remaining_s=int(remaining) if remaining is not None else None,
@@ -157,6 +164,8 @@ class PrusaAdapter(IntegrationAdapter):
         auth = DigestAuthWorkaround(username=_username(config), password=str(config.get("password", "")))
         async with httpx.AsyncClient(base_url=str(config["base_url"]).rstrip("/"), auth=auth, timeout=_UPLOAD_TIMEOUT_S, verify=_TLS) as client:
             listing = await client.get("/api/v1/storage", timeout=_TIMEOUT_S)
+            if listing.is_redirect:
+                raise RuntimeError(redirect_message(listing))
             if listing.status_code >= 400:
                 raise RuntimeError(f"PrusaLink refused to list its storage: HTTP {listing.status_code}")
             storages = listing.json()["storage_list"]
@@ -164,6 +173,8 @@ class PrusaAdapter(IntegrationAdapter):
             if not storage:
                 raise RuntimeError("Prusa printer has no storage to upload to")
             stored = await client.put(f"/api/v1/files{storage.rstrip('/')}/{filename}", content=data, headers=_UPLOAD_HEADERS)
+        if stored.is_redirect:
+            raise RuntimeError(redirect_message(stored))
         if stored.status_code >= 400:
             raise RuntimeError(f"PrusaLink rejected the file: HTTP {stored.status_code}")
 
@@ -194,3 +205,9 @@ class PrusaAdapter(IntegrationAdapter):
                 yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _username(config), str(config.get("password", "")))
             except httpx.HTTPStatusError as exc:
                 raise RuntimeError(_failure(exc.response)) from None
+            except Conflict:
+                raise RuntimeError("PrusaLink refused it with HTTP 409, since the printer is not in a state that allows it") from None
+            except NotFound:
+                raise RuntimeError("PrusaLink did not answer like its API: HTTP 404") from None
+            except json.JSONDecodeError:
+                raise RuntimeError("PrusaLink did not answer like its API") from None

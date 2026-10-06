@@ -11,6 +11,8 @@ import uuid
 from abc import ABC
 from typing import Any, Awaitable, Callable
 
+import httpx
+
 HttpFn = Callable[..., Awaitable[tuple[int, Any]]]
 
 
@@ -81,6 +83,19 @@ class Adapter(ABC):
         ]
         if blank:
             raise ValueError(f"{self.label} needs {' and '.join(blank)} filled in")
+
+
+def redirect_message(response: httpx.Response) -> str:
+    """Says where a redirect points, since an adapter never follows one.
+
+    Args:
+        response: A 3xx answer carrying a Location header.
+
+    Returns:
+        A sentence naming both addresses and what to register instead.
+    """
+    source, target = (f"{url.scheme}://{url.netloc.decode()}" for url in (response.url, response.url.join(response.headers["location"])))
+    return f"{source} redirects to {target}. Register the address the service answers on"
 
 
 def multipart_form(
