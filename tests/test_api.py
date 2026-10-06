@@ -215,7 +215,8 @@ async def test_refreshing_printer_cameras_waits_as_long_as_a_camera_takes_to_ope
         request = AsyncMock(return_value=[])
         monkeypatch.setattr(engine, "request", request)
         await client.post("/cameras/refresh-printers", headers={"Authorization": f"Bearer {tokens['manage']}"})
-        assert request.await_args.kwargs["timeout"] > OPEN_WAIT_S
+        assert "timeout" not in request.await_args.kwargs
+        assert engine._time_allowed({"cmd": "printer.cameras.refresh"}) > OPEN_WAIT_S
 
 
 async def test_read_surface_strips_camera_source_credentials() -> None:
@@ -633,7 +634,8 @@ async def test_adding_a_camera_waits_as_long_as_a_camera_takes_to_open(monkeypat
         request = AsyncMock(return_value=[])
         monkeypatch.setattr(engine, "request", request)
         await client.post("/cameras", json={"source": {"kind": "fake"}}, headers={"Authorization": f"Bearer {tokens['manage']}"})
-        assert request.await_args.kwargs["timeout"] > OPEN_WAIT_S
+        assert "timeout" not in request.await_args.kwargs
+        assert engine._time_allowed({"cmd": "camera.add"}) > OPEN_WAIT_S
 
 
 async def test_rejected_command_is_400() -> None:

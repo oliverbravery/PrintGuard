@@ -19,13 +19,12 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import AfterValidator, BaseModel, ConfigDict
 
-from ..engine.engine import REQUEST_TIMEOUT_S, Engine
+from ..engine.engine import Engine
 from ..engine.integrations import INTEGRATIONS
 from ..engine.notifiers import NOTIFIERS
 from ..engine.reports import is_url, scrub_url, scrub_urls
 from ..engine.tokens import SCOPE_ORDER, expand_scope, hash_secret
 from .events import require_finite
-from .platform import OPEN_WAIT_S
 from .prints import PrintUpload, capped, file_response, receive_print
 
 logger = logging.getLogger(__name__)
