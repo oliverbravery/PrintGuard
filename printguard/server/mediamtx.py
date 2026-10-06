@@ -126,7 +126,10 @@ class EmbeddedMediaMTX:
     the hub uses that and this never runs. A server that exits is restarted and
     the failure logged, because dropped streams must never pass silently, and
     its lifetime is tied to the hub's so no exit can leave it holding the
-    streaming ports.
+    streaming ports. One that cannot stay up, as when another program holds its
+    ports, is logged on its first failure in a row and then on the second,
+    fourth, eighth and so on, since a line every restart would push everything
+    else out of the log tail a bug report attaches.
 
     The control API can read every camera's source URL and add a path that runs
     a command, and on the desktop app it listens on the computer's own loopback,
@@ -196,7 +199,10 @@ class EmbeddedMediaMTX:
 
     async def _run(self) -> None:
         replacement = False
+        failures = 0
+        loop = asyncio.get_running_loop()
         while not self._stopping:
+            launched = loop.time()
             try:
                 self._process = await asyncio.create_subprocess_exec(
                     self._binary,
@@ -205,7 +211,9 @@ class EmbeddedMediaMTX:
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
             except OSError as exc:
-                logger.error("MediaMTX failed to launch (%s); retrying", exc)
+                failures += 1
+                if failures & (failures - 1) == 0:
+                    logger.error("MediaMTX failed to launch (%s); retrying", exc)
                 await asyncio.sleep(RESTART_DELAY_S)
                 continue
             self._bind_lifetime(self._process.pid)
@@ -218,7 +226,9 @@ class EmbeddedMediaMTX:
             self._release_lifetime()
             if self._stopping:
                 return
-            logger.error("MediaMTX exited (code %s); restarting", code)
+            failures = failures + 1 if loop.time() - launched < READY_TIMEOUT_S else 1
+            if failures & (failures - 1) == 0:
+                logger.error("MediaMTX exited (code %s); restarting", code)
             await asyncio.sleep(RESTART_DELAY_S)
             replacement = True
 

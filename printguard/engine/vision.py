@@ -14,6 +14,7 @@ from PIL import Image
 
 INPUT_SIZE = 224
 RESIZE_SHORTEST = 256
+LONGEST_RATIO = 4
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,10 @@ def preprocess(rgb: np.ndarray, assets: Assets) -> np.ndarray:
     Follows the torchvision transforms the model was trained with, resizing the
     shortest edge to 256 through Pillow's bilinear filter, collapsing to luminance
     and centre-cropping to 224. Sampling single pixels instead hands each frame's
-    sensor noise to the model, so a still scene's score jitters.
+    sensor noise to the model, so a still scene's score jitters. Only the middle
+    of the long side survives the crop, so no more than ``LONGEST_RATIO`` times
+    the short side is resized, or a frame a few pixels tall and thousands wide
+    would be scaled up to hundreds of megabytes first.
 
     Args:
         rgb: HxWx3 uint8 frame in RGB channel order.
@@ -60,7 +64,11 @@ def preprocess(rgb: np.ndarray, assets: Assets) -> np.ndarray:
     """
     image = Image.fromarray(rgb)
     scale = RESIZE_SHORTEST / min(image.size)
-    image = image.resize((round(image.width * scale), round(image.height * scale)), Image.Resampling.BILINEAR)
+    width, height = (min(side, min(image.size) * LONGEST_RATIO) for side in image.size)
+    left, top = (image.width - width) // 2, (image.height - height) // 2
+    image = image.resize(
+        (round(width * scale), round(height * scale)), Image.Resampling.BILINEAR, box=(left, top, left + width, top + height)
+    )
     left, top = (image.width - INPUT_SIZE) // 2, (image.height - INPUT_SIZE) // 2
     image = image.convert("L").crop((left, top, left + INPUT_SIZE, top + INPUT_SIZE))
     grey = np.asarray(image, dtype=np.float32) / 255.0

@@ -673,3 +673,22 @@ def test_the_metadata_node_beside_a_camera_is_not_offered(tmp_path: Path, monkey
     _answering(monkeypatch, _capability(b"HD Pro Webcam C920", V4L2_CAP_META_CAPTURE))
 
     assert _v4l2_card(node) is None
+
+
+def test_a_sliver_of_a_frame_is_not_scaled_up_whole_before_it_is_cropped(monkeypatch) -> None:
+    """A 4000x2 image posted for classifying was resized to 512000x256 first."""
+    from PIL import Image
+
+    resized: list[tuple[int, int]] = []
+    resize = Image.Image.resize
+
+    def measured(image, size, *args, **kwargs):
+        resized.append(size)
+        return resize(image, size, *args, **kwargs)
+
+    monkeypatch.setattr(Image.Image, "resize", measured)
+    assets = vision.Assets(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), prototypes={})
+
+    assert vision.preprocess(np.zeros((2, 4000, 3), dtype=np.uint8), assets).shape == (1, 3, 224, 224)
+    assert vision.preprocess(np.zeros((720, 1280, 3), dtype=np.uint8), assets).shape == (1, 3, 224, 224)
+    assert resized == [(1024, 256), (455, 256)]

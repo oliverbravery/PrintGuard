@@ -135,6 +135,29 @@ async def test_the_supervisor_restores_paths_once_a_restarted_server_answers(tmp
     assert launches_at_restore == ["xx"]
 
 
+async def test_a_server_that_cannot_stay_up_is_logged_less_and_less_often(tmp_path, monkeypatch) -> None:
+    """A line every restart filled the log tail a bug report attaches within minutes."""
+    monkeypatch.setattr("printguard.server.mediamtx.RESTART_DELAY_S", 0)
+    monkeypatch.setattr("printguard.server.mediamtx.READY_TIMEOUT_S", 1.0)
+    launches = tmp_path / "launches"
+    launches.write_text("")
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text(f"open({str(launches)!r}, 'a').write('x')\nraise SystemExit(1)\n")
+    logged: list[str] = []
+    monkeypatch.setattr("printguard.server.mediamtx.logger.error", lambda message, *args: logged.append(message % args))
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), "http://127.0.0.1:9", ("printguard", "secret"), _nothing)
+
+    await server.start()
+    async with asyncio.timeout(30):
+        while len(launches.read_text()) < 9:
+            await asyncio.sleep(0.01)
+    await server.stop()
+
+    exits = len(launches.read_text())
+    restarts = [line for line in logged if line == "MediaMTX exited (code 1); restarting"]
+    assert len(restarts) in ((exits - 1).bit_length(), exits.bit_length()), "one line for the first, second, fourth and eighth exit in a row"
+
+
 def test_the_shipped_config_grants_the_control_api_to_nobody() -> None:
     """A web page in a browser on the same computer can reach the loopback listeners.
 
