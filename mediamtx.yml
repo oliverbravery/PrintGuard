@@ -25,6 +25,7 @@ hlsSegmentDuration: 1s
 
 webrtc: no
 srt: no
+moq: no
 
 paths:
   all_others:

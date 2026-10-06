@@ -674,7 +674,7 @@ for development and packaging.
 | `MODEL_DIR` | The model, its metadata and prototypes | `models/` |
 | `STATIC_DIR` | The built dashboard the hub serves | `web/dist` |
 | `LOG_FILE` | A rotating log file, 2 MB with two backups | None, and `printguard.log` in the desktop app's data directory |
-| `MEDIAMTX_BINARY` | The MediaMTX binary the hub supervises, 1.15.4 or newer. The hub starts it with a random login for its control API, which `mediamtx.yml` grants to nobody. Unset, the hub expects one already running | Unset |
+| `MEDIAMTX_BINARY` | The MediaMTX binary the hub supervises, 1.19.0 or newer. The hub starts it with a random login for its control API, which `mediamtx.yml` grants to nobody. Unset, the hub expects one already running | Unset |
 | `MEDIAMTX_CONFIG` | The config that binary starts with. The hub adds its API login as the second entry of `authInternalUsers`, so a config of your own has to declare exactly one user there, as `mediamtx.yml` does. A second one would be overwritten | `mediamtx.yml` |
 | `MEDIAMTX_API`, `MEDIAMTX_RTSP`, `MEDIAMTX_HLS` | Where MediaMTX's control API, RTSP and HLS listeners are. If a MediaMTX you run yourself wants a login for its API, put it in the URL as `http://user:pass@host:9997` | `http://localhost:9997`, `rtsp://localhost:8554`, `http://localhost:8888` |
 | `UPDATE_ASSET` | The release asset this deployment updates with. Setting it marks the hub as the desktop app | Unset, and the platform's installer in the desktop app |
