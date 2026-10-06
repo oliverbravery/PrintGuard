@@ -84,3 +84,8 @@ def test_a_frame_sent_again_after_a_pull_leaves_one_row(pull: types.ModuleType, 
     pull.pull(Bucket({key(1): (jpeg(), labels(label="failure"))}), tmp_path)
 
     assert [json.loads(row)["label"] for row in (tmp_path / "frames.jsonl").read_text().splitlines()] == ["failure"]
+
+def test_a_frame_over_the_pixel_cap_is_discarded_before_it_is_decoded(pull: types.ModuleType) -> None:
+    assert pull.sanitised(jpeg((5780, 5780), quality=10)) is None
+    assert pull.sanitised(jpeg((4096, 4096), quality=10)) is not None
+

@@ -44,10 +44,12 @@ def sanitised(raw: bytes) -> bytes | None:
 
     Returns:
         A JPEG holding only the decoded pixels, or None if the upload is not an
-        image Pillow can decode.
+        image Pillow can decode or one over ``PIXELS_MAX`` pixels.
     """
     try:
         image = Image.open(io.BytesIO(raw))
+        if image.width * image.height > PIXELS_MAX:
+            return None
         image.load()
     except Exception:
         return None
@@ -118,7 +120,6 @@ def main() -> None:
     """Pulls the inbox into the directory named on the command line."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("out", type=Path, help="the dataset directory")
-    Image.MAX_IMAGE_PIXELS = PIXELS_MAX
     client = boto3.client(
         "s3",
         endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.{JURISDICTION}.r2.cloudflarestorage.com",
