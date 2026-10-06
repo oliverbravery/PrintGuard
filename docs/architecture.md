@@ -102,7 +102,7 @@ for the hub:
 | `http(...)` | httpx. A redirect that would replay the request under another method, such as a POST answered with 301 or 302, raises. So does a body over `max_bytes`, which a plugin's request, a plugin install, the catalogue and the update check pass, counted as it is decompressed, and an answer to one of those in any encoding but gzip |
 | `open_socket(url, arrived)` | A `Socket`, a `websockets` client connection held for a plugin, which refuses a redirect |
 | `encode_jpeg(rgb)` / `decode_jpeg(data)` | PyAV. `encode_jpeg` logs a warning and returns `None` when a frame cannot be encoded, and `decode_jpeg` refuses an image over `CLASSIFY_MAX_PIXELS`, 50 megapixels, or one with no decoder |
-| `load_state()` / `save_state(state)` | `data/state.json`, written atomically and readable only by its owner. A file that will not parse, or parses to something the engine never saves, such as a top-level list or a section of the wrong type, is kept as `state.json.corrupt` and the hub starts empty |
+| `load_state()` / `save_state(state)` | `data/state.json`, written atomically and readable only by its owner. `save_state` returns at once: the state is serialised on the caller's thread and written and synced on a writer thread, where a save made while one waits replaces it, and `close()` writes the last one. A write that fails is a `Notice`, once per outage. A file that will not parse, or parses to something the engine never saves, such as a top-level list or a section of the wrong type, is kept as `state.json.corrupt` and the hub starts empty, and a later one as `.corrupt.1` up to `.4`. One the hub may not read or move aside stops it with the data directory and its owner named |
 
 Four smaller protocols hang off it:
 
@@ -819,7 +819,8 @@ printguard/
     platform.py      the hub's Platform: capture, MediaMTX, httpx, the state file and the file store
     inference.py     LiteRT and ONNX Runtime selection and the worker benchmark
     events.py        the per-socket queue that conflates state and result events
-    publish.py       pushes browser recordings, MJPEG sources, capture devices and the Bambu chamber camera into MediaMTX over RTSP
+    publish.py       pushes browser recordings, MJPEG sources, capture devices and the Bambu chamber camera into MediaMTX over RTSP, a live view from a thread of its own
+    state_file.py    the state file: background saves, and what a damaged or unreachable one does
     api.py           REST API (/api/v1) over the engine protocol, scoped by token
     mcp.py           MCP server for agents, derived from the REST API
     prints.py        print library uploads and downloads, shared by the dashboard and the REST API

@@ -84,7 +84,7 @@ and its reason.
 ## Cameras plugged into the hub
 
 The desktop app lists the computer's cameras under **This machine**, ready to add. On Windows
-two cameras of the same model are listed as `(1)` and `(2)` and can both be added. On macOS a
+two cameras of the same model are listed as `(1)` and `(2)` and can both be added. One you added by name in 2.5.0 is the first, so the list leaves it out. On macOS a
 camera is opened by its name, so only the first of two that share one can be used.
 
 In Docker a USB camera reaches the container only if you pass it in, and once you have, it
