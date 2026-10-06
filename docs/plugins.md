@@ -107,7 +107,8 @@ out.
 | Installed over | Grants, stored data and credentials |
 |---|---|
 | The same repository and path | Carry across |
-| Anywhere else, a zip included | Start from scratch |
+| A zip over the zip it replaces | Stored data and credentials carry across when it asks for nothing more, and the permissions are asked again |
+| Anywhere else | Start from scratch |
 
 ## Permissions
 
