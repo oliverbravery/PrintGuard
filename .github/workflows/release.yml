@@ -274,16 +274,25 @@ jobs:
       issues: write
       pull-requests: read
     steps:
-      - name: Ask related reporters to verify
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Ask the reporters of everything merged since the last release to verify
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: v${{ needs.version.outputs.version }}
         run: |
-          pr_number=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq 'map(select(.merged_at != null))[0].number // empty')
-          if [ -z "$pr_number" ]; then
-            exit 0
-          fi
-          issue_numbers=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
+          previous_tag=$(git describe --first-parent --tags --abbrev=0 --match 'v[0-9]*' "${GITHUB_SHA}^")
+          merged_prs=$(
+            for merge in $(git rev-list --first-parent "${previous_tag}..${GITHUB_SHA}"); do
+              gh api "repos/${GITHUB_REPOSITORY}/commits/${merge}/pulls" --jq '.[] | select(.merged_at != null) | .number'
+            done | sort -un
+          )
+          issue_numbers=$(
+            for pr_number in $merged_prs; do
+              gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json closingIssuesReferences --jq '.closingIssuesReferences[].number'
+            done | sort -un
+          )
           for issue_number in $issue_numbers; do
             if [ "$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state --jq .state)" = "CLOSED" ]; then
               continue
