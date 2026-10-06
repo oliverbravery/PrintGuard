@@ -1469,8 +1469,8 @@ def test_classify_rejects_non_finite_embeddings() -> None:
         std=(0.25, 0.25, 0.25),
         prototypes={"success": np.zeros(4, np.float32), "failure": np.ones(4, np.float32)},
     )
-    bad = vision.classify(np.array([np.nan, 0, 0, 0], dtype=np.float32), assets)
-    assert bad["prediction"] == "unknown"
+    with pytest.raises(ValueError, match="non-finite"):
+        vision.classify(np.array([np.nan, 0, 0, 0], dtype=np.float32), assets)
     good = vision.classify(np.zeros(4, np.float32), assets)
     assert good["prediction"] == "success"
     assert good["margin"] == 2.0
