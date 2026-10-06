@@ -160,6 +160,7 @@ class Engine:
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
         self._requester: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = contextvars.ContextVar("requester", default=None)
         self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
+        self.startup_warnings: list[str] = []
         self._tasks: list[asyncio.Task[None]] = []
         self._finishing: set[asyncio.Task[None]] = set()
         self._attach_tasks: dict[str, asyncio.Task[None]] = {}
@@ -239,9 +240,11 @@ class Engine:
             try:
                 self.settings[key] = check(self.settings[key])
             except (TypeError, ValueError) as exc:
-                logger.warning("the stored %s setting was reset: %s", key, exc)
+                self._warn_at_start(f"The saved {key} setting could not be used, so it was reset: {logs.describe(exc)}")
                 self.settings[key] = SETTINGS_DEFAULTS[key]
         await self.platform.configure(self.settings)
+        for notice in self.platform.take_notices():
+            self._warn_at_start(notice.message)
         self.scheduler.reset()
         self.feedback_token = persisted.get("feedback_token")
         restorers: dict[str, Callable[[dict[str, Any]], None]] = {
@@ -258,7 +261,8 @@ class Engine:
                 try:
                     restore(record)
                 except (AttributeError, KeyError, TypeError, ValueError) as exc:
-                    logger.warning("dropping an unreadable record from the stored %s: %s", kind, logs.describe(exc))
+                    label = record.get("name") or record.get("id") if isinstance(record, dict) else None
+                    self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}")
         await self.reconcile_declared_cameras()
         self.cameras.sync_in_use(self.monitors, self.printers)
         self.settle_reviews()
@@ -283,6 +287,15 @@ class Engine:
             len(self.monitors),
             len(self.prints.items),
         )
+
+    def _warn_at_start(self, message: str) -> None:
+        """Warns of something start found, and keeps it for a dashboard that connects after it.
+
+        Nobody is connected while the hub starts, so a warning that was only
+        emitted would reach the log and no one else.
+        """
+        self.emit({"event": "warning", "message": message, "recovered": False})
+        self.startup_warnings.append(self._scrubbed(message))
 
     def _restore_printer(self, record: dict[str, Any]) -> None:
         printer = sanitise_printer(record["id"], record)
@@ -378,7 +391,8 @@ class Engine:
 
         A plugin reads as disabled while the platform has no plugin runtime, so
         the dashboard stops its half of a plugin when the hub has stopped the
-        other.
+        other. ``startup_warnings`` is what start found wrong, kept until the
+        hub restarts for a dashboard that was not there to hear it.
         """
         plugins_running = self.platform.plugin_runtime is not None
         return {
@@ -391,6 +405,7 @@ class Engine:
             "prints": [p.public() for p in self.prints.values()],
             "reviews": self.reviews.public(),
             "feedback_hub": self.feedback_token.split(".")[0] if self.feedback_token else None,
+            "startup_warnings": self.startup_warnings,
             "monitors": [
                 {
                     **monitor,

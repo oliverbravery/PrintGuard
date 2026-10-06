@@ -4994,7 +4994,59 @@ async def test_a_wrong_shaped_record_is_dropped_at_start_and_the_rest_load(caplo
         assert [len(state[kind]) for kind in ("tokens", "printers", "monitors", "reviews", "prints", "cameras")] == [1, 1, 1, 0, 0, 1]
     finally:
         await restarted.stop()
-    assert caplog.text.count("dropping an unreadable record") == 8
+    assert caplog.text.count("could not be read and was dropped") == 8
+    assert len(restarted.startup_warnings) == 8
+
+
+async def test_a_monitor_stored_with_no_printer_is_kept_with_its_printer_cleared() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        pass
+    saved = platform.state
+    platform.state = {**saved, "monitors": [{**saved["monitors"][0], "printer_id": None}]}
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        assert [monitor["printer_id"] for monitor in restarted.monitors.values()] == [""]
+        assert restarted.startup_warnings == []
+    finally:
+        await restarted.stop()
+
+
+async def test_what_start_dropped_or_worked_around_is_kept_for_a_dashboard_that_connects_later() -> None:
+    platform = FakePlatform()
+    platform.notices = [Notice("Intel GPU cannot run the model, so detection is not using it: out of memory")]
+    manifest = {
+        "id": "local-thing",
+        "name": "Local thing",
+        "version": "1.0.0",
+        "permissions": ["net"],
+        "reasons": {"net": "reads my printer"},
+        "urls": ["http://127.1/*"],
+    }
+    platform.state = {
+        "monitors": [{"id": "m9", "name": "Bench", "on_defect": "explode"}],
+        "plugins": [{"id": "local-thing", "manifest": manifest, "sources": {}, "digests": {}, "source": {"kind": "file"}, "granted": [], "installed": 1.0}],
+        "settings": {"glass": {"opacity": 0.4, "tone": "x"}},
+    }
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        await asyncio.sleep(0.05)
+        heard: list[dict] = []
+        engine.add_sink(heard.append)
+        platform.notices = [Notice("live view unavailable: refused")]
+        await asyncio.sleep(1.2)
+        warnings = engine.state_event()["startup_warnings"]
+    finally:
+        await engine.stop()
+
+    assert "Intel GPU cannot run the model, so detection is not using it: out of memory" in warnings
+    assert any("saved monitor (Bench)" in warning and "on_defect" in warning for warning in warnings), warnings
+    assert any("saved plugin (local-thing)" in warning and "net:local" in warning for warning in warnings), warnings
+    assert any("glass" in warning for warning in warnings), warnings
+    assert len(warnings) == 4, "something raised after start was kept with what start raised"
+    assert heard[0]["startup_warnings"] == warnings, "a dashboard connecting later is handed them in its first snapshot"
 
 
 async def test_a_wrong_shaped_layout_is_reset_without_the_theme() -> None:
