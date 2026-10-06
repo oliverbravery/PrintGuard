@@ -5085,6 +5085,8 @@ async def test_a_value_a_setting_does_not_take_is_refused_rather_than_rewritten(
             ({"cmd": "settings.update", "patch": {"mqtt": {"host": "broker", "port": 0}}}, "MQTT port"),
             ({"cmd": "settings.update", "patch": {"mqtt": {"enabled": True, "host": "  "}}}, "MQTT needs the broker's host"),
             ({"cmd": "settings.update", "patch": {"mqtt": {"enabled": True}}}, "MQTT needs the broker's host"),
+            ({"cmd": "settings.update", "patch": {"mqtt": {"host": 5}}}, "MQTT host is the broker's address"),
+            ({"cmd": "camera.update", "id": camera_id, "patch": {"rotation": False}}, "rotation is 0, 90, 180 or 270"),
             ({"cmd": "settings.update", "patch": {"fault_grace_s": "120"}}, "fault_grace_s must be a number"),
             ({"cmd": "settings.update", "patch": {"fault_grace_s": True}}, "fault_grace_s must be a number"),
             ({"cmd": "settings.update", "patch": {"preheat": None}}, "preheat is a list of presets"),
