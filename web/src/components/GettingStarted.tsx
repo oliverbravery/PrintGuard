@@ -108,7 +108,7 @@ export function GettingStarted() {
           Register a camera and add a monitor to start watching. Connect a printer and alerts for the
           full safety net.
         </p>
-        <Progress value={doneCount} total={steps.length} className="mb-4" />
+        <Progress label="Setup progress" value={doneCount} total={steps.length} className="mb-4" />
         <ol className="space-y-2.5">
           {steps.map((step) => (
             <StepRow key={step.n} step={step} primary={step === primaryStep} />

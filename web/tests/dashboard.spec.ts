@@ -233,7 +233,7 @@ test("a review answered before its frames arrive still marks the alert frames, a
 
   await sheet.getByRole("button", { name: /^Don't send/ }).nth(1).click();
   await expect(sheet.getByRole("button", { name: "Send 2 frames" })).toBeVisible();
-  await sheet.getByRole("button", { name: /^Send the frame at/ }).click();
+  await sheet.getByRole("button", { name: /^Send frame \d of \d at/ }).click();
   await sheet.getByRole("button", { name: "Send 3 frames" }).click();
   expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: ["a1"], removed: [] });
 
@@ -1075,6 +1075,35 @@ test("a report attachment is picked from a button, and the picker is left empty 
   await (await chooser).setFiles(screenshot);
   await expect(page.getByText("shot.png")).toBeVisible();
   await expect(page.locator('input[type="file"]')).toHaveJSProperty("value", "");
+});
+
+test("the setup and introduction progress bars are named, and the file picker is not an unnamed tab stop", async ({ page }) => {
+  await dashboard(page, { engine: engine({ cameras: [], monitors: [] }) });
+  await expect(page.getByRole("progressbar", { name: "Setup progress" })).toBeVisible();
+
+  await page.evaluate(() => (window as any).__pg.setState({ dialog: "intro" }));
+  await expect(page.getByRole("progressbar", { name: "Introduction progress" })).toBeVisible();
+
+  await page.evaluate(() => (window as any).__pg.setState({ dialog: "prints" }));
+  await expect(page.getByRole("button", { name: "browse" })).toBeVisible();
+  await expect(page.locator("input[type=file]")).toBeHidden();
+});
+
+test("the glass sliders read out percentages, and two review frames from one minute are told apart", async ({ page }) => {
+  const settings = { ...engine().settings, glass: { opacity: 0.5, tone: 0.25 } };
+  await dashboard(page, { engine: engine({ settings, reviews: [review({ frames: 2 })] }), reviewId: "r1" });
+  await expect(page.getByRole("slider", { name: "Opacity", includeHidden: true }).first()).toHaveAttribute("aria-valuetext", "50%");
+  await expect(page.getByRole("slider", { name: "Tone", includeHidden: true }).first()).toHaveAttribute("aria-valuetext", "25%");
+
+  await emit(page, {
+    event: "review", ...review({ frames: 2 }),
+    frames: [{ id: "s1", ts: 60, score: 0.1, kind: "spaced", size: 1 }, { id: "s2", ts: 70, score: 0.1, kind: "spaced", size: 1 }],
+  });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "Yes" }).click();
+  await expect(sheet.getByRole("button", { name: /^Frame 1 of 2 at .*, marked Good/ })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: /^Frame 2 of 2 at .*, marked Good/ })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: /^Don't send frame 2 of 2 at / })).toBeVisible();
 });
 
 test("a slider is named by its label and reads its formatted value", async ({ page }) => {

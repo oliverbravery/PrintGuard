@@ -1,8 +1,9 @@
-export function Progress({ value, total, className = "" }: { value: number; total: number; className?: string }) {
+export function Progress({ label, value, total, className = "" }: { label: string; value: number; total: number; className?: string }) {
   return (
     <div
       className={`flex items-center gap-3 ${className}`}
       role="progressbar"
+      aria-label={label}
       aria-valuenow={value}
       aria-valuemin={0}
       aria-valuemax={total}
