@@ -64,6 +64,7 @@ function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId:
 
 export function StatsPage({ monitor }: { monitor: Monitor }) {
   const { engine, historyData, history: scores, reconnecting, openStats, openReview, fetchHistory } = useStore();
+  const camera = engine?.cameras.find((c) => c.id === monitor.camera_id);
   const reviews = (engine?.reviews ?? []).filter((review) => review.monitor_id === monitor.id);
   const prints = reviews.filter((review) => review.status !== "running" && review.frames > 0).reverse();
   const alertsKept = reviews.reduce((kept, review) => kept + review.alerts, 0);
@@ -95,7 +96,7 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
       <div className="px-5 py-4 border-b border-line-0">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="row-span-2 flex items-center justify-center">
-            <RiskGauge score={monitor.watching ? (scores[monitor.id]?.at(-1)?.score ?? stats.current ?? 0) : null} threshold={monitor.threshold} size={92} />
+            <RiskGauge score={camera?.online && monitor.watching ? (scores[monitor.id]?.at(-1)?.score ?? stats.current ?? 0) : null} threshold={monitor.threshold} size={92} />
           </div>
           <StatTile label="average" value={pct(stats.avg)} />
           <StatTile label="peak" value={pct(stats.max)} />

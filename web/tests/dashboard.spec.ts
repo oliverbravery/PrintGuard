@@ -1054,6 +1054,17 @@ test("an alerting tile opens from its banner, and an offline camera shows no inf
   await expect(page.getByRole("dialog", { name: "Prusa" })).toBeVisible();
 });
 
+test("an offline camera shows no frame rate in the camera list and no risk in the history sheet", async ({ page }) => {
+  const offline = engine({ cameras: [camera({ online: false })] });
+  await dashboard(page, { engine: offline, history: { m1: [{ ts: 1, score: 0.9 }] } });
+  const card = page.getByRole("button", { name: /Edit camera Workshop/ });
+  await expect(card).not.toContainText("5.0");
+  await expect(card.getByText("none")).toHaveCount(2);
+
+  await page.evaluate(() => (window as any).__pg.getState().openStats("m1"));
+  await expect(page.getByRole("dialog", { name: "Prusa · history" }).getByRole("img", { name: "risk unknown" })).toBeVisible();
+});
+
 test("the saved chip shows only on the form that saved", async ({ page }) => {
   await dashboard(page, { detailId: "m1" });
   const panel = page.getByRole("dialog", { name: "Prusa" });
