@@ -15,6 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 
 from ..engine.cameras import webrtc_endpoint, whep_endpoint
+from ..engine.reports import MESSAGE_STANDALONE_BELOW, scrub, scrub_url, url_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,9 @@ class MediaMTX:
 
         A fingerprint is the SHA-256 of a self-signed source certificate (hex,
         no colons), letting MediaMTX validate an otherwise-untrusted RTSPS feed.
+
+        Raises:
+            ValueError: If MediaMTX refuses the source.
         """
         payload: dict[str, Any] = {
             "source": source_url,
@@ -91,10 +95,26 @@ class MediaMTX:
         self._pulled[name] = payload
 
     async def _add_path(self, name: str, payload: dict[str, Any]) -> None:
+        """Adds a path, or updates it when the server already has one by that name.
+
+        Args:
+            name: The path name.
+            payload: The path's config.
+
+        Raises:
+            ValueError: If the server refuses the config, such as a source it
+                cannot read. The message carries its reason without credentials.
+        """
         resp = await self._client.post(
             f"{self._api}/v3/config/paths/add/{name}", json=payload, auth=self._login, timeout=5.0
         )
         if resp.status_code == 400:
+            reason = resp.json().get("error", "")
+            if "already exists" not in reason:
+                source = payload["source"]
+                reason = reason.replace(source, scrub_url(source))
+                reason = scrub(reason, url_secrets(source), standalone_below=MESSAGE_STANDALONE_BELOW)
+                raise ValueError(f"PrintGuard can't use that address: {reason}")
             resp = await self._client.patch(
                 f"{self._api}/v3/config/paths/patch/{name}", json=payload, auth=self._login, timeout=5.0
             )
