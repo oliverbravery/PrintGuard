@@ -595,3 +595,173 @@ async def test_a_worker_can_act_on_a_single_inference_over_its_own_threshold(run
         assert [m for m, url in platform.http_calls if "/api/job" in url].count("POST") == 1, "the printer was not paused once"
     finally:
         await engine.stop()
+
+
+STATE_COUNTER = {
+    "id": "counter",
+    "version": "1.0.0",
+    "permissions": ["state:read", "notify"],
+    "reasons": {"state:read": "to count", "notify": "to say so"},
+    "events": ["state"],
+}
+
+
+@pytest.mark.parametrize(
+    "worker",
+    [
+        "plugin.on('state', (event, ctx) => { ctx.store.n = (ctx.store.n || 0) + 1; });",
+        "plugin.on('state', (event, ctx) => { ctx.store.n = (ctx.store.n || 0) + 1; ctx.notify('hi'); });",
+    ],
+)
+async def test_a_workers_own_commands_do_not_wake_its_state_handler(runtime: WasmPluginRuntime, worker: str) -> None:
+    """``state`` is a once a second event, so a handler's own save or effect cannot be what delivers the next one."""
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    effects: list[dict] = []
+    engine.add_sink(lambda event: effects.append(event) if event.get("event") == "plugin_effect" else None)
+    try:
+        await install_and_accept(engine, STATE_COUNTER, worker)
+        await asyncio.sleep(0.2)
+        effects.clear()
+        before = engine.plugins.get("counter").config.get("n", 0)
+        await asyncio.sleep(2.5)
+        ran = engine.plugins.get("counter").config.get("n", 0) - before
+    finally:
+        await engine.stop()
+
+    assert ran <= 4, f"the state handler ran {ran} times in 2.5 s"
+    assert len(effects) <= 4
+
+
+SLOW_WORKER = """
+plugin.on('alert', (event, ctx) => { let x = 0; for (let i = 0; i < 200000; i++) x += i; });
+plugin.on('result', (event, ctx) => { ctx.store.changed = true; });
+"""
+
+SLOW_MANIFEST = {
+    "id": "slow",
+    "version": "1.0.0",
+    "permissions": ["state:read"],
+    "reasons": {"state:read": "to hear alerts"},
+    "events": ["alert", "result"],
+}
+
+
+async def test_a_call_that_changed_nothing_does_not_undo_a_save_made_while_it_ran(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, SLOW_MANIFEST, SLOW_WORKER)
+        engine.emit({"event": "alert", "monitor_id": "m", "score": 0.9, "action": "none"})
+        while "slow" not in runtime._busy:
+            await asyncio.sleep(0)
+        await engine.request({"cmd": "plugin.update", "id": "slow", "patch": {"config": {"on": True}}})
+        await asyncio.sleep(1.0)
+
+        assert engine.plugins.get("slow").config == {"on": True}, "a worker that changed nothing wrote its old copy back"
+    finally:
+        await engine.stop()
+
+
+async def test_a_worker_that_changes_its_store_still_has_it_saved(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, SLOW_MANIFEST, SLOW_WORKER)
+        engine.emit({"event": "result", "monitor_id": "m", "camera_id": "c", "score": 0.1})
+        await asyncio.sleep(0.6)
+
+        assert engine.plugins.get("slow").config == {"changed": True}
+    finally:
+        await engine.stop()
+
+
+async def test_a_second_answer_to_one_question_is_ignored_but_a_made_up_one_is_not(runtime: WasmPluginRuntime) -> None:
+    """Every open dashboard tab answers a call plugin.js serves, so all but the first arrive late."""
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    events: list[dict] = []
+    engine.add_sink(events.append)
+    try:
+        consumer = {
+            "id": "np-widget", "version": "1.0.0",
+            "permissions": ["link:consume"], "reasons": {"link:consume": "to draw it"},
+            "consumes": ["spotify:now-playing"],
+        }
+        await install_and_accept(engine, SERVER_MANIFEST, "plugin.on('state', () => {});")
+        await install_and_accept(engine, consumer, "plugin.on('answer', () => {});")
+        await engine.handle({"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "now-playing", "tag": "np"})
+        asked = next(e for e in events if e.get("event") == "call")
+        answer = {"cmd": "plugin.answer", "id": "spotify", "call_id": asked["call_id"], "channel": "now-playing", "body": {"track": "Blue"}}
+        await engine.handle({**answer, "req_id": 1})
+        await engine.handle({**answer, "req_id": 2})
+        await engine.handle({**answer, "call_id": "made-up", "req_id": 3})
+        await engine.handle({**answer, "id": "np-widget", "req_id": 4})
+    finally:
+        await engine.stop()
+
+    assert len([e for e in events if e.get("event") == "answer"]) == 1
+    errors = {e["req_id"] for e in events if e.get("event") == "error" and e.get("req_id") in (1, 2, 3, 4)}
+    assert errors == {3, 4}, "a late duplicate was reported, or a made-up answer was not"
+
+
+def zipped(members: dict[str, str], compression: int = zipfile.ZIP_DEFLATED) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression) as archive:
+        for name, body in members.items():
+            archive.writestr(name, body)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("manifest", ["[]", "null", '"text"', "7"])
+def test_a_manifest_that_is_not_an_object_is_refused_cleanly(manifest: str) -> None:
+    with pytest.raises(ValueError, match="not a JSON object"):
+        engine_plugins.unpack(zipped({"plugin.json": manifest, "plugin.js": "plugin.render(() => null);"}))
+
+
+@pytest.mark.parametrize("compression", [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_a_zip_member_compressed_with_anything_but_deflate_is_refused_unread(compression: int) -> None:
+    """bzip2 and lzma members are inflated whole whatever size they declare."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("plugin.json", json.dumps({"id": "demo", "version": "1.0.0"}))
+        archive.writestr(zipfile.ZipInfo("plugin.js"), "plugin.render(() => null);", compress_type=compression)
+
+    with pytest.raises(ValueError, match="compression"):
+        engine_plugins.unpack(buffer.getvalue())
+
+
+def test_a_stored_or_deflated_zip_still_unpacks() -> None:
+    for compression in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+        manifest, sources, _, _ = engine_plugins.unpack(
+            zipped({"plugin.json": json.dumps({"id": "demo"}), "plugin.js": "plugin.render(() => null);"}, compression)
+        )
+        assert manifest == {"id": "demo"} and sources == {"plugin.js": "plugin.render(() => null);"}
+
+
+@pytest.mark.parametrize("name", ["plugin.js", "worker.js", "panel.html"])
+async def test_an_update_that_cannot_read_a_source_file_fails_rather_than_dropping_it(name: str) -> None:
+    sha = "a" * 40
+    raw = f"https://raw.githubusercontent.com/you/plug/{sha}"
+    platform = FakePlatform()
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        files = {"plugin.js": "plugin.render(() => null);", "worker.js": "plugin.on('alert', () => {});", "panel.html": "<p>hi</p>"}
+        platform.responses[f"{raw}/plugin.json"] = (200, {**WORKER_MANIFEST, "id": "two-halves", "events": ["alert"]})
+        for file, body in files.items():
+            platform.responses[f"{raw}/{file}"] = (200, body)
+        source = {"kind": "github", "repo": "you/plug", "path": "", "ref": sha}
+        await engine.request({"cmd": "plugin.install", "source": source})
+        assert sorted(engine.plugins.get("two-halves").sources) == sorted(files)
+
+        platform.responses[f"{raw}/{name}"] = (503, "upstream connect error")
+        with pytest.raises(RuntimeError, match="503"):
+            await engine.request({"cmd": "plugin.install", "source": source})
+        assert sorted(engine.plugins.get("two-halves").sources) == sorted(files)
+
+        platform.responses[f"{raw}/{name}"] = (404, "404: Not Found")
+        await engine.request({"cmd": "plugin.install", "source": source})
+        assert sorted(engine.plugins.get("two-halves").sources) == sorted(set(files) - {name})
+    finally:
+        await engine.stop()

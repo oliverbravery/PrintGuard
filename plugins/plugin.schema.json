@@ -335,7 +335,7 @@
       "description": "The only addresses ctx.http and ctx.socket may reach, each a match pattern of scheme://host/path. Naming a private or loopback address needs the net:local permission as well as net.",
       "items": {
         "type": "string",
-        "pattern": "^(?P<scheme>\\*|http|https|ws|wss|rtsp|rtsps)://(?P<host>\\*|(?:\\*\\.)?[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\\[[0-9a-f:]+\\])(?::(?P<port>\\*|\\d{1,5}))?(?P<path>/[^\\s]*)$"
+        "pattern": "^(\\*|http|https|ws|wss|rtsp|rtsps)://(\\*|(?:\\*\\.)?[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\\[[0-9a-f:]+\\])(?::(\\*|\\d{1,5}))?(/[^\\s]*)$"
       }
     },
     "events": {

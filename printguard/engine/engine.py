@@ -15,7 +15,7 @@ import logging
 import time
 import traceback
 import uuid
-from collections import deque
+from collections import defaultdict, deque
 from typing import Any, Awaitable, Callable
 
 import numpy as np
@@ -152,6 +152,8 @@ class Engine:
         self.oauth = oauth.OAuthFlows(platform.http)
         self._plugin_calls: dict[str, list[float]] = {}
         self._pending_calls: dict[str, tuple[str, str, str, float]] = {}
+        self._answered_calls: dict[str, tuple[str, float]] = {}
+        self._sign_in_refreshes: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
         self._requester: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = contextvars.ContextVar("requester", default=None)
         self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
@@ -1874,11 +1876,21 @@ class Engine:
         self.emit({"event": "call", "id": to, "from": caller.id, "channel": channel, "body": body, "call_id": call_id})
 
     async def _cmd_plugin_answer(self, message: dict[str, Any]) -> None:
-        """Returns one plugin's answer to the plugin that asked for it."""
-        waiting = self._pending_calls.pop(str(message.get("call_id", "")), None)
+        """Returns one plugin's answer to the plugin that asked for it.
+
+        Every open dashboard answers a call its plugin serves, so an answer to
+        one that has just been answered by the same plugin is dropped quietly.
+        """
+        call_id = str(message.get("call_id", ""))
+        now = time.monotonic()
+        self._answered_calls = {k: v for k, v in self._answered_calls.items() if now - v[1] < CALL_TTL_S}
+        waiting = self._pending_calls.pop(call_id, None)
+        if waiting is None and self._answered_calls.get(call_id, ("",))[0] == message["id"]:
+            return
         if waiting is None or waiting[1] != message["id"]:
             raise PermissionError("no question of that plugin is waiting for an answer")
         caller, answering, tag, _ = waiting
+        self._answered_calls[call_id] = (answering, now)
         body = plugins.sanitise_config({"body": message.get("body")})["body"]
         self.emit({"event": "answer", "id": caller, "tag": tag, "from": answering, "channel": str(message.get("channel", "")), "body": body})
 
@@ -1955,14 +1967,19 @@ class Engine:
         return plugin.manifest["name"]
 
     async def _refresh_sign_in(self, plugin: Plugin) -> None:
-        """Renews a plugin's access token before a request goes out on it."""
+        """Renews a plugin's access token before a request goes out on it.
+
+        One renewal runs at a time for a plugin, so a request that waited on it
+        finds the new token rather than spending the refresh token again.
+        """
         if not plugin.manifest["oauth"]:
             return
-        held = plugin.secrets
-        renewed = await self.oauth.refreshed(self._provider(plugin), held)
-        if renewed is not None:
-            plugin.secrets = {**plugin.secrets, **{key: value for key, value in renewed.items() if held.get(key) != value}}
-            self.save()
+        async with self._sign_in_refreshes[plugin.id]:
+            held = plugin.secrets
+            renewed = await self.oauth.refreshed(self._provider(plugin), held)
+            if renewed is not None:
+                plugin.secrets = {**plugin.secrets, **{key: value for key, value in renewed.items() if held.get(key) != value}}
+                self.save()
 
     async def _cmd_plugin_effect(self, message: dict[str, Any]) -> None:
         """Hands a plugin's effect to the dashboards that can perform it.

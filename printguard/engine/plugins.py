@@ -840,13 +840,17 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
         path the manifest uses.
 
     Raises:
-        ValueError: If the zip is unreadable, carries no manifest, or declares
-            more than a plugin may ship, which is refused before it is unpacked.
+        ValueError: If the zip is unreadable, carries no manifest or one that
+            is not an object, uses a compression other than stored or deflate,
+            or declares more than a plugin may ship, which is refused before
+            it is unpacked.
     """
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
         raise ValueError("not a zip archive") from exc
+    if any(info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED) for info in archive.infolist()):
+        raise ValueError("this zip uses a compression PrintGuard does not read")
     entries: dict[str, str] = {}
     for entry in archive.namelist():
         entries.setdefault(entry.rsplit("/", 1)[-1], entry)
@@ -861,15 +865,17 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
         return archive.read(entry)
 
     manifest = json.loads(read(MANIFEST_FILE, MAX_SOURCE_BYTES))
+    if not isinstance(manifest, dict):
+        raise ValueError(f"{MANIFEST_FILE} is not a JSON object")
     sources = {name: read(name, MAX_SOURCE_BYTES).decode("utf-8", "replace") for name in SOURCE_FILES if name in entries}
-    declared = {str(name).strip().lower() for name in manifest.get("assets", []) if isinstance(manifest, dict)}
+    declared = {str(name).strip().lower() for name in manifest.get("assets", [])}
     assets: dict[str, bytes] = {}
     total = 0
     for name in sorted(declared & entries.keys()):
         total = within_budget(name, archive.getinfo(entries[name]).file_size, total)
         assets[name] = archive.read(entries[name])
     listed = [str(manifest.get("icon", "")).strip().lower(), README_FILE]
-    listed += [str(shot).strip().lower() for shot in manifest.get("media", []) if isinstance(manifest, dict)]
+    listed += [str(shot).strip().lower() for shot in manifest.get("media", [])]
     named = set(archive.namelist())
     page: dict[str, bytes] = {}
     total = 0
@@ -923,8 +929,9 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
         resolved commit SHA.
 
     Raises:
-        ValueError: If the reference is unusable, the plugin is not there, or
-            its assets pass what a plugin may ship, at the file that does it.
+        ValueError: If the reference is unusable, the plugin is not there, a
+            source file answers with anything but its content or a 404, or its
+            assets pass what a plugin may ship, at the file that does it.
     """
     if not _REPO_PATTERN.match(repo):
         raise ValueError(f"{repo!r} is not an owner/name repository")
@@ -943,8 +950,11 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
         status, body = await http(
             "GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"), timeout=TIMEOUT_S, max_bytes=MAX_SOURCE_BYTES
         )
-        if status == 200 and isinstance(body, str):
-            sources[name] = body
+        if status == 404:
+            continue
+        if status != 200 or not isinstance(body, str):
+            raise ValueError(f"could not read {name} at {repo}/{prefix} ({status})")
+        sources[name] = body
     assets: dict[str, bytes] = {}
     total = 0
     for name in sorted({str(a).strip().lower() for a in manifest.get("assets", [])}):

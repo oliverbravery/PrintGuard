@@ -225,9 +225,15 @@ class WasmPluginRuntime:
         slower than its own event rate would otherwise accumulate calls without
         bound. An event carrying an id is an answer to one plugin's own request,
         so it goes to that plugin rather than to everything listening.
+
+        A state event that closes a command is kept for what workers read but
+        never delivered, since the engine's own tick is what makes ``state`` a
+        once a second event and a plugin's commands must not wake it again.
         """
         if event.get("event") == "state":
             self._state = event
+            if event.get("req_id") is not None:
+                return
         addressed = event.get("id")
         for sandbox in list(self._sandboxes.values()):
             plugin = sandbox.plugin
@@ -333,12 +339,13 @@ class WasmPluginRuntime:
         healthy gate and lock everybody out.
         """
         plugin = sandbox.plugin
+        started_with = plugin.config
         request = {
             "kind": kind,
             "event": payload.get("event", {}),
             "request": payload.get("request", {}),
             "state": plugins.project_state(self._state, plugin.granted),
-            "store": plugin.config,
+            "store": started_with,
             "assets": plugins.text_assets(plugin.assets),
         }
         self._busy.add(plugin.id)
@@ -357,12 +364,13 @@ class WasmPluginRuntime:
             return None
         finally:
             self._busy.discard(plugin.id)
-        await self._store(plugin, output.get("store"))
+        await self._store(plugin, started_with, output.get("store"))
         await self._perform(plugin, output["effects"])
         return output.get("result")
 
-    async def _store(self, plugin: Plugin, store: Any) -> None:
-        if not isinstance(store, dict) or store == plugin.config or self._request is None:
+    async def _store(self, plugin: Plugin, started_with: dict[str, Any], store: Any) -> None:
+        """Saves a worker's data if the call changed it from what the call was handed."""
+        if not isinstance(store, dict) or store == started_with or self._request is None:
             return
         try:
             await self._request({"cmd": "plugin.update", "id": plugin.id, "patch": {"config": store}})
