@@ -4795,6 +4795,67 @@ async def test_one_stream_written_two_ways_is_one_camera() -> None:
         assert len(engine.cameras.values()) == 2, "a path is told apart by its case"
 
 
+@pytest.mark.parametrize(
+    ("first", "again"),
+    [
+        ("rtsp://cam.local/live", "rtsp://cam.local:554/live"),
+        ("rtsp://cam.local:554/live", "rtsp://cam.local/live"),
+        ("http://cam.local/video", "http://cam.local:80/video"),
+        ("https://cam.local/video", "https://cam.local:443/video"),
+        ("http://cam.local:8090/video", "http://cam.local:08090/video"),
+        ("http://127.0.0.1:8090/video", "http://127.1:8090/video"),
+        ("http://127.0.0.1:8090/video", "http://2130706433:8090/video"),
+        ("rtsp://cam.local/live", "rtsp://cam.local/live/"),
+        ("rtsp://cam.local/live", "rtsp://cam.local/live?"),
+        ("rtsp://cam.local/live", "rtsp://cam.local./live"),
+        ("rtsp://cam.local/live", "rtsp://cam.local/%6Cive"),
+        ("rtsp://cam.local/live", "rtsp://user:pw@cam.local/live"),
+        ("rtsp://a:b@cam.local/live", "rtsp://c:d@cam.local/live"),
+        ("http://cam.local/s?a=1&b=2", "http://cam.local/s?b=2&a=1"),
+        ("http://cam.local/s?a=1&b=2", "http://cam.local/s?a=1&&b=2"),
+        ("http://[::1]:8090/video", "http://[0:0:0:0:0:0:0:1]:8090/video"),
+        ("http://cam.local", "http://cam.local/"),
+    ],
+)
+async def test_every_way_of_writing_one_stream_is_one_camera(first: str, again: str) -> None:
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
+        await engine.request({"cmd": "camera.add", "source": {"kind": "url", "url": first}})
+        with pytest.raises(RuntimeError, match="already registered"):
+            await engine.request({"cmd": "camera.add", "source": {"kind": "url", "url": again}})
+
+
+@pytest.mark.parametrize(
+    ("first", "other"),
+    [
+        ("rtsp://cam.local/live", "rtsp://cam.local/Live"),
+        ("rtsp://cam.local/live", "rtsps://cam.local/live"),
+        ("rtsp://cam.local/live", "rtsp://cam.local:555/live"),
+        ("http://cam.local/video", "https://cam.local/video"),
+        ("http://cam.local/video", "http://cam.local:443/video"),
+        ("http://127.0.0.1/video", "http://127.0.0.2/video"),
+        ("http://cam.local/s?a=1", "http://cam.local/s?a=2"),
+        ("http://cam.local/a%2Fb", "http://cam.local/a/b"),
+    ],
+)
+async def test_streams_that_differ_are_told_apart(first: str, other: str) -> None:
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
+        await engine.request({"cmd": "camera.add", "source": {"kind": "url", "url": first}})
+        await engine.request({"cmd": "camera.add", "source": {"kind": "url", "url": other}})
+        assert len(engine.cameras.values()) == 2
+
+
+async def test_a_device_registered_by_hand_is_not_registered_again_when_the_deployment_declares_it() -> None:
+    platform = FakePlatform()
+    platform.devices = [{"kind": "device", "device_id": "/dev/video0", "label": "USB cam", "declared": False}]
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.request({"cmd": "camera.add", "name": "bench cam", "source": {"kind": "device", "device_id": "/dev/video0"}})
+    platform.devices = [{"kind": "device", "device_id": "/dev/video0", "label": "USB cam", "declared": True}]
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        cameras = engine.cameras.values()
+        assert [(camera.name, camera.declared) for camera in cameras] == [("bench cam", False)], "one device became two cameras"
+        await engine.request({"cmd": "camera.remove", "id": cameras[0].id})
+
+
 async def test_two_adds_of_one_stream_at_once_register_one_camera(monkeypatch) -> None:
     platform = FakePlatform()
     opening = platform.open_camera

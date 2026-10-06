@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
+import re
+import socket
+import string
 from typing import Any
 from urllib.parse import urlsplit
 
 from .bounds import clamp
+from .urls import DEFAULT_PORTS
 
 _WEBRTC_SCHEMES = ("webrtc", "whep", "wheps", "whip", "whips")
 _WHEP_SCHEMES = ("whep", "wheps")
 _WEBRTC_PATH_SEGMENTS = frozenset({"webrtc", "whep", "whip"})
+_DEFAULT_PORTS = {**DEFAULT_PORTS, "rtmp": 1935, "rtmps": 443}
+_UNRESERVED = frozenset(string.ascii_letters + string.digits + "-._~")
+_IPV4_SHORTHAND = re.compile(r"(0x[0-9a-f]+|\d+)(\.(0x[0-9a-f]+|\d+)){0,3}")
 
 
 def webrtc_endpoint(url: str) -> bool:
@@ -49,6 +57,35 @@ def tidy_stream_url(url: str) -> str:
     return f"{scheme.lower()}{separator}{rest}" if separator else scheme
 
 
+def _plain_percent_escapes(text: str) -> str:
+    """Writes each escape the way one spelling of it is: a letter or digit decoded, the rest in capitals."""
+
+    def decode(escape: re.Match[str]) -> str:
+        character = chr(int(escape.group()[1:], 16))
+        return character if character in _UNRESERVED else escape.group().upper()
+
+    return re.sub(r"%[0-9a-fA-F]{2}", decode, text)
+
+
+def _plain_host(host: str) -> str:
+    """A host with the spellings that name one machine written one way.
+
+    Args:
+        host: A host as ``urlsplit`` hands it back: lower case, without brackets.
+
+    Returns:
+        It without a trailing dot, a number-form IPv4 address such as ``127.1``
+        written out in full, and an IPv6 address in its compressed form.
+    """
+    host = host.rstrip(".")
+    try:
+        if _IPV4_SHORTHAND.fullmatch(host):
+            return socket.inet_ntoa(socket.inet_aton(host))
+        return ipaddress.IPv6Address(host).compressed
+    except (OSError, ValueError):
+        return host
+
+
 def same_stream(url: str) -> str:
     """The part of a stream address that says which stream it is, for telling two addresses apart.
 
@@ -56,12 +93,26 @@ def same_stream(url: str) -> str:
         url: A stream address.
 
     Returns:
-        It tidied, with its host in lower case and without a fragment, which
-        the camera is never sent.
+        It tidied and written one way however it was typed: without a
+        fragment, credentials, a port that is the scheme's own or a
+        trailing slash, dot or bare ``?``, with its host in lower case and its
+        query parameters in order, and with the escapes that spell a letter or
+        digit decoded. A path keeps its case, since a server tells them apart.
     """
-    scheme, separator, rest = tidy_stream_url(url).partition("#")[0].partition("://")
-    host, slash, path = rest.partition("/")
-    return f"{scheme}{separator}{host.lower()}{slash}{path}"
+    tidy = tidy_stream_url(url).partition("#")[0]
+    parts = urlsplit(tidy)
+    if not parts.netloc:
+        return tidy
+    try:
+        port = parts.port
+    except ValueError:
+        return tidy
+    host = _plain_host(parts.hostname or "")
+    if ":" in host:
+        host = f"[{host}]"
+    shown_port = f":{port}" if port is not None and port != _DEFAULT_PORTS.get(parts.scheme) else ""
+    query = "&".join(sorted(pair for pair in parts.query.split("&") if pair))
+    return _plain_percent_escapes(f"{parts.scheme}://{host}{shown_port}{parts.path.rstrip('/')}{'?' + query if query else ''}")
 
 
 def declared_camera_id(device_id: str) -> str:

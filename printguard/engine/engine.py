@@ -1059,7 +1059,8 @@ class Engine:
         stays registered and offline, and is declared again when the device
         returns. Until then it is the user's to remove. A device that is still
         there but no longer declared is one the deployment stopped managing,
-        and its camera goes.
+        and its camera goes. One registered by hand before it was declared stays
+        the one camera on it, which the user can still remove.
         """
         devices = {
             declared_camera_id(source["device_id"]): source
@@ -1077,6 +1078,9 @@ class Engine:
             known = self.cameras.get(camera_id)
             if known:
                 known.declared = True
+                continue
+            if _address(source) in self._registered_addresses():
+                logger.info("declared device '%s' is already registered by hand", source["label"])
                 continue
             camera = Camera(
                 id=camera_id,
