@@ -264,6 +264,31 @@ async def test_native_delivers_text_without_snapshot(monkeypatch) -> None:
     assert sent == [None], "no snapshot means no attachment"
 
 
+@pytest.mark.parametrize("scheduled", [True, False])
+async def test_native_reports_a_notification_the_system_would_not_schedule(monkeypatch, scheduled: bool) -> None:
+    import logging
+    import sys
+
+    class FakeNotifier:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def request_authorisation(self) -> bool:
+            return True
+
+        async def send(self, **kwargs: Any) -> None:
+            if not scheduled:
+                logging.getLogger("desktop_notifier.backends.macos").warning("Error when scheduling notification: code=1")
+
+    library = SimpleNamespace(Attachment=lambda path: path, DesktopNotifier=FakeNotifier, Icon=lambda path: path)
+    monkeypatch.setitem(sys.modules, "desktop_notifier", library)
+    if scheduled:
+        await NOTIFIERS["native"].send(None, {}, "T", "B", None)
+    else:
+        with pytest.raises(RuntimeError, match="Error when scheduling notification: code=1"):
+            await NOTIFIERS["native"].send(None, {}, "T", "B", None)
+
+
 def test_native_runs_in_the_desktop_app_only() -> None:
     assert NOTIFIERS["native"].desktop_only is True
 

@@ -1698,7 +1698,7 @@ class Engine:
                     await NOTIFIERS[notifier_id].send(self.service_http, config, title, body, image, urgent=urgent)
             except Exception as exc:
                 logger.debug("notifier %s delivery traceback", notifier_id, exc_info=True)
-                self.emit({"event": "error", "message": f"{NOTIFIERS[notifier_id].label} notification failed: {logs.describe(exc)}"})
+                self.emit({"event": "error", "message": f"Sending to {NOTIFIERS[notifier_id].label} failed: {logs.describe(exc)}"})
 
         configured = {nid: config for nid, config in self.settings.get("notifiers", {}).items() if nid in NOTIFIERS}
         await asyncio.gather(*(deliver(notifier_id, config) for notifier_id, config in configured.items()))

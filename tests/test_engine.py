@@ -864,7 +864,7 @@ async def test_a_channel_that_never_answers_holds_up_neither_the_others_nor_the_
         assert monitor_id not in engine.watchdog.responding, "the monitor can never respond to a defect again"
 
     assert ("POST", "http://disc/hook") in platform.http_calls, "the channel behind the silent one was never sent to"
-    assert any(message.startswith("ntfy notification failed") for message in (event["message"] for event in _of(events, "error")))
+    assert any(message.startswith("Sending to ntfy failed") for message in (event["message"] for event in _of(events, "error")))
 
 
 async def test_overlapping_reconciles_open_a_printer_camera_once(monkeypatch) -> None:
