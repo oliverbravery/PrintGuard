@@ -705,6 +705,40 @@ async def test_a_second_answer_to_one_question_is_ignored_but_a_made_up_one_is_n
     assert errors == {3, 4}, "a late duplicate was reported, or a made-up answer was not"
 
 
+def zipped(members: dict[str, str], compression: int = zipfile.ZIP_DEFLATED) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression) as archive:
+        for name, body in members.items():
+            archive.writestr(name, body)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("manifest", ["[]", "null", '"text"', "7"])
+def test_a_manifest_that_is_not_an_object_is_refused_cleanly(manifest: str) -> None:
+    with pytest.raises(ValueError, match="not a JSON object"):
+        engine_plugins.unpack(zipped({"plugin.json": manifest, "plugin.js": "plugin.render(() => null);"}))
+
+
+@pytest.mark.parametrize("compression", [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_a_zip_member_compressed_with_anything_but_deflate_is_refused_unread(compression: int) -> None:
+    """bzip2 and lzma members are inflated whole whatever size they declare."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("plugin.json", json.dumps({"id": "demo", "version": "1.0.0"}))
+        archive.writestr(zipfile.ZipInfo("plugin.js"), "plugin.render(() => null);", compress_type=compression)
+
+    with pytest.raises(ValueError, match="compression"):
+        engine_plugins.unpack(buffer.getvalue())
+
+
+def test_a_stored_or_deflated_zip_still_unpacks() -> None:
+    for compression in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+        manifest, sources, _, _ = engine_plugins.unpack(
+            zipped({"plugin.json": json.dumps({"id": "demo"}), "plugin.js": "plugin.render(() => null);"}, compression)
+        )
+        assert manifest == {"id": "demo"} and sources == {"plugin.js": "plugin.render(() => null);"}
+
+
 @pytest.mark.parametrize("name", ["plugin.js", "worker.js", "panel.html"])
 async def test_an_update_that_cannot_read_a_source_file_fails_rather_than_dropping_it(name: str) -> None:
     sha = "a" * 40
@@ -731,17 +765,3 @@ async def test_an_update_that_cannot_read_a_source_file_fails_rather_than_droppi
         assert sorted(engine.plugins.get("two-halves").sources) == sorted(set(files) - {name})
     finally:
         await engine.stop()
-
-
-def zipped(members: dict[str, str], compression: int = zipfile.ZIP_DEFLATED) -> bytes:
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression) as archive:
-        for name, body in members.items():
-            archive.writestr(name, body)
-    return buffer.getvalue()
-
-
-@pytest.mark.parametrize("manifest", ["[]", "null", '"text"', "7"])
-def test_a_manifest_that_is_not_an_object_is_refused_cleanly(manifest: str) -> None:
-    with pytest.raises(ValueError, match="not a JSON object"):
-        engine_plugins.unpack(zipped({"plugin.json": manifest, "plugin.js": "plugin.render(() => null);"}))

@@ -841,13 +841,16 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
 
     Raises:
         ValueError: If the zip is unreadable, carries no manifest or one that
-            is not an object, or declares more than a plugin may ship, which is
-            refused before it is unpacked.
+            is not an object, uses a compression other than stored or deflate,
+            or declares more than a plugin may ship, which is refused before
+            it is unpacked.
     """
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
         raise ValueError("not a zip archive") from exc
+    if any(info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED) for info in archive.infolist()):
+        raise ValueError("this zip uses a compression PrintGuard does not read")
     entries: dict[str, str] = {}
     for entry in archive.namelist():
         entries.setdefault(entry.rsplit("/", 1)[-1], entry)
