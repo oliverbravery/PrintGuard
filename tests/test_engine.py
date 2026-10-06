@@ -2670,7 +2670,8 @@ async def test_a_reset_time_already_past_on_the_hubs_clock_does_not_retry_every_
         queued = engine.state_event()["reviews"][0]
 
     assert len(attempts) == 1, f"a hub whose clock is ahead of the inbox's asked {len(attempts)} times in half a second"
-    assert queued["code"] == "global_daily" and queued["retry_at"] > time.time() + engine_module.FEEDBACK_RETRY_S - 60
+    assert queued["code"] == "global_daily"
+    assert time.time() + engine_module.FEEDBACK_RECHECK_S - 5 < queued["retry_at"] < time.time() + engine_module.FEEDBACK_RECHECK_S + 5, "a reset time already past was put off for hours"
 
 
 async def test_an_unreachable_inbox_keeps_the_frames_and_tries_again_later(monkeypatch) -> None:

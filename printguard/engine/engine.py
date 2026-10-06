@@ -68,6 +68,7 @@ PLUGIN_TIMEOUT_S = 10.0
 MAX_PLUGIN_BODY = 256 * 1024
 CALL_TTL_S = 30.0
 FEEDBACK_RETRY_S = 6 * 3600.0
+FEEDBACK_RECHECK_S = 60.0
 FEEDBACK_UNSENDABLE = ("details", "not_jpeg", "too_large", "length")
 LOOP_RETRY_S = 1.0
 FAILURE_REPORT_EVERY_S = 30.0
@@ -778,9 +779,10 @@ class Engine:
 
         A print the inbox has no room for stays queued with the reason and a
         time to try again, which is the inbox's own reset time when it gives
-        one, or six hours on when that time has already passed on this hub's
-        clock. A frame that can never be sent, because its file is gone or the
-        inbox rejects that frame itself, is passed over so the rest still go,
+        one, or six hours on when it gives none. A reset time already past on
+        this hub's clock, which one running ahead of the inbox's sees, is tried
+        again in a minute. A frame that can never be sent, because its file is
+        gone or the inbox rejects that frame itself, is passed over so the rest still go,
         and leaves the reviewer's choices so it is not counted as sent. A
         print none of whose frames could be sent goes back to waiting for a
         review and says so, since calling it sent would be wrong.
@@ -820,7 +822,10 @@ class Engine:
             refused = exc if isinstance(exc, feedback.Refused) else None
             submission["code"] = refused.code if refused else "failed"
             reset_at = refused.retry_at if refused else None
-            submission["retry_at"] = reset_at if reset_at and reset_at > time.time() else time.time() + FEEDBACK_RETRY_S
+            if not reset_at:
+                submission["retry_at"] = time.time() + FEEDBACK_RETRY_S
+            else:
+                submission["retry_at"] = reset_at if reset_at > time.time() else time.time() + FEEDBACK_RECHECK_S
             logger.info("feedback for review %s queued: %s", review.id, submission["code"])
             if not refused:
                 self.report_failure("sending a reviewed print", exc)
