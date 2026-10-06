@@ -8,3 +8,4 @@ export const REGISTRATIONS_PER_NETWORK = 3;
 export const EXPIRY_DAYS = 30;
 export const EXPIRY_WARN_DAYS = 7;
 export const DAY_MS = 86_400_000;
+export const RECOUNT_GAP_MS = 3_600_000;

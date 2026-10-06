@@ -22,6 +22,7 @@ import argparse
 import io
 import json
 import os
+from email.errors import HeaderParseError
 from email.header import decode_header, make_header
 from pathlib import Path
 from typing import Any, Iterator
@@ -43,15 +44,19 @@ def sanitised(raw: bytes) -> bytes | None:
 
     Returns:
         A JPEG holding only the decoded pixels, or None if the upload is not an
-        image Pillow can decode.
+        image Pillow can decode or one over ``PIXELS_MAX`` pixels.
     """
     try:
         image = Image.open(io.BytesIO(raw))
+        if image.width * image.height > PIXELS_MAX:
+            return None
         image.load()
     except Exception:
         return None
     clean = io.BytesIO()
-    image.convert("RGB").save(clean, "JPEG", quality=JPEG_QUALITY)
+    pixels = image.convert("RGB")
+    pixels.info.clear()
+    pixels.save(clean, "JPEG", quality=JPEG_QUALITY)
     return clean.getvalue()
 
 
@@ -61,10 +66,10 @@ def labels(metadata: dict[str, str]) -> dict[str, str]:
 
 
 def _decoded(value: str) -> str:
-    """Decodes one label, keeping it as sent when it only looks encoded, such as one naming a charset there isn't."""
+    """Decodes one label, keeping it as sent when it only looks encoded, such as one naming a charset there isn't or holding broken base64."""
     try:
         return str(make_header(decode_header(value)))
-    except (LookupError, ValueError):
+    except (HeaderParseError, LookupError, ValueError):
         return value
 
 
@@ -117,7 +122,6 @@ def main() -> None:
     """Pulls the inbox into the directory named on the command line."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("out", type=Path, help="the dataset directory")
-    Image.MAX_IMAGE_PIXELS = PIXELS_MAX
     client = boto3.client(
         "s3",
         endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.{JURISDICTION}.r2.cloudflarestorage.com",

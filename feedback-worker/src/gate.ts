@@ -13,6 +13,7 @@ export type Reservation = { bytes: number; uploads: number };
 
 const STORED_BYTES = "stored_bytes";
 const BYTES_SINCE_RECOUNT_BEGAN = "bytes_since_recount_began";
+const RECOUNT_BEGAN_AT = "recount_began_at";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -38,33 +39,41 @@ export class Gate extends DurableObject<Env> {
     return null;
   }
 
-  reserve(hub: string, network: string, frame: string, bytes: number, bytesInBucket: number): Refusal | Reservation {
-    const reservedToday = this.count("frame", frame);
-    const bytesBefore = reservedToday || bytesInBucket;
-    const reservation = { bytes: bytes - bytesBefore, uploads: bytesBefore > 0 ? 0 : 1 };
-    if (reservation.uploads > 0) {
-      if (this.count("hub", hub) >= UPLOADS_PER_HUB) return untilTomorrow("hub_daily");
-      if (this.count("network", network) >= UPLOADS_PER_NETWORK) return untilTomorrow("network_daily");
-      if (this.count("everyone", "") >= UPLOADS_PER_DAY) return untilTomorrow("global_daily");
-    }
-    if (this.storedBytes() + reservation.bytes > STORED_BYTES_MAX) return { status: 507, code: "storage_full" };
-    this.tally(hub, network, reservation.bytes, reservation.uploads);
-    this.add("frame", frame, bytes - reservedToday);
-    return reservation;
+  reserve(hub: string, network: string, frame: string, bytes: number): Refusal | Reservation {
+    if (this.count("frame", frame) > 0) return { bytes: 0, uploads: 0 };
+    if (this.count("hub", hub) >= UPLOADS_PER_HUB) return untilTomorrow("hub_daily");
+    if (this.count("network", network) >= UPLOADS_PER_NETWORK) return untilTomorrow("network_daily");
+    if (this.count("everyone", "") >= UPLOADS_PER_DAY) return untilTomorrow("global_daily");
+    if (this.storedBytes() + bytes > STORED_BYTES_MAX) return { status: 507, code: "storage_full" };
+    this.tally(hub, network, bytes, 1);
+    this.add("frame", frame, bytes);
+    return { bytes, uploads: 1 };
   }
 
   release(hub: string, network: string, frame: string, reservation: Reservation): void {
+    if (reservation.uploads === 0 || this.count("stored", frame) > 0) return;
     this.tally(hub, network, -reservation.bytes, -reservation.uploads);
     this.add("frame", frame, -reservation.bytes);
   }
 
-  beginRecount(): void {
+  stored(hub: string, network: string, frame: string, bytes: number): void {
+    if (this.count("frame", frame) === 0) {
+      this.tally(hub, network, bytes, 1);
+      this.add("frame", frame, bytes);
+    }
+    this.add("stored", frame, 1);
+  }
+
+  beginRecount(minimumGapMs: number): boolean {
+    if (Date.now() - (this.ctx.storage.kv.get<number>(RECOUNT_BEGAN_AT) ?? 0) < minimumGapMs) return false;
+    this.ctx.storage.kv.put(RECOUNT_BEGAN_AT, Date.now());
     this.ctx.storage.kv.put(BYTES_SINCE_RECOUNT_BEGAN, 0);
+    this.ctx.storage.sql.exec("DELETE FROM counts WHERE day < ?", today());
+    return true;
   }
 
   recount(listedBytes: number): void {
     this.ctx.storage.kv.put(STORED_BYTES, listedBytes + this.bytesSinceRecountBegan());
-    this.ctx.storage.sql.exec("DELETE FROM counts WHERE day < ?", today());
   }
 
   storedBytes(): number {
