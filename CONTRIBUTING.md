@@ -335,7 +335,7 @@ On merge, the [release workflow](.github/workflows/release.yml):
 4. builds the macOS and Windows desktop apps and attaches them to the draft. The macOS app
    is signed and notarised with the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
    `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` repository secrets, which the
-   **launch** check uses too.
+   **launch** check uses too. The build fails if the notarisation key is empty.
 5. publishes the release, which tags the merge commit. The download links and the in-app
    update check only see a release once it's published, so neither points at a release with
    no desktop builds. If a desktop build fails, re-run it and the release publishes after it.
