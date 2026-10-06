@@ -445,6 +445,12 @@ test("two tabs never issue the same request id", async ({ page, context }) => {
   expect(ids[0]).not.toBe(ids[1]);
 });
 
+test("a camera that cannot open says why in the camera rail", async ({ page }) => {
+  const reason = "no decoder for this stream";
+  await dashboard(page, { engine: engine({ cameras: [camera({ online: false, in_use: false, reason })] }) });
+  await expect(page.getByText(reason)).toBeVisible();
+});
+
 test("a camera that fails to register stops its publisher", async ({ page }) => {
   await dashboard(page);
   await page.evaluate(async () => {

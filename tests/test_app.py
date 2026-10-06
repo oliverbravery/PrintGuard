@@ -904,6 +904,14 @@ async def test_a_print_whose_file_is_gone_is_a_404_that_names_no_path(tmp_path) 
         await engine.stop()
 
 
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity", "1e999", "-1e999"])
+def test_a_number_that_is_not_finite_is_refused_when_a_command_is_read(literal: str) -> None:
+    from printguard.server.app import parse_command
+
+    assert parse_command('{"cmd": "printer.heat", "nozzle": 1.5}') == {"cmd": "printer.heat", "nozzle": 1.5}
+    assert parse_command('{"cmd": "printer.update", "patch": {"config": {"note": %s}}}' % literal) is None
+
+
 async def test_the_engine_socket_refuses_a_command_carrying_nan_and_never_sends_one() -> None:
     from fakes import FakePlatform
 

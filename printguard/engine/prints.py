@@ -10,8 +10,10 @@ since dropping the last one would free the file to start anywhere.
 from __future__ import annotations
 
 import re
+import sys
 from typing import TYPE_CHECKING, Any
 
+from .bounds import clamp
 from .integrations import INTEGRATIONS, IntegrationAdapter
 
 if TYPE_CHECKING:
@@ -75,3 +77,26 @@ def printer_filename(name: str, ext: str) -> str:
     """A name safe on any print service's filesystem, ASCII with no spaces."""
     stem = _UNSAFE.sub("_", name).strip("._")[:FILENAME_MAX].strip("._") or "print"
     return f"{stem}.{ext}"
+
+
+def stored_print(record: dict[str, Any]) -> dict[str, Any]:
+    """Checks a print file's record read back from the state store.
+
+    Args:
+        record: One print as ``PrintFile.persisted`` wrote it.
+
+    Returns:
+        The record, ready to build a ``PrintFile`` from.
+
+    Raises:
+        ValueError: If a value is not of the kind its field takes.
+    """
+    if not all(isinstance(record.get(key), str) for key in ("id", "name", "filename", "ext")):
+        raise ValueError("its id, name, filename and format are text")
+    if not isinstance(record.get("printer_ids"), list) or not all(isinstance(printer_id, str) for printer_id in record["printer_ids"]):
+        raise ValueError("its printers are a list of ids")
+    if not isinstance(record.get("meta"), dict) or not (record.get("thumbnail") is None or isinstance(record["thumbnail"], str)):
+        raise ValueError("its slicer details are an object and its thumbnail a media type")
+    clamp("size", record.get("size"), 0, sys.maxsize)
+    clamp("uploaded", record.get("uploaded"), 0, sys.float_info.max)
+    return record

@@ -183,7 +183,7 @@ class OAuthFlows:
         if status >= 400 or not isinstance(body, dict) or not body.get("access_token"):
             raise RuntimeError(f"{provider['label']} refused the sign-in ({status})")
         try:
-            lifetime = clamp("expires_in", body.get("expires_in") or DEFAULT_LIFETIME_S, 0.0, MAX_LIFETIME_S)
+            lifetime = clamp("expires_in", float(body.get("expires_in") or DEFAULT_LIFETIME_S), 0.0, MAX_LIFETIME_S)
         except (TypeError, ValueError) as exc:
             raise RuntimeError(f"{provider['label']} answered with a sign-in that cannot be read: {exc}") from exc
         held = {ACCESS: str(body["access_token"]), EXPIRES: str(time.time() + lifetime)}

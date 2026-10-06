@@ -289,7 +289,8 @@ and overwrites it each time.
 | Was saved with a UTF-8 byte order mark, as Notepad does | Is read as it is |
 | Won't parse, isn't a JSON object, or has a section of the wrong type, such as `monitors` holding text | Is moved to `state.json.corrupt` and the hub starts empty |
 | The hub's user may not read, or may not move aside when it is damaged | [Stops the hub](troubleshooting.md#starting-up) with a log line naming the data directory and its owner, which has to be that user |
-| Holds a camera, printer, monitor, print, review, plugin or API token record of the wrong shape | Loads without that record, which is logged as `dropping an unreadable record` and gone from the file at the next save |
+| Holds a camera, printer, monitor, print, review, plugin or API token record of the wrong shape | Loads without that record, which is logged and shown as a startup warning, `A saved camera (name) could not be read and was dropped`, and gone from the file at the next save |
+| Holds a setting of the wrong kind, such as `mqtt` set to `null` or a `feedback` that is neither `ask` nor `off` | Loads with that setting at its default, which is logged and shown as a startup warning, `The saved mqtt setting could not be used, so it was reset` |
 
 | Install | Data directory |
 |---|---|

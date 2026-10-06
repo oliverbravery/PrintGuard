@@ -57,17 +57,3 @@ def _glass(raw: Any) -> dict[str, float]:
 CHECKS: dict[str, Callable[[Any], Any]] = {"theme": _name, "themes": _themes, "glass": _glass, "layout": _layout}
 """What each of the dashboard's own settings is checked with, raising ValueError for one of the wrong shape."""
 
-
-def sanitise(settings: dict[str, Any]) -> dict[str, Any]:
-    """Checks the dashboard's own settings are ones every dashboard can render.
-
-    Args:
-        settings: The whole settings record, with any patch already applied.
-
-    Returns:
-        The theme, custom themes, glass and layout to store.
-
-    Raises:
-        ValueError: If one of them has the wrong shape, naming which.
-    """
-    return {key: check(settings[key]) for key, check in CHECKS.items()}

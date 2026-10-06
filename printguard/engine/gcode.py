@@ -476,7 +476,7 @@ def _number(value: str | bytes | float, maximum: float) -> float:
         ValueError: If it is not finite or is over the maximum, which would not
             survive the JSON a browser reads the library from.
     """
-    number = clamp("a number in this file", value, 0.0, sys.float_info.max)
+    number = clamp("a number in this file", float(value), 0.0, sys.float_info.max)
     if number > maximum:
         raise ValueError(f"a number in this file is over {maximum:g}, which is more than a slicer writes")
     return number

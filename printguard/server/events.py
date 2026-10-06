@@ -6,23 +6,14 @@ import asyncio
 import json
 import math
 from collections import deque
-from typing import Any, NoReturn
-
-
-def refuse_non_finite_constant(constant: str) -> NoReturn:
-    """Stops a JSON parse at NaN, Infinity or -Infinity, which are not JSON.
-
-    Args:
-        constant: The bare word the parser met.
-
-    Raises:
-        ValueError: Always.
-    """
-    raise ValueError(f"{constant} is not allowed, send a finite number")
+from typing import Any
 
 
 def parse_json(text: str) -> Any:
-    """Reads JSON the way a browser would, refusing the NaN and Infinity Python also accepts.
+    """Reads JSON the way a browser would, refusing every number that is not finite.
+
+    Python reads NaN, Infinity and a literal such as 1e999 as floats, none of
+    which a browser's parser or ``encode_event`` takes back.
 
     Args:
         text: The JSON document.
@@ -30,7 +21,7 @@ def parse_json(text: str) -> Any:
     Raises:
         ValueError: If it is not JSON or holds a non-finite number.
     """
-    return json.loads(text, parse_constant=refuse_non_finite_constant)
+    return require_finite(json.loads(text))
 
 
 def require_finite(value: Any) -> Any:

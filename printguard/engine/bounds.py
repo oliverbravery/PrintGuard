@@ -13,7 +13,8 @@ def clamp(field: str, value: Any, low: float, high: float) -> float:
     """Holds a number inside a range, refusing one that is not a number at all.
 
     NaN compares false with everything, so ``max`` and ``min`` alone hand back
-    whichever bound they were given first.
+    whichever bound they were given first. A boolean or text is not a number
+    either, though ``float`` would read it as one.
 
     Args:
         field: What the number sets, named in the refusal.
@@ -25,9 +26,15 @@ def clamp(field: str, value: Any, low: float, high: float) -> float:
         The number, moved to the nearer bound when it lies outside them.
 
     Raises:
-        ValueError: If the value is NaN or infinite, or does not read as a number.
+        ValueError: If the value is not a number, or is NaN, infinite or too
+            large to be one.
     """
-    number = float(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a number")
+    try:
+        number = float(value)
+    except OverflowError:
+        number = math.inf
     if not math.isfinite(number):
         raise ValueError(f"{field} must be a finite number, not {number}")
     return max(low, min(high, number))
