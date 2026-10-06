@@ -225,9 +225,15 @@ class WasmPluginRuntime:
         slower than its own event rate would otherwise accumulate calls without
         bound. An event carrying an id is an answer to one plugin's own request,
         so it goes to that plugin rather than to everything listening.
+
+        A state event that closes a command is kept for what workers read but
+        never delivered, since the engine's own tick is what makes ``state`` a
+        once a second event and a plugin's commands must not wake it again.
         """
         if event.get("event") == "state":
             self._state = event
+            if event.get("req_id") is not None:
+                return
         addressed = event.get("id")
         for sandbox in list(self._sandboxes.values()):
             plugin = sandbox.plugin

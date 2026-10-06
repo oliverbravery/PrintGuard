@@ -595,3 +595,39 @@ async def test_a_worker_can_act_on_a_single_inference_over_its_own_threshold(run
         assert [m for m, url in platform.http_calls if "/api/job" in url].count("POST") == 1, "the printer was not paused once"
     finally:
         await engine.stop()
+
+
+STATE_COUNTER = {
+    "id": "counter",
+    "version": "1.0.0",
+    "permissions": ["state:read", "notify"],
+    "reasons": {"state:read": "to count", "notify": "to say so"},
+    "events": ["state"],
+}
+
+
+@pytest.mark.parametrize(
+    "worker",
+    [
+        "plugin.on('state', (event, ctx) => { ctx.store.n = (ctx.store.n || 0) + 1; });",
+        "plugin.on('state', (event, ctx) => { ctx.store.n = (ctx.store.n || 0) + 1; ctx.notify('hi'); });",
+    ],
+)
+async def test_a_workers_own_commands_do_not_wake_its_state_handler(runtime: WasmPluginRuntime, worker: str) -> None:
+    """``state`` is a once a second event, so a handler's own save or effect cannot be what delivers the next one."""
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    effects: list[dict] = []
+    engine.add_sink(lambda event: effects.append(event) if event.get("event") == "plugin_effect" else None)
+    try:
+        await install_and_accept(engine, STATE_COUNTER, worker)
+        await asyncio.sleep(0.2)
+        effects.clear()
+        before = engine.plugins.get("counter").config.get("n", 0)
+        await asyncio.sleep(2.5)
+        ran = engine.plugins.get("counter").config.get("n", 0) - before
+    finally:
+        await engine.stop()
+
+    assert ran <= 4, f"the state handler ran {ran} times in 2.5 s"
+    assert len(effects) <= 4
