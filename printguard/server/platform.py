@@ -27,7 +27,7 @@ import httpx
 import numpy as np
 import websockets
 from av.video.reformatter import VideoReformatter
-from ..engine import vision
+from ..engine import logs, vision
 from ..engine.platform import Frame, Notice
 from ..engine.reports import scrub_url
 from .bambu_camera import open_bambu_jpeg_stream
@@ -66,6 +66,24 @@ V4L2_CAP_DEVICE_CAPS = 0x80000000
 V4L2_CAPABILITY = "16x32s32xIII12x"
 """struct v4l2_capability in full, since the kernel writes all of it, unpacking
 only card, version, capabilities and device_caps."""
+
+CLASSIFY_MAX_PIXELS = 50_000_000
+"""Most pixels a supplied image may have: a few kilobytes of JPEG can describe a
+frame that decodes to gigabytes, and an 8K frame is 33 million."""
+
+STATE_SECTIONS: dict[str, type | tuple[type, ...]] = {
+    "cameras": list,
+    "printers": list,
+    "prints": list,
+    "monitors": list,
+    "reviews": list,
+    "tokens": list,
+    "plugins": list,
+    "settings": dict,
+    "feedback_token": (str, type(None)),
+}
+"""What the engine saves under each top-level key of the state file, so one
+holding anything else is treated as damaged."""
 
 SOCKET_TIMEOUT_S = 10.0
 SOCKET_MAX_BYTES = 256 * 1024
@@ -300,6 +318,26 @@ def _authorize_macos_camera() -> None:
     )
 
 
+def _decodable_video_stream(container: Any) -> Any:
+    """Picks a container's first video stream, refusing one nothing can decode.
+
+    Args:
+        container: An opened PyAV input container.
+
+    Returns:
+        The stream.
+
+    Raises:
+        RuntimeError: If FFmpeg can demux the stream but has no decoder for it,
+            as for an SVG. PyAV then has no codec context, and decoding through
+            that ends the process.
+    """
+    stream = container.streams.video[0]
+    if stream.codec_context is None:
+        raise RuntimeError("no decoder for this stream")
+    return stream
+
+
 class AVSource:
     """Continuously decodes a stream, keeping only the freshest frame.
 
@@ -310,7 +348,9 @@ class AVSource:
     MediaMTX cannot pull itself reach viewers as HLS. A push that fails costs
     the live view alone: capture carries on feeding detection, the failure is
     reported once through ``report``, and the push is tried again every
-    RECONNECT_DELAY_S.
+    RECONNECT_DELAY_S. ``finished`` is called from the reader's thread as it ends,
+    and ``shown_as`` is the address errors name when the source is one the hub
+    made up, such as the MediaMTX path a pulled camera is read from.
 
     A container's declared rate is taken for a network stream or a device and
     measured for a byte stream, whose raw MJPEG demuxer answers 25 whatever the
@@ -331,9 +371,13 @@ class AVSource:
         container_format: str | None = None,
         open_options: tuple[dict[str, str], ...] | None = None,
         report: Callable[[str, bool], None] = lambda message, recovered: None,
+        finished: Callable[[], None] = lambda: None,
+        shown_as: str | None = None,
     ) -> None:
         self._source = source
+        self._shown_as = shown_as if shown_as is not None else scrub_url(source) if isinstance(source, str) else None
         self._report = report
+        self._finished = finished
         self._publish_url = publish_url
         self._container_format = container_format
         self._open_options = open_options or DEVICE_OPEN_OPTIONS
@@ -415,7 +459,7 @@ class AVSource:
             pipe: Any = None
             try:
                 container, pipe = self._open()
-                stream = container.streams.video[0]
+                stream = _decodable_video_stream(container)
                 declared = float(stream.average_rate or 0)
                 if isinstance(self._source, str) and not self.fps and 0 < declared <= 240:
                     self.fps = min(60.0, declared)
@@ -427,21 +471,23 @@ class AVSource:
                 self.last_error = self._without_credentials(str(exc))
                 logger.debug("camera source read failed: %s", self.last_error)
             finally:
+                self.online = False
                 if container is not None:
                     container.close()
                 if push is not None:
                     push.close()
                 if pipe is not None:
                     pipe.close()
-            self.online = False
+                self._latest = self._latest_rgb = None
             if not self._stop and self._demanded():
                 time.sleep(RECONNECT_DELAY_S)
+        self._finished()
 
     def _without_credentials(self, message: str) -> str:
         """Scrubs the source address out of an error PyAV raised, which quotes it in full."""
         if not isinstance(self._source, str):
             return message
-        return message.replace(self._source, scrub_url(self._source))
+        return message.replace(self._source, self._shown_as)
 
     def _decode(self, container: Any, stream: Any, push: H264Push | None) -> None:
         """Keeps the freshest frame until the source ends, transcoding if asked.
@@ -458,6 +504,9 @@ class AVSource:
                 for frame in container.decode(stream):
                     if self._stop or not self._demanded():
                         return
+                    if self._container_format is not None:
+                        # a device's raw frames point into buffers the close unmaps
+                        frame.make_writable()
                     self._seq += 1
                     self._latest = (frame, float(self._seq), time.time())
                     self.online = True
@@ -470,6 +519,8 @@ class AVSource:
                             self.fps = max(1.0, min(60.0, (len(samples) - 1) / (samples[-1] - samples[0])))
                 return
             except av.error.BlockingIOError:
+                if not self._demanded():
+                    return
                 time.sleep(0.02)
 
     def _publish(self, push: H264Push, frame: av.VideoFrame) -> None:
@@ -633,6 +684,17 @@ class DiskFileStore:
         """Where a key's bytes live, for serving straight from disk."""
         return self.root / key
 
+    @staticmethod
+    def _create_private(path: Path) -> Any:
+        """Opens a file for writing that nobody but the hub's user may read.
+
+        Held to the mode before anything is written too, since one left behind
+        by a hub that was killed keeps the mode it had.
+        """
+        path.touch(mode=0o600)
+        path.chmod(0o600)
+        return path.open("wb")
+
     async def store(self, key: str, chunks: AsyncIterable[bytes]) -> int:
         """Writes a file from its chunks, replacing any under that key.
 
@@ -642,7 +704,7 @@ class DiskFileStore:
         partial = self.path(f"{key}.part")
         size = 0
         try:
-            with await asyncio.to_thread(partial.open, "wb") as handle:
+            with await asyncio.to_thread(self._create_private, partial) as handle:
                 async for chunk in chunks:
                     await asyncio.to_thread(handle.write, chunk)
                     size += len(chunk)
@@ -778,6 +840,7 @@ class ServerPlatform:
         container_format: str | None = None
         open_options: tuple[dict[str, str], ...] | None = None
         target: str | Callable[[], Any]
+        shown_as: str | None = None
         if source["kind"] == "device":
             await asyncio.to_thread(_authorize_macos_camera)
             container_format, target = _device_input(source["device_id"])
@@ -791,27 +854,32 @@ class ServerPlatform:
             else:
                 await self.mediamtx.ensure_path(camera_id, pulled, source.get("fingerprint"))
                 target = self.mediamtx.rtsp_url(camera_id)
+                shown_as = scrub_url(source["url"])
         elif source["kind"] == "path":
             target = self.mediamtx.rtsp_url(source["path"])
+            shown_as = source["path"]
         elif source["kind"] == "bambu":
             target = partial(open_bambu_jpeg_stream, source["host"], source["access_code"])
             publish_url = self.mediamtx.rtsp_url(camera_id)
         else:
             raise ValueError(f"cannot open source kind {source['kind']!r}")
         reader = source.get("device_id", camera_id)
-        closing = self._closing.pop(reader, None)
-        if closing is not None and not await asyncio.to_thread(closing.stopped, READER_STOP_WAIT_S):
-            self._closing[reader] = closing
-            raise RuntimeError(
-                "this camera's last capture stopped answering and cannot be closed, so it is not opened again. "
-                "Restart PrintGuard to free it"
-            )
+        closing = self._closing.get(reader)
+        if closing is not None:
+            if not await asyncio.to_thread(closing.stopped, READER_STOP_WAIT_S):
+                raise RuntimeError(
+                    "this camera's last capture stopped answering and cannot be closed, so it is not opened again. "
+                    "Restart PrintGuard to free it"
+                )
+            self._closing.pop(reader, None)
         av_source = AVSource(
             target,
             publish_url,
             container_format,
             open_options,
             lambda message, recovered: self._notices.append(Notice(message, recovered, camera_id)),
+            lambda: self._forget_closed(reader, av_source),
+            shown_as,
         )
         self._sources[camera_id] = av_source
         try:
@@ -840,6 +908,11 @@ class ServerPlatform:
             await asyncio.sleep(0.1)
         source.view()
 
+    def _forget_closed(self, reader: str, source: AVSource) -> None:
+        """Drops a released source once its reader has ended, along with its last frames."""
+        if self._closing.get(reader) is source:
+            del self._closing[reader]
+
     async def release_camera(self, camera_id: str, source: dict[str, Any]) -> None:
         """Closes the source and removes any MediaMTX pull path.
 
@@ -849,8 +922,8 @@ class ServerPlatform:
         """
         av_source = self._sources.pop(camera_id, None)
         if av_source:
-            av_source.close()
             self._closing[source.get("device_id", camera_id)] = av_source
+            av_source.close()
         if source["kind"] == "url":
             try:
                 await self.mediamtx.remove_path(camera_id)
@@ -922,14 +995,18 @@ class ServerPlatform:
 
         try:
             return await asyncio.to_thread(encode)
-        except Exception:
+        except Exception as exc:
+            logger.warning("a frame could not be encoded as JPEG: %s", logs.describe(exc))
             return None
 
     async def decode_jpeg(self, data: bytes) -> np.ndarray | None:
         """Decodes supplied image bytes to an RGB frame with PyAV."""
         def decode() -> np.ndarray:
             with av.open(io.BytesIO(data)) as container:
-                return next(container.decode(video=0)).reformat(format="rgb24", threads=1).to_ndarray()
+                stream = _decodable_video_stream(container)
+                if stream.width * stream.height > CLASSIFY_MAX_PIXELS:
+                    raise ValueError(f"{stream.width}x{stream.height} is more than {CLASSIFY_MAX_PIXELS} pixels")
+                return next(container.decode(stream)).reformat(format="rgb24", threads=1).to_ndarray()
 
         try:
             return await asyncio.to_thread(decode)
@@ -941,15 +1018,22 @@ class ServerPlatform:
 
         Returns:
             The saved state, or nothing on a first boot. A file that will not
-            parse is moved aside before the hub starts empty, so the next save
-            cannot overwrite what is left of it.
+            parse, or parses to something the engine never saves, is moved
+            aside before the hub starts empty, so the next save cannot
+            overwrite what is left of it.
 
         Raises:
             RuntimeError: If the file is there and the hub may not read it,
                 saying whose it has to be.
         """
         try:
-            return json.loads(self._state_path.read_text())
+            state = json.loads(self._state_path.read_text())
+            if not isinstance(state, dict):
+                raise ValueError(f"it holds {type(state).__name__}, not an object")
+            for section, expected in STATE_SECTIONS.items():
+                if section in state and not isinstance(state[section], expected):
+                    raise ValueError(f"its {section} are {type(state[section]).__name__}")
+            return state
         except FileNotFoundError:
             return {}
         except PermissionError as exc:

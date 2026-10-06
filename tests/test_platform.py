@@ -5,13 +5,17 @@ from __future__ import annotations
 import asyncio
 import errno
 import fcntl
+import gc
+import io
 import json
 import logging
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
+import weakref
 from contextlib import ExitStack
 from fractions import Fraction
 from pathlib import Path
@@ -553,8 +557,9 @@ async def test_a_reader_that_cannot_be_stopped_is_not_joined_by_another(monkeypa
                 await platform.open_camera("cam1", camera)
         assert opened == [1]
     finally:
-        release.set()
-    assert platform._closing["cam1"].stopped(5.0)
+        stuck = platform._closing["cam1"]
+    release.set()
+    assert stuck.stopped(5.0)
     release.clear()
     with pytest.raises(RuntimeError, match="no frames from camera cam1"):
         await platform.open_camera("cam1", camera)
@@ -704,3 +709,299 @@ def test_a_state_file_the_hub_may_not_read_says_whose_it_has_to_be(tmp_path, mon
     holder = SimpleNamespace(_state_path=tmp_path / "state.json")
     with pytest.raises(RuntimeError, match="state.json could not be read .*belong to the user the hub runs as"):
         ServerPlatform.load_state(holder)
+
+
+SVG_STREAM = b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="blue"/></svg>'
+
+
+def _run_in_child(code: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+
+
+def test_an_image_ffmpeg_can_demux_but_not_decode_does_not_end_the_hub() -> None:
+    """A 110-byte SVG has a demuxer and no decoder, and decoding it ended the process with SIGBUS."""
+    child = _run_in_child(
+        "import asyncio\n"
+        "from types import SimpleNamespace\n"
+        "from printguard.server.platform import ServerPlatform\n"
+        f"print(asyncio.run(ServerPlatform.decode_jpeg(SimpleNamespace(), {SVG_STREAM!r})))\n"
+    )
+
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.strip() == "None"
+
+
+def test_a_camera_whose_stream_has_no_decoder_goes_offline_with_the_reason(tmp_path: Path) -> None:
+    """A saved camera whose address starts serving an SVG ended the hub at every start."""
+    stream = tmp_path / "webcam.svg"
+    stream.write_bytes(SVG_STREAM)
+    child = _run_in_child(
+        "import time\n"
+        "from printguard.server.platform import AVSource\n"
+        f"source = AVSource({str(stream)!r})\n"
+        "deadline = time.monotonic() + 15\n"
+        "while source.last_error is None and time.monotonic() < deadline:\n"
+        "    time.sleep(0.05)\n"
+        "source.close()\n"
+        "print(source.online, source.last_error)\n"
+    )
+
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.strip() == "False no decoder for this stream"
+
+
+async def test_an_image_with_more_pixels_than_the_cap_is_refused_before_it_is_decoded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 2 MB JPEG of 12000x12000 pixels grew the hub from 386 MB to 1.6 GB."""
+    from PIL import Image
+
+    def jpeg(side: int) -> bytes:
+        encoded = io.BytesIO()
+        Image.new("RGB", (side, side)).save(encoded, "JPEG")
+        return encoded.getvalue()
+
+    decoded: list[int] = []
+    real_reformat = av.VideoFrame.reformat
+    monkeypatch.setattr(av.VideoFrame, "reformat", lambda frame, *a, **k: decoded.append(frame.width) or real_reformat(frame, *a, **k))
+    monkeypatch.setattr("printguard.server.platform.CLASSIFY_MAX_PIXELS", 100 * 100)
+    holder = SimpleNamespace()
+
+    assert await ServerPlatform.decode_jpeg(holder, jpeg(101)) is None
+    assert decoded == []
+    assert (await ServerPlatform.decode_jpeg(holder, jpeg(100))).shape == (100, 100, 3)
+
+
+@pytest.mark.parametrize(
+    "saved",
+    ["null", "[]", '"state"', '{"settings": "x"}', '{"cameras": {"cam1": {}}}', '{"feedback_token": 5}', '{"tokens": null}'],
+)
+def test_a_state_file_of_the_wrong_shape_is_kept_like_one_that_will_not_parse(tmp_path, caplog, saved: str) -> None:
+    """Valid JSON that is not what the engine saves started an empty hub, or ended the start with an AttributeError."""
+    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
+    (tmp_path / "state.json").write_text(saved)
+
+    assert ServerPlatform.load_state(holder) == {}
+    ServerPlatform.save_state(holder, {})
+
+    assert (tmp_path / "state.json.corrupt").read_text() == saved
+    assert [record.levelname for record in caplog.records] == ["ERROR"]
+    assert "state.json.corrupt" in caplog.text
+
+
+def test_a_state_file_of_the_shape_the_engine_saves_is_read(tmp_path) -> None:
+    state = {
+        "cameras": [], "printers": [], "prints": [], "monitors": [], "reviews": [], "tokens": [], "plugins": [],
+        "settings": {}, "feedback_token": None,
+    }
+    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
+    (tmp_path / "state.json").write_text(json.dumps(state))
+
+    assert ServerPlatform.load_state(holder) == state
+
+
+async def test_a_quiet_device_is_released_when_its_camera_stands_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A USB camera answering every read with EAGAIN never reached the standby check, which only ran when a frame arrived."""
+    closed = threading.Event()
+
+    class QuietDevice:
+        streams = SimpleNamespace(video=[SimpleNamespace(average_rate=30, guessed_rate=30, codec_context=object())])
+
+        def decode(self, stream: object) -> object:
+            raise av.error.BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
+
+        def close(self) -> None:
+            closed.set()
+
+    monkeypatch.setattr(av, "open", lambda *args, **kwargs: QuietDevice())
+    monkeypatch.setattr("printguard.server.platform.DEMAND_IDLE_S", 0.1)
+    source = AVSource("/dev/video0", None, "v4l2", ({},))
+    try:
+        await asyncio.sleep(0.3)
+        source.set_monitoring(False)
+        released = await asyncio.to_thread(closed.wait, 3.0)
+    finally:
+        source.close()
+
+    assert released, "a device that delivers nothing was held open after nothing needed it"
+
+
+async def test_a_reader_that_cannot_be_stopped_is_remembered_when_the_wait_for_it_is_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The entry was taken out before the wait, so cancelling the wait forgot it and the next open started a second capture thread."""
+    release = threading.Event()
+    opened: list[int] = []
+
+    def stuck_stream(host: str, access_code: str) -> object:
+        opened.append(1)
+        release.wait()
+        raise OSError("gone")
+
+    monkeypatch.setattr("printguard.server.platform.open_bambu_jpeg_stream", stuck_stream)
+    monkeypatch.setattr("printguard.server.platform.OPEN_WAIT_S", 0.2)
+    monkeypatch.setattr("printguard.server.platform.READER_STOP_WAIT_S", 1.0)
+    platform = object.__new__(ServerPlatform)
+    platform.mediamtx = SimpleNamespace(rtsp_url=lambda path: f"rtsp://127.0.0.1:9/{path}")
+    platform._sources, platform._closing, platform._notices = {}, {}, []
+    camera = {"kind": "bambu", "host": "printer", "access_code": "code"}
+
+    try:
+        with pytest.raises(RuntimeError, match="no frames from camera cam1"):
+            await platform.open_camera("cam1", camera)
+        waiting = asyncio.ensure_future(platform.open_camera("cam1", camera))
+        await asyncio.sleep(0.1)
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        with pytest.raises(RuntimeError, match="stopped answering and cannot be closed"):
+            await platform.open_camera("cam1", camera)
+        assert opened == [1]
+    finally:
+        release.set()
+
+
+async def test_a_released_camera_is_forgotten_once_its_reader_has_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every released camera's source, with its last frames, was kept for the life of the process."""
+    monkeypatch.setattr("printguard.server.platform.open_bambu_jpeg_stream", lambda host, access_code: _MjpegPipe())
+    monkeypatch.setattr("printguard.server.platform.MEASURE_WARMUP_S", 0.1)
+    monkeypatch.setattr("printguard.server.platform.FPS_SAMPLE_S", 0.3)
+    platform = object.__new__(ServerPlatform)
+    platform.mediamtx = SimpleNamespace(rtsp_url=lambda path: f"rtsp://127.0.0.1:9/{path}")
+    platform._sources, platform._closing, platform._notices = {}, {}, []
+    camera = {"kind": "bambu", "host": "printer", "access_code": "code"}
+
+    opened = await platform.open_camera("cam1", camera)
+    assert await opened.grab() is not None
+    reader = weakref.ref(opened)
+    await platform.release_camera("cam1", camera)
+    del opened
+    deadline = time.monotonic() + 5
+    while platform._closing and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
+    gc.collect()
+
+    assert platform._closing == {}
+    assert reader() is None
+
+
+def test_a_closed_device_leaves_no_frame_pointing_into_its_buffers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """V4L2's raw formats decode into buffers the close unmaps, so the kept frame is copied out, then dropped at the close."""
+    writable: list[int] = []
+    online_at_close: list[bool] = []
+    ended, constructed = threading.Event(), threading.Event()
+
+    class Frame:
+        def make_writable(self) -> None:
+            writable.append(1)
+
+    class Device:
+        streams = SimpleNamespace(video=[SimpleNamespace(average_rate=30, guessed_rate=30, codec_context=object())])
+
+        def decode(self, stream: object) -> object:
+            yield Frame()
+            constructed.wait()
+            raise RuntimeError("device unplugged")
+
+        def close(self) -> None:
+            online_at_close.append(source.online)
+            ended.set()
+
+    monkeypatch.setattr(av, "open", lambda *args, **kwargs: Device())
+    monkeypatch.setattr("printguard.server.platform.RECONNECT_DELAY_S", 5.0)
+    source = AVSource("/dev/video0", None, "v4l2", ({},))
+    constructed.set()
+    try:
+        assert ended.wait(5.0)
+        deadline = time.monotonic() + 5
+        while source._latest is not None and time.monotonic() < deadline:
+            time.sleep(0.01)
+    finally:
+        source.close()
+
+    assert writable == [1]
+    assert online_at_close == [False]
+    assert source._latest is None and source._latest_rgb is None
+
+
+def test_a_live_view_listener_that_never_answers_fails_the_push_instead_of_stalling_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MediaMTX accepting on 8554 and never replying held the capture thread inside the first mux for good."""
+    from printguard.server.publish import H264Push
+
+    monkeypatch.setattr("printguard.server.publish.PUSH_TIMEOUT_US", 500_000)
+    outcome: list[BaseException | None] = []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        push = H264Push(f"rtsp://127.0.0.1:{listener.getsockname()[1]}/cam", 15)
+        frame = av.VideoFrame.from_ndarray(np.zeros((240, 320, 3), dtype=np.uint8), format="rgb24")
+
+        def send() -> None:
+            try:
+                push.send(frame)
+                outcome.append(None)
+            except BaseException as exc:
+                outcome.append(exc)
+
+        thread = threading.Thread(target=send, daemon=True)
+        thread.start()
+        thread.join(15)
+
+    assert not thread.is_alive(), "the push never gave up on a listener that does not answer"
+    assert isinstance(outcome[0], av.error.FFmpegError)
+
+
+async def test_a_stored_file_is_readable_only_by_whoever_runs_the_hub(tmp_path: Path) -> None:
+    """Review frames and sliced files sat at 0644 beside a state file at 0600."""
+
+    async def chunks() -> object:
+        yield b"G28\n"
+
+    store = DiskFileStore(tmp_path)
+    leftover = tmp_path / "benchy.gcode.part"
+    leftover.write_bytes(b"from a hub that was killed")
+    leftover.chmod(0o644)
+
+    await store.store("benchy.gcode", chunks())
+    await store.store("frame.jpg", chunks())
+
+    assert oct((tmp_path / "benchy.gcode").stat().st_mode)[-3:] == "600"
+    assert oct((tmp_path / "frame.jpg").stat().st_mode)[-3:] == "600"
+
+
+@pytest.mark.parametrize(
+    ("camera", "named"),
+    [
+        ({"kind": "url", "url": "whep://admin:CAMPASS@camera.invalid/stream"}, "whep://camera.invalid/stream"),
+        ({"kind": "path", "path": "garage"}, "garage"),
+    ],
+)
+async def test_a_camera_pulled_through_the_hub_names_the_address_it_was_given(
+    monkeypatch: pytest.MonkeyPatch, camera: dict[str, str], named: str
+) -> None:
+    """The error named rtsp://localhost:8554/<camera id>, an address the hub made up, and never the user's."""
+
+    async def ensure_path(name: str, pulled: str, fingerprint: object) -> None:
+        return None
+
+    async def remove_path(name: str) -> None:
+        return None
+
+    monkeypatch.setattr("printguard.server.platform.OPEN_WAIT_S", 5.0)
+    platform = object.__new__(ServerPlatform)
+    platform.mediamtx = SimpleNamespace(
+        rtsp_url=lambda path: f"rtsp://127.0.0.1:9/{path}", ensure_path=ensure_path, remove_path=remove_path
+    )
+    platform._sources, platform._closing, platform._notices = {}, {}, []
+
+    with pytest.raises(RuntimeError, match="no frames from camera cam1") as raised:
+        await platform.open_camera("cam1", camera)
+
+    assert named in str(raised.value)
+    assert "127.0.0.1" not in str(raised.value) and "CAMPASS" not in str(raised.value)
+
+
+async def test_a_frame_that_cannot_be_encoded_is_logged_not_swallowed(caplog: pytest.LogCaptureFixture) -> None:
+    """The alert went out with no picture and no word of why."""
+    holder = SimpleNamespace()
+    with caplog.at_level(logging.WARNING, logger="printguard.server.platform"):
+        assert await ServerPlatform.encode_jpeg(holder, np.zeros((240, 320, 4), dtype=np.uint8)) is None
+
+    assert [record.levelname for record in caplog.records] == ["WARNING"]
+    assert "JPEG" in caplog.text
