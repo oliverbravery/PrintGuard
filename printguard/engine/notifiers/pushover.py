@@ -63,15 +63,22 @@ class PushoverNotifier(NotifierAdapter):
         "required": ["api_token", "user_key"],
     }
 
-    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:
-        """Posts the message, as multipart with the snapshot or form-encoded without."""
+    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
+        """Posts the message, as multipart with the snapshot or form-encoded without.
+
+        A notice that is not urgent goes at normal priority, or lower where the
+        configured priority is lower.
+        """
         priority = str(config.get("priority", "")).strip()
+        priority = priority if priority in PRIORITIES else DEFAULT_PRIORITY
+        if not urgent:
+            priority = str(min(int(priority), 0))
         fields = {
             "token": str(config["api_token"]).strip(),
             "user": str(config["user_key"]).strip(),
             "title": title,
             "message": body,
-            "priority": priority if priority in PRIORITIES else DEFAULT_PRIORITY,
+            "priority": priority,
         }
         if image:
             headers, payload = multipart_form(fields, "attachment", "snapshot.jpg", image)

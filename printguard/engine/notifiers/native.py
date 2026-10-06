@@ -38,7 +38,7 @@ class NativeNotifier(NotifierAdapter):
     )
     schema = {"type": "object", "properties": {}}
 
-    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:
+    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
         """Posts the alert to the OS, writing the snapshot to a file it can read."""
         await self._deliver(title, body, self._write_snapshot(image) if image else None)
 

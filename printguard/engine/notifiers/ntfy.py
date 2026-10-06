@@ -53,7 +53,7 @@ class NtfyNotifier(NotifierAdapter):
         "required": ["url"],
     }
 
-    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:
+    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
         """Publishes via PUT with the snapshot as the attachment body, or as text without one.
 
         A self-hosted server takes attachments only once ``attachment-cache-dir``
@@ -63,7 +63,7 @@ class NtfyNotifier(NotifierAdapter):
         Raises:
             RuntimeError: If ntfy rejects the alert, or takes it only without its snapshot.
         """
-        headers = {"Title": _header(title), "Priority": "urgent", "Tags": "rotating_light"}
+        headers = {"Title": _header(title), **({"Priority": "urgent", "Tags": "rotating_light"} if urgent else {})}
         if config.get("token"):
             headers["Authorization"] = f"Bearer {config['token']}"
         url = str(config["url"]).strip()

@@ -1839,3 +1839,54 @@ def test_a_password_holding_a_url_delimiter_is_still_scrubbed(password: str) -> 
     assert scrubbed.startswith("http://") and "octopi.local:5000" in scrubbed
     assert {"olly", password} <= reports.url_secrets(url)
     assert reports.scrub_urls({"base_url": url})["base_url"] == scrubbed
+
+
+async def test_ntfy_marks_only_an_urgent_notice_urgent() -> None:
+    for urgent, expected in ((True, {"Priority": "urgent", "Tags": "rotating_light"}), (False, {})):
+        http = RecordingHttp()
+        await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "T", "B", None, urgent=urgent)
+        assert {name: value for name, value in http.last["headers"].items() if name in ("Priority", "Tags")} == expected
+        http = RecordingHttp()
+        await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "T", "B", JPEG, urgent=urgent)
+        assert {name: value for name, value in http.last["headers"].items() if name in ("Priority", "Tags")} == expected
+
+
+@pytest.mark.parametrize(("configured", "expected"), [("1", "0"), ("0", "0"), ("-1", "-1"), ("-2", "-2")])
+async def test_pushover_sends_a_quiet_notice_at_normal_priority_at_most(configured: str, expected: str) -> None:
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk", "priority": configured}, "T", "B", None, urgent=False)
+    assert http.last["data"].endswith(f"priority={expected}".encode())
+
+
+async def test_pushover_keeps_the_configured_priority_for_an_urgent_notice() -> None:
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk"}, "T", "B", None, urgent=True)
+    assert http.last["data"].endswith(b"priority=1")
+
+
+async def test_telegram_sends_a_quiet_notice_silently() -> None:
+    http = RecordingHttp(body={"ok": True})
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "77"}, "T", "B", None, urgent=False)
+    assert http.last["json"]["disable_notification"] is True
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "77"}, "T", "B", JPEG, urgent=False)
+    assert b'name="disable_notification"\r\n\r\ntrue\r\n' in http.last["data"]
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "77"}, "T", "B", None)
+    assert "disable_notification" not in http.last["json"]
+
+
+async def test_discord_sends_a_quiet_notice_with_notifications_suppressed() -> None:
+    http = RecordingHttp()
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None, urgent=False)
+    assert http.last["json"] == {"content": "**T**\nB", "flags": 4096}
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", JPEG, urgent=False)
+    assert jsonlib.dumps({"content": "**T**\nB", "flags": 4096}).encode() in http.last["data"]
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None)
+    assert http.last["json"] == {"content": "**T**\nB"}
+
+
+async def test_native_takes_urgent_and_ignores_it(monkeypatch) -> None:
+    async def deliver(title: str, body: str, snapshot: Any) -> None:
+        return None
+
+    monkeypatch.setattr(NOTIFIERS["native"], "_deliver", deliver)
+    await NOTIFIERS["native"].send(None, {}, "Title", "Body", None, urgent=False)

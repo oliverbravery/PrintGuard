@@ -31,15 +31,16 @@ class TelegramNotifier(NotifierAdapter):
         "required": ["bot_token", "chat_id"],
     }
 
-    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:
-        """Calls sendPhoto with a multipart upload, or sendMessage without."""
+    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
+        """Calls sendPhoto with a multipart upload, or sendMessage without, silently when not urgent."""
         api = f"https://api.telegram.org/bot{config['bot_token']}"
         text = f"{title}\n{body}"
         if image:
-            headers, payload = multipart_form({"chat_id": str(config["chat_id"]), "caption": text}, "photo", "snapshot.jpg", image)
+            fields = {"chat_id": str(config["chat_id"]), "caption": text, **({} if urgent else {"disable_notification": "true"})}
+            headers, payload = multipart_form(fields, "photo", "snapshot.jpg", image)
             status, resp = await http("POST", f"{api}/sendPhoto", headers=headers, data=payload, timeout=15.0)
         else:
-            status, resp = await http("POST", f"{api}/sendMessage", json={"chat_id": config["chat_id"], "text": text}, timeout=15.0)
+            status, resp = await http("POST", f"{api}/sendMessage", json={"chat_id": config["chat_id"], "text": text, **({} if urgent else {"disable_notification": True})}, timeout=15.0)
         if status >= 400:
             detail = resp.get("description") if isinstance(resp, dict) else None
             raise RuntimeError(f"Telegram rejected the alert: {detail or f'HTTP {status}'}")
