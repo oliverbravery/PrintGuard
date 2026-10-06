@@ -157,11 +157,8 @@ def edges() -> list[str]:
 def test_the_dashboard_calls_local_exactly_what_the_engine_does() -> None:
     """The consent sheet sorts a plugin's addresses with its own copy of the rules.
 
-    Those rules are the ones Python settled on in 3.12.4, so an older patch
-    release, which draws a few of the lines elsewhere, has nothing to compare.
+    Those rules are the ones Python settled on in 3.12.4, the oldest it runs on.
     """
-    if not hasattr(ipaddress._IPv4Constants, "_private_networks_exceptions"):
-        pytest.skip("this Python predates the address rules the dashboard mirrors")
     hosts = edges()
     script = "import('./src/urls.ts').then((urls) => console.log(JSON.stringify(JSON.parse(process.argv[1]).map(urls.isLocalAddress))))"
     answered = subprocess.run(
