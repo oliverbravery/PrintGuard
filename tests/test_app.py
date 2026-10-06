@@ -670,22 +670,67 @@ async def test_a_starting_hub_clears_the_files_no_print_or_review_names(tmp_path
     await engine.start()
     try:
         record = await prints.receive_print(engine, prints.PrintUpload(filename="benchy.gcode"), as_chunks(PRUSA))
-        engine.reviews.restore([{"id": "r1", "monitor_id": "m1", "started": 0.0, "spacing_s": 5.0, "frames": [{"id": "f1"}]}])
-        kept = {record.file_key, record.thumbnail_key, frame_key("r1", "f1")}
-        for name in (frame_key("r1", "f1"), frame_key("r1", "gone"), "killed.gcode.part", "norecord.gcode", "norecord.thumb"):
+        engine.reviews.restore([{"id": "a1", "monitor_id": "m1", "started": 0.0, "spacing_s": 5.0, "frames": [{"id": "f1"}]}])
+        kept = {record.file_key, record.thumbnail_key, frame_key("a1", "f1"), "notes.txt", "my print.gcode", "0badf00d.stl", "@eaDir"}
+        orphans = {frame_key("a1", "f2"), "deadbeef.gcode.part", "0badf00d.gcode", "0badf00d.thumb"}
+        for name in {frame_key("a1", "f1")} | orphans | kept - {record.file_key, record.thumbnail_key, "@eaDir"}:
             (tmp_path / name).write_bytes(b"x")
         (tmp_path / "@eaDir").mkdir()
-        kept.add("@eaDir")
 
         await prints.sweep_orphans(engine, unnamed=False)
-        assert {path.name for path in tmp_path.iterdir()} == kept | {frame_key("r1", "gone"), "norecord.gcode", "norecord.thumb"}, (
+        assert {path.name for path in tmp_path.iterdir()} == kept | orphans - {"deadbeef.gcode.part"}, (
             "a damaged state file may yet be put back, and it may name these"
         )
         await prints.sweep_orphans(engine, unnamed=True)
-        assert {path.name for path in tmp_path.iterdir()} == kept
+        assert {path.name for path in tmp_path.iterdir()} == kept, "only names the hub generates are deleted"
     finally:
         await engine.stop()
 
+
+async def test_a_starting_hub_keeps_the_files_of_a_record_it_could_not_read(tmp_path) -> None:
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+    from printguard.server import prints
+    from printguard.server.platform import DiskFileStore
+
+    platform = FakePlatform()
+    platform.files = DiskFileStore(tmp_path)
+    platform.state = {"prints": [{"id": "abcd1234", "filename": "benchy.gcode"}]}
+    for name in ("abcd1234.gcode", "abcd1234.thumb", "0badf00d.gcode"):
+        (tmp_path / name).write_bytes(b"x")
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        await prints.sweep_orphans(engine, unnamed=True)
+        assert sorted(path.name for path in tmp_path.iterdir()) == ["abcd1234.gcode", "abcd1234.thumb"]
+        assert "its file was kept" in engine.startup_warnings[0]
+    finally:
+        await engine.stop()
+
+
+async def test_an_upload_with_an_absurd_estimate_is_refused_and_leaves_nothing(tmp_path) -> None:
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+    from printguard.server.platform import DiskFileStore
+
+    platform = FakePlatform()
+    platform.files = DiskFileStore(tmp_path)
+    engine = Engine(platform)
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    crafted = b"; estimated printing time (normal mode) = " + b"9" * 4300 + b"d\nG28\nM104 S210\n"
+    octet = {"Content-Type": "application/octet-stream", "origin": "http://test"}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            upload = await client.post("/api/prints?filename=evil.gcode", content=crafted, headers=octet)
+            assert upload.status_code == 400 and "a number in this file" in upload.json()["detail"]
+            assert (await client.post("/api/prints/inspect?ext=gcode", content=crafted, headers=octet)).status_code == 400
+        assert not engine.prints.values() and not list(tmp_path.iterdir())
+    finally:
+        await engine.stop()
 
 
 def test_a_host_that_cannot_be_read_is_not_trusted() -> None:

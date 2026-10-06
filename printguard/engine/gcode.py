@@ -18,6 +18,7 @@ import struct
 import sys
 import zipfile
 import zlib
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Iterator
 
@@ -25,12 +26,19 @@ from .bounds import HEATER_MAX, clamp
 
 HEAD_BYTES = 4 * 1024 * 1024
 TAIL_BYTES = 512 * 1024
-MAX_MEMBER_BYTES = 512 * 1024 * 1024
-"""How large one file inside a 3mf may unpack to, which is what an upload itself is capped at."""
+MAX_UNPACKED_BYTES = 512 * 1024 * 1024
+"""How large the files inside a 3mf may unpack to between them, which is what an upload itself is capped at."""
 MAX_BLOCK_BYTES = 16 * 1024 * 1024
 """How much the metadata and thumbnail blocks of one binary gcode file may inflate to between them."""
 REWRITE_BYTES = 1024 * 1024
 """About how much text gcode is rewritten at a time, so memory and the interpreter lock are held a piece at a time."""
+TEXT_MAX = 80
+"""The longest slicer or printer name kept, as long as a print's own name."""
+MAX_SECONDS = 365 * 86400
+MAX_GRAMS = 1_000_000.0
+MAX_MILLIMETRES = 1_000_000_000.0
+MAX_DEGREES = 1000.0
+"""The most a file's estimates and temperatures may say, far above any print and low enough to encode."""
 PLATE_GCODE = re.compile(r"^Metadata/plate_(\d+)\.gcode$")
 PLATE_GCODE_NAME = "Metadata/plate_{plate}.gcode"
 PLATE_IMAGE = "Metadata/plate_{plate}.png"
@@ -113,12 +121,12 @@ def inspect(data: bytes, ext: str) -> Sliced:
     if not data:
         raise ValueError("this file is empty")
     if ext == "3mf":
-        plate, gcode = plate_gcode(data)
-        sliced = _text(gcode)
-        if sliced.thumbnail is None:
-            image = _member(data, PLATE_IMAGE.format(plate=plate))
-            if image:
-                sliced.thumbnail, sliced.thumbnail_type = image, IMAGE_TYPES["png"]
+        with _archive(data) as archive:
+            plate, gcode = _plate(archive)
+            sliced = _text(gcode)
+            image_name = PLATE_IMAGE.format(plate=plate)
+            if sliced.thumbnail is None and image_name in archive.namelist():
+                sliced.thumbnail, sliced.thumbnail_type = _unpacked(archive, image_name), IMAGE_TYPES["png"]
         return sliced
     if ext == "bgcode":
         return _binary(data)
@@ -175,62 +183,74 @@ def plate_gcode(data: bytes) -> tuple[int, bytes]:
         The plate number and its gcode.
 
     Raises:
-        ValueError: If the file is not a zip or holds no plate gcode, which is
-            what an unsliced project looks like, or the plate is too large.
+        ValueError: If the file is not a zip, is damaged or holds no plate gcode,
+            which is what an unsliced project looks like, or unpacks to too much.
+    """
+    with _archive(data) as archive:
+        return _plate(archive)
+
+
+@contextmanager
+def _archive(data: bytes) -> Iterator[zipfile.ZipFile]:
+    """Opens a 3mf, refusing one PrintGuard cannot read or that would unpack past the cap.
+
+    Every file inside is checked as the archive opens, so a rule holds for the
+    whole 3mf and not only for the files PrintGuard reads. No more is inflated
+    than the size the archive declares, since a file that understates it would
+    otherwise be unpacked whole before it was refused.
+
+    Raises:
+        ValueError: If it is not a zip, is damaged, holds a file stored with a
+            compression other than deflate, which cannot be bounded, or declares
+            more than the cap between its files.
     """
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            plates = sorted((int(m.group(1)), name) for name in archive.namelist() if (m := PLATE_GCODE.match(name)))
-            if not plates:
-                raise ValueError("this 3mf has not been sliced, export it from Bambu Studio or Orca with the gcode included")
-            plate, name = plates[0]
-            return plate, _unpacked(archive, name)
-    except zipfile.BadZipFile as exc:
-        raise ValueError("this 3mf is not a zip archive") from exc
+            for info in archive.infolist():
+                if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    raise ValueError(f"{info.filename} in this 3mf uses a compression PrintGuard does not read")
+            if sum(info.file_size for info in archive.infolist()) > MAX_UNPACKED_BYTES:
+                raise ValueError(f"this 3mf unpacks to more than {MAX_UNPACKED_BYTES // 1024 // 1024} MB")
+            yield archive
+    except (zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError, EOFError) as exc:
+        raise ValueError("this 3mf is not a zip archive or is cut short or damaged") from exc
+
+
+def _plate(archive: zipfile.ZipFile) -> tuple[int, bytes]:
+    plates = sorted((int(m.group(1)), name) for name in archive.namelist() if (m := PLATE_GCODE.match(name)))
+    if not plates:
+        raise ValueError("this 3mf has not been sliced, export it from Bambu Studio or Orca with the gcode included")
+    plate, name = plates[0]
+    return plate, _unpacked(archive, name)
 
 
 def _unpacked(archive: zipfile.ZipFile, name: str) -> bytes:
-    """Reads one file out of a 3mf, refusing one that would unpack past the cap.
-
-    No more is inflated than the size the archive declares, since a file that
-    understates it would otherwise be unpacked whole before it was refused.
+    """Reads one file out of a 3mf, no further than its declared size.
 
     Raises:
-        ValueError: If the file declares more than the cap or is stored
-            with a compression other than deflate, which cannot be bounded.
         zipfile.BadZipFile: If it holds more than it declares.
     """
-    info = archive.getinfo(name)
-    if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
-        raise ValueError(f"{name} in this 3mf uses a compression PrintGuard does not read")
-    declared = info.file_size
-    if declared > MAX_MEMBER_BYTES:
-        raise ValueError(f"{name} in this 3mf unpacks to more than {MAX_MEMBER_BYTES // 1024 // 1024} MB")
     with archive.open(name) as member:
-        return member.read(declared)
+        return member.read(archive.getinfo(name).file_size)
 
 
 def _replace_plate(data: bytes, rewrite: Callable[[bytes], bytes]) -> bytes:
     """Rewrites a 3mf's first sliced plate and the checksum Bambu Studio keeps beside it."""
-    plate, gcode = plate_gcode(data)
-    name = PLATE_GCODE_NAME.format(plate=plate)
-    gcode = rewrite(gcode)
     output = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(data)) as source, zipfile.ZipFile(output, "w") as target:
-        for member in source.infolist():
-            if member.filename == name:
-                body = gcode
-            elif member.filename == f"{name}.md5":
-                body = hashlib.md5(gcode).hexdigest().upper().encode()
-            else:
-                body = _unpacked(source, member.filename)
-            target.writestr(member, body)
+    with _archive(data) as source:
+        plate, gcode = _plate(source)
+        name = PLATE_GCODE_NAME.format(plate=plate)
+        gcode = rewrite(gcode)
+        with zipfile.ZipFile(output, "w") as target:
+            for member in source.infolist():
+                if member.filename == name:
+                    body = gcode
+                elif member.filename == f"{name}.md5":
+                    body = hashlib.md5(gcode).hexdigest().upper().encode()
+                else:
+                    body = _unpacked(source, member.filename)
+                target.writestr(member, body)
     return output.getvalue()
-
-
-def _member(data: bytes, name: str) -> bytes | None:
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        return _unpacked(archive, name) if name in archive.namelist() else None
 
 
 def _text(data: bytes) -> Sliced:
@@ -278,7 +298,7 @@ def _scan(data: bytes) -> tuple[dict[str, str], str | None, list[tuple[int, str,
                 collecting = (int(begin.group(2)) * int(begin.group(3)), media, [])
             continue
         if slicer is None and (named := _SLICER.match(line)):
-            slicer = f"{named.group(1)} {named.group(2)}"
+            slicer = _label(f"{named.group(1)} {named.group(2)}")
             continue
         for segment in line[1:].split(";"):
             key, separator, value = segment.partition("=") if "=" in segment else segment.partition(":")
@@ -308,13 +328,13 @@ def _temperature(data: bytes, found: dict[str, str], heater: str) -> tuple[float
         falls back to the first non-zero set-point.
     """
     reached = _setpoints(data[:HEAD_BYTES], heater)
-    listed = [temperatures for key in _TEMPERATURE_KEYS[heater] if any(temperatures := [_number(value) for value in _NUMBER.findall(found.get(key, ""))])]
+    listed = [temperatures for key in _TEMPERATURE_KEYS[heater] if any(temperatures := [_number(value, MAX_DEGREES) for value in _NUMBER.findall(found.get(key, ""))])]
     if not listed:
         return next((value for value in reached if value), None), None
     first_layer = listed[0]
     heated = [filament for filament, degrees in enumerate(first_layer) if degrees]
     usage = next((used for key in _USAGE_KEYS if len(used := _NUMBER.findall(found.get(key, ""))) == len(first_layer)), [])
-    printing = [filament for filament in heated if usage and _number(usage[filament])] or heated
+    printing = [filament for filament in heated if usage and _number(usage[filament], MAX_MILLIMETRES)] or heated
     filament = next((printing[index] for value in reached for index, candidate in enumerate(printing) if first_layer[candidate] == value), printing[0])
     return first_layer[filament], {temperatures[filament] for temperatures in listed if filament < len(temperatures) and temperatures[filament]}
 
@@ -328,7 +348,7 @@ def _setpoints(data: bytes, heater: str) -> Iterator[float]:
     """
     commands = [(match.start(), match[2]) for match in _SETPOINT[heater].finditer(b"\n" + data)]
     macros = [(line.start() + param.start(), param[2]) for line in _MACRO.finditer(data) for param in _MACRO_PARAM[heater].finditer(line[0])]
-    return (_number(value) for _, value in sorted(commands + macros))
+    return (_number(value, MAX_DEGREES) for _, value in sorted(commands + macros))
 
 
 def _whole_lines(data: bytes) -> Iterator[bytes]:
@@ -422,11 +442,11 @@ def _sliced(
     found: dict[str, str], slicer: str | None, thumbnails: list[tuple[int, str, bytes]], temperatures: dict[str, float | None]
 ) -> Sliced:
     meta = {
-        "slicer": slicer or _first(found, _SLICER_KEYS, str),
+        "slicer": slicer or _first(found, _SLICER_KEYS, _label),
         "time_s": _first(found, _TIME_KEYS, _seconds),
         "filament_g": _first(found, _GRAMS_KEYS, _grams),
         "filament_mm": _first(found, _LENGTH_KEYS, _millimetres),
-        "printer_model": _first(found, _PRINTER_KEYS, lambda value: value.strip('"')),
+        "printer_model": _first(found, _PRINTER_KEYS, _label),
         "nozzle": temperatures.get("nozzle"),
         "bed": temperatures.get("bed"),
     }
@@ -445,31 +465,42 @@ def _first(found: dict[str, str], keys: tuple[str, ...], parse: Callable[[str], 
     return None
 
 
-def _number(value: str | bytes | float) -> float:
+def _number(value: str | bytes | float, maximum: float) -> float:
     """Reads a number a file wrote, or a total of them.
 
+    Args:
+        value: The number as the file wrote it.
+        maximum: The most a file may say for what the number measures.
+
     Raises:
-        ValueError: If it is too large to be one, which would not survive the
-            JSON a browser reads the library from.
+        ValueError: If it is not finite or is over the maximum, which would not
+            survive the JSON a browser reads the library from.
     """
-    return clamp("a number in this file", value, 0.0, sys.float_info.max)
+    number = clamp("a number in this file", value, 0.0, sys.float_info.max)
+    if number > maximum:
+        raise ValueError(f"a number in this file is over {maximum:g}, which is more than a slicer writes")
+    return number
+
+
+def _label(value: str) -> str:
+    return " ".join(value.strip('"').split())[:TEXT_MAX]
 
 
 def _seconds(value: str) -> int | None:
     units = {"d": 86400, "h": 3600, "m": 60, "s": 1}
     parts = _DURATION.findall(value)
     if parts:
-        return sum(int(amount) * units[unit] for amount, unit in parts)
-    return int(_number(value)) if _NUMBER.fullmatch(value.strip()) else None
+        return int(_number(sum(float(amount) * units[unit] for amount, unit in parts), MAX_SECONDS))
+    return int(_number(value, MAX_SECONDS)) if _NUMBER.fullmatch(value.strip()) else None
 
 
 def _grams(value: str) -> float | None:
     amounts = _NUMBER.findall(value)
-    return round(_number(sum(float(amount) for amount in amounts)), 2) if amounts else None
+    return round(_number(sum(float(amount) for amount in amounts), MAX_GRAMS), 2) if amounts else None
 
 
 def _millimetres(value: str) -> float | None:
     scale = {None: 1.0, "mm": 1.0, "cm": 10.0, "m": 1000.0}
     amounts = _LENGTH.findall(value)
     total = sum(float(amount) * scale[unit or None] for amount, unit in amounts)
-    return round(_number(total), 1) if amounts else None
+    return round(_number(total, MAX_MILLIMETRES), 1) if amounts else None

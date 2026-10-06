@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -19,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from ..engine import gcode
 from ..engine.engine import Engine
-from ..engine.prints import extension
+from ..engine.prints import FORMATS, extension
 from ..engine.registry import PrintFile
 from ..engine.reviews import frame_key
 from .platform import DiskFileStore
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 MAX_PRINT_BYTES = 512 * 1024 * 1024
 MAX_SAMPLE_BYTES = gcode.HEAD_BYTES + gcode.TAIL_BYTES + 1
 ADD_TIMEOUT_S = 120.0
+GENERATED_NAME = re.compile(rf"^(?:[0-9a-f]{{8}}\.(?:{'|'.join(FORMATS)}|thumb)|review-[0-9a-f]+-[0-9a-f]+\.jpg)$")
 THUMBNAIL_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
 
@@ -130,8 +132,11 @@ async def sweep_orphans(engine: Engine, *, unnamed: bool) -> None:
     A hub killed part way through an upload leaves a ``.part``, and a file
     whose record was never saved stays for good, since only a record's removal
     deletes a file. This runs once when the hub starts, before anything can be
-    uploaded. A folder is left alone, since a NAS keeps its own beside the
-    files, such as Synology's ``@eaDir``.
+    uploaded. Only names the hub generates are touched, so a folder is left
+    alone, since a NAS keeps its own beside the files, such as Synology's
+    ``@eaDir``, and so is a file a user dropped in. The files of a record the
+    start could not read are kept too, since the record is gone but the file
+    may be all that is left of the print.
 
     Args:
         engine: The hub's engine, with its state loaded.
@@ -144,7 +149,10 @@ async def sweep_orphans(engine: Engine, *, unnamed: bool) -> None:
     orphans = [
         path
         for path in store_of(engine).root.iterdir()
-        if path.is_file() and (path.suffix == ".part" or (unnamed and path.name not in named))
+        if path.is_file()
+        and GENERATED_NAME.match(path.name.removesuffix(".part"))
+        and (path.suffix == ".part" or (unnamed and path.name not in named))
+        and not any(dropped in path.name for dropped in engine.dropped_ids)
     ]
     for path in orphans:
         path.unlink()
