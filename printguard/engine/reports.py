@@ -29,7 +29,7 @@ from platform import platform as host_os
 from typing import TYPE_CHECKING, Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
-from . import logs
+from . import logs, plugins
 from .adapters import HttpFn
 from .integrations import INTEGRATIONS
 from .notifiers import NOTIFIERS
@@ -45,6 +45,7 @@ REDACTED = "[redacted]"
 MESSAGE_MAX = 4096
 TIMEOUT_S = 20.0
 SOURCE_KEYS = ("kind", "path", "device_id", "label")
+DIAGNOSTIC_SETTINGS = ("update_check", "inference_runtime", "fault_grace_s", "feedback")
 MESSAGE_STANDALONE_BELOW = 8
 PATH_TOKEN = re.compile(r"[A-Za-z0-9]{16,}|[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
 """A path segment that reads as a key rather than a name: one long and
@@ -82,11 +83,13 @@ def _parse_credentialed(url: str) -> tuple[str, SplitResult]:
     return userinfo, urlsplit(f"{scheme}{separator}{rest}")
 
 
-def scrub_url(url: str) -> str:
+def scrub_url(url: str, *, private_path: bool = False) -> str:
     """Removes the credentials a URL can carry.
 
     Args:
         url: A camera, printer or notifier address as the user entered it.
+        private_path: Whether the whole path is a secret, as in a private
+            catalogue's address, instead of only the segments that read as a key.
 
     Returns:
         The address without its ``user:pass@`` part, with every query value
@@ -99,16 +102,21 @@ def scrub_url(url: str) -> str:
         parts = _parse_credentialed(url)[1]
     except ValueError:
         return REDACTED
-    path = "/".join(REDACTED if PATH_TOKEN.fullmatch(segment) else segment for segment in parts.path.split("/"))
+    if private_path:
+        path = f"/{REDACTED}" if parts.path.strip("/") else parts.path
+    else:
+        path = "/".join(REDACTED if PATH_TOKEN.fullmatch(segment) else segment for segment in parts.path.split("/"))
     query = "&".join(f"{pair.partition('=')[0]}={REDACTED}" if "=" in pair else pair for pair in parts.query.split("&"))
     return urlunsplit(parts._replace(path=path, query=query))
 
 
-def url_secrets(url: str) -> set[str]:
+def url_secrets(url: str, *, private_path: bool = False) -> set[str]:
     """The credential values a URL carries, for scrubbing freeform text.
 
     Args:
         url: A camera, printer or notifier address as the user entered it.
+        private_path: Whether the whole path is a secret, so it and each of its
+            segments are taken.
 
     Returns:
         Its username and password, each path segment that reads as a key, and
@@ -120,11 +128,25 @@ def url_secrets(url: str) -> set[str]:
     except ValueError:
         return {url}
     secrets = {part for part in userinfo.partition(":")[::2] if part}
-    secrets |= {segment for segment in parts.path.split("/") if PATH_TOKEN.fullmatch(segment)}
+    segments = {segment for segment in parts.path.split("/") if segment}
+    if private_path:
+        secrets |= segments | {parts.path}
+    else:
+        secrets |= {segment for segment in segments if PATH_TOKEN.fullmatch(segment)}
     for pair in parts.query.split("&"):
         if pair.partition("=")[2]:
             secrets.add(pair)
     return secrets
+
+
+def scrub_catalogue_url(url: str) -> str:
+    """Scrubs a plugin catalogue's address, whose whole path is a secret unless it is the default."""
+    return scrub_url(url, private_path=url != plugins.CATALOGUE_URL)
+
+
+def catalogue_secrets(url: str) -> set[str]:
+    """The credential values in a plugin catalogue's address, for scrubbing freeform text."""
+    return url_secrets(url, private_path=url != plugins.CATALOGUE_URL)
 
 
 def is_url(value: Any) -> bool:
@@ -132,18 +154,21 @@ def is_url(value: Any) -> bool:
     return isinstance(value, str) and "://" in value
 
 
-def require_splittable(values: Iterable[Any]) -> None:
-    """Refuses an address that could not be scrubbed once it was stored.
+def require_storable(values: Iterable[Any]) -> None:
+    """Refuses an address that could not be scrubbed once it was stored, or that is one already scrubbed.
 
     Args:
         values: The values of a camera source or an adapter config.
 
     Raises:
-        ValueError: If one is a URL that cannot be split. The message leaves the
-            address out, since it may carry a password.
+        ValueError: If one is a URL that cannot be split, or holds the marker a
+            scrubbed address shows in place of a hidden part. The message leaves
+            the address out, since it may carry a password.
     """
     for value in values:
         if is_url(value):
+            if REDACTED in value:
+                raise ValueError("the address has a hidden part, type it in full")
             try:
                 urlsplit(value)
             except ValueError as exc:
@@ -204,20 +229,20 @@ def collect_secrets(engine: "Engine") -> set[str]:
     substitutes them into requests it makes, so a failure carrying the URL back
     can put one in a log line.
     """
-    secrets: set[str] = set()
+    printer_keys = {key for adapter in INTEGRATIONS.values() for key in adapter.secret_keys()}
+    notifier_keys = {key for adapter in NOTIFIERS.values() for key in adapter.secret_keys()}
+    secrets: set[str] = set(engine.platform.secrets)
     for printer in engine.printers.values():
-        adapter = INTEGRATIONS.get(printer.provider)
-        secrets |= config_secrets(printer.config, adapter.secret_keys() if adapter else set(printer.config))
+        secrets |= config_secrets(printer.config, printer_keys if printer.provider in INTEGRATIONS else set(printer.config))
     for provider, config in engine.settings.get("notifiers", {}).items():
-        adapter = NOTIFIERS.get(provider)
-        secrets |= config_secrets(config, adapter.secret_keys() if adapter else set(config))
+        secrets |= config_secrets(config, notifier_keys if provider in NOTIFIERS else set(config))
     if (engine.settings.get("mqtt") or {}).get("password"):
         secrets.add(str(engine.settings["mqtt"]["password"]))
     for camera in engine.cameras.values():
         if camera.source.get("access_code"):
             secrets.add(str(camera.source["access_code"]))
         secrets |= url_secrets(str(camera.source.get("url") or ""))
-    secrets |= url_secrets(str(engine.settings.get("catalogue_url") or ""))
+    secrets |= catalogue_secrets(str(engine.settings.get("catalogue_url") or ""))
     for plugin in engine.plugins.values():
         secrets |= {value for value in plugin.secrets.values() if value}
     return secrets
@@ -251,18 +276,18 @@ def diagnostics(engine: "Engine") -> dict[str, Any]:
 
     Carries the configuration shapes, scheduler stats and recent
     alert/warning/error events a maintainer needs to reproduce a bug,
-    with every credential redacted: notifier and printer configs lose
-    their schema-marked secret fields (unknown adapters lose the whole
-    config), the MQTT password goes, camera sources are reduced to their
-    non-sensitive shape and API tokens are omitted entirely.
+    with every credential redacted: printer configs lose their
+    schema-marked secret fields (unknown adapters lose the whole config),
+    camera sources are reduced to their non-sensitive shape and API tokens
+    are omitted entirely. Of the settings only the ones that change how the
+    hub behaves go, with the names of the alert channels and whether a
+    broker and a custom catalogue are set. A printer's state goes without
+    the name of the file it is printing.
     """
-    settings = {**engine.settings, "catalogue_url": scrub_url(str(engine.settings["catalogue_url"]))}
-    settings["notifiers"] = {
-        provider: redact(config, NOTIFIERS[provider].secret_keys()) if provider in NOTIFIERS else REDACTED
-        for provider, config in settings.get("notifiers", {}).items()
-    }
-    if settings.get("mqtt"):
-        settings["mqtt"] = redact(settings["mqtt"], {"password"})
+    settings = {key: engine.settings[key] for key in DIAGNOSTIC_SETTINGS}
+    settings["notifiers"] = sorted(engine.settings["notifiers"])
+    settings["mqtt"] = bool(engine.settings["mqtt"].get("host"))
+    settings["custom_catalogue"] = engine.settings["catalogue_url"] != plugins.CATALOGUE_URL
     return {
         "version": engine.platform.version,
         "deployment": deployment(engine.platform),
@@ -273,6 +298,7 @@ def diagnostics(engine: "Engine") -> dict[str, Any]:
         "printers": [
             {
                 **printer.public(),
+                "device_state": {key: value for key, value in (printer.device_state or {}).items() if key != "job"} or None,
                 "config": redact(printer.config, INTEGRATIONS[printer.provider].secret_keys())
                 if printer.provider in INTEGRATIONS
                 else REDACTED,

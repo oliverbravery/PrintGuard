@@ -108,6 +108,7 @@ class FakePlatform:
     update_repo = "o/r"
     update_asset: str | None = None
     plugin_runtime = None
+    secrets: frozenset[str] = frozenset()
 
     def __init__(self, infer_s: float = 0.05, failing: bool = False) -> None:
         self.infer_s = infer_s

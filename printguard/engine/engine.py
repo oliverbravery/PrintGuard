@@ -374,8 +374,9 @@ class Engine:
             logger.log(level, "%s %s", event["event"], {k: v for k, v in event.items() if k not in ("event", "req_id")})
         self._broadcast(event)
 
-    def _scrubbed(self, text: str) -> str:
-        return reports.scrub(text, reports.collect_secrets(self), standalone_below=reports.MESSAGE_STANDALONE_BELOW)
+    def _scrubbed(self, text: str, typed: set[str] | frozenset[str] = frozenset()) -> str:
+        """Removes every stored secret from a message, and the ``typed`` credentials a test was sent that are not stored."""
+        return reports.scrub(text, reports.collect_secrets(self) | typed, standalone_below=reports.MESSAGE_STANDALONE_BELOW)
 
     def _broadcast(self, event: dict[str, Any]) -> None:
         """Delivers an event to recent history and every transport sink."""
@@ -1000,7 +1001,7 @@ class Engine:
         source = dict(message["source"])
         if source.get("url"):
             source["url"] = tidy_stream_url(str(source["url"]))
-        reports.require_splittable(source.values())
+        reports.require_storable(source.values())
         address = _address(source)
         if address and address in self._registered_addresses() | self._adding:
             raise ValueError("that camera is already registered")
@@ -1220,7 +1221,7 @@ class Engine:
         printer_id = uuid.uuid4().hex[:8]
         record = sanitise_printer(printer_id, message.get("printer", {}))
         INTEGRATIONS[record["provider"]].require(record["config"])
-        reports.require_splittable(record["config"].values())
+        reports.require_storable(record["config"].values())
         printer = Printer(id=printer_id, name=record["name"], provider=record["provider"], config=record["config"])
         self.printers.add(printer)
         self._schedule_reconcile(printer)
@@ -1229,7 +1230,8 @@ class Engine:
         """Applies a patch to a printer, forgetting the status read through connection details it no longer has.
 
         A secret the patch's config leaves out or blank keeps its stored
-        value, unless the provider changed, and one sent as null is cleared.
+        value, and one sent as null is cleared. A change of provider keeps
+        nothing of the old config, so the patch has to carry the new one whole.
 
         The new details are in place before anything is awaited, so an answer
         from the service it had is dropped instead of landing on the new one.
@@ -1238,11 +1240,14 @@ class Engine:
         if not existing:
             raise LookupError(f"no printer {message['id']}")
         patch = dict(message.get("patch", {}))
-        if "config" in patch and patch.get("provider", existing.provider) == existing.provider:
-            patch["config"] = credentials.keep_stored(patch["config"], existing.config, INTEGRATIONS[existing.provider].secret_keys())
-        record = sanitise_printer(existing.id, patch, existing.persisted())
+        base = existing.persisted()
+        if patch.get("provider", existing.provider) != existing.provider:
+            base["config"] = {}
+        elif "config" in patch:
+            patch["config"] = credentials.keep_stored(patch["config"], existing.config, INTEGRATIONS[existing.provider].secret_fields())
+        record = sanitise_printer(existing.id, patch, base)
         INTEGRATIONS[record["provider"]].require(record["config"])
-        reports.require_splittable(record["config"].values())
+        reports.require_storable(record["config"].values())
         was = (existing.provider, existing.config)
         existing.name = record["name"]
         existing.provider = record["provider"]
@@ -1310,16 +1315,17 @@ class Engine:
         if not adapter:
             raise RuntimeError(f"unknown provider {message.get('provider')!r}")
         config = message.get("config", {})
+        typed = reports.config_secrets(config, adapter.secret_keys())
         stored = self.printers.get(message.get("id") or "")
         try:
             if stored and stored.provider == adapter.id:
-                config = credentials.keep_stored(config, stored.config, adapter.secret_keys())
+                config = credentials.keep_stored(config, stored.config, adapter.secret_fields())
             adapter.require(config)
             state = await adapter.fetch_state(self.platform.http, config)
             ok = state.status.value not in ("offline", "unknown")
-            self.emit({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
+            self._reply({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
         except Exception as exc:
-            self.emit({"event": "printer_test", "ok": False, "status": None, "error": self._scrubbed(logs.describe(exc)), "req_id": message.get("req_id")})
+            self._reply({"event": "printer_test", "ok": False, "status": None, "error": self._scrubbed(logs.describe(exc), typed), "req_id": message.get("req_id")})
         finally:
             used = (adapter.connection_key(p.config) for p in self.printers.values() if p.provider == adapter.id)
             if adapter.connection_key(config) not in used:
@@ -1407,8 +1413,8 @@ class Engine:
         Raises:
             PermissionError: If the file is tagged for other printers.
             RuntimeError: If the service cannot print the format, the printer
-                is not idle or is already being sent a file, or the service
-                rejects the file.
+                is not idle or is already being sent a file, the file has gone
+                from the store, or the service rejects the file.
         """
         record = self.prints.get(message["id"])
         if not record:
@@ -1429,7 +1435,10 @@ class Engine:
             state = await adapter.fetch_state(self.platform.http, printer.config)
             if state.status is not DeviceStatus.IDLE:
                 raise RuntimeError(f"{printer.name} is {state.status.value}, so {record.name} was not sent")
-            data = await self.platform.files.read(record.file_key)
+            try:
+                data = await self.platform.files.read(record.file_key)
+            except FileNotFoundError:
+                raise RuntimeError(f"print {record.id!r} has lost its file") from None
             await adapter.print_file(self.platform.http, printer.config, printer_filename(record.name, record.ext), data)
         except asyncio.CancelledError:
             self.emit({"event": "error", "message": f"Sending {record.name} to {printer.name} was interrupted, so check whether it started", "req_id": message.get("req_id")})
@@ -1546,14 +1555,15 @@ class Engine:
         adapter = NOTIFIERS.get(message.get("provider") or "")
         if not adapter:
             raise RuntimeError(f"unknown notifier {message.get('provider')!r}")
+        typed = reports.config_secrets(message.get("config", {}), adapter.secret_keys())
         try:
-            config = credentials.keep_stored(message.get("config", {}), self.settings["notifiers"].get(adapter.id, {}), adapter.secret_keys())
+            config = credentials.keep_stored(message.get("config", {}), self.settings["notifiers"].get(adapter.id, {}), adapter.secret_fields())
             adapter.require(config)
             picture = await self.platform.encode_jpeg(np.zeros(TEST_PICTURE_SHAPE, np.uint8))
             await adapter.send(self.platform.http, config, "PrintGuard test", "Notifications are working.", picture)
-            self.emit({"event": "notify_test", "provider": adapter.id, "ok": True, "req_id": message.get("req_id")})
+            self._reply({"event": "notify_test", "provider": adapter.id, "ok": True, "req_id": message.get("req_id")})
         except Exception as exc:
-            self.emit({"event": "notify_test", "provider": adapter.id, "ok": False, "error": self._scrubbed(logs.describe(exc)), "req_id": message.get("req_id")})
+            self._reply({"event": "notify_test", "provider": adapter.id, "ok": False, "error": self._scrubbed(logs.describe(exc), typed), "req_id": message.get("req_id")})
 
     async def _cmd_settings_update(self, message: dict[str, Any]) -> None:
         """Applies a settings patch, switching the inference runtime first if it changes.
@@ -1575,13 +1585,13 @@ class Engine:
                 raise ValueError(f"unknown notifier {provider!r}")
         if "notifiers" in patch:
             patch["notifiers"] = {
-                provider: credentials.keep_stored(config, self.settings["notifiers"].get(provider, {}), NOTIFIERS[provider].secret_keys())
+                provider: credentials.keep_stored(config, self.settings["notifiers"].get(provider, {}), NOTIFIERS[provider].secret_fields())
                 for provider, config in patch["notifiers"].items()
             }
         if "mqtt" in patch:
             patch["mqtt"] = credentials.keep_stored(patch["mqtt"], self.settings["mqtt"], credentials.MQTT_SECRETS)
         if "catalogue_url" in patch:
-            patch["catalogue_url"] = credentials.keep_url(patch["catalogue_url"], self.settings["catalogue_url"])
+            patch["catalogue_url"] = credentials.keep_url(patch["catalogue_url"], self.settings["catalogue_url"], reports.scrub_catalogue_url)
         settings = {**self.settings, **patch}
         if settings["inference_runtime"] not in ("auto", "litert", "onnx"):
             raise ValueError("inference runtime must be auto, litert or onnx")
@@ -1595,7 +1605,7 @@ class Engine:
         if not isinstance(settings["catalogue_url"], str):
             raise ValueError("catalogue_url is an address")
         for provider, config in patch.get("notifiers", {}).items():
-            reports.require_splittable(config.values())
+            reports.require_storable(config.values())
             NOTIFIERS[provider].require(config)
         settings["fault_grace_s"] = clamp_grace(settings["fault_grace_s"])
         settings["preheat"] = sanitise_presets(settings["preheat"])

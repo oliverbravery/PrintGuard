@@ -68,6 +68,13 @@ async def test_model_inference(tmp_path: Path, runtime: str) -> None:
     assert platform.workers > 0
 
 
+async def test_a_login_in_the_video_servers_addresses_is_one_the_engine_scrubs(tmp_path: Path) -> None:
+    platform = ServerPlatform(Path("models"), tmp_path, "http://pg:API-PASS-31@mediamtx:9997", "rtsp://hub:RTSP-PASS-77@mediamtx:8554")
+    await platform.close()
+
+    assert {"pg", "API-PASS-31", "hub", "RTSP-PASS-77"} <= platform.secrets
+
+
 async def test_runtimes_agree_on_classification() -> None:
     """Both runtimes carry the same model, so they must classify a frame the same way.
 
