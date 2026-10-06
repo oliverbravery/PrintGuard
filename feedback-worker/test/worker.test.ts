@@ -180,6 +180,19 @@ describe("uploading a frame", () => {
     expect((await env.FRAMES.list({ prefix: token.split(".")[0] })).objects).toEqual([]);
   });
 
+  it("turns away a label holding a control character", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const labels = ["printer", "provider", "version"];
+    const refusals = [];
+    for (const [index, name] of labels.entries()) {
+      for (const bad of ["a\u0000b", "a\r\nx-amz-meta-label: failure", "tab\there"]) {
+        refusals.push(await upload(token, "203.0.113.15", frameId(8000 + index), JPEG, { [name]: bad }));
+      }
+    }
+    expect(refusals.map((response) => response.status)).toEqual(Array(refusals.length).fill(400));
+    expect((await upload(token, "203.0.113.15", frameId(8010), JPEG, { printer: "Prusa MK4 \u00e9\u4e2d" })).status).toBe(201);
+  });
+
   it("stops one hub at its daily limit and leaves other hubs alone", async () => {
     const token = await issueToken(env.TOKEN_SECRET);
     for (let sent = 0; sent < UPLOADS_PER_HUB; sent += 1) {

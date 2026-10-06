@@ -6,6 +6,7 @@ import { hubOf, issueToken, keyed } from "./token";
 export { Gate };
 
 const frameId = z.string().regex(/^[0-9a-f]{12}$/);
+const label = (maxLength: number) => z.string().max(maxLength).regex(/^\P{Cc}*$/u);
 
 const FrameDetails = z.object({
   print: frameId,
@@ -15,9 +16,9 @@ const FrameDetails = z.object({
   score: z.number().min(0).max(1),
   threshold: z.number().min(0).max(1),
   ts: z.number(),
-  version: z.string().max(20),
-  provider: z.string().max(40),
-  printer: z.string().max(80),
+  version: label(20),
+  provider: label(40),
+  printer: label(80),
 });
 
 const refuse = ({ status, code, retryAt }: Refusal) =>
