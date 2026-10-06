@@ -218,6 +218,16 @@ async def test_a_test_alert_makes_the_request_a_defect_alert_does() -> None:
     assert next(e for e in events if e.get("event") == "notify_test")["ok"]
 
 
+async def test_a_printer_and_a_notifier_never_follow_a_redirect() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _events):
+        await engine.handle({"cmd": "printer.test", **OCTOPRINT, "req_id": 1})
+        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {"url": "http://ntfy/topic"}, "req_id": 2})
+    asked = [request for request in platform.http_requests if request["url"].startswith(("http://ntfy/", "http://op/"))]
+    assert {request["url"].split("/")[2] for request in asked} == {"ntfy", "op"}
+    assert all(request["redirects"] == "refuse" for request in asked)
+
+
 async def test_slow_printer_action_does_not_pause_inference(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "ACT_ATTEMPTS", 1)
     monkeypatch.setattr(watchdog, "ACT_RETRY_S", 0.01)

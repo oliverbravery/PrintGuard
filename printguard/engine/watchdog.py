@@ -183,7 +183,7 @@ class Watchdog:
         turn = next(self._reads)
         failure: Exception | None = None
         try:
-            snapshot = (await adapter.fetch_state(self._engine.platform.http, printer.config)).public()
+            snapshot = (await adapter.fetch_state(self._engine.service_http, printer.config)).public()
         except Exception as exc:
             if after_command:
                 logger.warning("printer '%s' took a command but could not be read back: %s", printer.name, logs.describe(exc))
@@ -561,7 +561,7 @@ class Watchdog:
             async with asyncio.timeout(deadline):
                 for _ in range(ACT_ATTEMPTS):
                     try:
-                        await adapter.send(self._engine.platform.http, printer.config, action)
+                        await adapter.send(self._engine.service_http, printer.config, action)
                         return wanted
                     except Exception as exc:
                         last_error = exc

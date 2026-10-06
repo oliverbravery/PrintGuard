@@ -374,6 +374,10 @@ class Engine:
             logger.log(level, "%s %s", event["event"], {k: v for k, v in event.items() if k not in ("event", "req_id")})
         self._broadcast(event)
 
+    async def service_http(self, method: str, url: str, **request: Any) -> tuple[int, Any]:
+        """Makes a printer's or a notifier's request, which fails on a redirect and never follows one."""
+        return await self.platform.http(method, url, redirects="refuse", **request)
+
     def _scrubbed(self, text: str) -> str:
         return reports.scrub(text, reports.collect_secrets(self), standalone_below=reports.MESSAGE_STANDALONE_BELOW)
 
@@ -1162,7 +1166,7 @@ class Engine:
             if not adapter or not unchanged():
                 return
             try:
-                exposed = await adapter.cameras(self.platform.http, printer.config)
+                exposed = await adapter.cameras(self.service_http, printer.config)
             except Exception as exc:
                 self.emit({"event": "warning", "message": f"Could not list the cameras of printer '{printer.name}': {logs.describe(exc)}"})
                 return
@@ -1276,7 +1280,7 @@ class Engine:
         adapter = INTEGRATIONS.get(printer.provider)
         if not adapter:
             raise RuntimeError("no printer service linked")
-        await adapter.send(self.platform.http, printer.config, DeviceAction(message["action"]))
+        await adapter.send(self.service_http, printer.config, DeviceAction(message["action"]))
         await self.watchdog.refresh(printer, after_command=True)
 
     async def _cmd_printer_heat(self, message: dict[str, Any]) -> None:
@@ -1295,7 +1299,7 @@ class Engine:
             raise ValueError("a heat command names a nozzle or bed target")
         adapter = INTEGRATIONS[printer.provider]
         for heater, target in targets.items():
-            await adapter.heat(self.platform.http, printer.config, heater, target)
+            await adapter.heat(self.service_http, printer.config, heater, target)
         await self.watchdog.refresh(printer, after_command=True)
 
     async def _cmd_printer_test(self, message: dict[str, Any]) -> None:
@@ -1315,7 +1319,7 @@ class Engine:
             if stored and stored.provider == adapter.id:
                 config = credentials.keep_stored(config, stored.config, adapter.secret_keys())
             adapter.require(config)
-            state = await adapter.fetch_state(self.platform.http, config)
+            state = await adapter.fetch_state(self.service_http, config)
             ok = state.status.value not in ("offline", "unknown")
             self.emit({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
         except Exception as exc:
@@ -1426,11 +1430,11 @@ class Engine:
             raise RuntimeError(f"{printer.name} is already being sent a file, so {record.name} was not sent")
         self._starting.add(printer.id)
         try:
-            state = await adapter.fetch_state(self.platform.http, printer.config)
+            state = await adapter.fetch_state(self.service_http, printer.config)
             if state.status is not DeviceStatus.IDLE:
                 raise RuntimeError(f"{printer.name} is {state.status.value}, so {record.name} was not sent")
             data = await self.platform.files.read(record.file_key)
-            await adapter.print_file(self.platform.http, printer.config, printer_filename(record.name, record.ext), data)
+            await adapter.print_file(self.service_http, printer.config, printer_filename(record.name, record.ext), data)
         except asyncio.CancelledError:
             self.emit({"event": "error", "message": f"Sending {record.name} to {printer.name} was interrupted, so check whether it started", "req_id": message.get("req_id")})
             raise
@@ -1550,7 +1554,7 @@ class Engine:
             config = credentials.keep_stored(message.get("config", {}), self.settings["notifiers"].get(adapter.id, {}), adapter.secret_keys())
             adapter.require(config)
             picture = await self.platform.encode_jpeg(np.zeros(TEST_PICTURE_SHAPE, np.uint8))
-            await adapter.send(self.platform.http, config, "PrintGuard test", "Notifications are working.", picture)
+            await adapter.send(self.service_http, config, "PrintGuard test", "Notifications are working.", picture)
             self.emit({"event": "notify_test", "provider": adapter.id, "ok": True, "req_id": message.get("req_id")})
         except Exception as exc:
             self.emit({"event": "notify_test", "provider": adapter.id, "ok": False, "error": self._scrubbed(logs.describe(exc)), "req_id": message.get("req_id")})
@@ -1691,7 +1695,7 @@ class Engine:
         async def deliver(notifier_id: str, config: dict[str, Any]) -> None:
             try:
                 async with asyncio.timeout(NOTIFY_TIMEOUT_S):
-                    await NOTIFIERS[notifier_id].send(self.platform.http, config, title, body, image, urgent=urgent)
+                    await NOTIFIERS[notifier_id].send(self.service_http, config, title, body, image, urgent=urgent)
             except Exception as exc:
                 logger.debug("notifier %s delivery traceback", notifier_id, exc_info=True)
                 self.emit({"event": "error", "message": f"{NOTIFIERS[notifier_id].label} notification failed: {logs.describe(exc)}"})
@@ -1925,7 +1929,7 @@ class Engine:
             json=filled["json"],
             binary=message.get("binary") is True,
             timeout=PLUGIN_TIMEOUT_S,
-            follow_redirects=False,
+            redirects="answer",
             max_bytes=MAX_PLUGIN_BODY,
         )
         self.emit(
