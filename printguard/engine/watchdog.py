@@ -21,7 +21,6 @@ from . import logs
 from .bounds import clamp
 from .integrations import INTEGRATIONS, DeviceAction, DeviceState, DeviceStatus
 from .monitors import monitor_watching
-from .notifiers import NOTIFIERS
 from .platform import Frame
 from .reviews import ENDED_STATUSES
 
@@ -157,7 +156,7 @@ class Watchdog:
         if await self._read(printer, after_command):
             self.follow_printers()
         if printer.reported_status != reported:
-            self._engine.save()
+            self._save()
 
     async def _read(self, printer: "Printer", after_command: bool = False) -> bool:
         """Reads a printer's state, taking a service that cannot be reached as offline.
@@ -221,7 +220,24 @@ class Watchdog:
             if printer and printer.reported_status in ENDED_STATUSES:
                 self._cooldown_until.pop(monitor["id"], None)
         if self._engine.settle_reviews():
+            self._save()
+
+    def _save(self) -> None:
+        """Saves the state without letting a failed write interrupt the alert path, reporting it instead."""
+        try:
             self._engine.save()
+        except OSError as exc:
+            self._engine.report_failure("saving the state", exc)
+
+    def forget(self, monitor_id: str) -> None:
+        """Drops everything the watchdog holds for a monitor that was removed."""
+        for held in (self._streaks, self._cooldown_until, self._online_since, self._coverage):
+            held.pop(monitor_id, None)
+        for fault in ("device", "offline", "stalled", "unstable"):
+            self._forget(f"{fault}:{monitor_id}")
+            self._flaps.pop(f"{fault}:{monitor_id}", None)
+        for outcome in [outcome for outcome in self._last_notified if outcome[0] == monitor_id]:
+            del self._last_notified[outcome]
 
     def drop_streak(self, monitor_id: str) -> None:
         """Forgets the defect frames a monitor has counted towards an alert."""
@@ -504,8 +520,8 @@ class Watchdog:
         printer was answering. A monitor stood down meanwhile keeps it, since
         the pause that stood it down is the one being announced, while one
         switched off meanwhile had its alert cleared and stays clear. A command the
-        printer did not take is tried again after ACT_FAILED_COOLDOWN_S at the
-        latest, whatever the monitor's own cooldown.
+        printer did not take is tried again after ACT_FAILED_COOLDOWN_S, whatever
+        the monitor's own cooldown.
         """
         mid = monitor["id"]
         try:
@@ -514,7 +530,7 @@ class Watchdog:
             if monitor is None:
                 return
             if action == "failed":
-                self._cooldown_until[mid] = min(self._cooldown_until.get(mid, 0.0), time.monotonic() + ACT_FAILED_COOLDOWN_S)
+                self._cooldown_until[mid] = time.monotonic() + ACT_FAILED_COOLDOWN_S
             alert = {"score": round(score, 3), "action": action, "ts": time.time()}
             if self._streaks.get(mid) != 0 and monitor["enabled"]:
                 monitor["alert"] = alert
@@ -532,7 +548,7 @@ class Watchdog:
         finally:
             self.responding.discard(mid)
             if self._engine.settle_reviews():
-                self._engine.save()
+                self._save()
 
     async def _act(self, monitor: dict[str, Any]) -> str:
         """Sends a monitor's defect action to its printer, trying again when it is not taken.
@@ -584,7 +600,7 @@ class Watchdog:
         if not monitor.get("notify"):
             return
         outcome = (monitor["id"], action)
-        if time.monotonic() - self._last_notified.get(outcome, 0.0) < NOTIFY_COOLDOWN_S:
+        if time.monotonic() - self._last_notified.get(outcome, float("-inf")) < NOTIFY_COOLDOWN_S:
             return
         self._last_notified[outcome] = time.monotonic()
         title = f"PrintGuard: {monitor['name']} defect ({score * 100:.0f}%)"

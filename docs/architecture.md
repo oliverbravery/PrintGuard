@@ -396,11 +396,12 @@ sequenceDiagram
 applies the camera's settings in a fixed order, so rotation, then the crop in the rotated
 frame's coordinates, then brightness, contrast and sharpness. `preprocess` resizes the
 shortest edge to 256 with Pillow's bilinear filter, converts to luminance, centre-crops to 224
-and normalises. `classify` picks the nearest class prototype by Euclidean distance.
+and normalises. `classify` picks the nearest class prototype by Euclidean distance, and an embedding that
+isn't finite raises, so the scheduler reports an inference error for it instead of scoring the frame.
 
 `defect_score` maps the two distances to `0.5 * (1 + tanh((success² - failure²) / 2))`, the
 softmax over negative squared distances the model was trained with. 0.5 is the decision
-boundary, and a frame that could not be classified scores 0.5.
+boundary, and a result with no distances scores 0.5.
 
 `_on_result` runs once for each inference and handles every monitor on that camera that is
 watching. Each score goes into [`engine/history.py`](../printguard/engine/history.py), which is held in memory and
@@ -424,7 +425,8 @@ each, 30 s, so one that never answers cannot hold the response open.
 
 Everything that writes to disk comes after the part that protects the print. A frame is
 scored and passed to the watchdog before it is considered for the review, and an alert is
-pushed before its frame is stored, so a full data volume raises an `error` event and costs
+pushed before its frame is stored, and the watchdog reports a state write that fails instead of
+letting it interrupt the response, so a full data volume raises an `error` event and costs
 only the kept frames.
 
 ### Print reviews
@@ -573,7 +575,7 @@ The timings are constants at the top of [`engine/watchdog.py`](../printguard/eng
 | `RESTART_AFTER_S`, `RESTART_COOLDOWN_S` | 15 s, 60 s | How long a camera faults before it is re-attached, and the gap between attempts on one camera |
 | `ACT_ATTEMPTS`, `ACT_RETRY_S` | 3, 1 s | Printer action attempts and their spacing |
 | `ACT_DEADLINE_S` | 45 s | How long those attempts get in all, on top of what the adapter allows a slow action |
-| `ACT_FAILED_COOLDOWN_S` | 30 s | The longest a failed printer action waits before the next defect frame tries it again |
+| `ACT_FAILED_COOLDOWN_S` | 30 s | How long a failed printer action waits before the next defect frame tries it again, whatever the monitor's cooldown |
 | `NOTIFY_COOLDOWN_S` | 30 s | The floor between defect notifications with the same outcome for one monitor |
 
 A camera with no source at all is retried by the engine's ticker every 10 s.

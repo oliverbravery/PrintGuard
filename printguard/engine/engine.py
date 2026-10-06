@@ -1480,6 +1480,7 @@ class Engine:
         if self.monitors.pop(message["id"], None) is None:
             raise LookupError(f"no monitor {message['id']}")
         logger.info("monitor %s removed", message["id"])
+        self.watchdog.forget(message["id"])
         self.history.pop(message["id"], None)
         await self.reviews.forget(message["id"])
         self._results.pop(message["id"], None)
