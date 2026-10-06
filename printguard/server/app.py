@@ -50,13 +50,17 @@ REPO_ROOT = PACKAGE_ROOT.parent
 HLS_WARN_THROTTLE_S = 30.0
 REVALIDATE_CACHE_CONTROL = "no-cache"
 ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+DASHBOARD_FRAME_HEADERS = {"X-Frame-Options": "SAMEORIGIN", "Content-Security-Policy": "frame-ancestors 'self'"}
+WEB_SCHEMES = ("http", "https")
+SOCKET_SCHEMES = {"ws": "http", "wss": "https"}
 
 
 class WebStaticFiles(StaticFiles):
-    """Serves the Vite shell with update-safe caching."""
+    """Serves the Vite shell with update-safe caching, framed only by the hub's own pages."""
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         response = await super().get_response(path, scope)
+        response.headers.update(DASHBOARD_FRAME_HEADERS)
         response.headers["Cache-Control"] = ASSET_CACHE_CONTROL if path.startswith("assets/") else REVALIDATE_CACHE_CONTROL
         return response
 
@@ -72,9 +76,12 @@ def normalised_origin(origin: str) -> str:
         the scheme's own and a trailing dot on the host dropped.
 
     Raises:
-        ValueError: If the origin has a port that is not a number or a malformed address.
+        ValueError: If the origin is not http or https, has a port that is not a
+            number or is a malformed address.
     """
     parts = urlsplit(origin.strip())
+    if parts.scheme not in WEB_SCHEMES:
+        raise ValueError(f"the scheme {parts.scheme or 'is missing, it'} must be http or https")
     host = (parts.hostname or "").removesuffix(".")
     port = "" if parts.port in (None, DEFAULT_PORTS.get(parts.scheme)) else f":{parts.port}"
     return f"{parts.scheme}://{f'[{host}]' if ':' in host else host}{port}"
@@ -102,13 +109,12 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str], *, required: b
     origin = connection.headers.get("origin")
     if not origin:
         return not required
+    host = (connection.headers.get("x-forwarded-host") or connection.headers["host"]).split(",")[0].strip()
+    scheme = connection.headers.get("x-forwarded-proto", "").split(",")[0].strip() or SOCKET_SCHEMES.get(connection.url.scheme, connection.url.scheme)
     try:
-        if normalised_origin(origin) in allowed:
-            return True
+        return normalised_origin(origin) in allowed | {normalised_origin(f"{scheme}://{host}")}
     except ValueError:
         return False
-    host = connection.headers.get("x-forwarded-host") or connection.headers.get("host")
-    return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
 
 
 def parse_command(text: str | None) -> dict[str, Any] | None:
@@ -136,7 +142,8 @@ def host_trusted(host: str, named: set[str]) -> bool:
     a name under a suffix public DNS never answers for, so those need no setup.
 
     Args:
-        host: A Host or X-Forwarded-Host value, with or without a port.
+        host: A Host or X-Forwarded-Host value, with or without a port. One that
+            names no host is not trusted.
         named: The hostnames listed in ``PRINTGUARD_ORIGINS``.
 
     Returns:
@@ -145,6 +152,8 @@ def host_trusted(host: str, named: set[str]) -> bool:
     try:
         name = (urlsplit(f"//{host}").hostname or "").lower().removesuffix(".")
     except ValueError:
+        return False
+    if not name:
         return False
     try:
         ipaddress.ip_address(name)
@@ -186,7 +195,8 @@ class HostGuard:
             await self._app(scope, receive, send)
             return
         headers = Headers(scope=scope)
-        hosts = [headers.get("host", ""), *headers.get("x-forwarded-host", "").split(",")]
+        forwarded = headers.get("x-forwarded-host")
+        hosts = [headers.get("host", ""), *(forwarded.split(",") if forwarded else [])]
         unknown = next((host.strip() for host in hosts if not host_trusted(host.strip(), self._named)), None)
         if unknown is None:
             await self._app(scope, receive, send)
@@ -195,6 +205,8 @@ class HostGuard:
         message = (
             f"PrintGuard refused a request for {unknown} because it does not know that name. "
             f"To reach the hub there, add PRINTGUARD_ORIGINS={'https' if secure else 'http'}://{unknown} to its environment and restart it."
+            if unknown
+            else "PrintGuard refused a request that names no host."
         )
         if unknown not in self._refused and len(self._refused) < REFUSED_HOSTS_LOGGED:
             self._refused.add(unknown)
@@ -332,7 +344,7 @@ def create_app() -> FastAPI:
             yield
             logger.info("hub shutting down")
 
-    app = FastAPI(title="PrintGuard", lifespan=lifespan)
+    app = FastAPI(title="PrintGuard", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     gate_cache: TTLCache[tuple[str, ...], bool] = TTLCache(GATE_CACHE_ENTRIES, GATE_CACHE_TTL_S)
 
     async def gate_allows(request: Request) -> bool:
