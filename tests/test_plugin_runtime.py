@@ -663,6 +663,23 @@ async def test_a_call_that_changed_nothing_does_not_undo_a_save_made_while_it_ra
         await engine.stop()
 
 
+async def test_a_worker_that_changes_one_key_does_not_undo_a_save_to_another_made_while_it_ran(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        worker = "plugin.on('result', (event, ctx) => { let x = 0; for (let i = 0; i < 200000; i++) x += i; ctx.store.changed = true; });"
+        await install_and_accept(engine, SLOW_MANIFEST, worker)
+        engine.emit({"event": "result", "monitor_id": "m", "camera_id": "c", "score": 0.1})
+        while "slow" not in runtime._busy:
+            await asyncio.sleep(0)
+        await engine.request({"cmd": "plugin.update", "id": "slow", "patch": {"config": {"on": True}}})
+        await asyncio.sleep(1.0)
+
+        assert engine.plugins.get("slow").config == {"on": True, "changed": True}
+    finally:
+        await engine.stop()
+
+
 async def test_a_worker_that_changes_its_store_still_has_it_saved(runtime: WasmPluginRuntime) -> None:
     engine = Engine(HostedPlatform(runtime))
     await engine.start()

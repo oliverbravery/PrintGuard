@@ -369,11 +369,18 @@ class WasmPluginRuntime:
         return output.get("result")
 
     async def _store(self, plugin: Plugin, started_with: dict[str, Any], store: Any) -> None:
-        """Saves a worker's data if the call changed it from what the call was handed."""
+        """Saves the keys a worker's call changed, over whatever the plugin has stored by now.
+
+        Writing the whole store back would undo anything the dashboard or a
+        route saved to another key while the call ran.
+        """
         if not isinstance(store, dict) or store == started_with or self._request is None:
             return
+        changed = {key: value for key, value in store.items() if started_with.get(key) != value}
+        removed = started_with.keys() - store.keys()
+        merged = {**{key: value for key, value in plugin.config.items() if key not in removed}, **changed}
         try:
-            await self._request({"cmd": "plugin.update", "id": plugin.id, "patch": {"config": store}})
+            await self._request({"cmd": "plugin.update", "id": plugin.id, "patch": {"config": merged}})
         except Exception as exc:
             logger.warning("plugin %s could not save its data: %s", plugin.id, exc)
 
