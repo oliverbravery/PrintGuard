@@ -76,7 +76,7 @@ FEEDBACK_UNSENDABLE = ("details", "not_jpeg", "too_large", "length")
 LOOP_RETRY_S = 1.0
 FAILURE_REPORT_EVERY_S = 30.0
 NOTIFY_TIMEOUT_S = 30.0
-FINISHING_COMMANDS = frozenset({"camera.remove", "printer.remove", "monitor.remove", "print.remove"})
+FINISHING_COMMANDS = frozenset({"camera.remove", "printer.update", "printer.remove", "monitor.remove", "print.remove"})
 READ_ONLY_COMMANDS = frozenset({"history.get", "snapshot.get", "review.get", "camera.snapshot"})
 UNSAVED_COMMANDS = frozenset(
     {
@@ -1100,23 +1100,31 @@ class Engine:
         keeping its name and tuning. One printer is reconciled by one caller at
         a time, so a camera is never opened twice, and a camera whose printer
         went while it was opening is closed again. A stream already registered
-        by hand stays the one camera on it. A printer whose cameras cannot be
+        by hand stays the one camera on it. A printer removed or edited to
+        another service or address while this waits its turn, lists its cameras
+        or opens one is left alone, since the reconcile that edit queued does
+        the work for the new details. A printer whose cameras cannot be
         listed, or a camera that will not open, raises a warning, since the
         camera not appearing says nothing about why.
         """
         async with self._reconciles.setdefault(printer.id, asyncio.Lock()):
             adapter = INTEGRATIONS.get(printer.provider)
-            if not adapter:
+            asked = (printer.provider, printer.config)
+
+            def unchanged() -> bool:
+                return self.printers.get(printer.id) is printer and (printer.provider, printer.config) == asked
+
+            if not adapter or not unchanged():
                 return
             try:
                 exposed = await adapter.cameras(self.platform.http, printer.config)
             except Exception as exc:
                 self.emit({"event": "warning", "message": f"Could not list the cameras of printer '{printer.name}': {logs.describe(exc)}"})
                 return
-            if self.printers.get(printer.id) is None:
-                return
             changed = False
             for descriptor in exposed:
+                if not unchanged():
+                    break
                 camera_id = f"{printer.id}-{descriptor['key']}"
                 source = dict(descriptor["source"])
                 camera = self.cameras.get(camera_id)
@@ -1134,10 +1142,10 @@ class Engine:
                 except Exception as exc:
                     self.emit({"event": "warning", "message": f"Could not open the camera '{descriptor['name']}' of printer '{printer.name}': {logs.describe(exc)}"})
                     continue
-                if self.printers.get(printer.id) is not printer:
+                if not unchanged():
                     source.close()
                     await self.platform.release_camera(camera_id, camera.source)
-                    return
+                    break
                 camera.frame_source = source
                 source.set_monitoring(camera.in_use)
                 if source.fps > 0:
@@ -1173,23 +1181,28 @@ class Engine:
         self._schedule_reconcile(printer)
 
     async def _cmd_printer_update(self, message: dict[str, Any]) -> None:
-        """Applies a patch to a printer, forgetting the status read through connection details it no longer has."""
+        """Applies a patch to a printer, forgetting the status read through connection details it no longer has.
+
+        The new details are in place before anything is awaited, so an answer
+        from the service it had is dropped instead of landing on the new one.
+        """
         existing = self.printers.get(message["id"])
         if not existing:
             raise LookupError(f"no printer {message['id']}")
         record = sanitise_printer(existing.id, message.get("patch", {}), existing.persisted())
         INTEGRATIONS[record["provider"]].require(record["config"])
         reports.require_splittable(record["config"].values())
-        if record["provider"] != existing.provider or record["config"] != existing.config:
-            await INTEGRATIONS[existing.provider].close(existing.config)
-            existing.device_state = None
-            existing.reported_status = None
-        if record["provider"] != existing.provider:
-            for camera in [c for c in self.cameras.values() if c.printer_id == existing.id]:
-                await self._drop_camera(camera.id)
+        was = (existing.provider, existing.config)
         existing.name = record["name"]
         existing.provider = record["provider"]
         existing.config = record["config"]
+        if was != (existing.provider, existing.config):
+            existing.device_state = None
+            existing.reported_status = None
+            await INTEGRATIONS[was[0]].close(was[1])
+        if was[0] != existing.provider:
+            for camera in [c for c in self.cameras.values() if c.printer_id == existing.id]:
+                await self._drop_camera(camera.id)
         self._schedule_reconcile(existing)
 
     async def _cmd_printer_remove(self, message: dict[str, Any]) -> None:

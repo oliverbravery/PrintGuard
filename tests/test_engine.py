@@ -1967,6 +1967,100 @@ async def test_a_number_that_is_not_finite_is_refused_by_name(unbounded: float) 
         assert before == (engine.monitors[monitor_id], camera.brightness, camera.crop, engine.settings["preheat"])
 
 
+class _SlowCameraPlatform(FakePlatform):
+    release_s = 0.0
+    open_s = 0.0
+
+    async def release_camera(self, camera_id: str, source: dict) -> None:
+        await asyncio.sleep(self.release_s)
+        await super().release_camera(camera_id, source)
+
+    async def open_camera(self, camera_id: str, source: dict):
+        await asyncio.sleep(self.open_s)
+        return await super().open_camera(camera_id, source)
+
+
+def _webcam(url: str, key: str = "webcam"):
+    async def cameras(http, config):
+        return [{"key": key, "name": "cam", "source": {"kind": "url", "url": url}}]
+
+    return cameras
+
+
+async def test_a_poll_of_the_old_service_answering_during_a_provider_change_is_not_kept(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    old_answer = asyncio.Event()
+
+    async def old_state(http, config):
+        await old_answer.wait()
+        return DeviceState(DeviceStatus.IDLE)
+
+    async def new_state(http, config):
+        raise RuntimeError("new service is unreachable")
+
+    async def no_cameras(http, config):
+        return []
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "fetch_state", old_state)
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", _webcam("http://old/stream"))
+    monkeypatch.setattr(INTEGRATIONS["klipper"], "fetch_state", new_state)
+    monkeypatch.setattr(INTEGRATIONS["klipper"], "cameras", no_cameras)
+    platform = _SlowCameraPlatform()
+    platform.release_s = 0.3
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.1)
+        assert engine.cameras.values(), "the old service's camera was not registered"
+        printer = engine.printers.get(printer_id)
+        poll = asyncio.create_task(engine.watchdog.refresh(printer))
+        await asyncio.sleep(0.05)
+        edit = asyncio.create_task(
+            engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"provider": "klipper", "config": {"base_url": "http://new"}}})
+        )
+        await asyncio.sleep(0.1)
+        old_answer.set()
+        await asyncio.gather(poll, edit)
+
+    assert printer.reported_status is None and printer.device_state is None, "the old service's answer stuck on the printer's new one"
+
+
+async def test_a_camera_listed_from_the_old_service_is_not_registered_after_a_provider_change(monkeypatch) -> None:
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", _webcam("http://old/stream"))
+    monkeypatch.setattr(INTEGRATIONS["klipper"], "cameras", _webcam("http://new/stream", "abc123"))
+    platform = _SlowCameraPlatform()
+    platform.open_s = 0.3
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.05)
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"provider": "klipper", "config": {"base_url": "http://new"}}})
+        await asyncio.sleep(1.0)
+        urls = [camera.source["url"] for camera in engine.cameras.values()]
+
+    assert urls == ["http://new/stream"], urls
+
+
+async def test_a_reconcile_queued_behind_another_does_not_reach_a_printer_removed_meanwhile(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def cameras(http, config):
+        calls.append("cameras")
+        return [{"key": "webcam", "name": "cam", "source": {"kind": "url", "url": "http://old/stream"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", cameras)
+    platform = _SlowCameraPlatform()
+    platform.open_s = 0.3
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.05)
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"name": "renamed"}})
+        await asyncio.sleep(0.05)
+        await engine.handle({"cmd": "printer.remove", "id": printer_id})
+        await asyncio.sleep(0.8)
+
+    assert calls == ["cameras"], "a printer that was removed had its service asked for cameras again"
+    assert not engine.cameras.values()
+
+
 async def test_provider_change_clears_stale_printer_state(monkeypatch) -> None:
     platform = FakePlatform()
     closed: list[dict | None] = []
