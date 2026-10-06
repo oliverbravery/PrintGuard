@@ -1007,3 +1007,250 @@ test("an alerting tile opens from its banner, and an offline camera shows no inf
   await page.mouse.click(banner.x + banner.width / 2, banner.y + banner.height / 2);
   await expect(page.getByRole("dialog", { name: "Prusa" })).toBeVisible();
 });
+
+test("the saved chip shows only on the form that saved", async ({ page }) => {
+  await dashboard(page, { detailId: "m1" });
+  const panel = page.getByRole("dialog", { name: "Prusa" });
+  const acknowledge = async (cmd: string) => {
+    await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
+    const { req_id } = await page.evaluate((cmd) => (window as any).__sent.findLast((c: any) => c.cmd === cmd), cmd);
+    await emit(page, { event: "state", ...engine(), req_id });
+  };
+
+  await page.evaluate(() => (window as any).__pg.getState().updateSettings({ update_check: false }));
+  await acknowledge("settings.update");
+  expect(await page.evaluate(() => Object.keys((window as any).__pg.getState().savedAt))).toEqual(["settings"]);
+  await expect(panel.getByText(/saved/)).toBeHidden();
+
+  await page.evaluate(() => (window as any).__pg.getState().updateMonitor("m1", { threshold: 0.4 }));
+  await acknowledge("monitor.update");
+  await expect(panel.getByText(/saved/)).toBeVisible();
+});
+
+test("an alert says what happened to the print, and nothing for alert only", async ({ page }) => {
+  await dashboard(page, { engine: engine({ monitors: [monitor({ alert: { score: 0.9, action: "none", ts: 1 } })] }), detailId: "m1" });
+  await emit(page, { event: "alert", monitor_id: "m1", score: 0.9, action: "none", ts: 1 });
+  await emit(page, { event: "alert", monitor_id: "m1", score: 0.9, action: "pause", ts: 2 });
+  const panel = page.getByRole("dialog", { name: "Prusa" });
+
+  await expect(panel.getByRole("alert").first()).toHaveText("Defect on Prusa, 90%");
+  await expect(panel.getByRole("alert").last()).toHaveText("Defect on Prusa, 90%, print paused");
+  await expect(panel.getByText("defect at 90%", { exact: true })).toBeVisible();
+});
+
+test("the add monitor dialog stays open with what was typed when the add fails, and drops a camera removed elsewhere", async ({ page }) => {
+  await dashboard(page, { dialog: "monitor" });
+  const dialog = page.getByRole("dialog", { name: "Add monitor" });
+  await dialog.getByRole("textbox", { name: "Monitor name" }).fill("Voron");
+  await dialog.getByRole("combobox", { name: "Camera" }).selectOption("c1");
+  await dialog.getByRole("button", { name: "Add monitor" }).click();
+  await emit(page, { event: "error", message: "the state could not be saved", req_id: (await sent(page, "monitor.add")).req_id });
+
+  await expect(dialog.getByRole("textbox", { name: "Monitor name" })).toHaveValue("Voron");
+  await emit(page, { event: "state", ...engine({ cameras: [] }) });
+  await expect(dialog.getByRole("button", { name: "Add monitor" })).toBeDisabled();
+});
+
+test("a printer test result goes when the form it tested is edited, and a trailing space is not an unsaved name", async ({ page }) => {
+  const schema = { properties: { url: { title: "Address" } } };
+  const printer = { id: "p1", name: "MK4", provider: "octoprint", config: { url: "http://mk4" }, online: true, device_state: null };
+  const integrations = [{ id: "octoprint", label: "OctoPrint", docs_url: "", formats: [], heater_control: true, schema }];
+  await dashboard(page, { engine: engine({ printers: [printer], integrations }), dialog: "printers" });
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("button", { name: "Test connection" }).click();
+  await emit(page, { event: "printer_test", ok: true, status: "idle", req_id: (await sent(page, "printer.test")).req_id });
+  await expect(page.getByText("ok, idle")).toBeVisible();
+
+  await page.getByRole("textbox", { name: "Name" }).fill("MK4 ");
+  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+  await expect(page.getByText("ok, idle")).toBeVisible();
+  await page.getByRole("textbox", { name: "Address" }).fill("http://mk3");
+  await expect(page.getByText("ok, idle")).toBeHidden();
+  await expect(page.getByRole("textbox", { name: "Address" })).toHaveAttribute("autocapitalize", "none");
+});
+
+test("a device scan that was never sent does not read as scanning, or as finished", async ({ page }) => {
+  await dashboard(page, { dialog: "cameras" });
+  await page.evaluate(() => (window as any).__pg.setState({ link: { send: () => false, close() {} } }));
+  await page.getByRole("button", { name: "This machine" }).click();
+
+  await expect(page.getByRole("button", { name: "This machine" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("scanning devices")).toBeHidden();
+  await expect(page.getByText("no unregistered cameras found")).toBeHidden();
+});
+
+test("removing a camera the hub never hears about leaves it publishing and remembered for the next load", async ({ page }) => {
+  const publishing = camera({ id: "c2", name: "Bench", source: { kind: "path", path: "dev-bench-1" } });
+  await dashboard(page, { engine: engine({ cameras: [publishing] }), dialog: "cameras" });
+  await page.evaluate(async () => {
+    const win = window as any;
+    const stream = await import("/src/stream.ts" as string);
+    stream.published.set("dev-bench-1", () => (win.__stopped = true));
+    localStorage.setItem("pg-publishers", JSON.stringify({ "dev-bench-1": "usb" }));
+    win.__pg.setState({ link: { send: () => false, close() {} } });
+  });
+  await page.getByRole("button", { name: "Remove" }).click();
+
+  expect(await page.evaluate(() => (window as any).__stopped)).toBeUndefined();
+  expect(await page.evaluate(() => localStorage.getItem("pg-publishers"))).toContain("dev-bench-1");
+});
+
+test("a hub that never answers the connection is tried again", async ({ page }) => {
+  await page.clock.install();
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__dialled = 0;
+    win.WebSocket = class {
+      static OPEN = 1;
+      readyState = 0;
+      constructor(url: string) {
+        if (url.endsWith("/api/ws")) win.__dialled++;
+      }
+      close() {}
+      send() {}
+    };
+  });
+  await page.goto("/");
+  await expect.poll(() => page.evaluate(() => (window as any).__dialled)).toBe(1);
+  await page.clock.fastForward(12_000);
+  await expect.poll(() => page.evaluate(() => (window as any).__dialled)).toBe(2);
+});
+
+test("a preset temperature can be cleared and retyped, and pause is off for a paused print", async ({ page }) => {
+  const heater = { actual: 21, target: 0 };
+  const printer = {
+    id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
+    device_state: { status: "paused", progress: 40, job: "benchy", remaining_s: 60, nozzle: heater, bed: heater },
+  };
+  const settings = { ...engine().settings, preheat: [{ name: "PLA", nozzle: 200, bed: 60 }] };
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })], settings }), detailId: "m1" });
+  const panel = page.getByRole("dialog", { name: "Prusa" });
+  await expect(panel.getByRole("button", { name: "pause" })).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "resume" })).toBeEnabled();
+
+  await panel.getByRole("button", { name: "Edit" }).click();
+  const nozzle = panel.getByRole("spinbutton", { name: "PLA nozzle target" });
+  await nozzle.fill("");
+  await expect(nozzle).toHaveValue("");
+  await nozzle.pressSequentially("210");
+  await expect(nozzle).toHaveValue("210");
+  await nozzle.blur();
+  await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
+  expect((await sent(page, "settings.update")).patch.preheat).toEqual([{ name: "PLA", nozzle: 210, bed: 60 }]);
+});
+
+test("the header wraps instead of scrolling the page when a chip is added at its tightest widths", async ({ page }) => {
+  const state = { reconnecting: true, engine: engine({ update: { available: true, latest: "9.9.9" } }) };
+  for (const width of [640, 1024]) {
+    await page.setViewportSize({ width, height: 800 });
+    await dashboard(page, state);
+    await expect(page.getByText("reconnecting")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+  }
+});
+
+test("a long toast stays inside a phone screen", async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 852 });
+  await dashboard(page);
+  await page.evaluate(() => (window as any).__pg.getState().toast("error", "The hub is reconnecting, so that wasn't sent. Try again in a moment."));
+  const box = (await page.getByRole("status").filter({ hasText: "reconnecting, so" }).boundingBox())!;
+
+  expect(box.x).toBeGreaterThanOrEqual(16);
+  expect(box.x + box.width).toBeLessThanOrEqual(393 - 16);
+});
+
+test("a print that kept no frames is not offered for review, and a snapshot is opened and closed on its own", async ({ page }) => {
+  const reviews = [review({ status: "dismissed", frames: 0 }), review({ id: "r2", frames: 4 })];
+  await dashboard(page, { engine: engine({ reviews }), statsMonitorId: "m1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · history" });
+  const snap = { id: "s1", ts: 1_700_000_000, score: 0.9, action: "failed" };
+  await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_040, buckets: [], snaps: [snap], alerts: [], stats: {} });
+  await expect(sheet.getByRole("listitem")).toHaveCount(1);
+  await expect(sheet.getByRole("listitem")).toContainText("4 frames");
+
+  const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "snapshot.get").length);
+  const onOpening = await asked();
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: true }));
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: false }));
+  await expect.poll(asked).toBeGreaterThan(onOpening);
+
+  await sheet.getByRole("button", { name: /Snapshot at 90% risk/ }).click();
+  const enlarged = page.getByRole("dialog", { name: /90% · 40s ago · the printer did not take the command/ });
+  await expect(enlarged.getByRole("button", { name: "Close snapshot" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(enlarged).toBeHidden();
+  await expect(sheet).toBeVisible();
+});
+
+test("a tile behind a panel says its feed is paused", async ({ page }) => {
+  await dashboard(page, { detailId: "m1" });
+  await expect(page.locator("article").getByText("feed paused")).toBeAttached();
+});
+
+test("camera and settings controls are named, and toggle buttons say which is selected", async ({ page }) => {
+  await dashboard(page, { dialog: "cameras", focusCameraId: "c1" });
+  await expect(page.getByRole("img", { name: "online" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "0°", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "90°" })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("textbox", { name: "Stream URL" })).toHaveAttribute("autocapitalize", "none");
+
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("api"));
+  await expect(page.getByRole("combobox", { name: "Token scope" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Token name" })).toBeVisible();
+  await page.getByRole("tab", { name: "Alerts" }).click();
+  await expect(page.getByText("for monitors with push notifications on")).toBeVisible();
+});
+
+test("a dialog opened with the pointer shows no focus ring until the keyboard is used", async ({ page }) => {
+  await dashboard(page);
+  await page.getByRole("button", { name: "+ Camera" }).click();
+  const close = page.getByRole("button", { name: "Close dialog" });
+  await expect(close).toBeFocused();
+  await expect(close).toHaveCSS("outline-style", "none");
+
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(page.locator(":focus")).toHaveCSS("outline-style", "solid");
+});
+
+test.describe("on a touch screen", () => {
+  test.use({ hasTouch: true, viewport: { width: 393, height: 852 } });
+
+  test("the header's more button takes a tap 44 pixels across", async ({ page }) => {
+    await dashboard(page);
+    const box = (await page.getByRole("button", { name: "More" }).boundingBox())!;
+    const centre = [box.x + box.width / 2, box.y + box.height / 2];
+    const hits = await page.evaluate(
+      (points) => points.map(([x, y]) => document.elementFromPoint(x, y)?.closest("button")?.getAttribute("aria-label")),
+      [[centre[0] - 21, centre[1]], [centre[0], centre[1] - 21], [centre[0], centre[1] + 21]],
+    );
+    expect(hits).toEqual(["More", "More", "More"]);
+  });
+});
+
+test("a stored file is drawn from what arrives, and one over the limit is cut off without a length to go by", async ({ page }) => {
+  await page.addInitScript(() => {
+    const win = window as any;
+    const fetch = win.fetch;
+    win.fetch = async (url: string, init: RequestInit) => {
+      if (!String(url).endsWith("/gcode")) return fetch(url, init);
+      const megabyte = new Uint8Array(1024 * 1024).fill(10);
+      let sent = 0;
+      const body = new ReadableStream({
+        pull: (controller) => (sent++ < win.__megabytes ? controller.enqueue(megabyte) : controller.close()),
+        cancel: () => void (win.__cancelledAt = sent),
+      });
+      return new Response(win.__megabytes ? body : "G1 Z0.2\nG1 X10 Y10 E1\nG1 Z0.4\nG1 X20 Y20 E2\n");
+    };
+  });
+  await dashboard(page, { engine: engine({ prints: [printFile()] }), printId: "f1" });
+  await expect(page.getByRole("slider", { name: "Layers shown" })).toBeVisible();
+
+  await page.evaluate(() => {
+    (window as any).__megabytes = 40;
+    (window as any).__pg.setState({ printId: null });
+  });
+  await page.evaluate(() => (window as any).__pg.setState({ printId: "f1" }));
+  await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__cancelledAt)).toBeLessThan(36);
+});
