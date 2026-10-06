@@ -22,6 +22,8 @@ import argparse
 import io
 import json
 import os
+import re
+import unicodedata
 from email.errors import HeaderParseError
 from email.header import decode_header, make_header
 from pathlib import Path
@@ -34,6 +36,7 @@ BUCKET = "printguard-feedback"
 JURISDICTION = "eu"
 PIXELS_MAX = 4096 * 4096
 JPEG_QUALITY = 92
+FRAME_KEY = re.compile(r"[0-9a-f]{32}/[0-9a-f]{12}/[0-9a-f]{12}\.jpg")
 
 
 def sanitised(raw: bytes) -> bytes | None:
@@ -61,16 +64,17 @@ def sanitised(raw: bytes) -> bytes | None:
 
 
 def labels(metadata: dict[str, str]) -> dict[str, str]:
-    """Decodes an object's labels, which R2 hands back RFC 2047 encoded when they are not ASCII."""
+    """Decodes an object's labels, which R2 hands back RFC 2047 encoded when they are not ASCII, and drops control characters."""
     return {name: _decoded(value) for name, value in metadata.items()}
 
 
 def _decoded(value: str) -> str:
     """Decodes one label, keeping it as sent when it only looks encoded, such as one naming a charset there isn't or holding broken base64."""
     try:
-        return str(make_header(decode_header(value)))
+        decoded = str(make_header(decode_header(value)))
     except (HeaderParseError, LookupError, ValueError):
-        return value
+        decoded = value
+    return "".join(char for char in decoded if unicodedata.category(char) != "Cc")
 
 
 def inbox(client: Any) -> Iterator[str]:
@@ -95,15 +99,15 @@ def pull(client: Any, out: Path) -> tuple[int, int]:
     with (out / "frames.jsonl").open("a") as rows:
         for key in list(inbox(client)):
             stored = client.get_object(Bucket=BUCKET, Key=key)
-            clean = sanitised(stored["Body"].read())
-            if clean is None or key.count("/") != 2:
+            clean = sanitised(stored["Body"].read()) if FRAME_KEY.fullmatch(key) else None
+            if clean is None:
                 discarded += 1
             else:
                 hub, print_id, name = key.split("/")
                 target = out / hub / print_id / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(clean)
-                row = {"hub": hub, "print": print_id, "file": str(target.relative_to(out)), "uploaded": stored["LastModified"].isoformat(), **labels(stored["Metadata"])}
+                row = {**labels(stored["Metadata"]), "hub": hub, "print": print_id, "file": str(target.relative_to(out)), "uploaded": stored["LastModified"].isoformat()}
                 rows.write(json.dumps(row) + "\n")
                 rows.flush()
                 kept += 1
