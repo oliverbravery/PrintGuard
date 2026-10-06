@@ -505,10 +505,12 @@ async def test_a_monitor_binding_is_always_stored_as_text() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
         monitor_id = next(iter(engine.monitors))
-        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"camera_id": [], "printer_id": {}}})
+        camera_id = engine.monitors[monitor_id]["camera_id"]
+        with pytest.raises(RuntimeError, match="camera_id is text"):
+            await engine.request({"cmd": "monitor.update", "id": monitor_id, "patch": {"camera_id": [], "printer_id": {}}})
         await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"name": "renamed"}, "req_id": 2})
         assert not [event for event in _of(events, "error") if event.get("req_id") == 2], "a bad binding does not break later commands"
-        assert (engine.monitors[monitor_id]["camera_id"], engine.monitors[monitor_id]["printer_id"]) == ("", "")
+        assert (engine.monitors[monitor_id]["camera_id"], engine.monitors[monitor_id]["printer_id"]) == (camera_id, "")
 
     restarted = Engine(platform)
     await restarted.start()
@@ -2177,8 +2179,9 @@ async def test_camera_rotation_persists_and_rejects_off_axis() -> None:
         await engine.handle({"cmd": "camera.update", "id": camera.id, "patch": {"rotation": 90}})
         assert camera.rotation == 90
         assert camera.public()["rotation"] == 90
-        await engine.handle({"cmd": "camera.update", "id": camera.id, "patch": {"rotation": 45}})
-        assert camera.rotation == 0, "off-axis rotation falls back to 0"
+        with pytest.raises(RuntimeError, match="rotation is 0, 90, 180 or 270"):
+            await engine.request({"cmd": "camera.update", "id": camera.id, "patch": {"rotation": 45}})
+        assert camera.rotation == 90, "an off-axis rotation is refused"
         await engine.handle({"cmd": "camera.update", "id": camera.id, "patch": {"rotation": 270}})
 
     reborn = Engine(platform)
@@ -2948,7 +2951,8 @@ async def install_demo(engine: Engine, granted: list[str] | None = None, **extra
     """Installs the demo plugin from a file, accepting its permissions as the user would."""
     await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(), **extra})
     accepted = MANIFEST["permissions"] if granted is None else granted
-    await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": accepted, "enabled": True}})
+    await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": accepted}})
+    await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"enabled": True}})
     return engine.plugins.get("demo").public()
 
 
@@ -4277,3 +4281,314 @@ async def test_a_camera_restart_during_a_runtime_switch_does_not_fail_the_switch
         await switch
         platform.inference_blocked = False
     assert platform.inference_runtime == "onnx"
+
+
+async def test_stopping_cancels_an_inference_in_flight() -> None:
+    """Left to finish, it scores its frame after the printers are closed and starts a defect response."""
+    platform = FakePlatform(infer_s=0.3, failing=True)
+    engine = Engine(platform)
+    events: list[dict] = []
+    await engine.start()
+    engine.add_sink(events.append)
+    await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 10.0}})
+    printer_id = await _register_printer(engine)
+    await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+    patch = {"camera_id": next(iter(engine.cameras.items)), "printer_id": printer_id, "consecutive": 1, "on_defect": "pause", "notify": True}
+    await engine.handle({"cmd": "monitor.add", "monitor": patch})
+    platform.inference_started.clear()
+    await platform.inference_started.wait()
+    await engine.stop()
+    calls, seen = len(platform.http_calls), len(events)
+    await asyncio.sleep(0.6)
+
+    assert platform.http_calls[calls:] == [], "a printer or a notifier was called after the engine stopped"
+    assert not _of(events[seen:], "alert")
+
+
+async def test_a_printers_progress_does_not_push_an_alert_out_of_the_recent_events() -> None:
+    engine = Engine(FakePlatform())
+    await engine.start()
+    try:
+        engine.emit({"event": "alert", "monitor_id": "m", "score": 0.9, "action": "none"})
+        for percent in range(engine_module.RECENT_EVENTS_MAX):
+            engine.emit({"event": "device", "printer_id": "p", "status": "printing", "progress": percent})
+        assert [event["event"] for event in engine.recent_events()] == ["alert"]
+    finally:
+        await engine.stop()
+
+
+async def test_one_stream_written_two_ways_is_one_camera() -> None:
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "camera.add", "source": {"kind": "url", "url": "  RTSP://Cam.local/live  "}})
+        assert [camera.source["url"] for camera in engine.cameras.values()] == ["rtsp://Cam.local/live"], "the address is stored as it opens"
+        for url in ("rtsp://cam.local/live", "rtsp://Cam.local/live#again", " Rtsp://Cam.local/live"):
+            with pytest.raises(RuntimeError, match="already registered"):
+                await engine.request({"cmd": "camera.add", "source": {"kind": "url", "url": url}})
+        await engine.request({"cmd": "camera.add", "source": {"kind": "url", "url": "rtsp://cam.local/Live"}})
+        assert len(engine.cameras.values()) == 2, "a path is told apart by its case"
+
+
+async def test_two_adds_of_one_stream_at_once_register_one_camera(monkeypatch) -> None:
+    platform = FakePlatform()
+    opening = platform.open_camera
+
+    async def slow_open(camera_id: str, source: dict) -> object:
+        await asyncio.sleep(0.1)
+        return await opening(camera_id, source)
+
+    monkeypatch.setattr(platform, "open_camera", slow_open)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        add = {"cmd": "camera.add", "source": {"kind": "url", "url": "rtsp://cam.local/live"}}
+        await asyncio.gather(engine.handle(add), engine.handle(add))
+        assert len(engine.cameras.values()) == 1
+        assert [event["message"] for event in _of(events, "error")] == ["that camera is already registered"]
+        await engine.handle({"cmd": "camera.remove", "id": next(iter(engine.cameras.items))})
+        await engine.request(add)
+
+
+async def test_a_printers_webcam_registered_by_hand_is_not_registered_again(monkeypatch) -> None:
+    async def webcam(http, config):
+        return [{"key": "webcam", "name": "Shop cam", "source": {"kind": "url", "url": "http://op/webcam/?action=stream"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", webcam)
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "camera.add", "source": {"kind": "url", "url": "http://op/webcam/?action=stream"}})
+        await _register_printer(engine)
+        await asyncio.sleep(0.1)
+        assert [camera.printer_id for camera in engine.cameras.values()] == [None]
+
+
+async def test_removing_what_is_not_there_is_an_error() -> None:
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
+        for kind in ("monitor", "camera", "printer", "print", "token"):
+            with pytest.raises(RuntimeError, match=f"^no {kind} nope$"):
+                await engine.request({"cmd": f"{kind}.remove", "id": "nope"})
+        with pytest.raises(RuntimeError, match="^missing 'id'$"):
+            await engine.request({"cmd": "monitor.update"})
+
+
+async def test_a_monitor_is_not_bound_to_a_camera_or_printer_that_is_not_registered() -> None:
+    async with running_engine(FakePlatform(), camera_fps=[10.0]) as (engine, _):
+        monitor_id = next(iter(engine.monitors))
+        with pytest.raises(RuntimeError, match="^no camera nope$"):
+            await engine.request({"cmd": "monitor.add", "monitor": {"camera_id": "nope"}})
+        with pytest.raises(RuntimeError, match="^no printer nope$"):
+            await engine.request({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": "nope"}})
+        await engine.request({"cmd": "monitor.add", "monitor": {"name": "later", "camera_id": "", "printer_id": ""}})
+        assert [monitor["printer_id"] for monitor in engine.monitors.values()] == ["", ""]
+
+
+async def test_a_value_a_setting_does_not_take_is_refused_rather_than_rewritten() -> None:
+    async with running_engine(FakePlatform(), camera_fps=[10.0]) as (engine, _):
+        monitor_id, camera_id = next(iter(engine.monitors)), next(iter(engine.cameras.items))
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"on_defect": "pause"}})
+        before = (dict(engine.monitors[monitor_id]), engine.cameras.get(camera_id).persisted(), dict(engine.settings))
+        refused = [
+            ({"cmd": "monitor.update", "id": monitor_id, "patch": {"alert": {"score": 0.99, "action": "pause", "ts": 1}}}, "a monitor has no alert setting"),
+            ({"cmd": "monitor.update", "id": monitor_id, "patch": {"on_defect": "Pause"}}, "on_defect is one of none, pause, cancel"),
+            ({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": "false"}}, "enabled is true or false"),
+            ({"cmd": "monitor.update", "id": monitor_id, "patch": {"name": None}}, "name is text"),
+            ({"cmd": "camera.update", "id": camera_id, "patch": {"crop": [0, 0, 1, 1]}}, "a crop holds x, y, w and h"),
+            ({"cmd": "camera.update", "id": camera_id, "patch": {"name": None}}, "name is text"),
+            ({"cmd": "camera.update", "id": camera_id, "patch": {"source": {"kind": "url"}}}, "a camera has no source setting"),
+            ({"cmd": "settings.update", "patch": {"mqtt": {"port": True}}}, "MQTT port"),
+            ({"cmd": "settings.update", "patch": {"update_check": "banana"}}, "update_check is true or false"),
+            ({"cmd": "settings.update", "patch": {"catalogue_url": 5}}, "catalogue_url is an address"),
+        ]
+        for command, reason in refused:
+            with pytest.raises(RuntimeError, match=reason):
+                await engine.request(command)
+        assert (dict(engine.monitors[monitor_id]), engine.cameras.get(camera_id).persisted(), dict(engine.settings)) == before
+
+
+async def test_a_command_whose_name_is_not_text_is_an_unknown_command() -> None:
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": [], "req_id": 1})
+        await engine.handle({"cmd": {}, "req_id": 2})
+        assert [event["req_id"] for event in _of(events, "error")] == [1, 2]
+
+
+async def test_a_command_that_fails_applies_none_of_itself() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await platform.files.store("abcd1234.gcode", _chunks(b"G1 X1\n"))
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "part.gcode", "name": "Original"})
+        with pytest.raises(RuntimeError, match="no printer ghost"):
+            await engine.request({"cmd": "print.update", "id": "abcd1234", "patch": {"name": "Renamed", "printer_ids": ["ghost"]}})
+        assert engine.prints.get("abcd1234").name == "Original"
+
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip()})
+        held = list(engine.plugins.get("demo").granted)
+        with pytest.raises(RuntimeError, match="have not been accepted"):
+            await engine.request({"cmd": "plugin.update", "id": "demo", "patch": {"granted": ["state:read"], "enabled": True}})
+        assert engine.plugins.get("demo").granted == held
+
+
+async def test_a_printer_camera_that_cannot_be_listed_or_opened_is_a_warning(monkeypatch) -> None:
+    async def webcam(http, config):
+        return [{"key": "webcam", "name": "Shop cam", "source": {"kind": "device", "device_id": "/dev/gone"}}]
+
+    async def unlisted(http, config):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", webcam)
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, events):
+        await _register_printer(engine)
+        await asyncio.sleep(0.1)
+        monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", unlisted)
+        await engine.handle({"cmd": "printer.cameras.refresh"})
+        assert [event["message"] for event in _of(events, "warning")] == [
+            "Could not open the camera 'Shop cam' of printer 'P': no device at /dev/gone",
+            "Could not list the cameras of printer 'P': connection refused",
+        ]
+
+
+async def test_a_wrong_shaped_record_is_dropped_at_start_and_the_rest_load(caplog) -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        await _register_printer(engine)
+        await engine.request({"cmd": "token.create", "name": "t", "scope": "read"})
+    good = platform.state
+    platform.state = {
+        **good,
+        "tokens": [{"id": "t9", "surprise": 1}, *good["tokens"]],
+        "printers": [None, *good["printers"]],
+        "monitors": [{"name": "no id"}, {"id": "m9", "on_defect": "explode"}, *good["monitors"]],
+        "reviews": ["text", {"id": "r9"}],
+        "prints": [{"id": "p9"}],
+        "cameras": [{"id": "c9"}, *good["cameras"]],
+    }
+    restarted = Engine(platform)
+    with caplog.at_level(logging.WARNING, logger="printguard.engine.engine"):
+        await restarted.start()
+    try:
+        state = restarted.state_event()
+        assert [len(state[kind]) for kind in ("tokens", "printers", "monitors", "reviews", "prints", "cameras")] == [1, 1, 1, 0, 0, 1]
+    finally:
+        await restarted.stop()
+    assert caplog.text.count("dropping an unreadable record") == 8
+
+
+async def test_a_wrong_shaped_layout_is_reset_without_the_theme() -> None:
+    platform = FakePlatform()
+    theme = {"id": "t1", "name": "Mine", "base": "dark", "colors": {"accent": "#112233"}}
+    glass = {"opacity": 0.4, "tone": 0.2}
+    platform.state = {"settings": {"theme": "t1", "themes": [theme], "glass": glass, "layout": {"monitors": {"order": ["m1"]}, "stray": 5}}}
+    engine = Engine(platform)
+    await engine.start()
+    await engine.stop()
+    assert (engine.settings["theme"], engine.settings["themes"], engine.settings["glass"]) == ("t1", [theme], glass)
+    assert engine.settings["layout"] == {}
+
+
+async def test_editing_an_idle_printers_connection_does_not_make_a_print(monkeypatch) -> None:
+    """The edit forgets the printer's status, so its monitor watches until the next poll says idle again."""
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.3)
+    platform = FakePlatform(infer_s=0.02)
+    platform.device_status = "Operational"
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 20.0}})
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.5)
+        await engine.handle({"cmd": "monitor.add", "monitor": {"camera_id": next(iter(engine.cameras.items)), "printer_id": printer_id}})
+        for attempt in range(3):
+            config = {"base_url": f"http://op{attempt}", "api_key": "k"}
+            await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": config}})
+            await asyncio.sleep(0.5)
+        assert engine.printers.get(printer_id).reported_status == "idle"
+        assert engine.state_event()["reviews"] == [] and not platform.files.blobs
+
+
+async def test_prints_sent_together_register_the_hub_once(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    registered: list[str] = []
+    hubs: set[str] = set()
+    passthrough = platform.http
+
+    async def inbox(method: str, url: str, **request) -> tuple[int, object]:
+        if url == f"{feedback.ENDPOINT}/register":
+            await asyncio.sleep(0.05)
+            registered.append(f"{len(registered):032x}.{'b' * 64}")
+            return 201, {"token": registered[-1]}
+        if url == f"{feedback.ENDPOINT}/frame":
+            hubs.add(request["headers"]["Authorization"])
+            return 201, {}
+        return await passthrough(method, url, **request)
+
+    monkeypatch.setattr(platform, "http", inbox)
+    async with running_engine(platform, camera_fps=[10.0, 12.0]) as (engine, _):
+        await asyncio.sleep(0.5)
+        for monitor_id in list(engine.monitors):
+            await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        for review in engine.state_event()["reviews"]:
+            await engine.handle({"cmd": "review.send", "id": review["id"]})
+        await asyncio.sleep(0.6)
+        sent = [review["status"] for review in engine.state_event()["reviews"]]
+
+    assert sent == ["sent", "sent"]
+    assert len(registered) == 1 and hubs == {f"Bearer {registered[0]}"}, "frames went under more than one hub id"
+
+
+async def test_a_frame_being_stored_as_the_review_is_switched_off_is_not_kept(monkeypatch) -> None:
+    platform = FakePlatform(infer_s=0.02)
+    encode = platform.encode_jpeg
+    storing = asyncio.Event()
+
+    async def slow_encode(rgb: np.ndarray) -> bytes | None:
+        storing.set()
+        await asyncio.sleep(0.3)
+        return await encode(rgb)
+
+    monkeypatch.setattr(platform, "encode_jpeg", slow_encode)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        await storing.wait()
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
+        await asyncio.sleep(0.5)
+        assert not platform.files.blobs and [review["frames"] for review in engine.state_event()["reviews"]] == [0]
+
+
+async def test_a_private_catalogues_credentials_are_scrubbed_from_a_report() -> None:
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
+        private = "https://reader:hunter2pass@raw.example.com/catalogue.json?token=s3cr3tvalue"
+        await engine.handle({"cmd": "settings.update", "patch": {"catalogue_url": private}})
+        assert reports.diagnostics(engine)["settings"]["catalogue_url"] == "https://raw.example.com/catalogue.json?token=[redacted]"
+        assert {"hunter2pass", "token=s3cr3tvalue"} <= reports.collect_secrets(engine)
+
+
+async def test_a_print_none_of_whose_frames_could_be_sent_is_not_called_sent(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
+    platform = FakePlatform(infer_s=0.02)
+    uploads = _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine, 0.5)
+        platform.files.blobs.clear()
+        await engine.handle({"cmd": "review.send", "id": review["id"], "req_id": 7})
+        outcome = await _sent(events)
+        waiting = engine.state_event()["reviews"][0]
+
+    assert not uploads and not outcome["ok"]
+    assert (waiting["status"], waiting["sent"], waiting["chosen"]) == ("ready", 0, 0), "it can be sent again or dismissed"
+    assert [(event["message"], event["req_id"]) for event in _of(events, "error")] == [("none of that print's frames could be sent", 7)]
+
+
+@pytest.mark.parametrize("feedback_setting, ended_as", [("ask", "ready"), ("off", "dismissed")])
+async def test_a_monitor_with_no_printer_ends_its_print_after_a_day(monkeypatch, feedback_setting: str, ended_as: str) -> None:
+    """With the review off no frame is sampled, so the day has to be noticed without one."""
+    monkeypatch.setattr(reviews, "UNLINKED_PRINT_S", 0.4)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.05)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": feedback_setting}})
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": {"cooldown_s": 0, "consecutive": 1}})
+        await asyncio.sleep(1.5)
+        prints = engine.state_event()["reviews"]
+
+    assert len(prints) >= 3, "every alert went into one endless print"
+    assert {review["status"] for review in prints[:-1]} == {ended_as}
+
+
+def test_a_uuid_in_a_camera_path_is_scrubbed_and_a_punctuated_name_is_not() -> None:
+    assert reports.scrub_url("rtsps://nvr.local:7441/0b9f3c1e-8a41-4f6e-9d2b-6f1c2a7e5d10?enableSrtp") == "rtsps://nvr.local:7441/[redacted]?enableSrtp"
+    assert reports.url_secrets("rtsps://nvr.local:7441/0b9f3c1e-8a41-4f6e-9d2b-6f1c2a7e5d10") == {"0b9f3c1e-8a41-4f6e-9d2b-6f1c2a7e5d10"}
+    assert reports.scrub_url("rtsp://cam.local/h264Preview_01_main") == "rtsp://cam.local/h264Preview_01_main"

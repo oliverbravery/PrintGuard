@@ -46,10 +46,11 @@ MESSAGE_MAX = 4096
 TIMEOUT_S = 20.0
 SOURCE_KEYS = ("kind", "path", "device_id", "label")
 MESSAGE_STANDALONE_BELOW = 8
-PATH_TOKEN = re.compile(r"[A-Za-z0-9]{16,}")
-"""A path segment long and unbroken enough to be a key rather than a name.
-UniFi Protect puts a stream's key there, and words such as ``videostream`` or
-``h264Preview_01_main`` are shorter or punctuated."""
+PATH_TOKEN = re.compile(r"[A-Za-z0-9]{16,}|[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
+"""A path segment that reads as a key rather than a name: one long and
+unbroken, or a UUID. UniFi Protect puts a stream's key there, and words such as
+``videostream`` or ``h264Preview_01_main`` are shorter or punctuated. A key
+punctuated some other way cannot be told from such a name, so it stays."""
 
 
 def envelope_endpoint(dsn: str) -> str:
@@ -193,6 +194,7 @@ def collect_secrets(engine: "Engine") -> set[str]:
         if camera.source.get("access_code"):
             secrets.add(str(camera.source["access_code"]))
         secrets |= url_secrets(str(camera.source.get("url") or ""))
+    secrets |= url_secrets(str(engine.settings.get("catalogue_url") or ""))
     for plugin in engine.plugins.values():
         secrets |= {value for value in plugin.secrets.values() if value}
     return secrets
@@ -231,7 +233,7 @@ def diagnostics(engine: "Engine") -> dict[str, Any]:
     config), the MQTT password goes, camera sources are reduced to their
     non-sensitive shape and API tokens are omitted entirely.
     """
-    settings = dict(engine.settings)
+    settings = {**engine.settings, "catalogue_url": scrub_url(str(engine.settings["catalogue_url"]))}
     settings["notifiers"] = {
         provider: redact(config, NOTIFIERS[provider].secret_keys()) if provider in NOTIFIERS else REDACTED
         for provider, config in settings.get("notifiers", {}).items()

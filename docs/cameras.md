@@ -28,7 +28,9 @@ the other three.
 | **This browser** | The camera of the phone or laptop you have the dashboard open on | Only while that page stays open |
 
 A device or a stream URL registers once. Adding one that's already a camera, including a
-printer's own webcam, is refused.
+printer's own webcam, is refused, and a printer's webcam you registered by hand isn't added a
+second time. An address is the same camera whatever the case of its scheme and host, and a
+space around it is dropped.
 
 ## Printer cameras
 

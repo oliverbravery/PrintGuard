@@ -26,6 +26,7 @@ MONITOR_DEFAULTS: dict[str, Any] = {
 }
 
 STANDBY_STATUSES = ("idle", "paused", "error")
+ON_DEFECT = ("none", "pause", "cancel")
 
 # A score only approaches 1, and of the failure frames the model was trained
 # on one in seven passes 0.95 and one in seventy 0.99, so a threshold above
@@ -63,20 +64,37 @@ def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any
         A complete, validated monitor record.
 
     Raises:
-        ValueError: If the threshold, streak or cooldown is not a finite number.
+        ValueError: If the patch names a setting a monitor does not have, the
+            threshold, streak or cooldown is not a finite number, or another
+            value is not of the kind its setting takes.
     """
+    unknown = sorted(set(patch) - set(MONITOR_DEFAULTS))
+    if unknown:
+        raise ValueError(f"a monitor has no {unknown[0]} setting")
     record = {**(base or MONITOR_DEFAULTS), **patch, "id": monitor_id}
-    record["name"] = str(record["name"]).strip() or "Monitor"
-    record["camera_id"] = str(record["camera_id"] or "")
-    record["printer_id"] = str(record["printer_id"] or "")
+    for key in ("name", "camera_id", "printer_id"):
+        if not isinstance(record[key], str):
+            raise ValueError(f"a monitor's {key} is text")
+    for key in ("enabled", "notify"):
+        if not isinstance(record[key], bool):
+            raise ValueError(f"a monitor's {key} is true or false")
+    if record["on_defect"] not in ON_DEFECT:
+        raise ValueError(f"on_defect is one of {', '.join(ON_DEFECT)}")
+    record["name"] = record["name"].strip() or "Monitor"
     record["threshold"] = clamp("threshold", record["threshold"], *_CLAMPS["threshold"])
     record["consecutive"] = int(clamp("consecutive", record["consecutive"], *_CLAMPS["consecutive"]))
     record["cooldown_s"] = int(clamp("cooldown_s", record["cooldown_s"], *_CLAMPS["cooldown_s"]))
-    record["enabled"] = bool(record["enabled"])
-    record["notify"] = bool(record["notify"])
-    if record["on_defect"] not in ("none", "pause", "cancel"):
-        record["on_defect"] = "none"
     return record
+
+
+def stored_monitor(record: dict[str, Any]) -> dict[str, Any]:
+    """Reads a monitor back from the state store, leaving out a setting a later version retired.
+
+    Raises:
+        KeyError: If the record has no id.
+        ValueError: If a value is not of the kind its setting takes.
+    """
+    return sanitise_monitor(record["id"], {key: record[key] for key in MONITOR_DEFAULTS if key in record})
 
 
 def persisted_monitor(record: dict[str, Any]) -> dict[str, Any]:

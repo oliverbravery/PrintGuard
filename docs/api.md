@@ -93,7 +93,8 @@ file and `/cameras/refresh-printers`. Every other change returns the one thing i
 for `/prints/{id}/start` is the printer. The two test routes return the engine's `printer_test`
 or `notify_test` event as it was sent, `event` and `req_id` included. A rejected command is a
 `400`, a timeout a `504`, and a missing or under-scoped token a `401` or `403`. An id nothing
-matches is a `404` on a read and a `400` on a change. A body of the wrong shape is a `422`, which
+matches is a `404` on a read and a `400` on a change, which covers removing one and binding a
+monitor to a camera or printer that isn't registered. A body of the wrong shape is a `422`, which
 includes a number sent as `NaN` or `Infinity`. Adding a camera or refreshing the printer cameras waits up to 40 seconds for
 a first frame. A printer action or heater target waits 15 seconds, and 105 on an Elegoo printer,
 since a Centauri Carbon 2 answers a resume only once it has reheated. The interactive OpenAPI schema is served at `/api/v1/docs`.
@@ -120,7 +121,7 @@ name is in [`PRINTGUARD_ORIGINS`](deployment.md#host-and-origin-checking).
 | `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
 | `GET` | `/prints/{id}` | One print file |
 | `GET` | `/prints/{id}/file` | Download a print file as the library keeps it |
-| `GET` | `/events` | The last 100 alerts, warnings, device changes and errors |
+| `GET` | `/events` | The last 100 alerts, warnings and errors. A printer's status and progress are in `/printers` |
 
 </details>
 

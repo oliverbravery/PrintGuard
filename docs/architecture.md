@@ -156,8 +156,10 @@ Commands, UI to engine. The table is the engine's `_handlers` map:
 Every command may carry a `req_id`, echoed on the responding event so the UI can resolve
 pending requests. A command that succeeds ends with a `state` event carrying that `req_id`,
 or with its own event for the four that only read, and one that fails ends with an `error`,
-an unknown command included. An error that carries no text of its own, as a timeout does, is
-reported by its type.
+an unknown command included. An id nothing matches fails a remove as it does an update, and a
+monitor or camera patch is refused for a setting it doesn't have or a value its setting doesn't
+take, where a number out of range is clamped. An error that carries no text of its own, as a
+timeout does, is reported by its type.
 
 Events, engine to UI:
 
@@ -166,7 +168,7 @@ Events, engine to UI:
 | `state` | Full snapshot, on connect, after every command that can change it and on a 1 s ticker. `history.get`, `snapshot.get`, `review.get` and `camera.snapshot` only read, so they save nothing and answer with their own event alone. The commands in `UNSAVED_COMMANDS`, such as `discover`, `printer.test`, `notify.test`, `update.check`, `report.bundle` and a plugin's requests, change nothing that is stored, so they save nothing either and their closing `state` goes only to the transport that sent them. The fields are listed below |
 | `result` | One monitor's score, sampled at up to 5 Hz per monitor |
 | `alert` | A sustained defect, with the action taken |
-| `warning` | Watchdog conditions and their recovery, an MQTT broker the bridge cannot reach, once when the outage starts and once when it ends, and what the platform reports through `take_notices()` |
+| `warning` | Watchdog conditions and their recovery, an MQTT broker the bridge cannot reach, once when the outage starts and once when it ends, what the platform reports through `take_notices()`, and a printer whose cameras could not be listed or opened |
 | `device` | A printer's status, progress, job, time left and heaters |
 | `print_started` | A file from the library has been sent to a printer and started |
 | `discovered`, `printer_test`, `notify_test` | Command responses |
@@ -237,6 +239,7 @@ series or the proprietary port 6000 protocol on the A1 and P1. The adapter's opt
 demand through `printer.cameras.refresh` to pick up a camera attached later. One printer is
 reconciled by one caller at a time, and a camera whose source changed with the printer's
 connection details is attached again at the new address with its name and tuning kept. A
+stream already registered by hand stays the one camera on it. A
 printer whose connection details change also loses the status last read through the old ones,
 so its monitors watch until the new address answers. Such
 cameras cannot be removed on their own and are dropped with their printer. See
@@ -401,7 +404,9 @@ positively reports idle or error, or the monitor is disabled or removed, so a pa
 inside it. A print whose monitor has a defect response in flight stays open until that
 response has kept its alert frame, so a cancelled printer read idle while the notifiers are
 still answering can't close the print without it. A monitor with no printer closes its print
-after a day.
+after a day, which the ticker checks so it holds with the review off too. A monitor whose
+printer has not been read yet, as after its connection is edited, is watched but keeps no
+`near` or `spaced` frame, so an idle printer's first answer has no print to end.
 
 | Kind | Kept | Chosen by |
 |---|---|---|
@@ -433,7 +438,7 @@ so frames only leave the hub when a person presses Send in the dashboard.
 The Worker is the only writer to a private R2 bucket and holds every limit in one Durable
 Object, so the hub only reports what it was told. A refused print keeps its frames and the
 engine's ticker sends the rest once `retry_at` passes, six hours on where the refusal named no
-time or one already past on the hub's clock. A send cut short by a restart has no `retry_at` and is picked up on the next tick. A print dismissed while it uploads stops after the frame in flight. A frame over 150 KB is re-encoded once at 384px and skipped if it is still too big, as is one whose file is missing or that the Worker rejects as `details`, `not_jpeg`, `too_large` or `length`, since it could never be sent. A skipped frame leaves the submission, so `chosen` and `sent` count only what the inbox took. The Worker counts a network under an HMAC of its address, never the address, and counts a frame it already holds as no new upload. The hub's token is issued by the Worker
+time or one already past on the hub's clock. A send cut short by a restart has no `retry_at` and is picked up on the next tick. A print dismissed while it uploads stops after the frame in flight. A frame over 150 KB is re-encoded once at 384px and skipped if it is still too big, as is one whose file is missing or that the Worker rejects as `details`, `not_jpeg`, `too_large` or `length`, since it could never be sent. A skipped frame leaves the submission, so `chosen` and `sent` count only what the inbox took. A print with every frame skipped goes back to `ready` with an `error` event. Prints sent together register the hub one at a time, so they all go under one token. The Worker counts a network under an HMAC of its address, never the address, and counts a frame it already holds as no new upload. The hub's token is issued by the Worker
 and persisted, and the `state` snapshot carries only its public half as `feedback_hub`.
 
 ## Failing safely
@@ -546,8 +551,9 @@ engine the UI talks to, so they add no logic of their own and cannot drift from 
   call the engine directly: the state, list and get routes use `state_event()` with printer,
   notifier, MQTT and camera-source credentials stripped and each plugin's store left out, and the alert snapshot, camera frame,
   classify and events routes use `monitor_snapshot()`, `snapshot()`, `classify()` and
-  `recent_events()`. `recent_events()` is the newest 100 alert, warning, device and error
-  events.
+  `recent_events()`. `recent_events()` is the newest 100 alert, warning and error events.
+  `device` events are left out, since one printing printer sends enough of them to push an
+  alert out in minutes.
 - [`server/mcp.py`](../printguard/server/mcp.py) derives its tools from that app with
   `FastMCP.from_fastapi`, leaving out the camera frame, the alert snapshot,
   classify, and the print file download and upload, which carry a binary body. It adds three tools of its own,

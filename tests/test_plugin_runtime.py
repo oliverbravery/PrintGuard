@@ -220,7 +220,7 @@ async def engine_with_worker(runtime: WasmPluginRuntime):
 
 async def test_a_worker_reacts_to_an_alert_and_its_command_is_carried_out(runtime: WasmPluginRuntime) -> None:
     async with engine_with_worker(runtime) as engine:
-        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "m", "camera_id": "c"}})
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "m"}})
         monitor_id = next(iter(engine.monitors))
 
         engine.emit({"event": "alert", "monitor_id": monitor_id, "score": 0.91, "action": "pause"})

@@ -38,7 +38,13 @@ def scrub_with(scrub: Callable[[str], str]) -> None:
 
 
 def describe(exc: BaseException) -> str:
-    """What an exception says, or its type when it says nothing, as a timeout does."""
+    """What an exception says, or its type when it says nothing, as a timeout does.
+
+    A KeyError only quotes the key that was not there, which reads as a
+    riddle on its own, so it is said to be missing.
+    """
+    if isinstance(exc, KeyError):
+        return f"missing {exc}"
     return str(exc) or type(exc).__name__
 
 

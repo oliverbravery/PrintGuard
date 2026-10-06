@@ -8,11 +8,10 @@ every dashboard renders what was saved.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Callable
 
 from .bounds import clamp
 
-KEYS = ("theme", "themes", "glass", "layout")
 BASES = ("dark", "light")
 COLOUR = re.compile(r"^#[0-9a-fA-F]{6}$")
 GLASS_KEYS = ("opacity", "tone")
@@ -37,6 +36,28 @@ def _layout(raw: Any) -> dict[str, Any]:
     return raw
 
 
+def _name(raw: Any) -> str:
+    if not isinstance(raw, str):
+        raise ValueError("theme names a colour scheme or a custom theme")
+    return raw
+
+
+def _themes(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        raise ValueError("themes is a list of custom themes")
+    return [_theme(theme) for theme in raw]
+
+
+def _glass(raw: Any) -> dict[str, float]:
+    if not isinstance(raw, dict):
+        raise ValueError("glass holds an opacity and a tone")
+    return {key: clamp(f"glass {key}", raw.get(key, 0.0), 0.0, 1.0) for key in GLASS_KEYS}
+
+
+CHECKS: dict[str, Callable[[Any], Any]] = {"theme": _name, "themes": _themes, "glass": _glass, "layout": _layout}
+"""What each of the dashboard's own settings is checked with, raising ValueError for one of the wrong shape."""
+
+
 def sanitise(settings: dict[str, Any]) -> dict[str, Any]:
     """Checks the dashboard's own settings are ones every dashboard can render.
 
@@ -49,15 +70,4 @@ def sanitise(settings: dict[str, Any]) -> dict[str, Any]:
     Raises:
         ValueError: If one of them has the wrong shape, naming which.
     """
-    if not isinstance(settings["theme"], str):
-        raise ValueError("theme names a colour scheme or a custom theme")
-    if not isinstance(settings["themes"], list):
-        raise ValueError("themes is a list of custom themes")
-    if not isinstance(settings["glass"], dict):
-        raise ValueError("glass holds an opacity and a tone")
-    return {
-        "theme": settings["theme"],
-        "themes": [_theme(theme) for theme in settings["themes"]],
-        "glass": {key: clamp(f"glass {key}", settings["glass"].get(key, 0.0), 0.0, 1.0) for key in GLASS_KEYS},
-        "layout": _layout(settings["layout"]),
-    }
+    return {key: check(settings[key]) for key, check in CHECKS.items()}

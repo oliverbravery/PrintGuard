@@ -57,14 +57,14 @@ def sanitise_printers(printer_ids: Any, ext: str, printers: "PrinterRegistry") -
     """The printers a file is tagged for, each registered and able to print it.
 
     Raises:
-        KeyError: If a printer does not exist.
+        LookupError: If a printer does not exist.
         ValueError: If one cannot print the format.
     """
     chosen: list[str] = []
     for printer_id in printer_ids or []:
         printer = printers.get(str(printer_id))
         if printer is None:
-            raise KeyError(f"no printer {printer_id}")
+            raise LookupError(f"no printer {printer_id}")
         accepts(printer, ext)
         if printer.id not in chosen:
             chosen.append(printer.id)

@@ -100,10 +100,11 @@ class ReviewLibrary:
     def __init__(self, platform: Platform) -> None:
         self._platform = platform
         self._reviews: dict[str, Review] = {}
+        self._stops = 0
 
     def restore(self, records: list[dict[str, Any]]) -> None:
-        """Loads the reviews a previous run persisted."""
-        self._reviews = {record["id"]: Review(**record) for record in records}
+        """Loads reviews a previous run persisted."""
+        self._reviews.update({record["id"]: Review(**record) for record in records})
 
     def persisted(self) -> list[dict[str, Any]]:
         """Serialises every review for the state store."""
@@ -133,8 +134,7 @@ class ReviewLibrary:
 
         A frame is kept as spaced when the print's current gap has passed since
         the last one, and otherwise as a near miss when it scored under the
-        threshold but above the near misses already held. A monitor with no
-        printer has no print end, so its review is closed after a day.
+        threshold but above the near misses already held.
 
         Args:
             monitor: The monitor record the score belongs to.
@@ -146,11 +146,7 @@ class ReviewLibrary:
             Whether the kept frames changed.
         """
         score = round(score, 4)
-        review = self._running(monitor["id"])
-        if review and not monitor.get("printer_id") and ts - review.started >= UNLINKED_PRINT_S:
-            review.ended, review.status, review = ts, "ready" if review.frames else "dismissed", None
-        if review is None:
-            review = await self._begin(monitor["id"], ts)
+        review = self._running(monitor["id"]) or await self._begin(monitor["id"], ts)
         spaced = review.of_kind("spaced")
         if not spaced or ts - spaced[-1]["ts"] >= review.spacing_s:
             await self._keep(review, frame, {"ts": ts, "score": score, "kind": "spaced"})
@@ -180,8 +176,9 @@ class ReviewLibrary:
         """Ends the running review of every monitor whose print is over.
 
         A print is over once its printer positively reports it is idle or has
-        failed, or the monitor is switched off. A pause is part of the same
-        print, and a printer that cannot be read keeps the review running. So
+        failed, or the monitor is switched off. A monitor with no printer has
+        no print end, so its print is over after a day. A pause is part of the
+        same print, and a printer that cannot be read keeps the review running. So
         does a defect response still in flight, since the command that stops a
         print is sent before the frame that fired it is kept. A print with no
         frames kept has nothing to review, so it never waits for one.
@@ -196,12 +193,14 @@ class ReviewLibrary:
             Whether any review ended.
         """
         ended = False
+        now = time.time()
         for review in [review for review in self._reviews.values() if review.ended is None and review.monitor_id not in responding]:
             monitor = monitors.get(review.monitor_id)
             printer = printers.get(monitor.get("printer_id") or "") if monitor else None
-            if monitor and monitor.get("enabled") and not (printer and printer.reported_status in ENDED_STATUSES):
+            day_long = monitor and not monitor.get("printer_id") and now - review.started >= UNLINKED_PRINT_S
+            if monitor and monitor.get("enabled") and not (printer and printer.reported_status in ENDED_STATUSES) and not day_long:
                 continue
-            review.ended = time.time()
+            review.ended = now
             review.status = "ready" if wanted and review.frames else "dismissed"
             ended = True
         return ended
@@ -216,12 +215,12 @@ class ReviewLibrary:
             printer: The printer model the reviewer typed, or an empty string.
 
         Raises:
-            KeyError: If there is no such review.
+            LookupError: If there is no such review.
             ValueError: If the print is still running, was already sent, or no frame is left to send.
         """
         review = self._reviews.get(review_id)
         if review is None:
-            raise KeyError(f"no review {review_id!r}")
+            raise LookupError(f"no review {review_id}")
         if review.status in ("running", "sent"):
             raise ValueError("a print is reviewed once, after it has finished")
         labels = {frame["id"]: "failure" if frame["id"] in failures else "good" for frame in review.frames if frame["id"] not in removed}
@@ -235,12 +234,12 @@ class ReviewLibrary:
         """Stops a finished print waiting to be reviewed, keeping its frames.
 
         Raises:
-            KeyError: If there is no such review.
+            LookupError: If there is no such review.
             ValueError: If the print is still running or was already sent.
         """
         review = self._reviews.get(review_id)
         if review is None:
-            raise KeyError(f"no review {review_id!r}")
+            raise LookupError(f"no review {review_id}")
         if review.status in ("running", "sent"):
             raise ValueError("only a finished, unsent print can be dismissed")
         review.submission, review.status = None, "dismissed"
@@ -250,8 +249,9 @@ class ReviewLibrary:
 
         The alert frames stay because the risk history shows them. A print
         still running loses the frames kept so far and is dismissed when it
-        ends.
+        ends, and so does a frame that was still being stored.
         """
+        self._stops += 1
         for review in list(self._reviews.values()):
             if review.status in ("ready", "queued"):
                 review.submission, review.status = None, "dismissed"
@@ -285,14 +285,15 @@ class ReviewLibrary:
         return sum(frame["size"] for review in self._reviews.values() for frame in review.frames)
 
     async def _keep(self, review: Review, frame: Frame, record: dict[str, Any]) -> None:
-        """Stores a frame, unless its review was deleted while the file was being written."""
+        """Stores a frame, unless its review was deleted or the review switched off while the file was being written."""
+        stops = self._stops
         small = await asyncio.to_thread(vision.shrink, frame.rgb, SHORTEST_PX)
         jpeg = await self._platform.encode_jpeg(small)
         if not jpeg:
             return
         frame_id = uuid.uuid4().hex[:12]
         size = await self._platform.files.store(frame_key(review.id, frame_id), as_chunks(jpeg))
-        if self._reviews.get(review.id) is not review:
+        if self._reviews.get(review.id) is not review or (record["kind"] != "alert" and self._stops != stops):
             await self._platform.files.remove(frame_key(review.id, frame_id))
             return
         review.frames.append({"id": frame_id, **record, "size": size})

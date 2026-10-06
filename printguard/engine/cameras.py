@@ -36,6 +36,34 @@ def whep_endpoint(url: str) -> bool:
     return parsed.scheme in ("", "http", "https") and parsed.path.rstrip("/").rsplit("/", 1)[-1].lower() == "whep"
 
 
+def tidy_stream_url(url: str) -> str:
+    """Writes a stream address the way it opens, since a space around it or a capital in its scheme opens nothing.
+
+    Args:
+        url: The address as it was typed or pasted.
+
+    Returns:
+        It without the whitespace around it and with its scheme in lower case.
+    """
+    scheme, separator, rest = url.strip().partition("://")
+    return f"{scheme.lower()}{separator}{rest}" if separator else scheme
+
+
+def same_stream(url: str) -> str:
+    """The part of a stream address that says which stream it is, for telling two addresses apart.
+
+    Args:
+        url: A stream address.
+
+    Returns:
+        It tidied, with its host in lower case and without a fragment, which
+        the camera is never sent.
+    """
+    scheme, separator, rest = tidy_stream_url(url).partition("#")[0].partition("://")
+    host, slash, path = rest.partition("/")
+    return f"{scheme}{separator}{host.lower()}{slash}{path}"
+
+
 def declared_camera_id(device_id: str) -> str:
     """The id a device declared by the deployment registers under.
 
@@ -68,7 +96,7 @@ def _sanitise_crop(raw: Any) -> dict[str, float] | None:
     if raw is None:
         return None
     if not isinstance(raw, dict):
-        return None
+        raise ValueError("a crop holds x, y, w and h, each a share of the frame")
     x = clamp("crop x", raw.get("x", 0), 0.0, 1.0)
     y = clamp("crop y", raw.get("y", 0), 0.0, 1.0)
     w = clamp("crop w", raw.get("w", 1), 0.01, 1.0 - x)
@@ -79,11 +107,9 @@ def _sanitise_crop(raw: Any) -> dict[str, float] | None:
 
 
 def _sanitise_rotation(raw: Any) -> int:
-    try:
-        rotation = int(raw) % 360
-    except (TypeError, ValueError):
-        return 0
-    return rotation if rotation in _ROTATIONS else 0
+    if raw not in _ROTATIONS:
+        raise ValueError("rotation is 0, 90, 180 or 270")
+    return int(raw)
 
 
 def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -98,11 +124,18 @@ def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] 
         A complete, validated camera settings record.
 
     Raises:
-        ValueError: If a tuning value or a side of the crop is not a finite number.
+        ValueError: If the patch names a setting a camera does not have, a
+            tuning value or a side of the crop is not a finite number, or the
+            name, crop or rotation is not of the kind it takes.
     """
+    unknown = sorted(set(patch) - set(CAMERA_DEFAULTS) - {"name"})
+    if unknown:
+        raise ValueError(f"a camera has no {unknown[0]} setting")
     record = {**(base or CAMERA_DEFAULTS), **patch, "id": camera_id}
-    if "name" in patch or base:
-        record["name"] = str(record.get("name", "Camera")).strip() or "Camera"
+    if "name" in patch:
+        if not isinstance(patch["name"], str):
+            raise ValueError("a camera's name is text")
+        record["name"] = patch["name"].strip() or "Camera"
     for key in ("brightness", "contrast", "sharpness", "detect_fps"):
         record[key] = clamp(key, record[key], *_CLAMP[key])
     record["crop"] = _sanitise_crop(record.get("crop"))

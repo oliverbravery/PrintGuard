@@ -1337,14 +1337,12 @@ def test_sanitise_monitor_clamps_and_defaults() -> None:
             "threshold": 9,
             "consecutive": 99,
             "cooldown_s": 10_000,
-            "on_defect": "explode",
         },
     )
     assert record["name"] == "Monitor"
     assert record["threshold"] == 0.95
     assert record["consecutive"] == 30
     assert record["cooldown_s"] == 600
-    assert record["on_defect"] == "none"
 
 
 def test_persisted_monitor_keeps_only_configuration() -> None:

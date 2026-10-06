@@ -748,3 +748,30 @@ async def test_the_read_surface_does_not_list_the_api_tokens() -> None:
         for scope in ("read", "manage"):
             state = (await client.get("/state", headers={"Authorization": f"Bearer {tokens[scope]}"})).json()
             assert "tokens" not in state
+
+
+async def test_removing_an_id_nothing_matches_is_a_400() -> None:
+    async with api(("manage",)) as (client, _engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        for collection in ("monitors", "cameras", "printers", "prints"):
+            answer = await client.delete(f"/{collection}/nope", headers=manage)
+            assert (answer.status_code, answer.json()) == (400, {"detail": f"no {collection[:-1]} nope"})
+        unbound = await client.post("/monitors", json={"camera_id": "nope"}, headers=manage)
+        assert (unbound.status_code, unbound.json()) == (400, {"detail": "no camera nope"})
+
+
+async def test_a_private_catalogues_credentials_stay_out_of_the_state() -> None:
+    async with api(("read",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        private = "https://reader:hunter2pass@raw.example.com/catalogue.json?token=s3cr3tvalue"
+        await engine.handle({"cmd": "settings.update", "patch": {"catalogue_url": private}})
+        state = (await client.get("/state", headers={"Authorization": f"Bearer {tokens['read']}"})).json()
+        assert state["settings"]["catalogue_url"] == "https://raw.example.com/catalogue.json?token=[redacted]"
+        assert engine.settings["catalogue_url"] == private, "the dashboard still reads the address it saved"
+
+
+async def test_recent_events_leave_out_a_printers_progress() -> None:
+    async with api(("read",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        engine.emit({"event": "device", "printer_id": printer_id, "status": "printing", "progress": 41.0})
+        engine.emit({"event": "warning", "message": "camera 'cam' is offline"})
+        events = (await client.get("/events", headers={"Authorization": f"Bearer {tokens['read']}"})).json()
+        assert [event["event"] for event in events] == ["warning"]

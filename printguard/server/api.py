@@ -352,6 +352,7 @@ def public_state(engine: Engine) -> dict[str, Any]:
         **state["settings"],
         "notifiers": {pid: _public_config(config, NOTIFIERS[pid]) for pid, config in notifiers.items() if pid in NOTIFIERS},
         "mqtt": {**mqtt, "password": ""} if mqtt.get("password") else mqtt,
+        "catalogue_url": scrub_url(state["settings"]["catalogue_url"]),
     }
     return state
 
@@ -609,7 +610,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
 
     @api.get("/events", operation_id="recent_events", tags=["read"])
     async def recent_events(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
-        """Returns recent alerts, warnings, device changes and errors."""
+        """Returns recent alerts, warnings and errors."""
         return engine.recent_events()
 
     @api.patch("/settings", operation_id="update_settings", tags=["manage"])
