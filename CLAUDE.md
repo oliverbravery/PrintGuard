@@ -87,8 +87,8 @@ essentials a change must respect:
 
 - **Fail safe, fail loud.** A monitor's `watching` state gates inference; only a *positive*
   "not printing" stands it down (losing the signal keeps the last answer). Nothing on the alert
-  path swallows errors - failed printer actions, notifier failures and dropped feeds emit
-  `error`/`warning` events. See `engine/watchdog.py`.
+  path swallows errors - failed printer actions, notifier failures, an alert picture that cannot
+  be encoded and dropped feeds emit `error`/`warning` events. See `engine/watchdog.py`.
 
 - **State** persists through `platform.load_state()`/`save_state()`, a JSON file in the
   hub's data directory.

@@ -31,11 +31,11 @@ Every enabled channel gets every notice, so there's no routing to set up. A moni
 
 | Channel | You need | Notes |
 |---|---|---|
-| [ntfy](https://ntfy.sh) | A topic URL, on ntfy.sh or your own server | No account needed. Use a hard-to-guess topic, or a protected one with an access token. Anyone with an open topic's URL can read it, so the URL is kept out of bug reports and the API like a password. Every notice is sent at urgent priority. Your own server takes snapshots once [attachments](https://docs.ntfy.sh/config/#attachments) are on, which needs `attachment-cache-dir` and `base-url` set |
-| [Pushover](https://pushover.net) | An application token from [pushover.net/apps/build](https://pushover.net/apps/build) and your user key | A one-off app purchase. Priority covers every notice and defaults to High, which bypasses the quiet hours set on the device |
-| [Telegram](https://telegram.org) | A bot token from @BotFather and your chat ID | |
-| [Discord](https://discord.com) | A webhook URL, from Server Settings, Integrations, then Webhooks | |
-| Desktop notification | Nothing | Desktop app only. A native notification on the computer running the app, with the window open or closed |
+| [ntfy](https://ntfy.sh) | A topic URL, on ntfy.sh or your own server | No account needed. Use a hard-to-guess topic, or a protected one with an access token. Anyone with an open topic's URL can read it, so the URL is kept out of bug reports and the API like a password. Defect alerts and fault warnings are sent at urgent priority, and recoveries without it. Your own server takes snapshots once [attachments](https://docs.ntfy.sh/config/#attachments) are on, which needs `attachment-cache-dir` and `base-url` set |
+| [Pushover](https://pushover.net) | An application token from [pushover.net/apps/build](https://pushover.net/apps/build) and your user key | A one-off app purchase. Priority defaults to High, which bypasses the quiet hours set on the device. Recoveries go at Normal at most |
+| [Telegram](https://telegram.org) | A bot token from @BotFather and your chat ID | Recoveries are sent without a sound |
+| [Discord](https://discord.com) | A webhook URL, from Server Settings, Integrations, then Webhooks | Recoveries are sent with notifications suppressed |
+| Desktop notification | Nothing to fill in | Desktop app only. A native notification on the computer running the app, with the window open or closed. macOS asks for permission the first time, and a send fails with an error while notifications are switched off for PrintGuard in the system settings. A recovery looks like any other notice |
 
 Home Assistant gets the same defects and snapshots over MQTT, covered in
 [API & MCP](api.md#home-assistant). The **Progress reports** [plugin](plugins.md) sends a tally of
@@ -47,7 +47,7 @@ a print through these same channels.
 |---|---|---|
 | Defect alert | A defect holds for a monitor's consecutive count | A snapshot, the score and whether the print was paused, cancelled or left running. A pause or cancel that failed is called out |
 | Fault warning | A camera drops or freezes, a watching monitor has no camera, or a printer's state can't be read while its monitor watches | Which one, and whether the monitor has stopped watching or can no longer pause the print |
-| Recovery | A faulted camera or printer has stayed healthy | |
+| Recovery | A faulted camera or printer has stayed healthy | Sent quietly where the channel has a way to, as the [channels](#channels) say |
 
 A monitor set to **Alert only** says so in the alert, so you know the print is still running. A
 pause or cancel is tried up to three times in 45 seconds before it's reported as failed. An
@@ -67,8 +67,9 @@ A channel that fails to deliver raises an error on the dashboard. It isn't retri
 that refuses the snapshot is sent the alert again as text, and the dashboard error says the
 picture was refused.
 
-Give a channel the address it answers on, not one that redirects to it. A 301 or 302 turns the
-alert into a read, so PrintGuard reports it as failed and names the address to use.
+Give a channel the address it answers on, not one that redirects to it. A 301 or 302 turns a text
+alert into a read, so PrintGuard reports it as failed and names the address to use. An ntfy alert
+with a picture is a `PUT`, which is replayed and delivered.
 
 ## Faults and the grace period
 

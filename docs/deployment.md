@@ -177,8 +177,8 @@ is called DNS rebinding.
       PRINTGUARD_ORIGINS: "https://hub.example.com"   # comma-separate several
 ```
 
-Each entry needs its scheme. Capitals and a `:443` or `:80` make no difference, and the hub
-logs a warning at start for an entry it can't read.
+Each entry needs its scheme. Capitals, a `:443` or `:80` and a trailing dot on the name make no
+difference, and the hub logs a warning at start for an entry it can't read.
 
 Every request for a name that isn't covered gets a `403` that says which line to add, and the
 hub logs the same line once for each of the first 32 names. A WebSocket is closed with no text,
@@ -191,7 +191,8 @@ host or forwards it. Tailscale, Cloudflare and oauth2-proxy all do one or the ot
 The hub also rejects any WebSocket, print upload or camera stream request a browser sends from an
 `Origin` that is not the address the request was for or one listed in `PRINTGUARD_ORIGINS`. An upload or stream
 request with no `Origin`, which is what a script sends, is let through. A WebSocket with none is refused,
-since every browser sends one and only the dashboard opens them. An auth proxy checks the session cookie,
+since every browser sends one and only the dashboard opens them. An `Origin` that isn't a valid
+address is refused too, with a `403` or by closing the WebSocket. An auth proxy checks the session cookie,
 and the browser attaches that cookie to sockets opened by other sites too, so this is what stops
 a signed-in user's other tabs from driving the engine.
 
@@ -223,7 +224,7 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | Check | Why |
 |---|---|
 | No router port-forwards for `8000`, `8554` or `1935` | The hub has no authentication of its own |
-| Only admit people you would hand the printer to | There are no per-user roles, so anyone who authenticates sees every camera and controls every printer |
+| Only admit people you would hand the printer to | There are no per-user roles, so anyone who authenticates sees every camera and controls every printer. The dashboard's WebSocket also carries the stored credentials that the REST API and MCP server redact |
 | Bind ports to `127.0.0.1` when a proxy on the same host is the only client | Keeps the app unreachable except through the proxy |
 | Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback, and the hub proxies HLS out through `:8000`. The control API only answers the hub's own login, but the HLS muxer takes none |
 | List in `PRINTGUARD_ORIGINS` only the addresses you open the hub at | Every name in it is one a web page may reach the hub under. See [host and origin checking](#host-and-origin-checking) |
@@ -241,6 +242,7 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | `*.ingest.de.sentry.io` | Only when you send a bug report |
 | `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
 | Your printers, cameras, notification services and MQTT broker | As you configure them |
+| Microsoft, through Windows ML | Only in the Windows desktop app on Windows 11 24H2 or newer, when the provider for your GPU isn't installed yet. Windows does the download, at the first start |
 | The addresses a plugin's manifest lists, and the service it signs you in to | Only for a plugin you granted [`net`, `net:local` or `oauth`](plugins.md#permissions). A redirect from one of them is not followed |
 
 ## Environment variables
@@ -266,19 +268,21 @@ variable as a setting, so don't set one on the hub.
 
 ## Your data and backups
 
-Everything PrintGuard keeps is in its data directory.
+Everything PrintGuard keeps is in its data directory, bar one file. The desktop app's notifier
+writes the picture of the latest alert to `printguard-alert.jpg` in the system's temporary folder
+and overwrites it each time.
 
 | Path | Holds |
 |---|---|
-| `state.json` | Cameras, printers, monitors, settings, themes, layout, installed plugins, the print library's records and the record of each print's kept frames, with printer passwords, notifier keys, plugin credentials, API token hashes and the token the hub sends training frames with. Written readable only by the account running the hub |
+| `state.json` | Cameras, printers, monitors, settings, themes, layout, installed plugins, the print library's records and the record of each print's kept frames, with printer passwords, notifier keys, the MQTT broker password, camera addresses that carry a login and a Bambu camera's access code, plugin credentials, API token hashes and the token the hub sends training frames with. Written readable only by the account running the hub |
 | `state.tmp` | The next `state.json` while it is being written. It's only there for a moment |
-| `state.json.corrupt` | A `state.json` that would not parse at start, [kept so you can recover it](troubleshooting.md#starting-up). It's only there after that has happened |
-| `prints/` | The files of the [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub). At start the hub deletes any upload there that never finished, and any file `state.json` doesn't name unless a `state.json.corrupt` is waiting to be recovered. It leaves folders alone, such as a NAS's `@eaDir` |
+| `state.json.corrupt` | A `state.json` that would not parse at start, or held something the hub never saves, [kept so you can recover it](troubleshooting.md#starting-up). It's only there after that has happened |
+| `prints/` | The files of the [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub). At start the hub deletes any upload there that never finished, and any file `state.json` doesn't name unless a `state.json.corrupt` is waiting to be recovered. It leaves folders alone, such as a NAS's `@eaDir`. Files are written readable only by the account running the hub, and ones from before 2.6.0 keep the mode they had |
 
 | At start, a `state.json` that | Does |
 |---|---|
 | Isn't there | Starts an empty hub |
-| Won't parse | Is moved to `state.json.corrupt` and the hub starts empty |
+| Won't parse, isn't a JSON object, or has a section of the wrong type, such as `monitors` holding text | Is moved to `state.json.corrupt` and the hub starts empty |
 | The hub's user may not read | [Stops the hub](troubleshooting.md#starting-up) with a log line saying the data directory has to belong to that user |
 | Holds a camera, printer, monitor, print, review, plugin or API token record of the wrong shape | Loads without that record, which is logged as `dropping an unreadable record` and gone from the file at the next save |
 

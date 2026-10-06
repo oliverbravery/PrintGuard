@@ -7,8 +7,19 @@ MediaMTX and QuickJS-ng are separate programs (mere aggregation - each runs as i
 or in its own sandbox and is not linked into PrintGuard). FFmpeg, ONNX Runtime, LiteRT and
 Wasmtime are shared libraries the hub loads, taken as they come in each project's Python wheel.
 
-The GPU images, the desktop apps and the dashboard carry further libraries, listed after those.
-The dashboard's typefaces come last.
+The hub also loads native code from the Python packages in the first table. The GPU images, the
+desktop apps and the dashboard carry further libraries after it, and the dashboard's typefaces
+come last.
+
+| Package | Licence | Native libraries it carries |
+|---|---|---|
+| [NumPy](https://github.com/numpy/numpy) | BSD-3-Clause, the text under PyAV above | OpenBLAS |
+| [Pillow](https://github.com/python-pillow/Pillow) | MIT-CMU | libjpeg, libtiff and FreeType among others |
+| [cryptography](https://github.com/pyca/cryptography) | Apache-2.0 OR BSD-3-Clause, the Apache-2.0 text under Wasmtime below | OpenSSL |
+| [uvloop](https://github.com/MagicStack/uvloop) | MIT, the text under MediaMTX above | libuv |
+| [pydantic-core](https://github.com/pydantic/pydantic-core) | MIT, the text under MediaMTX above | Its own Rust code |
+| [paho-mqtt](https://github.com/eclipse-paho/paho.mqtt.python) | [EPL-2.0](https://www.eclipse.org/legal/epl-2.0/) OR BSD-3-Clause | None, and its source is at the link |
+
 
 ## MediaMTX
 
@@ -441,6 +452,13 @@ The Python interpreter, inside the desktop apps and the images.
 | [Python.NET](https://github.com/pythonnet/pythonnet) | Windows app | MIT | Copyright (c) 2006-2021 the contributors of the Python.NET project |
 | [clr-loader](https://github.com/pythonnet/clr-loader) | Windows app | MIT | Copyright (c) 2019-2026 Benedikt Reinartz |
 | [pywin32](https://github.com/mhammond/pywin32) | Windows app | PSF, as the wheel's metadata gives it | |
+| [winrt-runtime and the winrt-Windows-\* projections](https://github.com/pywinrt/pywinrt) | Windows app | MIT | Copyright (c) Microsoft Corporation. All rights reserved. Copyright (c) 2021-2025 David Lechner |
+| [pyobjc](https://github.com/ronaldoussoren/pyobjc) core and the Cocoa, Quartz, Security, UniformTypeIdentifiers and WebKit frameworks | macOS app | MIT | Copyright 2002, 2003 - Bill Bumgarner, Ronald Oussoren, Steve Majewski, Lele Gaifax, et.al. Copyright 2003-2025 - Ronald Oussoren |
+| [rubicon-objc](https://github.com/beeware/rubicon-objc) | macOS app | BSD-3-Clause, the text under PyAV above | Copyright (c) 2014 Russell Keith-Magee. |
+| [bottle](https://github.com/bottlepy/bottle) | Both apps | MIT | Copyright (c) 2009-2025, Marcel Hellkamp. |
+| [proxy_tools](https://github.com/jtushman/proxy_tools) | Both apps | MIT, as the wheel's metadata gives it | |
+| [bidict](https://github.com/jab/bidict) | Both apps | [MPL-2.0](https://www.mozilla.org/MPL/2.0/), whose source is at the link | Copyright 2009-2026 Joshua Bronson. All rights reserved. |
+| [six](https://github.com/benjaminp/six) | Both apps | MIT | Copyright (c) 2010-2024 Benjamin Peterson |
 
 The MIT text is reproduced under MediaMTX above.
 
@@ -464,9 +482,73 @@ Built into the dashboard the hub serves.
 | [react-image-crop](https://github.com/dominictobias/react-image-crop) | ISC | Copyright (c) 2015, Dominic Tobias (https://github.com/dominictobias) |
 | [Acorn](https://github.com/acornjs/acorn), with acorn-walk | MIT | Copyright (C) 2012-2022 by various contributors (see AUTHORS) |
 | [parse5](https://github.com/inikulin/parse5) | MIT | Copyright (c) 2013-2019 Ivan Nikulin (ifaaan@gmail.com, https://github.com/inikulin) |
+| [entities](https://github.com/fb55/entities) 8.0.0, used by parse5 | BSD-2-Clause | Copyright (c) Felix Böhm |
+| [tslib](https://github.com/microsoft/tslib), used by dnd kit | 0BSD | Copyright (c) Microsoft Corporation. |
 | [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | MIT | Copyright (c) Tailwind Labs, Inc. |
 
-The MIT text is reproduced under MediaMTX above and the Apache-2.0 text under Wasmtime.
+The MIT text is reproduced under MediaMTX above and the Apache-2.0 text under Wasmtime. The ISC,
+BSD-2-Clause and 0BSD texts follow.
+
+ISC, for Lucide and react-image-crop, with the copyright lines in the table above:
+
+```
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+BSD-2-Clause, for entities:
+
+```
+Copyright (c) Felix Böhm
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice,
+this list of conditions and the following disclaimer in the documentation
+and/or other materials provided with the distribution.
+
+THIS IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+0BSD, for tslib:
+
+```
+Copyright (c) Microsoft Corporation.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+```
 
 ## Saira, Saira Condensed and Chivo Mono
 

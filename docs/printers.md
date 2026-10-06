@@ -39,7 +39,9 @@ channels.
 
 Open the printer registry, choose the service, fill in the form and press **Test connection**
 before saving. A printer with a starred field left blank is not saved, and the error names the
-field. A key or password the service rejects fails the test with that as the reason. Then bind
+field. A key or password the service rejects fails the test with that as the reason, and so does
+an address that answers but not as the service's API does, or a PrusaLink one that redirects.
+Then bind
 it to a monitor and choose whether a sustained defect alerts you, pauses the print or cancels it.
 
 Linked printers report job name, progress, temperatures and state on every monitor that uses
@@ -115,6 +117,9 @@ MK2.5. It authenticates with HTTP Digest.
 1. Enable **PrusaLink** on the printer under Settings, Network, then PrusaLink.
 2. Register it with its URL and the password shown there. The username is `maker` on the printer's own firmware. PrusaLink on a Raspberry Pi uses the one you chose when setting it up, so enter that under **Username**.
 
+PrusaLink reports ATTENTION as paused, ERROR as error and BUSY as unknown. With no job running
+the printer's own state is used.
+
 PrusaConnect is not used, so no frames or job data leave hardware you own. PrusaLink's
 webcam feature pushes snapshots to PrusaConnect rather than serving a local video stream, so
 if the printer has a camera, add it separately as a [stream URL](cameras.md#stream-urls).
@@ -156,7 +161,7 @@ report idle at the moment you press **Print**, so nothing lands on top of a runn
 | OctoPrint | `.gcode`, `.gco`, `.g` | Uploaded to local storage, selected and printed |
 | Klipper (Moonraker) | `.gcode`, `.gco`, `.g` | Uploaded to the gcodes root and printed |
 | Elegoo | `.gcode` | Centauri Carbon: uploaded to internal storage and started. Neptune and OrangeStorm: through Moonraker |
-| Prusa (PrusaLink) | `.gcode`, `.bgcode` | Put onto the first writable storage, the USB stick or local storage on a Raspberry Pi, and printed after upload |
+| Prusa (PrusaLink) | `.gcode`, `.bgcode` | Sent as `text/x.gcode` onto the first writable storage, the USB stick or local storage on a Raspberry Pi, and printed after upload |
 | Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the printer's storage over FTPS, then the first plate is started over MQTT |
 
 A file the service stores but doesn't start, or a start the printer refuses, is reported as a
@@ -166,7 +171,8 @@ A file is sent under its library name, with each run of anything outside plain l
 dots, dashes and underscores turned into one `_` and the name before the extension cut to 60
 characters. Rename it first if the printer's own file list matters to you. PrusaLink replaces a
 file of the same name already on the printer. A file can be up to 512 MB, and a 3mf whose gcode
-unpacks to more than that is refused. A file whose gcode is over 32 MB isn't drawn in the browser, since parsing it takes
+unpacks to more than that is refused. So is an empty file, and a 3mf with a member compressed
+with anything but stored or deflate. A file whose gcode is over 32 MB isn't drawn in the browser, since parsing it takes
 about nine times its size in memory, so it has no 3D view and no drawn preview. It uploads and
 prints as usual, and the hub still reads its print time, filament and temperatures. A smaller
 file the browser can't draw, such as on a device with no WebGL, uploads without a drawn preview
@@ -199,8 +205,9 @@ heater off.
 | Prusa (PrusaLink) | Yes | No, PrusaLink has no endpoint for it |
 | Bambu Lab | Yes | Yes, as the `M104` and `M140` lines Bambu Studio sends |
 
-A target is capped at 350 °C for the nozzle and 150 °C for the bed, and the printer's own
-firmware applies its limits on top. Temperatures refresh with the printer's state, about every
+A target above 350 °C for the nozzle or 150 °C for the bed, or one that isn't a number, is
+refused. The dashboard moves what you type, and each preheat preset, to the limit instead, and the
+printer's own firmware applies its limits on top. Temperatures refresh with the printer's state, about every
 five seconds. Printers are read together, so the gap grows to about fifteen seconds while one of
 them isn't answering.
 
@@ -212,7 +219,8 @@ one the hub can reach, not one your browser can. The browser never calls the pri
 
 Register the address the service answers on, not one that redirects to it. A proxy that answers
 `http://` with a 301 or 302 to `https://` turns a pause into a read, so PrintGuard reports the
-command as failed and names the address to use. A 307 or 308 keeps the command and is followed.
+command as failed and names the address to use. A 307 or 308 keeps the command and is followed,
+except for PrusaLink, which names the address on any redirect.
 
 ### Where a printer's webcam is read from
 

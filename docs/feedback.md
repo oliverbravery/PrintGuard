@@ -30,7 +30,8 @@ A frame is kept as the model was given it, after the camera's rotation, crop and
 over 512px on its shorter side is scaled down to that. Frames are stored in the hub's data
 directory, so they survive a restart. The hub keeps the last 20 prints or 200 MB across every
 monitor and drops the oldest finished print first. The alert frames are the ones the risk
-history shows under **Risky moments**.
+history shows under **Risky moments**. Deleting a monitor deletes every print kept from it,
+including ones waiting for a review or to send.
 
 A print ends when its printer reports idle or an error, or when you switch its monitor off, so a
 paused print stays open. A monitor
@@ -50,6 +51,9 @@ isn't offered for review.
 3. Use the × on a frame to leave it out, and **Undo** to put it back.
 4. Add your printer model if you like, then press **Send**.
 
+**Not this print** takes it off your list of prints to review. Its frames stay on the hub, so
+you can still open it from **Prints** later.
+
 ## What's sent
 
 - The frames you kept, with the label you gave each one.
@@ -62,8 +66,9 @@ isn't offered for review.
 
 No names, camera URLs or credentials are sent. Frames go to a private Cloudflare R2
 bucket in the EU through [a small Worker](../feedback-worker) you can read. I download them,
-re-encode them and delete them from the bucket, and anything I haven't collected is deleted
-after 30 days. They are used only to train PrintGuard's detection model.
+re-encode them and delete them from the bucket. Re-encoding drops anything a file carries beyond
+its pixels, and a frame over 4096 by 4096 pixels is discarded. I keep each frame's labels and the
+time it reached the inbox, and anything I haven't collected is deleted after 30 days. They are used only to train PrintGuard's detection model.
 
 Your hub doesn't send its address, but the Worker sees the public IP address every request
 comes from, as any server does. It uses it only for the per-network limit below.
@@ -81,20 +86,23 @@ Worker's secret key. The Worker's request logs are switched off.
 The inbox runs on Cloudflare's free tier, which has a fixed amount of room, so the Worker caps
 what it takes. A frame that hits a limit stays on your hub and sends by itself once the limit resets, unless
 20 newer prints or 200 MB push its print out first. A print also waits when the inbox is full,
-closed or can't be reached, and the hub tries it again every six hours.
+closed or can't be reached, and the hub tries it again after six hours, or sooner when the inbox
+says when there will be room.
 
 | Limit | Value | What you see |
 |---|---|---|
 | One hub | 60 frames a day | "You've sent as many frames as one PrintGuard can in a day." |
 | One network | 120 frames a day, and 3 new hubs | "Your network has sent as many frames as it can today." |
 | Everyone | 1,000 frames a day | "PrintGuard has had all the frames it can take today." |
-| The inbox | 5 GB | "The inbox for training frames is full." |
+| The inbox | 5 GB | "The inbox for training frames is full." The Worker counts the bucket again before saying so, at most once an hour, so pulling frames out reopens it within the hour |
 | One frame | 150 KB | Nothing. The hub shrinks the frame once and skips it if it's still too big |
 
 Daily limits reset at midnight UTC, and the review sheet shows that time in your own time zone.
 A print that is waiting has **Try now** and **Cancel sending** on its sheet. A frame the hub
-skips isn't counted as sent, and sending a frame again doesn't count twice. A print none of
-whose frames could be sent goes back to waiting for a review.
+skips isn't counted as sent. A frame the inbox already holds is answered as sent without being
+written again, so it doesn't count twice and the copy keeps the labels of the first send. A print
+none of whose frames could be sent goes back to waiting for a review, and the Worker refuses a
+frame whose printer model holds a control character.
 
 The limit for everyone is shared, so a handful of busy networks can use it up for the day.
 Your frames wait on your hub until it resets.

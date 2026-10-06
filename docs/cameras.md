@@ -29,15 +29,18 @@ the other three.
 
 A device or a stream URL registers once. Adding one that's already a camera, including a
 printer's own webcam, is refused, and a printer's webcam you registered by hand isn't added a
-second time. An address is the same camera whatever the case of its scheme and host, and a
-space around it is dropped.
+second time. An address is the same camera however it's written, so its case, a port that is the
+scheme's own, a trailing slash, the order of its query, its credentials and spellings of the
+same host such as `127.1` make no difference. A device you registered by hand and later declared
+in the compose file stays that one camera, and you can still remove it.
 
 ## Printer cameras
 
 If a registered printer exposes a webcam, PrintGuard registers it as a camera for you, with no
 stream URL to copy. **Refresh** picks up a camera attached after the printer was registered. A
-webcam that can't be listed or won't open raises a warning on the dashboard and isn't added, so
-press **Refresh** once it's reachable.
+webcam that won't open raises a warning on the dashboard and isn't added, so press **Refresh**
+once it's reachable. So does a service that can't be asked for its webcams, but OctoPrint and
+Moonraker answering with an error just list none, so no camera appears and nothing says why.
 [Where a printer's webcam is read from](printers.md#where-a-printers-webcam-is-read-from) covers
 how a relative stream path from OctoPrint or Moonraker becomes an address.
 
@@ -63,12 +66,20 @@ WHEP endpoint. Use their MJPEG URL, or put [go2rtc](https://github.com/AlexxIT/g
 
 A camera that pushes a stream instead of serving one can publish to the hub on port `8554` for
 RTSP or `1935` for RTMP. The dashboard doesn't list pushed streams, so add one through the
-[REST API](api.md#rest-api), where `POST /cameras/discover` names it. Those two ports only need
+[REST API](api.md#rest-api), where `POST /cameras/discover` names it. A path named after a
+registered camera, including a printer's webcam, is the hub's own stream and isn't listed. Those two ports only need
 publishing for this, as [deployment](deployment.md#what-listens-where) explains, and the
 compose file publishes only `8554`.
 
 The URL has to be one the hub can reach. In Docker, `localhost` is the container, covered under
 [networking](printers.md#networking-caveats).
+
+A stream registers only once it has delivered a frame, which the hub waits 25 seconds for.
+Otherwise adding it fails with `no frames from camera` and the reason, with any credentials
+removed, and `no decoder for this stream` means the address serves something that isn't video,
+such as an SVG. A camera's address can't be edited afterwards, so remove it and add it again to
+change it. An address the bundled MediaMTX refuses fails with `PrintGuard can't use that address`
+and its reason.
 
 ## Cameras plugged into the hub
 
@@ -88,8 +99,9 @@ the same camera after a reboot renumbers the devices, and map each one in.
 A camera arrives named after itself, so rename it in the registry. There's no Remove button on
 it while the container has the device, since the compose file is what decides it exists.
 
-A camera whose device is missing when the container starts stays registered and reads as
-offline, and its monitor warns that it is not being monitored. It keeps its name, crop and
+Docker may refuse to start a container whose `devices:` entry names a path that isn't there. When
+it does start, a camera whose device is missing stays registered and reads as offline, and its
+monitor warns that it is not being monitored. It keeps its name, crop and
 tuning, so plugging it back in and restarting is all it needs. To remove one for good, drop its
 `devices:` entry, restart and use the Remove button it now has.
 
