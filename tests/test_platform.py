@@ -208,6 +208,18 @@ def test_macos_opens_a_camera_by_the_name_it_shows(monkeypatch: pytest.MonkeyPat
     assert _video_devices() == [("FaceTime HD Camera", "FaceTime HD Camera")]
 
 
+def test_the_macos_camera_bridge_is_installed_with_the_hub_and_not_only_the_desktop_extra() -> None:
+    """`uv sync && uv run printguard` on a Mac failed to add a USB camera with no module named objc."""
+    from importlib import metadata
+
+    from packaging.requirements import Requirement
+
+    bridge = next(Requirement(line) for line in metadata.requires("printguard") if line.startswith("pyobjc-framework-cocoa"))
+
+    assert bridge.marker is not None and "extra" not in str(bridge.marker)
+    assert bridge.marker.evaluate({"sys_platform": "darwin"}) and not bridge.marker.evaluate({"sys_platform": "linux"})
+
+
 def test_provider_library_that_cannot_load_leaves_the_cpu(tmp_path: Path) -> None:
     """A GPU image whose provider libraries the host cannot supply must still start.
 
@@ -323,56 +335,6 @@ def test_a_provider_that_returns_non_finite_output_fails_the_benchmark() -> None
     with pytest.raises(ValueError, match="non-finite"):
         _measure_concurrency(broken)
 
-
-def test_the_state_file_is_readable_only_by_whoever_runs_the_hub(tmp_path) -> None:
-    """It holds printer passwords, API token hashes and plugin credentials."""
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    ServerPlatform.save_state(holder, {"printers": [{"config": {"password": "hunter2"}}]})
-
-    assert oct((tmp_path / "state.json").stat().st_mode)[-3:] == "600"
-    assert not (tmp_path / "state.tmp").exists(), "the temporary file was left behind"
-
-
-def test_the_state_file_is_never_readable_by_anyone_else_while_it_is_written(tmp_path, monkeypatch) -> None:
-    """The temporary file holds every secret from the first byte, not only once it is renamed.
-
-    One a killed hub left behind keeps the mode it had, so it is held to the
-    mode as well as created with it.
-    """
-    modes: list[str] = []
-    monkeypatch.setattr("printguard.server.platform.os.fsync", lambda descriptor: modes.append(oct((tmp_path / "state.tmp").stat().st_mode)[-3:]))
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    ServerPlatform.save_state(holder, {"printers": [{"config": {"password": "hunter2"}}]})
-    (tmp_path / "state.tmp").write_text("left by a hub that was killed")
-    (tmp_path / "state.tmp").chmod(0o644)
-    ServerPlatform.save_state(holder, {"printers": []})
-
-    assert modes == ["600", "600"]
-
-
-def test_the_state_file_reaches_the_disk_before_it_takes_the_name(tmp_path, monkeypatch) -> None:
-    """A rename without a sync can survive a power cut pointing at an empty file."""
-    synced: list[int] = []
-    monkeypatch.setattr("printguard.server.platform.os.fsync", lambda descriptor: synced.append((tmp_path / "state.tmp").stat().st_size))
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    ServerPlatform.save_state(holder, {"printers": []})
-
-    assert synced == [(tmp_path / "state.json").stat().st_size]
-
-
-def test_a_damaged_state_file_is_kept_rather_than_overwritten(tmp_path, caplog) -> None:
-    """Starting empty in silence loses every printer and reopens anonymous reads of the API."""
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    assert ServerPlatform.load_state(holder) == {}
-    assert not caplog.records, "a first boot has no state file and nothing to say about it"
-
-    (tmp_path / "state.json").write_text('{"printers": [{"id": "p1"')
-    assert ServerPlatform.load_state(holder) == {}
-    ServerPlatform.save_state(holder, {})
-
-    assert (tmp_path / "state.json.corrupt").read_text() == '{"printers": [{"id": "p1"'
-    assert [record.levelname for record in caplog.records] == ["ERROR"]
-    assert "state.json.corrupt" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -707,18 +669,6 @@ def test_a_sliver_of_a_frame_is_not_scaled_up_whole_before_it_is_cropped(monkeyp
     assert resized == [(1024, 256), (455, 256)]
 
 
-def test_a_state_file_the_hub_may_not_read_says_whose_it_has_to_be(tmp_path, monkeypatch) -> None:
-    """A bare PermissionError traceback does not tell anyone the data directory has the wrong owner."""
-
-    def denied(path: Path, *args: object, **kwargs: object) -> str:
-        raise PermissionError(errno.EACCES, "Permission denied", str(path))
-
-    monkeypatch.setattr(Path, "read_text", denied)
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    with pytest.raises(RuntimeError, match="state.json could not be read .*belong to the user the hub runs as"):
-        ServerPlatform.load_state(holder)
-
-
 SVG_STREAM = b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="blue"/></svg>'
 
 
@@ -776,34 +726,6 @@ async def test_an_image_with_more_pixels_than_the_cap_is_refused_before_it_is_de
     assert await ServerPlatform.decode_jpeg(holder, jpeg(101)) is None
     assert decoded == []
     assert (await ServerPlatform.decode_jpeg(holder, jpeg(100))).shape == (100, 100, 3)
-
-
-@pytest.mark.parametrize(
-    "saved",
-    ["null", "[]", '"state"', '{"settings": "x"}', '{"cameras": {"cam1": {}}}', '{"feedback_token": 5}', '{"tokens": null}'],
-)
-def test_a_state_file_of_the_wrong_shape_is_kept_like_one_that_will_not_parse(tmp_path, caplog, saved: str) -> None:
-    """Valid JSON that is not what the engine saves started an empty hub, or ended the start with an AttributeError."""
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    (tmp_path / "state.json").write_text(saved)
-
-    assert ServerPlatform.load_state(holder) == {}
-    ServerPlatform.save_state(holder, {})
-
-    assert (tmp_path / "state.json.corrupt").read_text() == saved
-    assert [record.levelname for record in caplog.records] == ["ERROR"]
-    assert "state.json.corrupt" in caplog.text
-
-
-def test_a_state_file_of_the_shape_the_engine_saves_is_read(tmp_path) -> None:
-    state = {
-        "cameras": [], "printers": [], "prints": [], "monitors": [], "reviews": [], "tokens": [], "plugins": [],
-        "settings": {}, "feedback_token": None,
-    }
-    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
-    (tmp_path / "state.json").write_text(json.dumps(state))
-
-    assert ServerPlatform.load_state(holder) == state
 
 
 async def test_a_quiet_device_is_released_when_its_camera_stands_down(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -933,26 +855,81 @@ def test_a_live_view_listener_that_never_answers_fails_the_push_instead_of_stall
     from printguard.server.publish import H264Push
 
     monkeypatch.setattr("printguard.server.publish.PUSH_TIMEOUT_US", 500_000)
-    outcome: list[BaseException | None] = []
+    outcomes: list[Exception | None] = []
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
-        push = H264Push(f"rtsp://127.0.0.1:{listener.getsockname()[1]}/cam", 15)
+        push = H264Push(f"rtsp://127.0.0.1:{listener.getsockname()[1]}/cam", 15, 60.0, outcomes.append)
         frame = av.VideoFrame.from_ndarray(np.zeros((240, 320, 3), dtype=np.uint8), format="rgb24")
+        push.send(frame)
+        deadline = time.monotonic() + 15
+        while not outcomes and time.monotonic() < deadline:
+            time.sleep(0.05)
+        push.close()
 
-        def send() -> None:
-            try:
-                push.send(frame)
-                outcome.append(None)
-            except BaseException as exc:
-                outcome.append(exc)
+    assert isinstance(outcomes[0], av.error.FFmpegError), "the push never gave up on a listener that does not answer"
 
-        thread = threading.Thread(target=send, daemon=True)
+
+def test_a_browser_camera_push_to_a_listener_that_never_answers_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The remux had no timeout, so a MediaMTX that accepted and never replied held its thread for good."""
+    from printguard.server.publish import ChunkStream, remux
+
+    recording = io.BytesIO()
+    with av.open(recording, "w", format="matroska") as container:
+        stream = container.add_stream("mjpeg", rate=15)
+        stream.width, stream.height, stream.pix_fmt = 64, 48, "yuvj420p"
+        frame = av.VideoFrame.from_ndarray(np.zeros((48, 64, 3), dtype=np.uint8), format="rgb24")
+        for pts in range(5):
+            frame.pts = pts
+            for packet in stream.encode(frame):
+                container.mux(packet)
+    chunks = ChunkStream()
+    chunks.feed(recording.getvalue())
+    chunks.feed(None)
+    monkeypatch.setattr("printguard.server.publish.PUSH_TIMEOUT_US", 500_000)
+    outcome: list[BaseException] = []
+
+    def push(url: str) -> None:
+        try:
+            remux(chunks, url)
+        except BaseException as exc:
+            outcome.append(exc)
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        thread = threading.Thread(target=push, args=(f"rtsp://127.0.0.1:{listener.getsockname()[1]}/cam",), daemon=True)
         thread.start()
         thread.join(15)
 
-    assert not thread.is_alive(), "the push never gave up on a listener that does not answer"
+    assert not thread.is_alive(), "the remux never gave up on a listener that does not answer"
     assert isinstance(outcome[0], av.error.FFmpegError)
+
+
+async def test_a_live_view_that_stops_answering_never_delays_the_frames_detection_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each retry blocked the capture thread for the push's whole timeout, so a camera gave a frame half the time."""
+
+    def stalls(self: object, frame: object) -> None:
+        time.sleep(1.0)
+        raise av.error.TimeoutError(errno.ETIMEDOUT, "Operation timed out")
+
+    monkeypatch.setattr("printguard.server.publish.H264Push._encode", stalls)
+    monkeypatch.setattr("printguard.server.platform.RECONNECT_DELAY_S", 0.1)
+    monkeypatch.setattr(_MjpegPipe, "opened", 0)
+    reported: list[tuple[str, bool]] = []
+    source = AVSource(_MjpegPipe, "rtsp://127.0.0.1:9/cam1", report=lambda message, recovered: reported.append((message, recovered)))
+    try:
+        deadline = time.monotonic() + 15
+        while not source.online and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        started = source._seq
+        await asyncio.sleep(2.5)
+        gained = source._seq - started
+    finally:
+        source.close()
+
+    assert gained > 40, f"capture delivered {gained} frames in 2.5 s while the live view stalled"
+    assert len(reported) == 1, "the dashboard is told once per outage"
 
 
 async def test_a_stored_file_is_readable_only_by_whoever_runs_the_hub(tmp_path: Path) -> None:

@@ -5,6 +5,7 @@ bridge's aiomqtt session is a thin wrapper around."""
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -229,6 +230,54 @@ async def _until(condition) -> None:
     async with asyncio.timeout(2):
         while not condition():
             await asyncio.sleep(0.01)
+
+
+class CommandedBroker(FakeBroker):
+    """A broker that delivers Home Assistant's button presses, then goes quiet."""
+
+    def __init__(self, topics: list[str]) -> None:
+        super().__init__()
+        self._waiting = [SimpleNamespace(topic=topic, payload=b"on") for topic in topics]
+
+    async def __anext__(self) -> Any:
+        if self._waiting:
+            return self._waiting.pop(0)
+        await asyncio.Event().wait()
+
+
+async def test_commands_behind_a_slow_printer_run_side_by_side_and_in_order_for_one_monitor(monkeypatch) -> None:
+    """The loop awaited each command in turn, so a burst of presses ran late and one after another."""
+    engine = Engine(FakePlatform())
+    await engine.start()
+    await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 10.0}})
+    for name in ("Left", "Middle", "Right"):
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": name, "camera_id": next(iter(engine.cameras.items))}})
+    left, middle, right = list(engine.monitors)
+    topics = [f"printguard/monitor/{monitor}/enabled/set" for monitor in (left, middle, right, left)]
+    broker = CommandedBroker(topics)
+    monkeypatch.setattr(mqtt.aiomqtt, "Client", broker.client)
+    steps: list[tuple[str, str]] = []
+
+    async def slow_request(command: dict[str, Any]) -> list[dict[str, Any]]:
+        steps.append(("start", command["id"]))
+        await asyncio.sleep(0.3)
+        steps.append(("end", command["id"]))
+        return []
+
+    monkeypatch.setattr(engine, "request", slow_request)
+    bridge = mqtt.MqttBridge(engine, lambda: {"enabled": True, "host": "broker"})
+    bridge.start()
+    try:
+        began = asyncio.get_running_loop().time()
+        await _until(lambda: len([step for step in steps if step[0] == "end"]) == 4)
+        took = asyncio.get_running_loop().time() - began
+    finally:
+        await bridge.stop()
+        await engine.stop()
+
+    assert took < 0.9, f"four commands took {took:.2f} s, one after the other"
+    assert [step for step in steps if step[1] == left] == [("start", left), ("end", left)] * 2, "a monitor's presses overlapped"
+    assert steps[:3] == [("start", left), ("start", middle), ("start", right)]
 
 
 async def test_a_bridge_that_stops_tells_home_assistant_the_hub_is_offline(monkeypatch) -> None:

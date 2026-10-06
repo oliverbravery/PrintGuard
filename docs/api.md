@@ -307,6 +307,7 @@ Control is two-way, so an automation can arm a monitor or stop a print. A defect
 printer status is published at once, while the score, progress and temperatures are published in
 steps of 5, so a monitor never floods Home Assistant's history. Every entity shows as
 unavailable while the hub is stopped, the bridge is switched off or the connection is lost.
+Commands run side by side, up to 8 at a time and in order for one monitor, so a slow printer holds up only its own buttons.
 
 The base topic defaults to `printguard` and the discovery prefix to `homeassistant`. Change
 either in the same tab if your broker is shared. A topic holding `+` or `#` can't be used, and the

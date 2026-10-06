@@ -27,6 +27,7 @@ import json
 import logging
 import secrets
 import ssl
+from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Callable
 
 import aiomqtt
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from ..engine.engine import Engine
 
 RECONNECT_DELAY_S = 5.0
+COMMANDS_IN_FLIGHT = 8
 GOODBYE_TIMEOUT_S = 2.0
 KEEPALIVE_S = 30
 STATE_DEADBAND = 5.0
@@ -405,14 +407,31 @@ class MqttBridge:
             await self._handle(client, event, base, prefix)
 
     async def _command_loop(self, client: aiomqtt.Client, base: str) -> None:
-        async for message in client.messages:
-            command = route_command(str(message.topic), bytes(message.payload).decode("utf-8", "ignore"), self._state.get("monitors", []))
-            if command is None:
-                continue
-            try:
+        """Runs Home Assistant's commands side by side, in order for any one monitor or printer.
+
+        One command waiting on a slow printer must not hold up a button pressed
+        for another, so up to COMMANDS_IN_FLIGHT run at once. A burst for one
+        target still runs in the order it arrived, so pause then resume cannot
+        be reversed.
+        """
+        slots = asyncio.Semaphore(COMMANDS_IN_FLIGHT)
+        targets: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        async with asyncio.TaskGroup() as running:
+            async for message in client.messages:
+                command = route_command(str(message.topic), bytes(message.payload).decode("utf-8", "ignore"), self._state.get("monitors", []))
+                if command is None:
+                    continue
+                await slots.acquire()
+                running.create_task(self._run_command(command, slots, targets[command["id"]]))
+
+    async def _run_command(self, command: dict[str, Any], slots: asyncio.Semaphore, target: asyncio.Lock) -> None:
+        try:
+            async with target:
                 await self._engine.request(command)
-            except Exception as exc:
-                self._engine.emit({"event": "error", "message": f"Home Assistant command failed: {exc}"})
+        except Exception as exc:
+            self._engine.emit({"event": "error", "message": f"Home Assistant command failed: {exc}"})
+        finally:
+            slots.release()
 
     async def _handle(self, client: aiomqtt.Client, event: dict[str, Any], base: str, prefix: str) -> None:
         kind = event.get("event")

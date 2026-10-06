@@ -259,6 +259,7 @@ for themselves.
 | `PRINTGUARD_ORIGINS` | Unset | The addresses you open the hub at when they are not an IP address or a local name, comma-separated and each with its scheme, such as `https://hub.example.com`. See [host and origin checking](#host-and-origin-checking) |
 | `PRINTGUARD_PLUGINS` | On | `off`, written exactly so, starts the hub with every plugin switched off |
 | `PRINTGUARD_CAMERAS` | `auto` in the image | Anything else, such as `off`, leaves [cameras passed into the container](cameras.md#cameras-plugged-into-the-hub) to be added by hand |
+| `MEDIAMTX_API` | `http://localhost:9997` | Where the hub finds MediaMTX. The hub only gives a MediaMTX its camera paths again when it supervises that server, so after one you run yourself restarts, restart the hub too. [Architecture](architecture.md#configuration) has the rest |
 | `PORT` | `8000` | The port the hub listens on |
 | `DATA_DIR` | `/data` in the image | Where state and print files are kept |
 | `LOG_LEVEL` | `INFO` | `DEBUG` adds command traces, printer state changes and exception tracebacks |
@@ -279,14 +280,15 @@ and overwrites it each time.
 |---|---|
 | `state.json` | Cameras, printers, monitors, settings, themes, layout, installed plugins, the print library's records and the record of each print's kept frames, with printer passwords, notifier keys, the MQTT broker password, camera addresses that carry a login and a Bambu camera's access code, plugin credentials, API token hashes and the token the hub sends training frames with. Written readable only by the account running the hub |
 | `state.tmp` | The next `state.json` while it is being written. It's only there for a moment |
-| `state.json.corrupt` | A `state.json` that would not parse at start, or held something the hub never saves, [kept so you can recover it](troubleshooting.md#starting-up). It's only there after that has happened |
+| `state.json.corrupt` | A `state.json` that would not parse at start, or held something the hub never saves, [kept so you can recover it](troubleshooting.md#starting-up). It's only there after that has happened. A later damaged file is kept beside it as `state.json.corrupt.1` up to `.4`, and the first is never replaced |
 | `prints/` | The files of the [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub). At start the hub deletes any upload there that never finished, and any file `state.json` doesn't name unless a `state.json.corrupt` is waiting to be recovered. It leaves folders alone, such as a NAS's `@eaDir`. Files are written readable only by the account running the hub, and ones from before 2.6.0 keep the mode they had |
 
 | At start, a `state.json` that | Does |
 |---|---|
 | Isn't there | Starts an empty hub |
+| Was saved with a UTF-8 byte order mark, as Notepad does | Is read as it is |
 | Won't parse, isn't a JSON object, or has a section of the wrong type, such as `monitors` holding text | Is moved to `state.json.corrupt` and the hub starts empty |
-| The hub's user may not read | [Stops the hub](troubleshooting.md#starting-up) with a log line saying the data directory has to belong to that user |
+| The hub's user may not read, or may not move aside when it is damaged | [Stops the hub](troubleshooting.md#starting-up) with a log line naming the data directory and its owner, which has to be that user |
 | Holds a camera, printer, monitor, print, review, plugin or API token record of the wrong shape | Loads without that record, which is logged as `dropping an unreadable record` and gone from the file at the next save |
 
 | Install | Data directory |
@@ -328,7 +330,7 @@ services:
 
 | Needs | Because |
 |---|---|
-| The data directory and everything in it owned by that user | The hub writes `state.json` and `prints/` there. It stops at start if it can't read `state.json` or create `prints/`, and a directory it can read but not write fails at the first save |
+| The data directory and everything in it owned by that user | The hub writes `state.json` and `prints/` there. It stops at start if it can't read `state.json` or create `prints/`, and a directory it can read but not write raises a dashboard warning at the first save. Saves are written in the background, so a slow disk never holds up a camera |
 | The host's `video` group in `group_add` | A [passed-in camera](cameras.md#cameras-plugged-into-the-hub) is readable by that group only. `getent group video` gives the number |
 | The host's `render` group in `group_add` | The same for `/dev/dri` on the [Intel image](hardware.md#intel-gpu). `getent group render` gives the number |
 
