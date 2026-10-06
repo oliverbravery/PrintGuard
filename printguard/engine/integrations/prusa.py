@@ -39,10 +39,15 @@ _TLS = httpx.create_ssl_context()
 _STATUS_MAP = {
     "PRINTING": DeviceStatus.PRINTING,
     "PAUSED": DeviceStatus.PAUSED,
+    "ATTENTION": DeviceStatus.PAUSED,
     "FINISHED": DeviceStatus.IDLE,
     "STOPPED": DeviceStatus.IDLE,
+    "IDLE": DeviceStatus.IDLE,
+    "READY": DeviceStatus.IDLE,
     "ERROR": DeviceStatus.ERROR,
+    "BUSY": DeviceStatus.UNKNOWN,
 }
+"""The printer's states, which PrusaLink on a Raspberry Pi also gives as the job's state, and the job's own."""
 
 
 def _username(config: dict[str, Any]) -> str:
@@ -90,8 +95,9 @@ class PrusaAdapter(IntegrationAdapter):
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
         """Reads the active job from /api/v1/job and the heaters from /api/v1/status.
 
-        No active job (HTTP 204) is idle; any failure to reach the printer is
-        offline, which keeps inference watching. The HTTP function is unused -
+        With no active job (HTTP 204) the printer's own state is the answer,
+        idle when it says none; any failure to reach the printer is offline,
+        which keeps inference watching. The HTTP function is unused -
         pyprusalink owns the digest-authenticated client.
 
         Raises:
@@ -109,7 +115,8 @@ class PrusaAdapter(IntegrationAdapter):
             "bed": Heater.reported(printer.get("temp_bed"), printer.get("target_bed")),
         }
         if not job:
-            return DeviceState(DeviceStatus.IDLE, **heaters)
+            idle = _STATUS_MAP.get(str(printer.get("state", "IDLE")).upper(), DeviceStatus.UNKNOWN)
+            return DeviceState(idle, **heaters)
         file = job.get("file") or {}
         remaining = job.get("time_remaining")
         return DeviceState(

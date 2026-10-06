@@ -1280,7 +1280,7 @@ async def test_prusa_normalises_job_states(monkeypatch, job_state: str, expected
 
 
 async def test_prusa_no_active_job_is_idle(monkeypatch) -> None:
-    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(None))
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(None, {"printer": {**PRUSA_STATUS["printer"], "state": "IDLE"}}))
     state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
     assert state.status is DeviceStatus.IDLE
     assert state.job is None, "204 No Content from /api/v1/job is idle, not a phantom job"
@@ -1294,6 +1294,28 @@ async def test_prusa_unreachable_is_offline(monkeypatch) -> None:
     monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", boom)
     state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
     assert state.status is DeviceStatus.OFFLINE, "an unreachable or unauthorised printer keeps inference watching"
+
+
+@pytest.mark.parametrize(
+    ("job", "printer_state", "expected"),
+    [
+        ({"id": 1, "state": "ATTENTION"}, "ATTENTION", DeviceStatus.PAUSED),
+        ({"id": 1, "state": "BUSY"}, "BUSY", DeviceStatus.UNKNOWN),
+        ({"id": 1, "state": "READY"}, "READY", DeviceStatus.IDLE),
+        (None, "IDLE", DeviceStatus.IDLE),
+        (None, "READY", DeviceStatus.IDLE),
+        (None, "FINISHED", DeviceStatus.IDLE),
+        (None, "ERROR", DeviceStatus.ERROR),
+        (None, "BUSY", DeviceStatus.UNKNOWN),
+        (None, "ATTENTION", DeviceStatus.PAUSED),
+        (None, "PRINTING", DeviceStatus.PRINTING),
+        (None, "PAUSED", DeviceStatus.PAUSED),
+    ],
+)
+async def test_prusa_takes_the_printers_own_state_for_what_the_job_does_not_say(monkeypatch, job: Any, printer_state: str, expected: DeviceStatus) -> None:
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(job, {"printer": {"state": printer_state}}))
+    state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
+    assert state.status is expected
 
 
 async def test_prusa_falls_back_to_raw_filename(monkeypatch) -> None:
