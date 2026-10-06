@@ -61,6 +61,7 @@ class OctoPrintAdapter(IntegrationAdapter):
 
         Raises:
             PermissionError: If OctoPrint rejects the API key.
+            RuntimeError: If it answers with anything but its job.
         """
         base = config["base_url"].rstrip("/")
         headers = self._headers(config)
@@ -68,7 +69,7 @@ class OctoPrintAdapter(IntegrationAdapter):
         if status in (401, 403):
             raise PermissionError(f"OctoPrint rejected the API key: HTTP {status}")
         if status != 200 or not isinstance(body, dict):
-            return DeviceState(DeviceStatus.OFFLINE)
+            raise RuntimeError(f"OctoPrint did not answer like its API: HTTP {status}")
         text = str(body.get("state", "")).lower()
         matched = next((s for key, s in _STATUS_MAP.items() if text.startswith(key)), DeviceStatus.UNKNOWN)
         progress = body.get("progress") or {}

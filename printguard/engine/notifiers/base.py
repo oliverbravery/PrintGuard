@@ -18,7 +18,7 @@ class NotifierAdapter(Adapter):
     """Base class for alert notifiers."""
 
     @abstractmethod
-    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:
+    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
         """Delivers an alert through the service.
 
         Args:
@@ -27,6 +27,9 @@ class NotifierAdapter(Adapter):
             title: Short alert headline.
             body: Alert detail text.
             image: JPEG snapshot of the offending frame, if available.
+            urgent: Whether the notice should interrupt, as a defect does. A
+                notice that only informs, such as a recovery, is False, and a
+                service with a quieter way to deliver one uses it.
 
         Raises:
             RuntimeError: If the service rejects the notification.

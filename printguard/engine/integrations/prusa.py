@@ -32,21 +32,33 @@ from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, Integ
 _USERNAME = "maker"
 _TIMEOUT_S = 10.0
 _UPLOAD_TIMEOUT_S = 180.0
-_UPLOAD_HEADERS = {"Content-Type": "application/octet-stream", "Print-After-Upload": "?1", "Overwrite": "?1"}
+_UPLOAD_HEADERS = {"Content-Type": "text/x.gcode", "Print-After-Upload": "?1", "Overwrite": "?1"}
 _TLS = httpx.create_ssl_context()
 """One TLS context for every client. A client builds its own otherwise, which reads the CA bundle on the event loop at every poll."""
 
 _STATUS_MAP = {
     "PRINTING": DeviceStatus.PRINTING,
     "PAUSED": DeviceStatus.PAUSED,
+    "ATTENTION": DeviceStatus.PAUSED,
     "FINISHED": DeviceStatus.IDLE,
     "STOPPED": DeviceStatus.IDLE,
+    "IDLE": DeviceStatus.IDLE,
+    "READY": DeviceStatus.IDLE,
     "ERROR": DeviceStatus.ERROR,
+    "BUSY": DeviceStatus.UNKNOWN,
 }
+"""The printer's states, which PrusaLink on a Raspberry Pi also gives as the job's state, and the job's own."""
 
 
 def _username(config: dict[str, Any]) -> str:
     return str(config.get("username") or "").strip() or _USERNAME
+
+
+def _failure(response: httpx.Response) -> str:
+    if response.is_redirect:
+        source, target = (f"{url.scheme}://{url.netloc.decode()}" for url in (response.url, response.url.join(response.headers["location"])))
+        return f"{source} redirects to {target}. Use the address it redirects to"
+    return f"PrusaLink answered HTTP {response.status_code}"
 
 
 class PrusaAdapter(IntegrationAdapter):
@@ -90,26 +102,27 @@ class PrusaAdapter(IntegrationAdapter):
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
         """Reads the active job from /api/v1/job and the heaters from /api/v1/status.
 
-        No active job (HTTP 204) is idle; any failure to reach the printer is
-        offline, which keeps inference watching. The HTTP function is unused -
-        pyprusalink owns the digest-authenticated client.
+        With no active job (HTTP 204) the printer's own state is the answer,
+        idle when it says none. The HTTP function is unused - pyprusalink owns
+        the digest-authenticated client.
 
         Raises:
             PermissionError: If PrusaLink rejects the username or password.
+            RuntimeError: If it answers with an error or a redirect.
+            httpx.HTTPError: If the printer cannot be reached.
         """
         try:
             job, status = await self._read(config)
         except InvalidAuth:
             raise PermissionError("PrusaLink rejected the username or password") from None
-        except Exception:
-            return DeviceState(DeviceStatus.OFFLINE)
         printer = status.get("printer") or {}
         heaters = {
             "nozzle": Heater.reported(printer.get("temp_nozzle"), printer.get("target_nozzle")),
             "bed": Heater.reported(printer.get("temp_bed"), printer.get("target_bed")),
         }
         if not job:
-            return DeviceState(DeviceStatus.IDLE, **heaters)
+            idle = _STATUS_MAP.get(str(printer.get("state", "IDLE")).upper(), DeviceStatus.UNKNOWN)
+            return DeviceState(idle, **heaters)
         file = job.get("file") or {}
         remaining = job.get("time_remaining")
         return DeviceState(
@@ -177,4 +190,7 @@ class PrusaAdapter(IntegrationAdapter):
     @asynccontextmanager
     async def _link(self, config: dict[str, Any]) -> AsyncIterator[Any]:
         async with httpx.AsyncClient(timeout=_TIMEOUT_S, verify=_TLS) as client:
-            yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _username(config), str(config.get("password", "")))
+            try:
+                yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _username(config), str(config.get("password", "")))
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(_failure(exc.response)) from None

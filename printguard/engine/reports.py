@@ -27,7 +27,7 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime, timezone
 from platform import platform as host_os
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from . import logs
 from .adapters import HttpFn
@@ -59,6 +59,29 @@ def envelope_endpoint(dsn: str) -> str:
     return f"{parts.scheme}://{parts.hostname}/api/{parts.path.strip('/')}/envelope/?sentry_version=7&sentry_key={parts.username}"
 
 
+def _parse_credentialed(url: str) -> tuple[str, SplitResult]:
+    """Splits a URL into its credentials and the rest, whatever characters they hold.
+
+    urlsplit ends the authority at the first ``/``, ``?`` or ``#``, so a
+    password holding one leaves no ``@`` for it to find. Everything between
+    ``://`` and the last ``@`` is taken as credentials instead, which can
+    over-redact an address that has an ``@`` further along.
+
+    Args:
+        url: A camera, printer or notifier address as the user entered it.
+
+    Returns:
+        The credentials, empty when there are none, and the address without them.
+
+    Raises:
+        ValueError: If the address cannot be split as it was written.
+    """
+    urlsplit(url)
+    scheme, separator, tail = url.partition("://")
+    userinfo, _, rest = tail.rpartition("@")
+    return userinfo, urlsplit(f"{scheme}{separator}{rest}")
+
+
 def scrub_url(url: str) -> str:
     """Removes the credentials a URL can carry.
 
@@ -73,12 +96,12 @@ def scrub_url(url: str) -> str:
         where its credentials end.
     """
     try:
-        parts = urlsplit(url)
+        parts = _parse_credentialed(url)[1]
     except ValueError:
         return REDACTED
     path = "/".join(REDACTED if PATH_TOKEN.fullmatch(segment) else segment for segment in parts.path.split("/"))
     query = "&".join(f"{pair.partition('=')[0]}={REDACTED}" if "=" in pair else pair for pair in parts.query.split("&"))
-    return urlunsplit(parts._replace(netloc=parts.netloc.rpartition("@")[2], path=path, query=query))
+    return urlunsplit(parts._replace(path=path, query=query))
 
 
 def url_secrets(url: str) -> set[str]:
@@ -93,10 +116,10 @@ def url_secrets(url: str) -> set[str]:
         own is an ordinary word. An address that cannot be split is a secret whole.
     """
     try:
-        parts = urlsplit(url)
+        userinfo, parts = _parse_credentialed(url)
     except ValueError:
         return {url}
-    secrets = {part for part in (parts.username, parts.password) if part}
+    secrets = {part for part in userinfo.partition(":")[::2] if part}
     secrets |= {segment for segment in parts.path.split("/") if PATH_TOKEN.fullmatch(segment)}
     for pair in parts.query.split("&"):
         if pair.partition("=")[2]:

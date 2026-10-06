@@ -12,6 +12,9 @@ from typing import Any
 from .base import HttpFn, NotifierAdapter, multipart_form
 
 
+SUPPRESS_NOTIFICATIONS = 1 << 12
+
+
 class DiscordNotifier(NotifierAdapter):
     """Posts to a channel webhook, attaching the snapshot as a file."""
 
@@ -34,10 +37,10 @@ class DiscordNotifier(NotifierAdapter):
         "required": ["webhook_url"],
     }
 
-    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None) -> None:
-        """Executes the webhook with payload_json and an optional file part."""
+    async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
+        """Executes the webhook with payload_json and an optional file part, suppressing notifications when not urgent."""
         url = str(config["webhook_url"]).strip()
-        payload = {"content": f"**{title}**\n{body}"}
+        payload = {"content": f"**{title}**\n{body}", **({} if urgent else {"flags": SUPPRESS_NOTIFICATIONS})}
         if image:
             headers, data = multipart_form({"payload_json": json.dumps(payload)}, "files[0]", "snapshot.jpg", image)
             status, _ = await http("POST", url, headers=headers, data=data, timeout=15.0)

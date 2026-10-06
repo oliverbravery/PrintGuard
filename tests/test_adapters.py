@@ -313,9 +313,9 @@ async def test_octoprint_heater_targets() -> None:
         await INTEGRATIONS["octoprint"].heat(RecordingHttp(status=409), {"base_url": "http://op"}, "nozzle", 200.0)
 
 
-async def test_octoprint_unreachable_is_offline() -> None:
-    state = await INTEGRATIONS["octoprint"].fetch_state(RecordingHttp(status=502, body="bad gateway"), {"base_url": "http://op"})
-    assert state.status is DeviceStatus.OFFLINE
+async def test_octoprint_that_answers_badly_says_why() -> None:
+    with pytest.raises(RuntimeError, match="HTTP 502"):
+        await INTEGRATIONS["octoprint"].fetch_state(RecordingHttp(status=502, body="bad gateway"), {"base_url": "http://op"})
 
 
 async def test_octoprint_exposes_webcam_stream() -> None:
@@ -410,8 +410,8 @@ async def test_klipper_actions_and_auth() -> None:
     assert http.last["url"] == "http://kl/printer/print/cancel"
     assert http.last["headers"] == {"X-Api-Key": "kk"}
 
-    state = await INTEGRATIONS["klipper"].fetch_state(RecordingHttp(status=500, body={}), {"base_url": "http://kl"})
-    assert state.status is DeviceStatus.OFFLINE
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        await INTEGRATIONS["klipper"].fetch_state(RecordingHttp(status=500, body={}), {"base_url": "http://kl"})
 
     with pytest.raises(RuntimeError, match="pause"):
         await INTEGRATIONS["klipper"].send(RecordingHttp(status=400), {"base_url": "http://kl"}, DeviceAction.PAUSE)
@@ -1002,6 +1002,14 @@ def _fake_centauri(client: FakeCentauri):
     return connect
 
 
+async def test_elegoo_centauri_past_its_estimate_has_no_negative_time_left(monkeypatch) -> None:
+    client = FakeCentauri()
+    client.state.print_info = SimpleNamespace(total_ticks=3000.0, current_ticks=3300.0)
+    monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
+    state = await INTEGRATIONS["elegoo"].fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    assert state.remaining_s == 0
+
+
 @pytest.mark.parametrize(
     ("print_status", "expected"),
     [
@@ -1280,20 +1288,67 @@ async def test_prusa_normalises_job_states(monkeypatch, job_state: str, expected
 
 
 async def test_prusa_no_active_job_is_idle(monkeypatch) -> None:
-    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(None))
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(None, {"printer": {**PRUSA_STATUS["printer"], "state": "IDLE"}}))
     state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
     assert state.status is DeviceStatus.IDLE
     assert state.job is None, "204 No Content from /api/v1/job is idle, not a phantom job"
     assert state.public()["bed"] == {"actual": 59.6, "target": 60.0}, "an idle printer still reports its heaters"
 
 
-async def test_prusa_unreachable_is_offline(monkeypatch) -> None:
+async def test_prusa_unreachable_says_why(monkeypatch) -> None:
     async def boom(config: dict[str, Any]) -> Any:
         raise ConnectionError("no route to printer")
 
     monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", boom)
+    with pytest.raises(ConnectionError, match="no route to printer"):
+        await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
+
+
+async def _prusa_answering(status_line: str, headers: str = "") -> tuple[asyncio.Server, dict[str, str]]:
+    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(f"HTTP/1.1 {status_line}\r\nContent-Length: 0\r\nConnection: close\r\n{headers}\r\n".encode())
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(answer, "127.0.0.1", 0)
+    return server, {"base_url": f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}", "password": "pw"}
+
+
+async def test_prusa_behind_a_redirect_names_where_it_went() -> None:
+    server, config = await _prusa_answering("301 Moved Permanently", "Location: https://printer.local/\r\n")
+    async with server:
+        with pytest.raises(RuntimeError, match=r"redirects to https://printer\.local"):
+            await INTEGRATIONS["prusa"].fetch_state(None, config)
+
+
+async def test_prusa_answering_with_an_error_names_the_status() -> None:
+    server, config = await _prusa_answering("502 Bad Gateway")
+    async with server:
+        with pytest.raises(RuntimeError, match="HTTP 502"):
+            await INTEGRATIONS["prusa"].fetch_state(None, config)
+
+
+@pytest.mark.parametrize(
+    ("job", "printer_state", "expected"),
+    [
+        ({"id": 1, "state": "ATTENTION"}, "ATTENTION", DeviceStatus.PAUSED),
+        ({"id": 1, "state": "BUSY"}, "BUSY", DeviceStatus.UNKNOWN),
+        ({"id": 1, "state": "READY"}, "READY", DeviceStatus.IDLE),
+        (None, "IDLE", DeviceStatus.IDLE),
+        (None, "READY", DeviceStatus.IDLE),
+        (None, "FINISHED", DeviceStatus.IDLE),
+        (None, "ERROR", DeviceStatus.ERROR),
+        (None, "BUSY", DeviceStatus.UNKNOWN),
+        (None, "ATTENTION", DeviceStatus.PAUSED),
+        (None, "PRINTING", DeviceStatus.PRINTING),
+        (None, "PAUSED", DeviceStatus.PAUSED),
+    ],
+)
+async def test_prusa_takes_the_printers_own_state_for_what_the_job_does_not_say(monkeypatch, job: Any, printer_state: str, expected: DeviceStatus) -> None:
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(job, {"printer": {"state": printer_state}}))
     state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
-    assert state.status is DeviceStatus.OFFLINE, "an unreachable or unauthorised printer keeps inference watching"
+    assert state.status is expected
 
 
 async def test_prusa_falls_back_to_raw_filename(monkeypatch) -> None:
@@ -1546,7 +1601,9 @@ async def test_prusa_puts_onto_the_first_writable_storage_and_sends_the_file_onc
         ("PUT", "/api/v1/files/usb/benchy.bgcode", True, 4000),
     ], "the challenge the listing answered signs the upload, so the file crosses the network once"
     upload = printer.received[-1][3]
-    assert (upload["content-type"], upload["print-after-upload"], upload["overwrite"]) == ("application/octet-stream", "?1", "?1")
+    assert (upload["content-type"], upload["print-after-upload"], upload["overwrite"]) == ("text/x.gcode", "?1", "?1"), (
+        "PrusaLink on a Raspberry Pi sniffs the destination for any other type, which fails for a new file name"
+    )
 
 
 async def test_prusa_without_storage_raises() -> None:
@@ -1770,3 +1827,66 @@ async def test_a_bambu_upload_is_not_cut_off_by_a_deadline(monkeypatch) -> None:
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_product", lambda config: "Bambu Lab A1")
     await INTEGRATIONS["bambu"].print_file(None, BAMBU_CONFIG, "big.3mf", sliced_3mf(plate=1))
     assert uploaded == ["big.3mf"]
+
+
+@pytest.mark.parametrize("password", ["pa/ss-w0rd", "pa?ss-w0rd", "pa#ss-w0rd", "pa/s?s#w0rd"])
+def test_a_password_holding_a_url_delimiter_is_still_scrubbed(password: str) -> None:
+    from printguard.engine import reports
+
+    url = f"http://olly:{password}@octopi.local:5000/api"
+    scrubbed = reports.scrub_url(url)
+    assert password not in scrubbed and "olly" not in scrubbed, "everything before the last @ is credentials"
+    assert scrubbed.startswith("http://") and "octopi.local:5000" in scrubbed
+    assert {"olly", password} <= reports.url_secrets(url)
+    assert reports.scrub_urls({"base_url": url})["base_url"] == scrubbed
+
+
+async def test_ntfy_marks_only_an_urgent_notice_urgent() -> None:
+    for urgent, expected in ((True, {"Priority": "urgent", "Tags": "rotating_light"}), (False, {})):
+        http = RecordingHttp()
+        await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "T", "B", None, urgent=urgent)
+        assert {name: value for name, value in http.last["headers"].items() if name in ("Priority", "Tags")} == expected
+        http = RecordingHttp()
+        await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "T", "B", JPEG, urgent=urgent)
+        assert {name: value for name, value in http.last["headers"].items() if name in ("Priority", "Tags")} == expected
+
+
+@pytest.mark.parametrize(("configured", "expected"), [("1", "0"), ("0", "0"), ("-1", "-1"), ("-2", "-2")])
+async def test_pushover_sends_a_quiet_notice_at_normal_priority_at_most(configured: str, expected: str) -> None:
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk", "priority": configured}, "T", "B", None, urgent=False)
+    assert http.last["data"].endswith(f"priority={expected}".encode())
+
+
+async def test_pushover_keeps_the_configured_priority_for_an_urgent_notice() -> None:
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk"}, "T", "B", None, urgent=True)
+    assert http.last["data"].endswith(b"priority=1")
+
+
+async def test_telegram_sends_a_quiet_notice_silently() -> None:
+    http = RecordingHttp(body={"ok": True})
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "77"}, "T", "B", None, urgent=False)
+    assert http.last["json"]["disable_notification"] is True
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "77"}, "T", "B", JPEG, urgent=False)
+    assert b'name="disable_notification"\r\n\r\ntrue\r\n' in http.last["data"]
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "12:ab", "chat_id": "77"}, "T", "B", None)
+    assert "disable_notification" not in http.last["json"]
+
+
+async def test_discord_sends_a_quiet_notice_with_notifications_suppressed() -> None:
+    http = RecordingHttp()
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None, urgent=False)
+    assert http.last["json"] == {"content": "**T**\nB", "flags": 4096}
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", JPEG, urgent=False)
+    assert jsonlib.dumps({"content": "**T**\nB", "flags": 4096}).encode() in http.last["data"]
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None)
+    assert http.last["json"] == {"content": "**T**\nB"}
+
+
+async def test_native_takes_urgent_and_ignores_it(monkeypatch) -> None:
+    async def deliver(title: str, body: str, snapshot: Any) -> None:
+        return None
+
+    monkeypatch.setattr(NOTIFIERS["native"], "_deliver", deliver)
+    await NOTIFIERS["native"].send(None, {}, "Title", "Body", None, urgent=False)

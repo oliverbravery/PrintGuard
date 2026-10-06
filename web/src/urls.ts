@@ -110,7 +110,7 @@ export function isLocalAddress(host: string): boolean {
 
 export function reachesLocal(pattern: string): boolean {
   const rule = parse(pattern);
-  return rule !== null && (rule.host === "*" || isLocalAddress(rule.host.replace(/^\*\./, "")));
+  return rule !== null && (rule.host === "*" || isLocalAddress(rule.host.replace(/^\*\./, "any.")));
 }
 
 export function webUrl(raw: string): string | null {

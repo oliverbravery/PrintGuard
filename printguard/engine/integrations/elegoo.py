@@ -117,7 +117,7 @@ class ElegooAdapter(IntegrationAdapter):
             self._status(status.print_status, cc2.get("machine_status")),
             float(status.progress or 0.0),
             status.filename or None,
-            remaining_s=int(job.total_ticks - (job.current_ticks or 0)) if job and job.total_ticks else None,
+            remaining_s=max(0, int(job.total_ticks - (job.current_ticks or 0))) if job and job.total_ticks else None,
             nozzle=Heater.reported(status.temp_nozzle, status.temp_nozzle_target),
             bed=Heater.reported(status.temp_bed, status.temp_bed_target),
         )
