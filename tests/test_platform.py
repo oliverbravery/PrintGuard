@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import fcntl
+import io
 import json
 import logging
 import socket
@@ -744,3 +745,23 @@ def test_a_camera_whose_stream_has_no_decoder_goes_offline_with_the_reason(tmp_p
 
     assert child.returncode == 0, child.stderr
     assert child.stdout.strip() == "False no decoder for this stream"
+
+
+async def test_an_image_with_more_pixels_than_the_cap_is_refused_before_it_is_decoded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 2 MB JPEG of 12000x12000 pixels grew the hub from 386 MB to 1.6 GB."""
+    from PIL import Image
+
+    def jpeg(side: int) -> bytes:
+        encoded = io.BytesIO()
+        Image.new("RGB", (side, side)).save(encoded, "JPEG")
+        return encoded.getvalue()
+
+    decoded: list[int] = []
+    real_reformat = av.VideoFrame.reformat
+    monkeypatch.setattr(av.VideoFrame, "reformat", lambda frame, *a, **k: decoded.append(frame.width) or real_reformat(frame, *a, **k))
+    monkeypatch.setattr("printguard.server.platform.CLASSIFY_MAX_PIXELS", 100 * 100)
+    holder = SimpleNamespace()
+
+    assert await ServerPlatform.decode_jpeg(holder, jpeg(101)) is None
+    assert decoded == []
+    assert (await ServerPlatform.decode_jpeg(holder, jpeg(100))).shape == (100, 100, 3)

@@ -67,6 +67,10 @@ V4L2_CAPABILITY = "16x32s32xIII12x"
 """struct v4l2_capability in full, since the kernel writes all of it, unpacking
 only card, version, capabilities and device_caps."""
 
+CLASSIFY_MAX_PIXELS = 50_000_000
+"""Most pixels a supplied image may have: a few kilobytes of JPEG can describe a
+frame that decodes to gigabytes, and an 8K frame is 33 million."""
+
 SOCKET_TIMEOUT_S = 10.0
 SOCKET_MAX_BYTES = 256 * 1024
 DEVICE_SIZE_CAP = 1280 * 720
@@ -949,7 +953,10 @@ class ServerPlatform:
         """Decodes supplied image bytes to an RGB frame with PyAV."""
         def decode() -> np.ndarray:
             with av.open(io.BytesIO(data)) as container:
-                return next(container.decode(_decodable_video_stream(container))).reformat(format="rgb24", threads=1).to_ndarray()
+                stream = _decodable_video_stream(container)
+                if stream.width * stream.height > CLASSIFY_MAX_PIXELS:
+                    raise ValueError(f"{stream.width}x{stream.height} is more than {CLASSIFY_MAX_PIXELS} pixels")
+                return next(container.decode(stream)).reformat(format="rgb24", threads=1).to_ndarray()
 
         try:
             return await asyncio.to_thread(decode)
