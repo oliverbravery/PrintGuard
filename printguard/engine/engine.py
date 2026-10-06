@@ -54,6 +54,9 @@ STATE_TICK_S = 1.0
 RESULT_EVENT_INTERVAL_S = 0.2
 REATTACH_EVERY_TICKS = 10
 REQUEST_TIMEOUT_S = 15.0
+CAMERA_OPEN_WAIT_S = 25.0
+CAMERAS_OPENED_IN_TURN = 4
+RUNTIME_LOAD_ALLOWANCE_S = 60.0
 RECENT_EVENTS_MAX = 100
 TEST_PICTURE_SHAPE = (180, 320, 3)
 RECENT_EVENT_TYPES = ("alert", "warning", "error")
@@ -500,8 +503,8 @@ class Engine:
         Args:
             message: The command, with its ``cmd`` name and arguments.
             timeout: Seconds to wait for the command to finish. Left out, it
-                is REQUEST_TIMEOUT_S, and longer for a command to a printer
-                whose service is slow to answer one.
+                is REQUEST_TIMEOUT_S, and longer for a command that is slow by
+                design.
             reply: A sink of the caller's that also receives the events
                 addressed to the requester, for a transport that hears its
                 answers as events.
@@ -535,9 +538,26 @@ class Engine:
         return collected
 
     def _time_allowed(self, message: dict[str, Any]) -> float:
-        """Seconds a requested command may run: longer for a printer whose adapter says its actions are slow."""
-        printer = self.printers.get(message.get("id") or "") if message.get("cmd") in ("printer.action", "printer.heat") else None
-        return REQUEST_TIMEOUT_S + (INTEGRATIONS[printer.provider].slow_action_s if printer else 0.0)
+        """Seconds a requested command may run.
+
+        More than REQUEST_TIMEOUT_S for the commands that are slow by design: a
+        printer whose adapter says its actions are slow, a camera that is given
+        CAMERA_OPEN_WAIT_S to open, one printer's cameras that open in turn, and
+        a switch of inference runtime, which waits for the inferences in flight
+        and then loads the model.
+        """
+        command = message.get("cmd")
+        if command in ("printer.action", "printer.heat"):
+            printer = self.printers.get(message.get("id") or "")
+            return REQUEST_TIMEOUT_S + (INTEGRATIONS[printer.provider].slow_action_s if printer else 0.0)
+        if command == "camera.add":
+            return REQUEST_TIMEOUT_S + CAMERA_OPEN_WAIT_S
+        if command == "printer.cameras.refresh":
+            return REQUEST_TIMEOUT_S + CAMERA_OPEN_WAIT_S * CAMERAS_OPENED_IN_TURN
+        patch = message.get("patch")
+        if command == "settings.update" and isinstance(patch, dict) and patch.get("inference_runtime", self.settings["inference_runtime"]) != self.settings["inference_runtime"]:
+            return REQUEST_TIMEOUT_S + RUNTIME_DRAIN_TIMEOUT_S + RUNTIME_LOAD_ALLOWANCE_S
+        return REQUEST_TIMEOUT_S
 
     async def snapshot(self, camera_id: str) -> bytes | None:
         """Encodes the freshest frame of a camera as JPEG, or None if unavailable.

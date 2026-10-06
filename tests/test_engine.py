@@ -4397,6 +4397,59 @@ async def test_a_poll_begun_before_a_pause_does_not_undo_the_read_made_after_it(
     assert [alert["action"] for alert in _of(events, "alert")] == ["pause"], "the paused print was paused again"
 
 
+async def test_a_camera_that_is_slow_to_open_is_given_the_time_it_takes_by_a_plain_request(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "REQUEST_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(engine_module, "CAMERA_OPEN_WAIT_S", 0.6)
+    platform = FakePlatform()
+    open_camera = platform.open_camera
+
+    async def slow_open(camera_id: str, source: dict):
+        await asyncio.sleep(0.4)
+        return await open_camera(camera_id, source)
+
+    monkeypatch.setattr(platform, "open_camera", slow_open)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.request({"cmd": "camera.add", "name": "slow", "source": {"kind": "fake"}})
+        assert len(engine.cameras.values()) == 1
+
+
+async def test_refreshing_a_printers_cameras_is_given_the_time_each_takes_to_open(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "REQUEST_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(engine_module, "CAMERA_OPEN_WAIT_S", 0.3)
+    platform = FakePlatform()
+    open_camera = platform.open_camera
+
+    async def slow_open(camera_id: str, source: dict):
+        await asyncio.sleep(0.25)
+        return await open_camera(camera_id, source)
+
+    async def two_cameras(http, config):
+        return [{"key": key, "name": key, "source": {"kind": "url", "url": f"http://op/{key}"}} for key in ("a", "b")]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", two_cameras)
+    monkeypatch.setattr(platform, "open_camera", slow_open)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await _register_printer(engine)
+        await engine.request({"cmd": "printer.cameras.refresh"})
+        assert len(engine.cameras.values()) == 2
+
+
+async def test_a_runtime_switch_is_given_the_time_the_model_takes_to_load(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "REQUEST_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(engine_module, "RUNTIME_LOAD_ALLOWANCE_S", 0.6)
+    platform = FakePlatform()
+    configure = platform.configure
+
+    async def slow_configure(settings: dict) -> None:
+        await asyncio.sleep(0.4)
+        await configure(settings)
+
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        monkeypatch.setattr(platform, "configure", slow_configure)
+        await engine.request({"cmd": "settings.update", "patch": {"inference_runtime": "onnx"}})
+        assert engine.settings["inference_runtime"] == "onnx"
+
+
 async def test_a_poll_begun_before_a_manual_pause_does_not_undo_it(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
     platform = FakePlatform(infer_s=0.02)
