@@ -2649,6 +2649,32 @@ async def test_two_prints_beginning_at_the_cap_do_not_evict_the_same_review(monk
     assert len(platform.files.blobs) == sum(review["frames"] for review in library.public()), "an evicted review's frame was left behind"
 
 
+async def test_a_print_beginning_while_the_review_is_switched_off_keeps_no_frame(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "REVIEW_MAX", 1)
+    platform = FakePlatform()
+    library = reviews.ReviewLibrary(platform)
+    frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
+    monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
+    await library.sample(monitor, frame, 0.1, 0.0)
+    library.settle({"m": monitor}, {}, set(), True)
+    remove = platform.files.remove
+    evicting = asyncio.Event()
+
+    async def slow_remove(key: str) -> None:
+        evicting.set()
+        await asyncio.sleep(0.1)
+        await remove(key)
+
+    monkeypatch.setattr(platform.files, "remove", slow_remove)
+    sampling = asyncio.create_task(library.sample(monitor, frame, 0.1, 100.0))
+    await evicting.wait()
+    await library.stop_asking()
+    await sampling
+
+    assert [review["frames"] for review in library.public()] == [0], "a frame was kept after the review was switched off"
+    assert not platform.files.blobs, "the frame's file stayed on disk"
+
+
 async def test_a_print_with_no_frames_kept_does_not_wait_for_a_review(monkeypatch) -> None:
     platform = FakePlatform(infer_s=0.02)
     monkeypatch.setattr(platform.files, "store", _disk_full)
