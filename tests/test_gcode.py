@@ -440,3 +440,10 @@ def test_an_empty_file_is_refused() -> None:
             gcode.inspect(b"", ext)
     with pytest.raises(ValueError, match="empty"):
         gcode.inspect(b"", "gcode")
+
+
+def test_binary_gcode_cut_short_inside_a_deflated_block_is_refused() -> None:
+    whole = bgcode(block(4, struct.pack("<H", 0), b"printer_model=MK4S\n" * 64, compression=1))
+    with pytest.raises(ValueError, match="cut short or damaged"):
+        gcode.inspect(whole[:-12], "bgcode")
+

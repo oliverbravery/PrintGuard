@@ -402,6 +402,8 @@ def _blocks(data: bytes) -> Sliced:
             room -= len(body)
             if room < 0:
                 raise ValueError(f"the metadata and previews of this binary gcode inflates to more than {MAX_BLOCK_BYTES // 1024 // 1024} MB")
+            if not inflater.eof:
+                raise zlib.error("a deflated block ends before its stream does")
         elif compression:
             continue
         if kind == _BGCODE_THUMBNAIL:
