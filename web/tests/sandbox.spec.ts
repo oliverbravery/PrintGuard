@@ -415,11 +415,20 @@ test("the Spotify panel asks Spotify nothing until it is signed in, and stops wh
   expect(await spotifyRequests(page)).toBe(asked);
 });
 
-test("a rejected Spotify token asks to reconnect rather than for something to play", async ({ page }) => {
+test("a rejected Spotify token stops the polling and asks to disconnect and connect again", async ({ page }) => {
   const panel = await spotifyPanel(page, ["oauth_client_id", "oauth"]);
   await page.evaluate(() => (window as any).__pgEvent({ event: "http", id: "pip", tag: "player", status: 401, body: null }));
 
-  await expect(panel.getByText("Reconnect Spotify in the Plugins tab in Settings.")).toBeVisible();
+  await expect(panel.getByText("Sign-in rejected")).toBeVisible();
+  await expect(panel.getByText("Disconnect, then Connect again in Settings.")).toBeVisible();
+  const asked = await spotifyRequests(page);
+  await page.waitForTimeout(1500);
+  expect(await spotifyRequests(page)).toBe(asked);
+
+  await holdSecrets(page, ["oauth_client_id"]);
+  await expect(panel.getByText("Not connected")).toBeVisible();
+  await holdSecrets(page, ["oauth_client_id", "oauth"]);
+  await expect.poll(() => spotifyRequests(page)).toBeGreaterThan(asked);
 });
 
 test("the consent dialog names where a plugin signs in and where it gets its tokens", async ({ page }) => {
