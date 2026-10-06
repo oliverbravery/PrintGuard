@@ -2096,13 +2096,25 @@ class Engine:
         """Renews a plugin's access token before a request goes out on it.
 
         One renewal runs at a time for a plugin, so a request that waited on it
-        finds the new token rather than spending the refresh token again.
+        finds the new token rather than spending the refresh token again. A
+        provider that no longer honours the refresh token signs the plugin out,
+        so later requests ask for a sign-in without calling the provider again
+        and the panel sees it is no longer signed in.
+
+        Raises:
+            RuntimeError: If the provider refused the refresh token.
         """
         if not plugin.manifest["oauth"]:
             return
         async with self._sign_in_refreshes[plugin.id]:
             held = plugin.secrets
-            renewed = await self.oauth.refreshed(self._provider(plugin), held)
+            try:
+                renewed = await self.oauth.refreshed(self._provider(plugin), held)
+            except oauth.SignInRefused as exc:
+                plugin.secrets = oauth.without_session(plugin.secrets)
+                self.save()
+                self._broadcast(self.state_event())
+                raise RuntimeError(f"{exc}, so {plugin.id} was signed out") from None
             if renewed is not None:
                 plugin.secrets = {**plugin.secrets, **{key: value for key, value in renewed.items() if held.get(key) != value}}
                 self.save()

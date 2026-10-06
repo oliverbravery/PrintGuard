@@ -3841,6 +3841,24 @@ async def test_an_expiring_access_token_is_renewed_before_the_request_goes_out()
     assert plugin.secrets["oauth_refresh"] == "rt-2", "a rotated refresh token was thrown away"
 
 
+async def test_a_refused_refresh_token_signs_the_plugin_out_once_and_the_provider_is_not_called_again() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.responses["https://auth.example.com/token"] = (400, {"error": "invalid_grant"})
+    asked = {"cmd": "plugin.http", "id": "vault", "url": "https://api.example.com/v1/me", "headers": {"Authorization": "Bearer {{secret.oauth}}"}}
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_vault(engine)
+        plugin = engine.plugins.get("vault")
+        plugin.secrets = {"oauth_client_id": "mine-1234", "oauth": "stale", "oauth_refresh": "rt-1", "oauth_expires": "0"}
+        with pytest.raises(RuntimeError, match="signed out"):
+            await engine.request(asked)
+        with pytest.raises(RuntimeError, match="not signed in yet"):
+            await engine.request(asked)
+        refreshes = [url for method, url in platform.http_calls if url == "https://auth.example.com/token"]
+
+    assert plugin.secrets == {"oauth_client_id": "mine-1234"}, "the panel would keep polling on a token nobody can renew"
+    assert len(refreshes) == 1, "a refused refresh token was sent to the provider again"
+
+
 async def test_a_plugin_reaches_the_whole_command_table_it_was_granted() -> None:
     """Every command a permission names dispatches, so the table cannot rot."""
     unreachable = [command for command in plugins.PERMISSION_COMMANDS if command not in Engine(FakePlatform())._handlers]
