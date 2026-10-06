@@ -880,8 +880,9 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
     assets: dict[str, bytes] = {}
     total = 0
     for name in sorted(declared & entries.keys()):
-        content = read(name, MAX_ASSET_BYTES)
-        total = within_budget(name, len(content), total)
+        cap = min(MAX_ASSET_BYTES, MAX_ASSETS_BYTES - total)
+        content = read_capped(entries[name], cap)
+        total = within_budget(name, cap + 1 if content is None else len(content), total)
         assets[name] = content
     listed = [str(manifest.get("icon", "")).strip().lower(), README_FILE]
     listed += [str(shot).strip().lower() for shot in manifest.get("media", [])]
