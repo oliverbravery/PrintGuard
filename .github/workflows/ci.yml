@@ -2,6 +2,11 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -240,13 +245,14 @@ jobs:
   launch-gate:
     name: launch
     needs: launch
-    if: always() && github.base_ref == 'main'
+    if: always()
     runs-on: ubuntu-24.04
     steps:
-      - name: The container and both desktop apps must start and catch a failing print, under a name branch protection can require
+      - name: Into main, the container and both desktop apps must have started and caught a failing print, and a skipped launch fails, under a name branch protection can require
         env:
+          BASE_REF: ${{ github.base_ref }}
           RESULT: ${{ needs.launch.result }}
-        run: '[ "$RESULT" = "success" ]'
+        run: '[ "$BASE_REF" != main ] || [ "$RESULT" = "success" ]'
 
   version:
     name: version
