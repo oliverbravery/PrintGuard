@@ -152,7 +152,15 @@ jobs:
           ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
           test -s "$RUNNER_TEMP/release-notes.md"
       - name: Draft the release once, so it is not the latest until the desktop builds are attached
-        run: gh release view "v${VERSION}" >/dev/null 2>&1 || gh release create "v${VERSION}" --draft --target "$GITHUB_SHA" --title "v${VERSION}" --notes-file "$RUNNER_TEMP/release-notes.md"
+        run: |
+          if ! draft=$(gh release view "v${VERSION}" --json isDraft --jq .isDraft 2>/dev/null); then
+            gh release create "v${VERSION}" --draft --target "$GITHUB_SHA" --title "v${VERSION}" --notes-file "$RUNNER_TEMP/release-notes.md"
+          elif [ "$draft" = true ]; then
+            gh release edit "v${VERSION}" --target "$GITHUB_SHA" --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            echo "::error::v${VERSION} is already published, run 'uv version --bump patch|minor|major' for the fix"
+            exit 1
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
