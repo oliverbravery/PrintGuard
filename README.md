@@ -104,8 +104,8 @@ GPU images, ports for cameras that push a stream and passing in a USB webcam are
 
 ### First five minutes
 
-A walkthrough opens on first load and a checklist on the dashboard tracks these until your first
-monitor is watching.
+A walkthrough opens on first load and a checklist on the dashboard tracks these until you add
+your first monitor.
 
 1. Add a camera under **Cameras**, and crop it to the print.
 2. Register your printer under **Printers** and test the connection.
@@ -120,7 +120,7 @@ as a camera for you.
 
 | | Supported |
 |---|---|
-| Print services | OctoPrint, Klipper via Moonraker, Elegoo, Prusa via PrusaLink, Bambu Lab |
+| Print services | OctoPrint, Klipper (Moonraker), Elegoo, Prusa (PrusaLink), Bambu Lab |
 | Cameras | Printer webcams, USB cameras plugged into the hub, RTSP, RTMP, HTTP/MJPEG, WHEP and a phone's or laptop's own camera |
 | Alerts | ntfy, Pushover, Telegram, Discord, and native notifications in the desktop app |
 
@@ -132,8 +132,9 @@ Bambu, Elegoo and Prusa printers are reached over their local APIs and never the
 
 Open a monitor for its live risk score and printer controls. Each one has its own alert
 threshold, the number of flagged frames in a row it takes to act, a cooldown and a response of
-alert, pause or cancel. Its history page charts the score over the last hour, 6 hours or 24
-hours beside a snapshot of every alert, so you can pick values from what your own camera saw.
+alert, pause or cancel. Its history page charts the score over the last hour, 6 hours, 24 hours
+or everything kept, beside a snapshot of every alert, so you can pick values from what your own
+camera saw.
 When a print ends you can label a few of its frames and [send them](docs/feedback.md) to help
 train the model.
 

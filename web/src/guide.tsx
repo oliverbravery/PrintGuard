@@ -70,7 +70,7 @@ export const INTRO: GuideSection[] = [
     body: (
       <>
         Only a printer that positively reports it is not printing stands a monitor down, so an idle
-        printer costs you nothing. Everything else keeps watching.
+        printer costs you nothing. A printer that drops off mid-print is still watched.
       </>
     ),
     visual: (
@@ -139,7 +139,7 @@ export const GUIDE: GuideSection[] = [
     body: (
       <>
         Connect a printer, whether <strong>OctoPrint</strong>, <strong>Klipper (Moonraker)</strong>, <strong>Elegoo</strong>,{" "}
-        <strong>PrusaLink</strong> or <strong>Bambu Lab</strong>, and PrintGuard can read its status, progress and temperatures,
+        <strong>Prusa (PrusaLink)</strong> or <strong>Bambu Lab</strong>, and PrintGuard can read its status, progress and temperatures,
         preheat it and pause or cancel a print on a defect. It's optional: without one, a monitor still watches and alerts.{" "}
         <a className={link} href={docs("printers.md")} target="_blank" rel="noreferrer">
           Setup guides <NewTab />
@@ -256,7 +256,7 @@ export const GUIDE: GuideSection[] = [
     shot: "plugins",
     body: (
       <>
-        Add a panel to the dashboard or a job on the hub, from the catalogue or any GitHub repo.
+        Add a panel to the dashboard or a job on the hub, from the catalogue, a GitHub repo or a zip.
         Plugins are third-party code, so they run in a sandbox with only what you grant them.{" "}
         <strong>Picture in picture</strong>, <strong>Alert sounds</strong>, <strong>Progress reports</strong>{" "}
         and <strong>Spotify</strong> are in the catalogue.{" "}
