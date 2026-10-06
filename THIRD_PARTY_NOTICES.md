@@ -7,6 +7,9 @@ MediaMTX and QuickJS-ng are separate programs (mere aggregation - each runs as i
 or in its own sandbox and is not linked into PrintGuard). FFmpeg, ONNX Runtime, LiteRT and
 Wasmtime are shared libraries the hub loads, taken as they come in each project's Python wheel.
 
+The GPU images, the desktop apps and the dashboard carry further libraries, listed after those.
+The dashboard's typefaces come last.
+
 ## MediaMTX
 
 - Project: https://github.com/bluenviron/mediamtx
@@ -376,6 +379,94 @@ prospectively choose to deem waived or otherwise exclude such Section(s) of
 the License, but only in their entirety and only with respect to the Combined
 Software.
 ```
+
+## OpenVINO execution provider
+
+In the `amd64` images, from the `onnxruntime-ep-openvino` wheel, which also carries the OpenVINO,
+oneTBB and hwloc libraries the provider loads.
+
+- Project: https://pypi.org/project/onnxruntime-ep-openvino/
+- Licence: MIT, as the wheel's metadata gives it and as reproduced under MediaMTX above. The wheel
+  carries no licence text for the libraries inside it
+
+## NVIDIA CUDA runtime and TensorRT RTX provider
+
+In the `-nvidia` image only.
+
+The CUDA runtime, from the `nvidia-cuda-runtime-cu12` wheel:
+
+- Project: https://developer.nvidia.com/cuda-zone
+- Licence: proprietary, NVIDIA's End User License Agreement, which the wheel ships as
+  `License.txt`
+
+The TensorRT RTX provider, from the `onnxruntime-ep-nv-tensorrt-rtx-cu12` wheel, which also
+carries the TensorRT RTX libraries:
+
+- Project: https://github.com/NVIDIA/TensorRT-RTX-EP-ABI
+- Licence: Apache-2.0, as the wheel's metadata gives it and as reproduced under Wasmtime above.
+  The wheel carries no licence text for the TensorRT RTX libraries inside it
+
+## Windows ML and the Windows App SDK
+
+In the Windows app only.
+
+ONNX Runtime with Windows ML, from the `onnxruntime-windowsml` wheel, which also carries
+`DirectML.dll`:
+
+- Project: https://onnxruntime.ai
+- Licence: MIT, as under ONNX Runtime above
+
+The Windows App SDK projections, from the `wasdk-Microsoft.Windows.AI.MachineLearning` and
+`wasdk-Microsoft.Windows.ApplicationModel.DynamicDependency.Bootstrap` wheels, the second of
+which carries `Microsoft.WindowsAppRuntime.Bootstrap.dll`:
+
+- Project: https://github.com/pywinrt/pywinrt
+- Licence: MIT, as the wheels' metadata gives it. They carry no licence text for the DLL
+
+## CPython
+
+The Python interpreter, inside the desktop apps and the images.
+
+- Project: https://www.python.org
+- Licence: [Python Software Foundation License Version 2](https://docs.python.org/3/license.html)
+
+## Desktop app libraries
+
+| Library | In | Licence | Copyright |
+|---|---|---|---|
+| [pystray](https://github.com/moses-palmer/pystray) | Both apps | [LGPL-3.0-or-later](https://www.gnu.org/licenses/lgpl-3.0.html), which adds to the [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.html) | Copyright (C) 2016-2022 Moses Palmér |
+| [pywebview](https://github.com/r0x0r/pywebview) | Both apps | BSD-3-Clause, the text under PyAV above | Copyright (c) 2014-2017, Roman Sirokov |
+| [desktop-notifier](https://github.com/samschott/desktop-notifier) | Both apps | MIT | Copyright (c) 2021, Sam Schott |
+| [platformdirs](https://github.com/tox-dev/platformdirs) | Both apps | MIT | Copyright (c) 2010-202x The platformdirs developers |
+| [Python.NET](https://github.com/pythonnet/pythonnet) | Windows app | MIT | Copyright (c) 2006-2021 the contributors of the Python.NET project |
+| [clr-loader](https://github.com/pythonnet/clr-loader) | Windows app | MIT | Copyright (c) 2019-2026 Benedikt Reinartz |
+| [pywin32](https://github.com/mhammond/pywin32) | Windows app | PSF, as the wheel's metadata gives it | |
+
+The MIT text is reproduced under MediaMTX above.
+
+## Dashboard JavaScript libraries
+
+Built into the dashboard the hub serves.
+
+| Library | Licence | Copyright |
+|---|---|---|
+| [React](https://github.com/facebook/react), with react-dom and scheduler | MIT | Copyright (c) Meta Platforms, Inc. and affiliates. |
+| [dnd kit](https://github.com/clauderic/dnd-kit) | MIT | Copyright (c) 2021, Claudéric Demers |
+| [zustand](https://github.com/pmndrs/zustand) | MIT | Copyright (c) 2019 Paul Henschel |
+| [hls.js](https://github.com/video-dev/hls.js) | Apache-2.0 | Copyright (c) 2017 Dailymotion (http://www.dailymotion.com) |
+| [DOMPurify](https://github.com/cure53/DOMPurify) | MPL-2.0 OR Apache-2.0 | |
+| [marked](https://github.com/markedjs/marked) | MIT | Copyright (c) 2018+, MarkedJS (https://github.com/markedjs/). Copyright (c) 2011-2018, Christopher Jeffrey (https://github.com/chjj/) |
+| [gcode-preview](https://github.com/remcoder/gcode-preview) | MIT | Copyright (c) 2017 Remco Veldkamp |
+| [three.js](https://github.com/mrdoob/three.js) | MIT | Copyright © 2010-2023 three.js authors |
+| [lil-gui](https://lil-gui.georgealways.com) | MIT | Copyright (c) 2019 George Michael Brower |
+| [fflate](https://github.com/101arrowz/fflate) | MIT | Copyright (c) 2026 Arjun Barrett |
+| [Lucide](https://github.com/lucide-icons/lucide) | ISC | Copyright (c) 2026 Lucide Icons and Contributors. Copyright (c) 2013-present Cole Bemis |
+| [react-image-crop](https://github.com/dominictobias/react-image-crop) | ISC | Copyright (c) 2015, Dominic Tobias (https://github.com/dominictobias) |
+| [Acorn](https://github.com/acornjs/acorn), with acorn-walk | MIT | Copyright (C) 2012-2022 by various contributors (see AUTHORS) |
+| [parse5](https://github.com/inikulin/parse5) | MIT | Copyright (c) 2013-2019 Ivan Nikulin (ifaaan@gmail.com, https://github.com/inikulin) |
+| [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | MIT | Copyright (c) Tailwind Labs, Inc. |
+
+The MIT text is reproduced under MediaMTX above and the Apache-2.0 text under Wasmtime.
 
 ## Saira, Saira Condensed and Chivo Mono
 
