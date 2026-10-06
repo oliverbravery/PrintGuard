@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fromBase64, renderMarkdown } from "../markdown";
-import { pluginFile, runsHere } from "../plugins";
+import { pluginFile, repositoryFiles, runsHere } from "../plugins";
 import { useStore } from "../store";
 import type { CatalogueEntry, PluginManifest, PluginRecord } from "../types";
 import { ConsentDialog, PermissionList } from "./PluginConsent";
@@ -184,7 +184,7 @@ function PluginPage({
   platforms: string[] | undefined;
   action?: ReactNode;
   media: { src: string; href?: string }[];
-  readme: { text: string; base?: string; skip?: string[]; sources?: Record<string, string> } | null | undefined;
+  readme: { text: string; base?: string; skip?: string[]; sources?: Record<string, string>; imagePrefixes: string[] } | null | undefined;
   fallback: string;
   manifest: PluginManifest;
   origin: string;
@@ -244,6 +244,7 @@ function PluginPage({
               dropTitle: true,
               skip: readme.skip ?? [],
               sources: readme.sources ?? {},
+              imagePrefixes: readme.imagePrefixes,
             }),
           }}
         />
@@ -302,11 +303,11 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
       ? undefined
       : fetched === null
         ? null
-        : { text: fetched, base: pluginFile(plugin.source, "README.md") ?? undefined, skip: manifest.media ?? [] }
+        : { text: fetched, base: pluginFile(plugin.source, "README.md") ?? undefined, skip: manifest.media ?? [], imagePrefixes: [repositoryFiles({ repo: plugin.source.repo!, ref: plugin.source.ref! })] }
     : page === undefined
       ? undefined
       : stored
-        ? { text: fromBase64(stored), skip: manifest.media ?? [], sources }
+        ? { text: fromBase64(stored), skip: manifest.media ?? [], sources, imagePrefixes: [] }
         : null;
 
   return (
@@ -417,7 +418,7 @@ function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; inst
       readme={
         readme == null
           ? readme
-          : { text: readme, base: pluginFile(entry, "README.md") ?? undefined, skip: entry.media ?? [] }
+          : { text: readme, base: pluginFile(entry, "README.md") ?? undefined, skip: entry.media ?? [], imagePrefixes: [repositoryFiles(entry)] }
       }
       fallback={entry.description ?? ""}
       manifest={manifest}

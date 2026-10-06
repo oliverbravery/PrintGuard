@@ -88,13 +88,16 @@ export function outboundLink(id: string, action: string, request: Record<string,
   };
 }
 
+export const repositoryFiles = (source: { repo: string; ref: string }) =>
+  `https://raw.githubusercontent.com/${source.repo}/${source.ref}/`;
+
 export function pluginFile(
   source: { repo?: string; path?: string; ref?: string },
   file: string | undefined,
 ): string | null {
   if (!source.repo || !source.ref || !file) return null;
   const prefix = source.path ? `${source.path}/` : "";
-  return `https://raw.githubusercontent.com/${source.repo}/${source.ref}/${prefix}${file}`;
+  return `${repositoryFiles({ repo: source.repo, ref: source.ref })}${prefix}${file}`;
 }
 
 export function runsHere(platforms: string[] | undefined, host: string): boolean {

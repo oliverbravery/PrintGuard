@@ -26,9 +26,9 @@ export function fromBase64(data: string): string {
 
 export function renderMarkdown(
   markdown: string,
-  options: { base?: string; dropTitle?: boolean; skip?: string[]; sources?: Record<string, string> } = {},
+  options: { base?: string; dropTitle?: boolean; skip?: string[]; sources?: Record<string, string>; imagePrefixes?: string[] } = {},
 ): string {
-  const { base, dropTitle, skip = [], sources = {} } = options;
+  const { base, dropTitle, skip = [], sources = {}, imagePrefixes } = options;
   const html = DOMPurify.sanitize(marked.parse(markdown, { async: false }) as string, SANITISER);
   const box = document.createElement("template");
   box.innerHTML = html;
@@ -38,7 +38,7 @@ export function renderMarkdown(
     const src = sources[raw] ?? resolved(raw, base);
     if (skip.includes(raw) || (src && skip.some((known) => src.endsWith(`/${known}`)))) {
       image.remove();
-    } else if (src) {
+    } else if (src && (raw in sources || !imagePrefixes || src.startsWith("data:") || imagePrefixes.some((prefix) => src.startsWith(prefix)))) {
       image.setAttribute("src", src);
       image.setAttribute("loading", "lazy");
     } else {

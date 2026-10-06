@@ -155,7 +155,7 @@ The README is shown as Markdown and little else. Headings, paragraphs, lists, li
 code, tables and blockquotes are kept, with `align` on a table cell or paragraph and `width` and
 `height` on an image. Any other HTML is dropped and its text kept, so forms, `<details>`, video,
 inline SVG, `style`, `class` and task-list checkboxes do not render. In a repository install,
-relative links and images resolve against the README's own folder at the pinned commit. A zip's
+relative links and images resolve against the README's own folder at the pinned commit, and an image from outside the repository does not load. A zip's
 README has no address to resolve against, so its relative links go nowhere and only an image
 the manifest lists in `media` shows, in the gallery.
 
