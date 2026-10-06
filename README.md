@@ -212,9 +212,9 @@ Themes are saved on the hub and follow every browser that opens it.
 </table>
 
 Tap **Customise** to drag monitors into any order, pin the ones that matter to the front and hide
-the rest. The camera rail rearranges the same way.
+the rest. Cameras in the rail can be dragged and hidden the same way.
 
-![Customise mode: drag to reorder, pin and hide monitors and cameras](docs/assets/customise.png)
+![Customise mode: drag to reorder and hide monitors and cameras, and pin a monitor](docs/assets/customise.png)
 
 The dashboard fits phones and tablets, works from the keyboard and with a screen reader, and
 meets WCAG 2.2 AA contrast. A guide behind the **?** in the header explains every part of it.

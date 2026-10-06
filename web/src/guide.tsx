@@ -20,7 +20,6 @@ export interface GuideSection {
 const WATCH_STATES: { led: string; when: string; then: string }[] = [
   { led: "led-on", when: "Printing, or no printer linked", then: "Watching, every frame scored" },
   { led: "led-off", when: "Positively idle, paused or errored", then: "Standby, nothing scored" },
-  { led: "led-warn", when: "A dropped camera, a frozen feed, or a printer state it cannot read", then: "Keeps watching, and warns you" },
 ];
 
 export const INTRO: GuideSection[] = [
@@ -213,8 +212,8 @@ export const GUIDE: GuideSection[] = [
     shot: "standby",
     body: (
       <>
-        A watchdog warns the instant a camera drops, a feed freezes or a printer stops answering,
-        nothing fails silently. Watching only stands down on a positive "not printing" signal, so a
+        A watchdog warns when a camera drops, a feed freezes or a printer stops answering for
+        longer than the grace period, two minutes by default. Watching only stands down on a positive "not printing" signal, so a
         lost feed keeps watching rather than going blind.
       </>
     ),
@@ -226,7 +225,8 @@ export const GUIDE: GuideSection[] = [
     shot: "customise",
     body: (
       <>
-        Reorder, pin and hide monitors and cameras with the ▦ Customise toggle, and switch between
+        Reorder and hide monitors and cameras with the ▦ Customise toggle, pin a monitor to the
+        front, and switch between
         light, dark, glass and your own custom themes. Your layout and theme sync to every browser that opens
         the hub.
       </>

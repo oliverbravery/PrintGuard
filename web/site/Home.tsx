@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { copyText } from "../src/components/CopyButton";
 import { Wordmark } from "../src/components/Wordmark";
 import { NewTab } from "../src/components/NewTab";
 import dashboardDark from "../../docs/assets/dashboard.png";
@@ -82,15 +83,18 @@ function DownloadButton({ label, href, icon, primary }: { label: string; href: s
 
 function Command({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
-  const copy = () => {
-    void navigator.clipboard?.writeText(command);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
+  const copy = (button: HTMLButtonElement) =>
+    copyText(command, button).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => undefined,
+    );
   return (
     <div className="panel relative min-w-0">
       <pre className="mono overflow-x-auto px-4 py-3 pr-16 text-[0.72rem] leading-relaxed text-text-1">{command}</pre>
-      <button className="btn absolute right-2.5 top-2.5 px-2 py-1" onClick={copy} aria-label="Copy command">
+      <button className="btn absolute right-2.5 top-2.5 px-2 py-1" onClick={(event) => copy(event.currentTarget)} aria-label="Copy command">
         {copied ? "copied" : "copy"}
       </button>
     </div>
@@ -207,8 +211,8 @@ export function Home() {
           <Feature index={2} led="led-infer" title="Detect" body="A compact encoder scores every frame against failure prototypes, scheduled fairly across all your cameras." />
           <Feature index={3} led="led-on" title="Act" body="A sustained defect pauses or cancels the print through OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab, and inference rests while the printer is idle." />
           <Feature index={4} led="led-bad" title="Alert" body="The moment a defect holds, PrintGuard sends a snapshot to your phone over ntfy, Pushover, Telegram or Discord, or to your desktop from the app." />
-          <Feature index={5} led="led-warn" title="Fail safe" body="A watchdog warns the second a camera drops, a feed freezes or your printer stops answering. Nothing fails silently." />
-          <Feature index={6} led="led-infer" title="Tune" body="Each monitor has its own threshold, hold time and cooldown, set against a history of its risk score and a snapshot of every alert." />
+          <Feature index={5} led="led-warn" title="Fail safe" body="A watchdog warns when a camera drops, a feed freezes or your printer stops answering for longer than the grace period, two minutes by default." />
+          <Feature index={6} led="led-infer" title="Tune" body="Each monitor has its own threshold, consecutive detections and cooldown, set against a history of its risk score and a snapshot of every alert." />
           <Feature index={7} led="led-on" title="Automate" body="Every monitor appears in Home Assistant over MQTT, and a REST API and MCP server let a script or an agent watch and control your printers." />
           <Feature index={8} led="led-on" title="Accelerate" body="Runs on a Raspberry Pi 4's CPU, and uses Core ML, Windows ML, OpenVINO or TensorRT where your machine has them." />
           <Feature index={9} led="led-infer" title="Anywhere" body="The dashboard fits a phone or a tablet, and works from the keyboard and with a screen reader." />
