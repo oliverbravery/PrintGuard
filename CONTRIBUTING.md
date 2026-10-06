@@ -332,8 +332,8 @@ On merge, the [release workflow](.github/workflows/release.yml):
 2. only once the images are published, drafts the GitHub release for `vX.Y.Z` with the
    changelog section as its notes, so a failed build never becomes a release.
 3. deploys the website to GitHub Pages.
-4. builds the macOS and Windows desktop apps and attaches them to the draft. The macOS app
-   is signed and notarised with the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+4. builds the macOS and Windows desktop apps and, once both have built, attaches them to the
+   draft. The macOS app is signed and notarised with the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
    `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` repository secrets, which the
    **launch** check uses too. The build fails if the notarisation key is empty.
 5. publishes the release, which tags the merge commit. The download links and the in-app

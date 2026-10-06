@@ -155,9 +155,9 @@ jobs:
 
   desktop:
     name: desktop
-    needs: [version, release]
+    needs: release
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -186,16 +186,33 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: bash packaging/build.sh
-      - name: Attach to the release
-        shell: bash
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-${{ matrix.os }}
+          path: dist/PrintGuard-*
+          if-no-files-found: error
+
+  attach:
+    name: attach
+    needs: [version, desktop]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: dist
+      - run: gh release upload "v${VERSION}" dist/PrintGuard-* --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.version.outputs.version }}
-        run: gh release upload "v${VERSION}" dist/PrintGuard-* --clobber
 
   publish:
     name: publish
-    needs: [version, desktop]
+    needs: [version, attach]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
