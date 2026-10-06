@@ -124,7 +124,7 @@ interface PgStore {
   discovering: boolean;
   printerTest: { target: string; ok: boolean; status?: string; error?: string } | null;
   testing: string | null;
-  notifyTest: { provider: string; ok: boolean; error?: string } | null;
+  notifyTest: { target: string; ok: boolean; error?: string } | null;
   outcome: { req_id: string; error: string | null } | null;
   testingNotifier: string | null;
   reportResult: { ok: boolean; error?: string } | null;
@@ -170,7 +170,7 @@ interface PgStore {
   updateCamera(id: string, patch: Record<string, unknown>): void;
   updateMonitor(id: string, patch: Record<string, unknown>): void;
   updatePrint(id: string, patch: Record<string, unknown>): void;
-  updateSettings(patch: Record<string, unknown>): void;
+  updateSettings(patch: Record<string, unknown>, scope?: string): void;
   flushUpdates(): void;
   discover(): void;
   openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
@@ -188,7 +188,7 @@ interface PgStore {
   clearCreatedToken(): void;
   testPrinter(target: string, provider: string, config: AdapterConfig, id?: string): void;
   addPublishedCamera(name: string, path: string): void;
-  testNotifier(provider: string, config: AdapterConfig): void;
+  testNotifier(target: string, provider: string, config: AdapterConfig): void;
   signIn(pluginId: string): void;
   toast(kind: Toast["kind"], text: string): void;
 }
@@ -647,7 +647,7 @@ export const useStore = create<PgStore>((set, get) => {
         if (issuedHere(event.req_id)) set((s) => ({ printerTest: { ...event, target: s.testing ?? "" }, testing: null }));
         break;
       case "notify_test":
-        if (issuedHere(event.req_id)) set({ notifyTest: event, testingNotifier: null });
+        if (issuedHere(event.req_id)) set((s) => ({ notifyTest: { ...event, target: s.testingNotifier ?? "" }, testingNotifier: null }));
         break;
       case "report_sent":
         if (issuedHere(event.req_id)) set({ reportResult: event });
@@ -838,8 +838,8 @@ export const useStore = create<PgStore>((set, get) => {
       queueUpdate(`print:${id}`, "print", id, patch);
     },
 
-    updateSettings(patch) {
-      queueUpdate("settings", "settings", undefined, patch);
+    updateSettings(patch, scope) {
+      queueUpdate(scope ? `settings:${scope}` : "settings", "settings", undefined, patch);
     },
 
     flushUpdates() {
@@ -956,9 +956,9 @@ export const useStore = create<PgStore>((set, get) => {
       else stopPublishing(path);
     },
 
-    testNotifier(provider, config) {
+    testNotifier(target, provider, config) {
       const asked = get().send({ cmd: "notify.test", provider, config }) !== null;
-      set({ notifyTest: null, testingNotifier: asked ? provider : null });
+      set({ notifyTest: null, testingNotifier: asked ? target : null });
     },
 
     signIn(pluginId) {

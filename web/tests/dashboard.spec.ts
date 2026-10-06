@@ -1567,16 +1567,50 @@ test("the clear control is a full touch target on a phone", async ({ browser }) 
 test("a printer save the hub refuses says why beside the form and keeps what was typed", async ({ page }) => {
   const form = await editKeyedPrinter(page);
   await form.getByRole("textbox", { name: "Address" }).fill("http://mk3");
+  await form.getByLabel(/^API key/).fill("again");
   await form.getByRole("button", { name: "Save", exact: true }).click();
-  const refusal = "send api_key again, since a stored secret is only kept for the address it was saved with";
+  const refusal = "the printer did not answer";
   await emit(page, { event: "error", message: refusal, req_id: (await sent(page, "printer.update")).req_id });
   await expect(form.getByRole("alert")).toHaveText(refusal);
   await expect(form.getByRole("textbox", { name: "Address" })).toHaveValue("http://mk3");
 
-  await form.getByLabel(/^API key/).fill("again");
   await form.getByRole("button", { name: "Save", exact: true }).click();
   await expect(form.getByRole("alert")).toBeHidden();
   expect((await lastSent(page, "printer.update")).patch.config).toEqual({ url: "http://mk3", api_key: "again" });
+});
+
+test("a moved printer address asks for the saved key again and the whole address, and sends neither half-typed", async ({ page }) => {
+  const form = await editKeyedPrinter(page);
+  const save = form.getByRole("button", { name: "Save", exact: true });
+  const key = form.getByLabel(/^API key/);
+  await form.getByRole("textbox", { name: "Address" }).fill("http://mk3");
+  await expect(form.getByText("The saved address may hide a login or key, so type the whole address.")).toBeVisible();
+  await expect(key).toHaveAttribute("placeholder", "Type it again, the address changed");
+  await expect(form.getByRole("button", { name: "Remove the stored API key" })).toBeHidden();
+  await expect(form.getByText("Retype API key, since the address changed.")).toBeVisible();
+  await expect(save).toBeDisabled();
+
+  await key.fill("again");
+  await expect(save).toBeEnabled();
+});
+
+test("a printer address that shows [redacted] is only saved untouched", async ({ page }) => {
+  await dashboard(page, {
+    engine: engine({ printers: [keyedPrinter({ config: { url: "http://mk4/?apikey=[redacted]" }, secrets_set: [] })], integrations: keyedIntegrations }),
+    dialog: "printers",
+  });
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  const form = page.locator(".panel .panel");
+  const address = form.getByRole("textbox", { name: "Address" });
+  const save = form.getByRole("button", { name: "Save", exact: true });
+  await form.getByRole("textbox", { name: "Name" }).fill("MK4S");
+  await expect(save).toBeEnabled();
+
+  await address.fill("http://mk5/?apikey=[redacted]");
+  await expect(form.getByText("The address still has [redacted] in it. Type the whole address.")).toBeVisible();
+  await expect(save).toBeDisabled();
+  await address.fill("http://mk5/?apikey=abc");
+  await expect(save).toBeEnabled();
 });
 
 const ntfy = {
@@ -1609,17 +1643,62 @@ test("a channel's saved secret is kept by a save or a test that leaves it blank,
   await page.getByRole("textbox", { name: "Priority" }).fill("low");
   await page.getByRole("button", { name: "Save channels" }).click();
   expect((await lastSent(page, "settings.update")).patch).toEqual({ notifiers: { ntfy: { priority: "low" } } });
-  await emit(page, { event: "state", ...withSavedChannel(), req_id: (await lastSent(page, "settings.update")).req_id });
+  const lowered = withSavedChannel({ settings: { ...engine().settings, notifiers: { ntfy: { priority: "low" } } } });
+  await emit(page, { event: "state", ...lowered, req_id: (await lastSent(page, "settings.update")).req_id });
 
   await address.fill("https://ntfy.sh/new");
   await page.getByRole("button", { name: "Save channels" }).click();
   expect((await lastSent(page, "settings.update")).patch.notifiers.ntfy).toEqual({ priority: "low", url: "https://ntfy.sh/new" });
-  await emit(page, { event: "state", ...withSavedChannel(), req_id: (await lastSent(page, "settings.update")).req_id });
+  await emit(page, { event: "state", ...lowered, req_id: (await lastSent(page, "settings.update")).req_id });
   await expect(address).toHaveValue("");
 
   await page.getByRole("button", { name: "Remove the stored Topic address" }).click();
   await page.getByRole("button", { name: "Save channels" }).click();
   expect((await lastSent(page, "settings.update")).patch.notifiers.ntfy).toEqual({ priority: "low", url: null });
+});
+
+test("a channel switched off and on again keeps what was typed and its saved secret", async ({ page }) => {
+  await dashboard(page, { engine: withSavedChannel(), dialog: "settings" });
+  const priority = page.getByRole("textbox", { name: "Priority" });
+  await priority.fill("low");
+  await page.getByRole("switch", { name: "ntfy" }).click();
+  await expect(priority).toBeHidden();
+  await page.getByRole("switch", { name: "ntfy" }).click();
+
+  await expect(priority).toHaveValue("low");
+  await expect(page.getByLabel(/^Topic address/)).toHaveAccessibleDescription(KEPT_HINT);
+});
+
+test("a channel's test result goes when its form is edited", async ({ page }) => {
+  await dashboard(page, { engine: withSavedChannel(), dialog: "settings" });
+  await page.getByRole("button", { name: "Send test alert" }).click();
+  await emit(page, { event: "notify_test", provider: "ntfy", ok: true, req_id: (await sent(page, "notify.test")).req_id });
+  await expect(page.getByText("sent", { exact: true })).toBeVisible();
+
+  await page.getByRole("textbox", { name: "Priority" }).fill("low");
+  await expect(page.getByText("sent", { exact: true })).toBeHidden();
+});
+
+test("the broker form refuses an empty host and asks for the password again when the address moves", async ({ page }) => {
+  const broker = { enabled: true, host: "broker.lan", username: "pg" };
+  const state = engine({ settings: { ...engine().settings, mqtt: broker }, secrets_set: { notifiers: {}, mqtt: ["password"] } });
+  await dashboard(page, { engine: state, dialog: "settings", settingsTab: "mqtt" });
+  await page.getByRole("tab", { name: "Home Assistant" }).click();
+  const save = page.getByRole("button", { name: "Save broker settings" });
+  const host = page.getByLabel("Broker host");
+  const password = page.getByLabel("Password", { exact: true });
+  await expect(save).toBeEnabled();
+
+  await host.fill("");
+  await expect(page.getByText("Enter the broker host.")).toBeVisible();
+  await expect(save).toBeDisabled();
+
+  await host.fill("other.lan");
+  await expect(password).toHaveAttribute("placeholder", "Type it again, the address changed");
+  await expect(page.getByText("Retype Password, since the address changed.")).toBeVisible();
+  await expect(save).toBeDisabled();
+  await password.fill("hunter2");
+  await expect(save).toBeEnabled();
 });
 
 test("the broker password is kept by an unrelated broker edit, replaced when typed and removed by Clear", async ({ page }) => {

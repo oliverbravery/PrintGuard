@@ -4,23 +4,43 @@ import { ExperimentalBadge } from "./ExperimentalBadge";
 import { NewTab } from "./NewTab";
 import { SecretInput } from "./SecretInput";
 
-export function withoutSecrets(meta: AdapterMeta | undefined, config: AdapterConfig): AdapterConfig {
-  return Object.fromEntries(Object.entries(config).filter(([key]) => !meta?.schema.properties[key]?.secret));
+const ADDRESS_FIELDS = ["base_url", "host", "port", "url"];
+const REDACTED = "[redacted]";
+
+const shown = (config: object, key: string) => String((config as Record<string, unknown>)[key] ?? "");
+
+export function addressMoved(value: object, stored: object): boolean {
+  return ADDRESS_FIELDS.some((key) => shown(value, key) !== shown(stored, key));
+}
+
+export function savedSecretTitles(meta: AdapterMeta, saved: string[]): Record<string, string> {
+  return Object.fromEntries(saved.map((key) => [key, meta.schema.properties[key]?.title ?? key]));
+}
+
+export function retypeReason(value: object, stored: object, savedSecrets: Record<string, string>): string | null {
+  if (ADDRESS_FIELDS.some((key) => shown(value, key).includes(REDACTED) && shown(value, key) !== shown(stored, key)))
+    return `The address still has ${REDACTED} in it. Type the whole address.`;
+  const blank = Object.entries(savedSecrets).filter(([key]) => (value as Record<string, unknown>)[key] !== null && !shown(value, key));
+  if (blank.length && addressMoved(value, stored)) return `Retype ${blank.map(([, title]) => title).join(" and ")}, since the address changed.`;
+  return null;
 }
 
 export function SchemaForm({
   meta,
   value,
+  stored,
   saved = [],
   onChange,
 }: {
   meta: AdapterMeta;
   value: AdapterConfig;
+  stored?: object;
   saved?: string[];
   onChange: (next: AdapterConfig) => void;
 }) {
   const formId = useId();
   const required = meta.schema.required ?? [];
+  const moved = stored !== undefined && addressMoved(value, stored);
   const setField = (key: string, next: string | null | undefined) => {
     const { [key]: _previous, ...rest } = value;
     onChange(next === undefined ? rest : { ...value, [key]: next });
@@ -49,6 +69,7 @@ export function SchemaForm({
               id={formId + key}
               name={prop.title}
               saved={saved.includes(key)}
+              retype={moved}
               value={value[key]}
               placeholder={prop.placeholder}
               autoCapitalize="none"
@@ -69,6 +90,9 @@ export function SchemaForm({
               spellCheck={false}
               onChange={(e) => setField(key, e.target.value)}
             />
+          )}
+          {!prop.secret && stored !== undefined && ADDRESS_FIELDS.includes(key) && shown(value, key) !== shown(stored, key) && (
+            <span className="mt-1 block text-[0.7rem] text-text-2">The saved address may hide a login or key, so type the whole address.</span>
           )}
         </div>
       ))}
