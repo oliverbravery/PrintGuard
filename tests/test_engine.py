@@ -415,7 +415,24 @@ async def test_a_full_disk_does_not_stop_detection(monkeypatch) -> None:
     assert len(errors) <= 2, "a fault that repeats on every frame is not reported on every frame"
 
 
-async def test_a_failed_pass_does_not_end_printer_polling(monkeypatch) -> None:
+async def test_a_runtime_returning_non_finite_embeddings_is_an_inference_error_not_a_quiet_success() -> None:
+    assets = vision.Assets(mean=(0.5,), std=(0.5,), prototypes={"success": np.zeros(8, np.float32), "failure": np.ones(8, np.float32)})
+
+    class NanPlatform(FakePlatform):
+        async def infer(self, rgb: np.ndarray) -> dict:
+            await asyncio.sleep(0.01)
+            return vision.classify(np.full(8, np.nan, np.float32), assets)
+
+    async with running_engine(NanPlatform(), camera_fps=[15.0]) as (engine, events):
+        await asyncio.sleep(0.8)
+        camera = engine.cameras.values()[0]
+
+    errors = [event["message"] for event in _of(events, "error")]
+    assert len(errors) == 1 and "non-finite embedding" in errors[0], "a fault on every frame is reported once"
+    assert not _of(events, "result") and not camera.last_result, "a frame with no embedding was scored as a success"
+
+
+async def test_a_failed_save_does_not_end_printer_polling(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
     monkeypatch.setattr(engine_module, "LOOP_RETRY_S", 0.05)
     platform = FakePlatform(infer_s=0.02)
@@ -437,7 +454,7 @@ async def test_a_failed_pass_does_not_end_printer_polling(monkeypatch) -> None:
         await asyncio.sleep(0.3)
         watching = engine.state_event()["monitors"][0]["watching"]
 
-    assert any("printer polling failed" in event["message"] for event in _of(events, "error")), "a failed poll is reported"
+    assert any("saving the state failed" in event["message"] for event in _of(events, "error")), "a failed save is reported"
     assert watching, "the next print is noticed after a poll failed"
 
 
@@ -577,6 +594,20 @@ async def test_a_defect_response_is_sent_once_with_no_cooldown(monkeypatch) -> N
     commands = [call for call in platform.http_calls if call[0] == "POST" and "/api/job" in call[1]]
     assert len(commands) == 1, "a paused print is not sent the command again"
     assert not monitor["watching"] and monitor["alert"], "the pause stands the monitor down with its alert showing"
+
+
+async def test_a_removed_monitor_leaves_nothing_behind_in_the_watchdog() -> None:
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off", **NTFY}})
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True}})
+        await asyncio.sleep(0.8)
+        assert _of(events, "alert")
+        await engine.handle({"cmd": "monitor.remove", "id": monitor_id})
+        held = [value for value in vars(engine.watchdog).values() if isinstance(value, (dict, set))]
+
+    assert not any(monitor_id in key or (isinstance(key, tuple) and monitor_id in key) for container in held for key in container)
 
 
 async def test_a_streak_does_not_survive_the_monitor_being_switched_off() -> None:
@@ -739,9 +770,71 @@ async def test_a_command_the_printer_refused_is_tried_again_inside_the_cooldown(
     assert len(failed) >= 2, "a pause that failed was not tried again until the cooldown was up"
 
 
+async def test_a_refused_command_waits_the_failed_cooldown_even_with_no_cooldown_of_its_own(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    monkeypatch.setattr(watchdog, "ACT_RETRY_S", 0.01)
+    monkeypatch.setattr(watchdog, "ACT_FAILED_COOLDOWN_S", 0.5)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    platform.reject_actions = True
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
+        printer_id = await _register_printer(engine)
+        patch = {"printer_id": printer_id, "on_defect": "pause", "cooldown_s": 0, "consecutive": 1}
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": patch})
+        await asyncio.sleep(1.2)
+
+    failed = [alert for alert in _of(events, "alert") if alert["action"] == "failed"]
+    assert 1 <= len(failed) <= 3, "a refused command was sent again at the monitor's own cooldown of none"
+
+
+async def test_a_defect_in_the_first_seconds_of_uptime_is_still_pushed(monkeypatch) -> None:
+    real_monotonic = time.monotonic
+    booted = real_monotonic()
+    monkeypatch.setattr(time, "monotonic", lambda: real_monotonic() - booted + 8.0)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off", **NTFY}})
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": {"notify": True}})
+        await asyncio.sleep(1.0)
+
+    assert _of(events, "alert") and _pushes(platform), "an alert raised soon after the host booted was never pushed"
+
+
+async def test_a_full_disk_between_pause_attempts_does_not_lose_the_alert(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    monkeypatch.setattr(watchdog, "ACT_RETRY_S", 0.01)
+    platform = FakePlatform(infer_s=0.02)
+    platform.reject_actions = True
+    answer = platform.http
+
+    async def stopping_by_itself(method: str, url: str, **request) -> tuple[int, object]:
+        if method == "POST" and "/api/job" in url:
+            platform.device_status = "Error"
+        return await answer(method, url, **request)
+
+    monkeypatch.setattr(platform, "http", stopping_by_itself)
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off", **NTFY}})
+        printer_id = await _register_printer(engine)
+        patch = {"printer_id": printer_id, "on_defect": "pause", "consecutive": 1, "notify": True}
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": patch})
+        await engine.watchdog.poll_devices()
+
+        def failing_save(state: dict) -> None:
+            raise OSError(28, "No space left on device")
+
+        platform.save_state = failing_save
+        platform.failing = True
+        await asyncio.sleep(1.0)
+
+    assert _of(events, "alert") and _pushes(platform), "a failed save between attempts swallowed the alert"
+    assert any("saving the state failed" in event["message"] for event in _of(events, "error")), "the full disk went unreported"
+
+
 async def test_a_pause_that_worked_is_pushed_straight_after_one_that_failed(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
     monkeypatch.setattr(watchdog, "ACT_RETRY_S", 0.01)
+    monkeypatch.setattr(watchdog, "ACT_FAILED_COOLDOWN_S", 0.05)
     platform = FakePlatform(infer_s=0.02)
     attempts = 0
 
@@ -2466,6 +2559,18 @@ def test_watch_time_is_the_time_readings_spanned_and_not_the_minutes_they_touche
     assert stats["watch_min"] == 2 and isinstance(stats["watch_min"], int), "the hour the monitor stood down counted as watched"
 
 
+def test_a_gap_between_readings_is_split_across_the_buckets_it_spans() -> None:
+    from printguard.engine.history import MonitorHistory
+
+    history = MonitorHistory()
+    for second in (50.0, 70.0, 90.0, 110.0, 130.0, 150.0, 170.0):
+        history.record(second, 0.1, 0.75)
+    buckets = history.series([])["buckets"]
+
+    assert [bucket["watched"] for bucket in buckets] == [10.0, 60.0, 50.0]
+    assert history.series([])["stats"]["watch_min"] == 2
+
+
 async def test_result_events_are_bounded_without_losing_history() -> None:
     platform = FakePlatform(infer_s=0.01)
     async with running_engine(platform, camera_fps=[30.0]) as (engine, events):
@@ -2489,6 +2594,41 @@ async def test_camera_restart_cancels_stuck_inference() -> None:
         await asyncio.sleep(0.2)
 
     assert any(event.get("event") == "result" for event in events)
+
+
+async def test_an_inference_cancelled_before_it_starts_frees_its_worker_and_camera() -> None:
+    platform = FakePlatform(infer_s=0.01)
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        for task in engine._tasks:
+            task.cancel()
+        await asyncio.gather(*engine._tasks, return_exceptions=True)
+        await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 15}})
+        camera = engine.cameras.values()[0]
+        await engine.handle({"cmd": "monitor.add", "monitor": {"camera_id": camera.id}})
+        await asyncio.sleep(0.2)
+        results: list[int] = []
+        original = engine.scheduler._on_result
+
+        async def spy(camera, frame, result):
+            results.append(frame.seq)
+            await original(camera, frame, result)
+
+        engine.scheduler._on_result = spy
+
+        await engine.scheduler.dispatch()
+        assert camera.inferring
+        await engine.restart_camera(camera)
+        await asyncio.sleep(0.05)
+        assert not camera.inferring, "a job cancelled before its first step left the camera inferring for good"
+
+        await asyncio.sleep(0.3)
+        await asyncio.wait_for(engine.scheduler.dispatch(), 2.0)
+        await asyncio.sleep(0.2)
+        assert results, "the only worker was still taken by the cancelled job"
+    finally:
+        await engine.stop()
 
 
 async def test_a_runtime_switch_behind_a_wedged_inference_gives_up_and_says_so(monkeypatch) -> None:

@@ -85,12 +85,14 @@ def classify(embedding: np.ndarray, assets: Assets) -> dict[str, Any]:
 
     Returns:
         Dict with prediction, per-class distances and the distance margin.
+
+    Raises:
+        ValueError: If the embedding is not finite, which means the runtime
+            failed rather than that the frame is unclear.
     """
-    if not np.isfinite(embedding).all():
-        return {"prediction": "unknown", "distances": {}, "margin": 0.0}
     distances = {cls: float(np.linalg.norm(embedding - proto)) for cls, proto in assets.prototypes.items()}
-    if any(math.isnan(d) or math.isinf(d) for d in distances.values()):
-        return {"prediction": "unknown", "distances": {}, "margin": 0.0}
+    if not all(math.isfinite(distance) for distance in distances.values()):
+        raise ValueError("the model returned a non-finite embedding")
     ordered = sorted(distances.items(), key=lambda kv: kv[1])
     margin = ordered[1][1] - ordered[0][1] if len(ordered) > 1 else 0.0
     return {"prediction": ordered[0][0], "distances": distances, "margin": margin}

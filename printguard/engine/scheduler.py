@@ -12,6 +12,7 @@ never inferred twice and results always describe the present.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import time
 from typing import Any, Awaitable, Callable
@@ -44,7 +45,7 @@ class Scheduler:
         self._registry = registry
         self._on_result = on_result
         self._on_error = on_error
-        self._last_error_at = 0.0
+        self._last_error_at = float("-inf")
         self._dispatch_lock = asyncio.Lock()
         self._jobs: set[asyncio.Task[None]] = set()
         self._camera_jobs: dict[str, asyncio.Task[None]] = {}
@@ -147,6 +148,7 @@ class Scheduler:
                         self._camera_jobs.pop(camera.id)
 
                 task.add_done_callback(forget)
+                task.add_done_callback(functools.partial(self._release, camera))
                 return 0.0
             wait = min((c.next_due - now for c in idle), default=IDLE_POLL_S)
         try:
@@ -188,7 +190,9 @@ class Scheduler:
             if time.monotonic() - self._last_error_at > ERROR_THROTTLE_S:
                 self._last_error_at = time.monotonic()
                 self._on_error(f"inference failed on '{camera.name}': {logs.describe(exc)}")
-        finally:
-            camera.inferring = False
-            self._slots.release()
-            self._job_finished.set()
+
+    def _release(self, camera: Camera, _: asyncio.Task[None]) -> None:
+        """Frees a job's worker slot and camera, even for a job cancelled before it ran a step."""
+        camera.inferring = False
+        self._slots.release()
+        self._job_finished.set()

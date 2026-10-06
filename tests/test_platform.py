@@ -316,6 +316,14 @@ def test_measured_concurrency_tracks_scaling() -> None:
     assert _measure_concurrency(serialises)[0] == 1
 
 
+def test_a_provider_that_returns_non_finite_output_fails_the_benchmark() -> None:
+    def broken(tensor: np.ndarray) -> np.ndarray:
+        return np.full(8, np.nan, dtype=np.float32)
+
+    with pytest.raises(ValueError, match="non-finite"):
+        _measure_concurrency(broken)
+
+
 def test_the_state_file_is_readable_only_by_whoever_runs_the_hub(tmp_path) -> None:
     """It holds printer passwords, API token hashes and plugin credentials."""
     holder = SimpleNamespace(_state_path=tmp_path / "state.json")

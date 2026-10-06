@@ -115,7 +115,8 @@ def _device_label(device: ort.OrtEpDevice) -> str:
 
 def _throughput(model: Model, workers: int) -> float:
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        list(pool.map(lambda _: model(BENCHMARK_TENSOR), range(workers)))
+        if not all(np.isfinite(embedding).all() for embedding in pool.map(lambda _: model(BENCHMARK_TENSOR), range(workers))):
+            raise ValueError("it returned a non-finite embedding")
         started = time.perf_counter()
         list(pool.map(lambda _: [model(BENCHMARK_TENSOR) for _ in range(BENCHMARK_RUNS)], range(workers)))
         elapsed = time.perf_counter() - started
