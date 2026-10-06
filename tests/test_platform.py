@@ -793,3 +793,29 @@ def test_a_state_file_of_the_shape_the_engine_saves_is_read(tmp_path) -> None:
     (tmp_path / "state.json").write_text(json.dumps(state))
 
     assert ServerPlatform.load_state(holder) == state
+
+
+async def test_a_quiet_device_is_released_when_its_camera_stands_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A USB camera answering every read with EAGAIN never reached the standby check, which only ran when a frame arrived."""
+    closed = threading.Event()
+
+    class QuietDevice:
+        streams = SimpleNamespace(video=[SimpleNamespace(average_rate=30, guessed_rate=30, codec_context=object())])
+
+        def decode(self, stream: object) -> object:
+            raise av.error.BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
+
+        def close(self) -> None:
+            closed.set()
+
+    monkeypatch.setattr(av, "open", lambda *args, **kwargs: QuietDevice())
+    monkeypatch.setattr("printguard.server.platform.DEMAND_IDLE_S", 0.1)
+    source = AVSource("/dev/video0", None, "v4l2", ({},))
+    try:
+        await asyncio.sleep(0.3)
+        source.set_monitoring(False)
+        released = await asyncio.to_thread(closed.wait, 3.0)
+    finally:
+        source.close()
+
+    assert released, "a device that delivers nothing was held open after nothing needed it"

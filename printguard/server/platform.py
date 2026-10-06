@@ -508,6 +508,8 @@ class AVSource:
                             self.fps = max(1.0, min(60.0, (len(samples) - 1) / (samples[-1] - samples[0])))
                 return
             except av.error.BlockingIOError:
+                if not self._demanded():
+                    return
                 time.sleep(0.02)
 
     def _publish(self, push: H264Push, frame: av.VideoFrame) -> None:
