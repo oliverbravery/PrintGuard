@@ -15,6 +15,7 @@ from typing import Any
 BUCKET_S = 60
 BUCKET_CAP = 1440
 ALERT_CAP = 50
+WATCH_GAP_S = 30.0
 
 
 class MonitorHistory:
@@ -24,15 +25,24 @@ class MonitorHistory:
         self.buckets: deque[dict[str, Any]] = deque(maxlen=BUCKET_CAP)
         self.alerts: deque[dict[str, Any]] = deque(maxlen=ALERT_CAP)
         self._last_score = 0.0
+        self._last_ts: float | None = None
 
     def record(self, ts: float, score: float, threshold: float) -> None:
-        """Folds one inference score into its fixed-interval bucket."""
+        """Folds one inference score into its fixed-interval bucket.
+
+        The time since the previous reading counts as watched unless it is
+        longer than WATCH_GAP_S, since a monitor that stood down or lost its
+        camera in between was not watching.
+        """
         self._last_score = score
         start = int(ts // BUCKET_S) * BUCKET_S
         bucket = self.buckets[-1] if self.buckets else None
         if bucket is None or bucket["t"] != start:
-            bucket = {"t": start, "n": 0, "sum": 0.0, "min": score, "max": score, "defects": 0}
+            bucket = {"t": start, "n": 0, "sum": 0.0, "min": score, "max": score, "defects": 0, "watched": 0.0}
             self.buckets.append(bucket)
+        if self._last_ts is not None and 0 < ts - self._last_ts <= WATCH_GAP_S:
+            bucket["watched"] += ts - self._last_ts
+        self._last_ts = ts
         bucket["n"] += 1
         bucket["sum"] += score
         bucket["min"] = min(bucket["min"], score)
@@ -63,7 +73,7 @@ class MonitorHistory:
             "defect_frames": defect_frames,
             "defect_pct": round(100.0 * defect_frames / inferences, 1) if inferences else 0.0,
             "alerts": len(self.alerts),
-            "watch_min": sum(1 for b in buckets if b["n"] > 0),
+            "watch_min": round(sum(b["watched"] for b in buckets) / 60),
             "snaps": len(snaps),
         }
         return {

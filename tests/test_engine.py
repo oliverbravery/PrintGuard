@@ -2268,6 +2268,26 @@ async def test_history_buckets_and_alert_snapshots() -> None:
     assert base64.b64decode(snapshot["jpeg"]) == b"\xff\xd8fake", "snapshot bytes did not round-trip over the protocol"
 
 
+def test_watch_time_is_the_time_readings_spanned_and_not_the_minutes_they_touched() -> None:
+    from printguard.engine.history import MonitorHistory
+
+    brief = MonitorHistory()
+    for second in range(50, 65):
+        brief.record(float(second), 0.1, 0.75)
+    assert brief.series([])["stats"]["watch_min"] == 0, "15 seconds of watching straddling a minute read as 2 minutes"
+
+    long = MonitorHistory()
+    for second in range(0, 301):
+        long.record(float(second), 0.1, 0.75)
+    assert long.series([])["stats"]["watch_min"] == 5
+
+    paused = MonitorHistory()
+    for second in (*range(0, 61), *range(3600, 3661)):
+        paused.record(float(second), 0.1, 0.75)
+    stats = paused.series([])["stats"]
+    assert stats["watch_min"] == 2 and isinstance(stats["watch_min"], int), "the hour the monitor stood down counted as watched"
+
+
 async def test_result_events_are_bounded_without_losing_history() -> None:
     platform = FakePlatform(infer_s=0.01)
     async with running_engine(platform, camera_fps=[30.0]) as (engine, events):
