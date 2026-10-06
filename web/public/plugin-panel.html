@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'sha256-/RrjVy+kw5F0QPye+fQCR4aMFlS2ymYQP/4/Z7IU4LI=' 'strict-dynamic' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'sha256-ZBWILvg2tUrfhEo3d9VPLpDkhOszzvaEn0oPT/7ecCo=' 'strict-dynamic' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>PrintGuard plugin panel</title>
     <style>
@@ -95,17 +95,9 @@
         window.pg = pg;
 
         function paint(html) {
-          const parsed = new DOMParser().parseFromString(html, "text/html");
-          for (const style of parsed.head.querySelectorAll("style, link")) document.head.appendChild(style);
-          for (const node of [...parsed.body.childNodes]) {
-            if (node.nodeName !== "SCRIPT") {
-              document.body.appendChild(node);
-              continue;
-            }
-            const script = document.createElement("script");
-            script.textContent = node.textContent;
-            document.body.appendChild(script);
-          }
+          const range = document.createRange();
+          range.selectNodeContents(document.body);
+          document.body.append(range.createContextualFragment(html));
         }
 
         let themed = null;

@@ -188,6 +188,20 @@ test("a panel's inline handler is refused, and its scripts still run", async ({ 
   expect(result.effects.map((effect: any) => effect.text)).toEqual(["script"]);
 });
 
+test("a panel's script runs before any markup", async ({ page }) => {
+  await page.goto("/");
+  const result = await runInPanel(page, `<script>pg.log("first")</script><div id="app"></div><script>pg.log("last")</script>`);
+
+  expect(result.effects.map((effect: any) => effect.text)).toEqual(["first", "last"]);
+});
+
+test("a panel's script runs inside an element", async ({ page }) => {
+  await page.goto("/");
+  const result = await runInPanel(page, `<div><p>drawn</p><script>pg.log("nested")</script></div><script>pg.log("after")</script>`);
+
+  expect(result.effects.map((effect: any) => effect.text)).toEqual(["nested", "after"]);
+});
+
 const PIP = `
 plugin.action((name, arg, ctx) => {
   if (name === "toggle") ctx.store.picked = [arg];
