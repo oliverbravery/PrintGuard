@@ -64,15 +64,15 @@ test("a dropped hub shows in the header, frees its buttons and gets the unsaved 
     const store = (window as any).__pg.getState();
     store.updateMonitor("m1", { threshold: 0.4 });
     store.flushUpdates();
-    store.send({ cmd: "monitor.remove", id: "m1" });
+    store.send({ cmd: "printer.remove", id: "p1" });
   });
   await expect.poll(() => updates().length).toBe(1);
 
   await sockets[0].close();
   await expect(page.getByRole("status").getByText("reconnecting")).toBeVisible();
-  expect(await page.evaluate(() => (window as any).__pg.getState().isPending("monitor.remove"))).toBe(false);
-  await page.evaluate(() => (window as any).__pg.getState().send({ cmd: "monitor.remove", id: "m1" }));
-  expect(await page.evaluate(() => (window as any).__pg.getState().isPending("monitor.remove"))).toBe(false);
+  expect(await page.evaluate(() => (window as any).__pg.getState().isPending("printer.remove"))).toBe(false);
+  await page.evaluate(() => (window as any).__pg.getState().send({ cmd: "printer.remove", id: "p1" }));
+  expect(await page.evaluate(() => (window as any).__pg.getState().isPending("printer.remove"))).toBe(false);
 
   await expect.poll(() => updates().length, { timeout: 8000 }).toBe(2);
   await expect(page.getByText("reconnecting")).toBeHidden();
@@ -131,6 +131,38 @@ test("a setting still saving holds its value when a later setting is acknowledge
   await expect.poll(pendingFields).toEqual([]);
 });
 
+test("a rename still waiting to send is dropped when its monitor or camera is deleted", async ({ page }) => {
+  const { commands } = await hub(page);
+  await page.evaluate(() => {
+    const store = (window as any).__pg.getState();
+    store.updateMonitor("m1", { name: "Renamed" });
+    store.send({ cmd: "monitor.remove", id: "m1" });
+    store.updateCamera("c1", { name: "Renamed" });
+    store.send({ cmd: "camera.remove", id: "c1" });
+  });
+  await expect.poll(() => commands.filter((c) => c.cmd.endsWith(".remove")).length).toBe(2);
+  await page.waitForTimeout(500);
+  expect(commands.filter((c) => c.cmd.endsWith(".update"))).toEqual([]);
+  expect(await page.evaluate(() => Object.keys((window as any).__pg.getState().optimistic))).toEqual([]);
+});
+
+test("a setting the hub refuses goes back on screen before the next state", async ({ page }) => {
+  const { commands, sockets } = await hub(page);
+  await page.evaluate(() => (window as any).__pg.getState().updateMonitor("m1", { threshold: 0.2 }));
+  await expect.poll(() => commands.filter((c) => c.cmd === "monitor.update").length).toBe(1);
+  expect(await page.evaluate(() => (window as any).__pg.getState().engine.monitors[0].threshold)).toBe(0.2);
+
+  sockets[0].send(JSON.stringify({ event: "error", message: "threshold refused", req_id: commands.at(-1).req_id }));
+  await expect.poll(() => page.evaluate(() => (window as any).__pg.getState().engine.monitors[0].threshold)).toBe(0.6);
+});
+
+test("a boot screen that cannot reach the hub says what to check", async ({ page }) => {
+  await page.routeWebSocket(/\/api\/ws$/, (socket) => void socket.close());
+  await page.goto("/");
+  await expect(page.getByText("Connecting to hub")).toBeVisible();
+  await expect(page.getByText(/The hub is not answering.*WebSockets.*Origin/)).toBeVisible({ timeout: 10_000 });
+});
+
 test("a hub that goes silent without closing is dropped and reached again", async ({ page }) => {
   await page.clock.install();
   const { sockets } = await hub(page);
@@ -151,12 +183,10 @@ test("a hub that goes silent without closing is dropped and reached again", asyn
 });
 
 test("a command pressed while the hub is away says so and leaves its button free", async ({ page }) => {
-  await hub(page);
-  await page.evaluate(() => {
-    const store = (window as any).__pg.getState();
-    store.openDetail("m1");
-    store.link.close();
-  });
+  const { sockets } = await hub(page);
+  await page.evaluate(() => (window as any).__pg.getState().openDetail("m1"));
+  await sockets[0].close();
+  await expect(page.getByRole("status").getByText("reconnecting")).toBeVisible();
   const panel = page.getByRole("dialog", { name: "Prusa" });
   await panel.getByRole("button", { name: "Delete" }).click();
 
@@ -844,6 +874,13 @@ test("removing or sending one file leaves the other rows' buttons alone", async 
   await expect(page.getByRole("button", { name: "Removing…" })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Print", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeEnabled();
+});
+
+test("a file uploaded seconds ago reads just now and an older one counts minutes", async ({ page }) => {
+  const secondsAgo = (seconds: number) => Date.now() / 1000 - seconds;
+  await dashboard(page, library([printFile({ uploaded: secondsAgo(5) }), printFile({ id: "f2", name: "Vase", uploaded: secondsAgo(150) })]));
+  await expect(page.getByText("just now")).toHaveCount(1);
+  await expect(page.getByText("2m ago")).toHaveCount(1);
 });
 
 test("a file dropped beside the drop zone is staged, and the page stays where it is", async ({ page }) => {
