@@ -12,8 +12,9 @@ function providerLabel(integrations: AdapterMeta[], id: string): string {
   return integrations.find((i) => i.id === id)?.label ?? id;
 }
 
-function PrinterTest({ target, provider, config }: { target: string; provider: string; config: Record<string, string> }) {
+function PrinterTest({ id, provider, config }: { id: string; provider: string; config: Record<string, string> }) {
   const { printerTest, testing, testPrinter } = useStore();
+  const target = JSON.stringify([id, provider, config]);
   return (
     <TestRow
       label="Test connection"
@@ -41,12 +42,10 @@ function PrinterRow({ printer }: { printer: Printer }) {
   const integrations = engine?.integrations ?? [];
   const meta = integrations.find((i) => i.id === printer.provider);
 
-  useEffect(() => {
-    setName(printer.name);
-    setConfig(printer.config ?? {});
-  }, [printer.id]);
+  useEffect(() => setName(printer.name), [printer.id, printer.name]);
+  useEffect(() => setConfig(printer.config ?? {}), [printer.id]);
 
-  const dirty = name !== printer.name || JSON.stringify(config) !== JSON.stringify(printer.config ?? {});
+  const dirty = name.trim() !== printer.name || JSON.stringify(config) !== JSON.stringify(printer.config ?? {});
 
   return (
     <div className="panel overflow-hidden">
@@ -74,7 +73,7 @@ function PrinterRow({ printer }: { printer: Printer }) {
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
           <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
-          <PrinterTest target={printer.id} provider={printer.provider} config={config} />
+          <PrinterTest id={printer.id} provider={printer.provider} config={config} />
           <button
             className="btn btn-primary w-full !py-1.5"
             disabled={!dirty || isPending("printer.update", printer.id)}
@@ -131,7 +130,7 @@ function RegisterPrinter() {
         <>
           <input className="field" aria-label="Name" placeholder={`Name (e.g. ${meta.label} Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
-          <PrinterTest target={NEW_PRINTER} provider={provider} config={config} />
+          <PrinterTest id={NEW_PRINTER} provider={provider} config={config} />
           <button
             className="btn btn-primary w-full"
             disabled={busy}

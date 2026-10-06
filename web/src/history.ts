@@ -39,3 +39,13 @@ export function groupBuckets(buckets: HistoryBucket[], period: Period, now: numb
     .sort((a, b) => a.t - b.t)
     .map(({ sum, ...g }) => ({ ...g, avg: g.n ? sum / g.n : 0 }));
 }
+
+const ALERT_OUTCOMES: Record<string, string> = {
+  pause: "print paused",
+  cancel: "print cancelled",
+  failed: "the printer did not take the command",
+};
+
+export function alertOutcome(action: string): string {
+  return ALERT_OUTCOMES[action] ?? "";
+}

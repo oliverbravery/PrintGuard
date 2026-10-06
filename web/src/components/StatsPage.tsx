@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
-import { GROUP_S, groupBuckets, HISTORY_BUCKET_MS, PERIODS, type Period } from "../history";
+import { useEffect, useId, useMemo, useState } from "react";
+import { alertOutcome, GROUP_S, groupBuckets, HISTORY_BUCKET_MS, PERIODS, type Period } from "../history";
 import { statusText } from "../review";
 import { useStore } from "../store";
 import type { Monitor, Snapshot } from "../types";
-import { Sheet } from "./Dialog";
+import { Modal, Sheet } from "./Dialog";
 import { DefectBars, RiskBandChart } from "./RiskChart";
 import { riskColor, RiskGauge } from "./RiskGauge";
 
@@ -36,9 +36,10 @@ function StatTile({ label, value }: { label: string; value: string }) {
 function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId: string; snap: Snapshot; threshold: number; now: number; onOpen: () => void }) {
   const url = useStore((s) => s.snapshotCache[snap.id]);
   const fetchSnapshot = useStore((s) => s.fetchSnapshot);
+  const reconnecting = useStore((s) => s.reconnecting);
   useEffect(() => {
-    fetchSnapshot(monitorId, snap.id);
-  }, [monitorId, snap.id]);
+    if (!reconnecting) fetchSnapshot(monitorId, snap.id);
+  }, [monitorId, snap.id, reconnecting]);
   return (
     <button type="button" onClick={onOpen} className="panel group relative block overflow-hidden text-left" aria-label={`Snapshot at ${(snap.score * 100).toFixed(0)}% risk, ${ago(snap.ts, now)}`}>
       <div className="aspect-video bg-ink-0">
@@ -55,7 +56,7 @@ function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId:
       </span>
       <span className="label absolute inset-x-0 bottom-0 bg-ink-1/85 px-2 py-1">
         {ago(snap.ts, now)}
-        {snap.action !== "none" && ` · ${snap.action}`}
+        {alertOutcome(snap.action) && ` · ${alertOutcome(snap.action)}`}
       </span>
     </button>
   );
@@ -64,12 +65,13 @@ function SnapshotThumb({ monitorId, snap, threshold, now, onOpen }: { monitorId:
 export function StatsPage({ monitor }: { monitor: Monitor }) {
   const { engine, historyData, history: scores, reconnecting, openStats, openReview, fetchHistory } = useStore();
   const reviews = (engine?.reviews ?? []).filter((review) => review.monitor_id === monitor.id);
-  const prints = reviews.filter((review) => review.status !== "running").reverse();
+  const prints = reviews.filter((review) => review.status !== "running" && review.frames > 0).reverse();
   const alertsKept = reviews.reduce((kept, review) => kept + review.alerts, 0);
   const [period, setPeriod] = useState<Period>("1h");
   const [sortByScore, setSortByScore] = useState(false);
   const [enlarged, setEnlarged] = useState<Snapshot | null>(null);
   const enlargedUrl = useStore((s) => (enlarged ? s.snapshotCache[enlarged.id] : undefined));
+  const enlargedCaption = useId();
   const history = historyData[monitor.id];
   const close = () => openStats(null);
 
@@ -180,18 +182,20 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
       </div>
 
       {enlarged && (
-        <button
-          type="button"
-          className="fixed inset-0 z-20 grid place-items-center bg-ink-0/90 p-6"
-          onClick={() => setEnlarged(null)}
-          aria-label="Close snapshot"
-        >
-          {enlargedUrl && <img src={enlargedUrl} alt="" className="max-h-full max-w-full object-contain" />}
-          <span className="mono absolute left-6 top-6 text-sm" style={{ color: riskColor(enlarged.score, monitor.threshold) }}>
-            {(enlarged.score * 100).toFixed(0)}% · {history && ago(enlarged.ts, history.now)}
-            {enlarged.action !== "none" && ` · ${enlarged.action}`}
-          </span>
-        </button>
+        <Modal onClose={() => setEnlarged(null)} labelledBy={enlargedCaption}>
+          <button
+            type="button"
+            className="fixed inset-0 grid place-items-center bg-ink-0/90 p-6"
+            onClick={() => setEnlarged(null)}
+            aria-label="Close snapshot"
+          >
+            {enlargedUrl && <img src={enlargedUrl} alt="" className="max-h-full max-w-full object-contain" />}
+            <span id={enlargedCaption} className="mono absolute left-6 top-6 text-sm" style={{ color: riskColor(enlarged.score, monitor.threshold) }}>
+              {(enlarged.score * 100).toFixed(0)}% · {history && ago(enlarged.ts, history.now)}
+              {alertOutcome(enlarged.action) && ` · ${alertOutcome(enlarged.action)}`}
+            </span>
+          </button>
+        </Modal>
       )}
     </Sheet>
   );

@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { listVideoInputs } from "../media";
 import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
-import { publishStream, published, stopPublishing } from "../stream";
-import { sourceLabel } from "./CameraRail";
+import { publishStream, published } from "../stream";
+import { cameraStatus, sourceLabel } from "./CameraRail";
 import { CropEditor } from "./CropEditor";
 import { Dialog } from "./Dialog";
 import { NameField } from "./NameField";
@@ -46,7 +46,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
   return (
     <div ref={ref} className="panel overflow-hidden">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
-        <span className={`led ${camera.online ? "led-on" : "led-off"}`} title={camera.online ? "online" : camera.standby ? "standby" : "offline"} />
+        <span role="img" aria-label={cameraStatus(camera)} className={`led ${camera.online ? "led-on" : "led-off"}`} title={cameraStatus(camera)} />
         <div className="min-w-0 grow basis-40 leading-tight">
           <div className="text-sm font-medium truncate">{camera.name}</div>
           <div className="mono text-[0.62rem] text-text-2 truncate">{sourceLabel(camera.source)}</div>
@@ -67,10 +67,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             <button
               className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
               disabled={isPending("camera.remove", camera.id)}
-              onClick={() => {
-                if (camera.source.path) stopPublishing(camera.source.path);
-                send({ cmd: "camera.remove", id: camera.id });
-              }}
+              onClick={() => send({ cmd: "camera.remove", id: camera.id })}
             >
               {isPending("camera.remove", camera.id) ? "Removing…" : "Remove"}
             </button>
@@ -122,6 +119,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
                 <button
                   key={deg}
                   className={`btn flex-1 !py-1.5 !text-[0.66rem] ${(camera.rotation ?? 0) === deg ? "!border-accent !text-accent" : ""}`}
+                  aria-pressed={(camera.rotation ?? 0) === deg}
                   onClick={() => updateCamera(camera.id, { rotation: deg })}
                 >
                   {deg}°
@@ -136,7 +134,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             onChange={(crop) => updateCamera(camera.id, { crop })}
           />
           <div className="flex justify-end pt-1">
-            <SaveStatus />
+            <SaveStatus scope={`camera:${camera.id}`} />
           </div>
         </div>
       )}
@@ -186,13 +184,13 @@ function PrinterCameras() {
 }
 
 function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSource) => void; hint?: string }) {
-  const { discovered, discovering, discover, isPending } = useStore();
+  const { discovered, discovering, discover, isPending, reconnecting } = useStore();
   const busy = isPending("camera.add");
   const [name, setName] = useState("");
   const [deviceId, setDeviceId] = useState("");
   useEffect(() => {
-    discover();
-  }, []);
+    if (!reconnecting) discover();
+  }, [reconnecting]);
   useRegistered(() => {
     setName("");
     setDeviceId("");
@@ -202,7 +200,7 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
   return (
     <div className="space-y-3">
       {discovering && <p className="mono text-[0.7rem] text-text-2 boot-cursor">scanning devices</p>}
-      {!discovering && !devices.length && (
+      {discovered && !devices.length && (
         <>
           <p className="mono text-[0.7rem] text-text-2">no unregistered cameras found</p>
           {hint && <p className="text-xs text-text-1">{hint}</p>}
@@ -292,6 +290,7 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
           <button
             key={key}
             className={`btn !py-1.5 !px-3 !text-[0.66rem] ${tab === key ? "!border-accent !text-accent" : ""}`}
+            aria-pressed={tab === key}
             onClick={() => setTab(key)}
           >
             {label}
@@ -304,6 +303,10 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
           <input
             className="field"
             aria-label="Stream URL"
+            inputMode="url"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             placeholder="rtsp:// rtmp:// http:// or whep:// stream URL"
             value={url}
             onChange={(e) => setUrl(e.target.value)}

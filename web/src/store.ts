@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { alertOutcome } from "./history";
 import { currentLayout } from "./layout";
 import { log } from "./log";
 import type { Finding } from "./lint";
@@ -121,7 +122,7 @@ interface PgStore {
   createdToken: { name: string; secret: string } | null;
   customising: boolean;
   optimistic: Record<string, OptimisticEntry>;
-  savedAt: number | null;
+  savedAt: Record<string, number>;
   pluginTrees: Record<string, PluginNode | null>;
   pluginFindings: Record<string, Finding[]>;
   background: { id: string; image: string } | null;
@@ -206,6 +207,7 @@ function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: () 
       expectTick();
       onUp();
     };
+    expectTick();
     opening.onmessage = (msg) => {
       expectTick();
       onEvent(JSON.parse(msg.data));
@@ -267,7 +269,8 @@ export const useStore = create<PgStore>((set, get) => {
         reqId: null,
       };
       const optimistic = { ...s.optimistic, [key]: entry };
-      return { optimistic, savedAt: null, engine: s.engine ? applyOptimistic(s.engine, optimistic) : s.engine };
+      const { [key]: _resaving, ...savedAt } = s.savedAt;
+      return { optimistic, savedAt, engine: s.engine ? applyOptimistic(s.engine, optimistic) : s.engine };
     });
     clearTimeout(updateTimers[key]);
     updateTimers[key] = setTimeout(() => flushKey(key), UPDATE_DEBOUNCE_MS);
@@ -491,12 +494,8 @@ export const useStore = create<PgStore>((set, get) => {
           location.reload();
           return;
         }
-        let optimistic = get().optimistic;
-        const had = Object.keys(optimistic).length > 0;
-        if (event.req_id != null && had) {
-          optimistic = Object.fromEntries(Object.entries(optimistic).filter(([, e]) => e.reqId !== event.req_id));
-        }
-        const cleared = had && Object.keys(optimistic).length === 0;
+        const acknowledged = event.req_id == null ? [] : Object.keys(get().optimistic).filter((key) => get().optimistic[key].reqId === event.req_id);
+        const optimistic = Object.fromEntries(Object.entries(get().optimistic).filter(([key]) => !acknowledged.includes(key)));
         const firstRun = get().phase !== "ready" && !readStored(INTRO_SEEN_KEY);
         const engine = Object.keys(optimistic).length ? applyOptimistic(server, optimistic) : server;
         let history = get().history;
@@ -514,7 +513,7 @@ export const useStore = create<PgStore>((set, get) => {
           statsMonitorId: present(s.statsMonitorId),
           reviewId: server.reviews.some((r) => r.id === s.reviewId && monitorIds.has(r.monitor_id)) ? s.reviewId : null,
           phase: "ready",
-          ...(cleared ? { savedAt: Date.now() } : {}),
+          savedAt: { ...s.savedAt, ...Object.fromEntries(acknowledged.map((key) => [key, Date.now()])) },
           ...(firstRun ? { dialog: "intro" as const } : {}),
         }));
         stopUnregisteredPublishers(server.cameras);
@@ -556,7 +555,7 @@ export const useStore = create<PgStore>((set, get) => {
         break;
       case "alert": {
         const name = get().engine?.monitors.find((m) => m.id === event.monitor_id)?.name ?? "monitor";
-        get().toast("alert", `Defect on ${name}, ${(event.score * 100).toFixed(0)}% (${event.action})`);
+        get().toast("alert", [`Defect on ${name}, ${(event.score * 100).toFixed(0)}%`, alertOutcome(event.action)].filter(Boolean).join(", "));
         break;
       }
       case "history":
@@ -697,7 +696,7 @@ export const useStore = create<PgStore>((set, get) => {
     createdToken: null,
     customising: false,
     optimistic: {},
-    savedAt: null,
+    savedAt: {},
     pluginTrees: {},
     pluginViews: {},
     pluginFindings: {},
@@ -799,8 +798,7 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     discover() {
-      set({ discovered: null, discovering: true });
-      get().send({ cmd: "discover" });
+      set({ discovered: null, discovering: get().send({ cmd: "discover" }) !== null });
     },
 
     openDialog(dialog, focusCameraId = null) {
@@ -815,6 +813,7 @@ export const useStore = create<PgStore>((set, get) => {
         focusCameraId,
         createdToken: null,
         settingsTab: null,
+        savedAt: {},
       });
     },
 
@@ -829,12 +828,13 @@ export const useStore = create<PgStore>((set, get) => {
         focusCameraId: null,
         createdToken: null,
         settingsTab,
+        savedAt: {},
       });
     },
 
     openDetail(detailId) {
       get().flushUpdates();
-      set({ detailId, printerTest: null });
+      set({ detailId, printerTest: null, savedAt: {} });
     },
 
     openStats(statsMonitorId) {

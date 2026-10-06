@@ -1,3 +1,4 @@
+import { alertOutcome } from "../history";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
 import { Sheet } from "./Dialog";
@@ -52,7 +53,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
         </div>
         {monitor.alert && (
           <p className="mono text-[0.7rem] text-bad mt-2">
-            defect at {(monitor.alert.score * 100).toFixed(0)}%, action {monitor.alert.action}
+            {[`defect at ${(monitor.alert.score * 100).toFixed(0)}%`, alertOutcome(monitor.alert.action)].filter(Boolean).join(", ")}
           </p>
         )}
         <button className="btn w-full mt-3" onClick={() => openStats(monitor.id)}>
@@ -163,7 +164,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
       </Section>
 
       <div className="flex items-center gap-2.5 px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-        <SaveStatus />
+        <SaveStatus scope={`monitor:${monitor.id}`} />
         <div className="flex-1" />
         <button
           className="btn btn-danger"

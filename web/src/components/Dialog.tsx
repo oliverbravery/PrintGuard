@@ -37,10 +37,7 @@ export function Modal({
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    // The opener is captured before `showModal` moves focus inside, and refocused on
-    // unmount: React detaches the node during the passive-effect flush, so the dialog's
-    // own focus-return has nothing to restore to by the time cleanup runs.
-    const opener = document.activeElement as HTMLElement | null;
+    const focusedBeforeShowModal = document.activeElement as HTMLElement | null;
     if (!dialog.open) dialog.showModal();
     setOpenModals(() => openModals.push(dialog));
 
@@ -65,7 +62,7 @@ export function Modal({
       dialog.removeEventListener("click", onLightDismiss);
       setOpenModals(() => openModals.splice(openModals.indexOf(dialog), 1));
       dialog.close();
-      opener?.focus?.();
+      focusedBeforeShowModal?.focus?.();
     };
   }, []);
 

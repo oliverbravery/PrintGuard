@@ -136,7 +136,6 @@ export async function publishStream(
     stream.getTracks().forEach((t) => t.stop());
     socket?.close();
     published.delete(path);
-    forgetPublisher(path);
   };
   published.set(path, stop);
   stream.getVideoTracks()[0].addEventListener("ended", () => {

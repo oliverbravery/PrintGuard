@@ -83,12 +83,14 @@ function HeaterCard({ name, heater, control, busy, onTarget }: { name: HeaterNam
 }
 
 function PresetRow({ preset, onChange, onRemove }: { preset: PreheatPreset; onChange: (next: PreheatPreset) => void; onRemove: () => void }) {
-  const [draft, setDraft] = useState(preset);
-  useEffect(() => setDraft(preset), [preset.name, preset.nozzle, preset.bed]);
+  const typed = () => ({ name: preset.name, nozzle: String(preset.nozzle), bed: String(preset.bed) });
+  const [draft, setDraft] = useState(typed);
+  useEffect(() => setDraft(typed()), [preset.name, preset.nozzle, preset.bed]);
   const commit = () => {
-    const next = { ...draft, name: draft.name.trim(), nozzle: Number(draft.nozzle) || 0, bed: Number(draft.bed) || 0 };
-    if (!next.name) return setDraft(preset);
+    const next = { name: draft.name.trim(), nozzle: Number(draft.nozzle) || 0, bed: Number(draft.bed) || 0 };
+    if (!next.name) return setDraft(typed());
     if (next.name !== preset.name || next.nozzle !== preset.nozzle || next.bed !== preset.bed) onChange(next);
+    else setDraft(typed());
   };
   const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && e.currentTarget.blur();
   return (
@@ -112,7 +114,7 @@ function PresetRow({ preset, onChange, onRemove }: { preset: PreheatPreset; onCh
           min={0}
           max={HEATER_MAX[name]}
           value={draft[name]}
-          onChange={(e) => setDraft({ ...draft, [name]: e.target.value === "" ? 0 : Number(e.target.value) })}
+          onChange={(e) => setDraft({ ...draft, [name]: e.target.value })}
           onBlur={commit}
           onKeyDown={blurOnEnter}
         />
@@ -214,7 +216,7 @@ export function PrinterControls({ printer }: { printer: Printer }) {
           <button
             key={name}
             className={`btn ${name === "cancel" ? "btn-danger" : ""}`}
-            disabled={acting}
+            disabled={acting || (name === "pause" && state?.status === "paused")}
             onClick={() => {
               setAction(name);
               send({ cmd: "printer.action", id: printer.id, action: name });

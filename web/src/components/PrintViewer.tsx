@@ -11,9 +11,19 @@ async function storedGcode(print: PrintFile): Promise<ToolpathSource | null> {
   const response = await fetch(`api/prints/${print.id}/gcode`);
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const source = { size: Number(response.headers.get("Content-Length")), text: () => response.text() };
-  if (tooLargeToDraw(source)) void response.body!.cancel();
-  return source;
+  const reader = response.body!.getReader();
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return new Blob(chunks);
+    size += value.length;
+    if (tooLargeToDraw({ size })) {
+      void reader.cancel();
+      return { size, text: async () => "" };
+    }
+    chunks.push(value);
+  }
 }
 
 export function PrintViewer({ print }: { print: PrintFile }) {

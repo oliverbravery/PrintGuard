@@ -14,11 +14,16 @@ export function playFile(url: string): void {
 }
 
 export function play(tones: PluginTone[]): void {
-  const audio = (context ??= new AudioContext());
+  const audio = (context ??= resumedByGesture(new AudioContext()));
   const asked = performance.now();
   void audio.resume().then(() => {
     if (performance.now() - asked < LATE_MS) schedule(audio, tones);
   });
+}
+
+function resumedByGesture(audio: AudioContext): AudioContext {
+  for (const gesture of ["pointerdown", "keydown"]) window.addEventListener(gesture, () => void audio.resume(), { once: true });
+  return audio;
 }
 
 function schedule(context: AudioContext, tones: PluginTone[]): void {
