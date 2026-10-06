@@ -703,3 +703,31 @@ async def test_a_second_answer_to_one_question_is_ignored_but_a_made_up_one_is_n
     assert len([e for e in events if e.get("event") == "answer"]) == 1
     errors = {e["req_id"] for e in events if e.get("event") == "error" and e.get("req_id") in (1, 2, 3, 4)}
     assert errors == {3, 4}, "a late duplicate was reported, or a made-up answer was not"
+
+
+@pytest.mark.parametrize("name", ["plugin.js", "worker.js", "panel.html"])
+async def test_an_update_that_cannot_read_a_source_file_fails_rather_than_dropping_it(name: str) -> None:
+    sha = "a" * 40
+    raw = f"https://raw.githubusercontent.com/you/plug/{sha}"
+    platform = FakePlatform()
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        files = {"plugin.js": "plugin.render(() => null);", "worker.js": "plugin.on('alert', () => {});", "panel.html": "<p>hi</p>"}
+        platform.responses[f"{raw}/plugin.json"] = (200, {**WORKER_MANIFEST, "id": "two-halves", "events": ["alert"]})
+        for file, body in files.items():
+            platform.responses[f"{raw}/{file}"] = (200, body)
+        source = {"kind": "github", "repo": "you/plug", "path": "", "ref": sha}
+        await engine.request({"cmd": "plugin.install", "source": source})
+        assert sorted(engine.plugins.get("two-halves").sources) == sorted(files)
+
+        platform.responses[f"{raw}/{name}"] = (503, "upstream connect error")
+        with pytest.raises(RuntimeError, match="503"):
+            await engine.request({"cmd": "plugin.install", "source": source})
+        assert sorted(engine.plugins.get("two-halves").sources) == sorted(files)
+
+        platform.responses[f"{raw}/{name}"] = (404, "404: Not Found")
+        await engine.request({"cmd": "plugin.install", "source": source})
+        assert sorted(engine.plugins.get("two-halves").sources) == sorted(set(files) - {name})
+    finally:
+        await engine.stop()

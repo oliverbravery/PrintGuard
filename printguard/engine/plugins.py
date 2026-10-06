@@ -923,8 +923,9 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
         resolved commit SHA.
 
     Raises:
-        ValueError: If the reference is unusable, the plugin is not there, or
-            its assets pass what a plugin may ship, at the file that does it.
+        ValueError: If the reference is unusable, the plugin is not there, a
+            source file answers with anything but its content or a 404, or its
+            assets pass what a plugin may ship, at the file that does it.
     """
     if not _REPO_PATTERN.match(repo):
         raise ValueError(f"{repo!r} is not an owner/name repository")
@@ -943,8 +944,11 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
         status, body = await http(
             "GET", GITHUB_RAW_URL.format(repo=repo, sha=sha, path=f"{prefix}{name}"), timeout=TIMEOUT_S, max_bytes=MAX_SOURCE_BYTES
         )
-        if status == 200 and isinstance(body, str):
-            sources[name] = body
+        if status == 404:
+            continue
+        if status != 200 or not isinstance(body, str):
+            raise ValueError(f"could not read {name} at {repo}/{prefix} ({status})")
+        sources[name] = body
     assets: dict[str, bytes] = {}
     total = 0
     for name in sorted({str(a).strip().lower() for a in manifest.get("assets", [])}):
