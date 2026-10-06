@@ -3399,6 +3399,41 @@ async def test_an_update_that_reaches_further_stands_the_plugin_down() -> None:
     assert updated.secrets["api_key"] == "s3cr3t", "the same plugin's own credentials were thrown away"
 
 
+async def test_a_reinstalled_repository_whose_address_changed_only_in_case_keeps_running() -> None:
+    """2.5.0 stored every pattern lowercased, and the reinstall that fixes a capital in a path must not cost the user their consent."""
+    platform = FakePlatform(infer_s=0.02)
+    spelt = {**SECRET_MANIFEST, "urls": ["https://api.example.com/bot*/sendMessage"]}
+    platform.responses = github_files("a" * 40, spelt)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_from_github(engine)
+        await engine.handle(
+            {"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "enabled": True}}
+        )
+        saved = engine.plugins.get("vault")
+        saved.manifest = {**saved.manifest, "urls": [url.lower() for url in saved.manifest["urls"]]}
+        await install_from_github(engine)
+        reinstalled = engine.plugins.get("vault")
+
+    assert reinstalled.enabled and reinstalled.granted == SECRET_MANIFEST["permissions"], "a pattern spelt with a capital switched the plugin off"
+
+
+async def test_a_zip_reinstalled_over_itself_keeps_its_stored_data_and_credentials() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file", "filename": "vault.zip"}, "zip": plugin_zip(SECRET_MANIFEST)})
+        await engine.handle({"cmd": "plugin.update", "id": "vault", "patch": {"granted": SECRET_MANIFEST["permissions"], "config": {"chat": "42"}}})
+        await engine.handle({"cmd": "plugin.secrets", "id": "vault", "secrets": {"api_key": "s3cr3t"}})
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file", "filename": "vault.zip"}, "zip": plugin_zip(SECRET_MANIFEST)})
+        kept = engine.plugins.get("vault")
+        wider = {**SECRET_MANIFEST, "urls": [*SECRET_MANIFEST["urls"], "https://collector.example.com/*"]}
+        await engine.handle({"cmd": "plugin.install", "source": {"kind": "file", "filename": "vault.zip"}, "zip": plugin_zip(wider)})
+        widened = engine.plugins.get("vault")
+
+    assert kept.secrets["api_key"] == "s3cr3t" and kept.config == {"chat": "42"}, "a reinstall threw away what the user had typed"
+    assert kept.granted == [], "a zip has no identity, so its permissions are asked again"
+    assert widened.secrets == {} and widened.config == {}, "a zip that reached further inherited what an earlier one was given"
+
+
 @pytest.mark.parametrize("endpoint", ["authorize_url", "token_url"])
 async def test_an_update_that_signs_in_somewhere_else_is_signed_out_and_asked_again(endpoint: str) -> None:
     """A refresh token goes to the token endpoint, so a new one must not inherit it."""

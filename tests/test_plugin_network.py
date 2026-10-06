@@ -476,6 +476,14 @@ def test_an_update_that_answers_on_a_new_channel_or_asks_for_a_new_scope_is_wide
     assert plugins.widens(accepted, declared(oauth={**sign_in, "scopes": ["read", "write"]}))
 
 
+def test_an_address_that_differs_only_in_the_case_of_its_path_is_not_wider() -> None:
+    saved = plugins.sanitise_manifest(manifest("net", urls=["https://api.telegram.org/bot*/sendmessage"]))
+    reinstalled = plugins.sanitise_manifest(manifest("net", urls=["https://api.telegram.org/bot*/sendMessage"]))
+
+    assert not plugins.widens(saved, reinstalled)
+    assert plugins.widens(saved, plugins.sanitise_manifest(manifest("net", urls=["https://api.telegram.org/bot*/getUpdates"])))
+
+
 async def test_a_plugin_that_fails_is_handed_back_to_its_runtime_without_it() -> None:
     reloads: list[list[str]] = []
 

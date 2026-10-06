@@ -441,7 +441,8 @@ def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     where it signs in and the scopes it asks for there are what the user agreed
     to, so a change to any of them is a fresh question. Anything not written
     exactly as before counts as wider, since a narrower-looking pattern can
-    cover more.
+    cover more, apart from the letter case of an address, which 2.5.0 stored
+    lowercased.
 
     Args:
         previous: The manifest the grants were given against.
@@ -453,7 +454,8 @@ def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     return (
         not same_sign_in(previous, current)
         or not set(current["oauth"].get("scopes", [])) <= set(previous["oauth"].get("scopes", []))
-        or any(not set(current[field]) <= set(previous[field]) for field in ("permissions", "urls", "consumes", "provides"))
+        or any(not set(current[field]) <= set(previous[field]) for field in ("permissions", "consumes", "provides"))
+        or not {url.lower() for url in current["urls"]} <= {url.lower() for url in previous["urls"]}
     )
 
 

@@ -1714,7 +1714,9 @@ class Engine:
         a newer revision replaces the old bytes and keeps the grants, stored data
         and credentials, as long as it comes from the same place. A bundle from
         anywhere else starts with none of them, and one reaching further than the
-        accepted manifest stands down until the wider list is accepted. One that
+        accepted manifest stands down until the wider list is accepted. A zip
+        over a zip keeps its stored data and credentials, but is accepted again,
+        unless it reaches further than the one it replaces. One that
         signs in at different addresses is signed out as well, so a refresh
         token is never sent to an endpoint it was not issued by.
         """
@@ -1746,15 +1748,17 @@ class Engine:
         entry = plugins.verified_by(self.catalogue, manifest["id"], digests)
         existing = self.plugins.get(manifest["id"])
         inherits = existing is not None and plugins.same_source(existing.source, source)
-        accepted = inherits and not plugins.widens(existing.manifest, manifest)
+        widened = existing is not None and plugins.widens(existing.manifest, manifest)
+        accepted = inherits and not widened
         granted = [p for p in (existing.granted if accepted else []) if p in manifest["permissions"]]
-        if existing is not None and not inherits:
+        keeps_data = inherits or (existing is not None and not widened and existing.source.get("kind") == source["kind"] == "file")
+        if existing is not None and not keeps_data:
             logger.warning(
                 "plugin %s came from %s and now from %s, so its grants and credentials were dropped",
                 manifest["id"], existing.source, source,
             )
-        secrets = existing.secrets if inherits else {}
-        if inherits and not plugins.same_sign_in(existing.manifest, manifest):
+        secrets = existing.secrets if keeps_data else {}
+        if keeps_data and not plugins.same_sign_in(existing.manifest, manifest):
             secrets = oauth.without_session(secrets)
             logger.warning("plugin %s signs in somewhere new, so it was signed out", manifest["id"])
         self.plugins.add(
@@ -1767,7 +1771,7 @@ class Engine:
                 digests=digests,
                 source=source,
                 granted=granted,
-                config=existing.config if inherits else {},
+                config=existing.config if keeps_data else {},
                 secrets=secrets,
                 verified=entry is not None,
                 enabled=bool(existing and existing.enabled and plugins.consented(manifest, granted)),
