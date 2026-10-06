@@ -181,8 +181,9 @@ Each entry needs its scheme. Capitals and a `:443` or `:80` make no difference, 
 logs a warning at start for an entry it can't read.
 
 Every request for a name that isn't covered gets a `403` that says which line to add, and the
-hub logs the same line once for each name. That includes the REST API, the MCP server and
-`/api/health`, so point an uptime check at the hub's address or list the name it uses.
+hub logs the same line once for each of the first 32 names. A WebSocket is closed with no text,
+so look in the log. That includes the REST API, the MCP server and `/api/health`, so point an
+uptime check at the hub's address or list the name it uses.
 
 The check reads both `Host` and `X-Forwarded-Host`, so it works whether your proxy keeps the
 host or forwards it. Tailscale, Cloudflare and oauth2-proxy all do one or the other.
@@ -203,9 +204,10 @@ like:
 | Permission | What it means for an exposed hub |
 |---|---|
 | **Serve its own pages** | The plugin answers requests under `/plugins/<id>/`. Those responses go out through your proxy like anything else, so whatever it serves is as exposed as the dashboard. It is served into a sandboxed origin, so it can never act as the dashboard |
-| **Authorise every request** | The plugin sees every request to the hub except `/api/health` and its own pages, with its cookie and authorisation headers, and can refuse it. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out. One that fails is disabled and every request is refused until you deal with it |
+| **Authorise every request** | The plugin is asked about every request to the hub except `/api/health` and its own pages, with its cookie and authorisation headers, and can refuse it. A yes is reused for 10 seconds for the same cookie, authorisation header, method, path and query. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out. One that fails is disabled and every request is refused until you deal with it |
 
-To start the hub with every plugin switched off, add this and then remove the plugin or enable it again:
+To start the hub with every plugin switched off, add this and then remove the plugin or enable it
+again. The value has to be exactly `off`:
 
 ```yaml
     environment:
@@ -234,27 +236,33 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 
 | Host | When |
 |---|---|
-| `api.github.com` | Once a day for the update check, when you press **Check now**, and to resolve a plugin's commit when you install or update it |
+| `api.github.com` | At start and then once a day for the update check, 15 minutes after one that failed, when you press **Check now**, and to resolve a plugin's commit when you install or update it |
 | `raw.githubusercontent.com` | The plugin catalogue and a plugin's files, when you browse the store or install one |
 | `*.ingest.de.sentry.io` | Only when you send a bug report |
 | `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
 | Your printers, cameras, notification services and MQTT broker | As you configure them |
-| The addresses a plugin's manifest lists, and the service it signs you in to | Only for a plugin you granted [`net` or `oauth`](plugins.md#permissions). A redirect from one of them is not followed |
+| The addresses a plugin's manifest lists, and the service it signs you in to | Only for a plugin you granted [`net`, `net:local` or `oauth`](plugins.md#permissions). A redirect from one of them is not followed |
 
 ## Environment variables
 
-Everything else is set from the dashboard. These are the ones a deployment sets.
+Everything else is set from the dashboard. These are the ones a deployment sets, and
+[Architecture](architecture.md#configuration) lists the ones the image and the desktop app set
+for themselves.
 
 | Variable | Default | Does |
 |---|---|---|
-| `PRINTGUARD_ORIGINS` | Unset | The addresses you open the hub at when they are not an IP address or a local name, comma-separated, such as `https://hub.example.com`. See [host and origin checking](#host-and-origin-checking) |
-| `PRINTGUARD_PLUGINS` | On | `off` starts the hub with every plugin switched off |
+| `PRINTGUARD_ORIGINS` | Unset | The addresses you open the hub at when they are not an IP address or a local name, comma-separated and each with its scheme, such as `https://hub.example.com`. See [host and origin checking](#host-and-origin-checking) |
+| `PRINTGUARD_PLUGINS` | On | `off`, written exactly so, starts the hub with every plugin switched off |
 | `PRINTGUARD_CAMERAS` | `auto` in the image | Anything else, such as `off`, leaves [cameras passed into the container](cameras.md#cameras-plugged-into-the-hub) to be added by hand |
 | `PORT` | `8000` | The port the hub listens on |
 | `DATA_DIR` | `/data` in the image | Where state and print files are kept |
-| `LOG_LEVEL` | `INFO` | `DEBUG` adds command traces and exception tracebacks |
-| `LOG_FILE` | Unset in the image | Also writes a rotating log file at this path. The desktop app sets it |
+| `LOG_LEVEL` | `INFO` | `DEBUG` adds command traces, printer state changes and exception tracebacks |
+| `LOG_FILE` | Unset in the image | Also writes a log file at this path, rotated at 2 MB with two older ones kept beside it as `.1` and `.2`. The desktop app sets it |
 | `NVIDIA_VISIBLE_DEVICES` | Every GPU | Picks one card on the [`latest-nvidia`](hardware.md#nvidia-gpu) image |
+| `NVIDIA_DRIVER_CAPABILITIES` | `compute,utility` in the image | What the NVIDIA Container Toolkit mounts into the container. Leave it as it is |
+
+The hub starts the bundled MediaMTX with its own environment, and MediaMTX reads any `MTX_`
+variable as a setting, so don't set one on the hub.
 
 ## Your data and backups
 
@@ -262,9 +270,17 @@ Everything PrintGuard keeps is in its data directory.
 
 | Path | Holds |
 |---|---|
-| `state.json` | Cameras, printers, monitors, settings, themes, layout, installed plugins and the record of each print's kept frames, with printer passwords, notifier keys, plugin credentials and API token hashes. Written readable only by the account running the hub |
-| `state.json.corrupt` | A `state.json` the hub could not read at start, [kept so you can recover it](troubleshooting.md#starting-up). It's only there after that has happened |
-| `prints/` | The [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub). At start the hub deletes any upload there that never finished, and any file `state.json` doesn't name unless a `state.json.corrupt` is waiting to be recovered |
+| `state.json` | Cameras, printers, monitors, settings, themes, layout, installed plugins, the print library's records and the record of each print's kept frames, with printer passwords, notifier keys, plugin credentials, API token hashes and the token the hub sends training frames with. Written readable only by the account running the hub |
+| `state.tmp` | The next `state.json` while it is being written. It's only there for a moment |
+| `state.json.corrupt` | A `state.json` that would not parse at start, [kept so you can recover it](troubleshooting.md#starting-up). It's only there after that has happened |
+| `prints/` | The files of the [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub). At start the hub deletes any upload there that never finished, and any file `state.json` doesn't name unless a `state.json.corrupt` is waiting to be recovered. It leaves folders alone, such as a NAS's `@eaDir` |
+
+| At start, a `state.json` that | Does |
+|---|---|
+| Isn't there | Starts an empty hub |
+| Won't parse | Is moved to `state.json.corrupt` and the hub starts empty |
+| The hub's user may not read | [Stops the hub](troubleshooting.md#starting-up) with a log line saying the data directory has to belong to that user |
+| Holds a camera, printer, monitor, print, review, plugin or API token record of the wrong shape | Loads without that record, which is logged as `dropping an unreadable record` and gone from the file at the next save |
 
 | Install | Data directory |
 |---|---|
@@ -272,8 +288,10 @@ Everything PrintGuard keeps is in its data directory.
 | macOS app | `~/Library/Application Support/PrintGuard` |
 | Windows app | `%LOCALAPPDATA%\PrintGuard\PrintGuard` |
 
-The desktop app also keeps `printguard.log` there, and on Windows its window's own storage in
-the `webview` folder. On macOS the window's storage is WebKit's, under `~/Library/WebKit`.
+The desktop app also keeps `printguard.log` there with `printguard.log.1` and `.2`, and on
+Windows its window's own storage in the `webview` folder. On macOS the window's storage is
+WebKit's, under `~/Library/WebKit`. **Start at login** is kept outside the data directory, as a
+file in `~/Library/LaunchAgents` on macOS and a value under the `Run` registry key on Windows.
 
 To back up, copy that directory with the hub stopped. In Docker the hub runs as root unless you
 [set a user](#running-the-container-as-your-own-user), so a bind-mounted `state.json` belongs
@@ -303,7 +321,7 @@ services:
 
 | Needs | Because |
 |---|---|
-| The data directory owned by that user | The hub writes `state.json` and `prints/` there and stops at start if it can't |
+| The data directory and everything in it owned by that user | The hub writes `state.json` and `prints/` there. It stops at start if it can't read `state.json` or create `prints/`, and a directory it can read but not write fails at the first save |
 | The host's `video` group in `group_add` | A [passed-in camera](cameras.md#cameras-plugged-into-the-hub) is readable by that group only. `getent group video` gives the number |
 | The host's `render` group in `group_add` | The same for `/dev/dri` on the [Intel image](hardware.md#intel-gpu). `getent group render` gives the number |
 
@@ -313,10 +331,10 @@ untested, as is the `latest-nvidia` image.
 
 ## Staying up to date
 
-The hub checks GitHub releases once a day and the header's version chip turns into an update
-badge. Open it to read the changelog for any release, then update. The check sends nothing about
-you, and **Automatically check for updates** in the **Updates** tab in Settings turns the daily
-one off.
+The hub checks GitHub releases at start and then once a day, and the header's version chip turns
+into an update badge. Open it to read the changelog for any release, then update. The check sends nothing about
+you, and **Automatically check for updates** in the **Updates** tab in Settings turns that
+check off.
 
 ```bash
 docker compose pull && docker compose up -d --wait
