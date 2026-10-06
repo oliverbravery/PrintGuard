@@ -18,12 +18,15 @@ from __future__ import annotations
 import socket
 import ssl
 import struct
+import time
 from typing import Any
 
 PORT = 6000
 USERNAME = "bblp"
 CONNECT_TIMEOUT_S = 5.0
 _HEADER_BYTES = 16
+MAX_JPEG_BYTES = 16 * 1024 * 1024
+FRAME_DEADLINE_S = 10.0
 
 
 def _auth_packet(access_code: str) -> bytes:
@@ -54,14 +57,28 @@ class BambuJpegStream:
         return out
 
     def _next_jpeg(self) -> bytes | None:
+        """Reads one frame, which a printer sends in well under FRAME_DEADLINE_S.
+
+        The peer is not verified, so a header claiming more than MAX_JPEG_BYTES, or a
+        frame that trickles in, ends the read and lets the source reconnect and stop.
+
+        Raises:
+            ValueError: If the header claims a frame larger than MAX_JPEG_BYTES.
+            TimeoutError: If the frame takes longer than FRAME_DEADLINE_S to arrive.
+        """
         header = self._recv(_HEADER_BYTES)
         if not header:
             return None
-        return self._recv(int.from_bytes(header[:4], "little"))
+        size = int.from_bytes(header[:4], "little")
+        if size > MAX_JPEG_BYTES:
+            raise ValueError(f"the printer's camera announced a {size} byte frame")
+        return self._recv(size, time.monotonic() + FRAME_DEADLINE_S)
 
-    def _recv(self, count: int) -> bytes | None:
+    def _recv(self, count: int, give_up_at: float = float("inf")) -> bytes | None:
         chunk = bytearray()
         while len(chunk) < count:
+            if time.monotonic() > give_up_at:
+                raise TimeoutError("the printer's camera took too long to send a frame")
             part = self._sock.recv(count - len(chunk))
             if not part:
                 return None
