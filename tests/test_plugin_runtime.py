@@ -631,3 +631,46 @@ async def test_a_workers_own_commands_do_not_wake_its_state_handler(runtime: Was
 
     assert ran <= 4, f"the state handler ran {ran} times in 2.5 s"
     assert len(effects) <= 4
+
+
+SLOW_WORKER = """
+plugin.on('alert', (event, ctx) => { let x = 0; for (let i = 0; i < 200000; i++) x += i; });
+plugin.on('result', (event, ctx) => { ctx.store.changed = true; });
+"""
+
+SLOW_MANIFEST = {
+    "id": "slow",
+    "version": "1.0.0",
+    "permissions": ["state:read"],
+    "reasons": {"state:read": "to hear alerts"},
+    "events": ["alert", "result"],
+}
+
+
+async def test_a_call_that_changed_nothing_does_not_undo_a_save_made_while_it_ran(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, SLOW_MANIFEST, SLOW_WORKER)
+        engine.emit({"event": "alert", "monitor_id": "m", "score": 0.9, "action": "none"})
+        while "slow" not in runtime._busy:
+            await asyncio.sleep(0)
+        await engine.request({"cmd": "plugin.update", "id": "slow", "patch": {"config": {"on": True}}})
+        await asyncio.sleep(1.0)
+
+        assert engine.plugins.get("slow").config == {"on": True}, "a worker that changed nothing wrote its old copy back"
+    finally:
+        await engine.stop()
+
+
+async def test_a_worker_that_changes_its_store_still_has_it_saved(runtime: WasmPluginRuntime) -> None:
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, SLOW_MANIFEST, SLOW_WORKER)
+        engine.emit({"event": "result", "monitor_id": "m", "camera_id": "c", "score": 0.1})
+        await asyncio.sleep(0.6)
+
+        assert engine.plugins.get("slow").config == {"changed": True}
+    finally:
+        await engine.stop()
