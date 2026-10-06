@@ -73,7 +73,7 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/progress-reports",
-      "ref": "8130da16252383ed647ebd62356b06a0d1cca1bd",
+      "ref": "f727de2ed985e11882ba35501d59969807234b47",
       "digests": {
         "plugin.json": "18efb817e7f465f18246e166b7d1224226c1b11215d29da6758ecb39abdd1b3c",
         "plugin.js": "20b57c627bc6337c52ff0eef8cae642e2b2e38817fe1a9a402d089a9fa942a48",
@@ -101,10 +101,10 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/spotify",
-      "ref": "abf6cca00b5838ff97f965a2a42528ffaef9dd37",
+      "ref": "ab94738f9ac0ce9ae14aef781602728337361652",
       "digests": {
         "plugin.json": "6531ffe400068aca00c600db15dbb2c31d5c88dd04f5f3452380af582cebe61f",
-        "panel.html": "56a644a5b66ddc48b265f88bea41a22649126ac49827bdb48be82a372c628ed4"
+        "panel.html": "4bb60dbc85dd9000161aeffbb92e639c925ed7b017eca8c53628d59d8cae6ca5"
       }
     }
   ]
