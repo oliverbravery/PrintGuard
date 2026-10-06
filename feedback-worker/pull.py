@@ -22,6 +22,7 @@ import argparse
 import io
 import json
 import os
+from email.errors import HeaderParseError
 from email.header import decode_header, make_header
 from pathlib import Path
 from typing import Any, Iterator
@@ -61,10 +62,10 @@ def labels(metadata: dict[str, str]) -> dict[str, str]:
 
 
 def _decoded(value: str) -> str:
-    """Decodes one label, keeping it as sent when it only looks encoded, such as one naming a charset there isn't."""
+    """Decodes one label, keeping it as sent when it only looks encoded, such as one naming a charset there isn't or holding broken base64."""
     try:
         return str(make_header(decode_header(value)))
-    except (LookupError, ValueError):
+    except (HeaderParseError, LookupError, ValueError):
         return value
 
 
