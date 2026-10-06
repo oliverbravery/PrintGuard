@@ -652,8 +652,8 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     if consumes and "link:consume" not in permissions:
         raise ValueError("consumes needs the link:consume permission")
     sign_in = sanitise_sign_in(raw.get("oauth"))
-    if sign_in and "oauth" not in permissions:
-        raise ValueError("oauth needs the oauth permission")
+    if bool(sign_in) != ("oauth" in permissions):
+        raise ValueError("the oauth permission and the oauth block go together")
     if sign_in:
         wanted[oauth.CLIENT_ID] = f"The client id of the {sign_in['label']} app you registered"
     icon = str(raw.get("icon", "")).strip().lower()

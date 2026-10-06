@@ -3515,6 +3515,14 @@ async def test_a_manifest_without_a_reason_for_a_permission_is_refused() -> None
         plugins.sanitise_manifest({**MANIFEST, "reasons": {"state:read": "to read"}})
 
 
+async def test_the_oauth_permission_and_the_oauth_block_come_together() -> None:
+    sign_in = SECRET_MANIFEST["oauth"]
+    with pytest.raises(ValueError, match="go together"):
+        plugins.sanitise_manifest({**SECRET_MANIFEST, "oauth": {}})
+    with pytest.raises(ValueError, match="go together"):
+        plugins.sanitise_manifest({**SECRET_MANIFEST, "oauth": sign_in, "permissions": ["net"], "reasons": {"net": "to post"}})
+
+
 async def test_a_plugins_request_comes_back_tagged_as_it_named_it() -> None:
     platform = FakePlatform(infer_s=0.02)
     platform.responses["https://hooks.example.com/feed"] = (200, {"temp": 4})

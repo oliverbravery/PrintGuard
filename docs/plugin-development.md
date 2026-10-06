@@ -135,7 +135,7 @@ A plugin needs at least one of the three source files.
 | `tick_s` | How often its worker runs anyway, 5 to 86400 seconds. Under 5 switches the timer off |
 
 A permission without a reason, `urls` without `net`, a [local address](#addresses) (a wildcard
-over a local suffix included) without `net:local`, `oauth` without the `oauth` permission, or `provides` and `consumes` without their
+over a local suffix included) without `net:local`, `oauth` without the `oauth` permission, the `oauth` permission without `oauth`, or `provides` and `consumes` without their
 link permission each refuse the install.
 
 ### Reasons
