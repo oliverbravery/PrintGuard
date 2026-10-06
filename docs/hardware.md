@@ -6,7 +6,7 @@
 
 </div>
 
-Which image to pull, how PrintGuard picks a model runtime, and how to give it a GPU or NPU.
+Which image to pull, how PrintGuard picks a model runtime, and how to give it a GPU.
 
 - [How much hardware you need](#how-much-hardware-you-need)
 - [Image variants](#image-variants)
@@ -66,8 +66,8 @@ flowchart TD
     gpu -- "NVIDIA RTX 30+ with Container Toolkit" --> nvidia["latest-nvidia"]
 ```
 
-macOS and Windows users running the desktop app do not choose a variant, since the app
-carries the runtimes for its platform.
+If you run the desktop app on macOS or Windows you don't choose a variant, since the app
+carries the runtimes for your platform.
 
 ## Model runtimes
 
@@ -97,7 +97,8 @@ the result is the `workers` term the scheduler divides by latency to get
 ## Execution providers by platform
 
 ONNX Runtime takes the first device its providers offer that can run the model, preferring a
-GPU, then an NPU, then the CPU. What is available depends on the platform:
+GPU, then an NPU, then the CPU. Nothing here sets an NPU up, so one is used only where its
+provider offers it. What is available depends on the platform:
 
 | Platform | Provider | Notes |
 |---|---|---|
@@ -111,9 +112,10 @@ GPU, then an NPU, then the CPU. What is available depends on the platform:
 If no accelerator is usable, PrintGuard keeps working on the CPU. On an `amd64` image that is
 OpenVINO's CPU path, which the `latest-nvidia` image carries too, and elsewhere it is ONNX
 Runtime's own CPU provider. That covers an accelerator that is offered but can't build or run
-the model, such as a GPU out of memory or a driver the provider rejects. The dashboard and the
-log name the device and the reason in a warning that it `cannot run the model, so detection is
-not using it`, and **compute** names the device used instead. It applies with the runtime pinned
+the model, such as a GPU out of memory or a driver the provider rejects. The log names the device
+and the reason in a warning that it `cannot run the model, so detection is not using it`, and the
+dashboard shows the same warning as a startup warning, kept until the hub restarts. **compute**
+names the device used instead. It applies with the runtime pinned
 to ONNX too. On **Automatic** the CPU path still has to beat LiteRT in the benchmark, so
 **compute** may read `litert cpu` instead.
 
@@ -190,8 +192,9 @@ PrintGuard logs which provider is unavailable and keeps running on the CPU.
 ## Reading and pinning the runtime
 
 The **compute** readout names the hardware the model is running on, as the provider's vendor and
-the kind of device. It sits in the header on a wide window, in the **More** sheet on a phone
-and, in capitals, as **Active compute** in the Advanced tab in Settings.
+the kind of device. It sits in the header on a window 1280 pixels wide or more and in the **More**
+sheet on a phone. From 640 to 1279 pixels it is only in the Advanced tab in Settings, where it
+reads **Active compute**.
 
 | Readout | Means |
 |---|---|
