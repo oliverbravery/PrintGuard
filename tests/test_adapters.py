@@ -1546,7 +1546,9 @@ async def test_prusa_puts_onto_the_first_writable_storage_and_sends_the_file_onc
         ("PUT", "/api/v1/files/usb/benchy.bgcode", True, 4000),
     ], "the challenge the listing answered signs the upload, so the file crosses the network once"
     upload = printer.received[-1][3]
-    assert (upload["content-type"], upload["print-after-upload"], upload["overwrite"]) == ("application/octet-stream", "?1", "?1")
+    assert (upload["content-type"], upload["print-after-upload"], upload["overwrite"]) == ("text/x.gcode", "?1", "?1"), (
+        "PrusaLink on a Raspberry Pi sniffs the destination for any other type, which fails for a new file name"
+    )
 
 
 async def test_prusa_without_storage_raises() -> None:

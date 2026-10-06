@@ -32,7 +32,7 @@ from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, Integ
 _USERNAME = "maker"
 _TIMEOUT_S = 10.0
 _UPLOAD_TIMEOUT_S = 180.0
-_UPLOAD_HEADERS = {"Content-Type": "application/octet-stream", "Print-After-Upload": "?1", "Overwrite": "?1"}
+_UPLOAD_HEADERS = {"Content-Type": "text/x.gcode", "Print-After-Upload": "?1", "Overwrite": "?1"}
 _TLS = httpx.create_ssl_context()
 """One TLS context for every client. A client builds its own otherwise, which reads the CA bundle on the event loop at every poll."""
 
