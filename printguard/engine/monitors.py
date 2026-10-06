@@ -90,11 +90,17 @@ def sanitise_monitor(monitor_id: str, patch: dict[str, Any], base: dict[str, Any
 def stored_monitor(record: dict[str, Any]) -> dict[str, Any]:
     """Reads a monitor back from the state store, leaving out a setting a later version retired.
 
+    A monitor with no printer, which an earlier version stored as null, has an
+    empty printer id.
+
     Raises:
         KeyError: If the record has no id.
         ValueError: If a value is not of the kind its setting takes.
     """
-    return sanitise_monitor(record["id"], {key: record[key] for key in MONITOR_DEFAULTS if key in record})
+    patch = {key: record[key] for key in MONITOR_DEFAULTS if key in record}
+    if "printer_id" in patch and patch["printer_id"] is None:
+        patch["printer_id"] = ""
+    return sanitise_monitor(record["id"], patch)
 
 
 def persisted_monitor(record: dict[str, Any]) -> dict[str, Any]:

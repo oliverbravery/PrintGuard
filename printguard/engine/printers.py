@@ -45,23 +45,29 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
     return record
 
 
-def _target(heater: str, value: Any) -> float:
-    return clamp(f"{heater} temperature", value, 0.0, HEATER_MAX[heater])
+def _target(heater: str, value: Any, strict: bool = False) -> float:
+    degrees = clamp(f"{heater} temperature", value, 0.0, HEATER_MAX[heater])
+    if strict and (isinstance(value, (bool, str)) or degrees != value):
+        raise ValueError(f"{heater} temperature must be a number from 0 to {HEATER_MAX[heater]:g}")
+    return degrees
 
 
-def sanitise_targets(fields: dict[str, Any]) -> dict[str, float]:
-    """The heater targets a command names, clamped to what a hotend or bed can take.
+def sanitise_targets(fields: dict[str, Any], strict: bool = False) -> dict[str, float]:
+    """The heater targets a command names.
 
     Args:
         fields: A mapping that may carry a value under each of ``HEATERS``.
+        strict: Whether to refuse a target outside what a hotend or bed can
+            take, or one that is not a number, instead of clamping it.
 
     Returns:
         Heater name to target in degrees Celsius, for the heaters named.
 
     Raises:
-        ValueError: If a target is not a finite number.
+        ValueError: If a target is not a finite number, or strict and it is
+            text, a boolean or out of range.
     """
-    return {heater: _target(heater, fields[heater]) for heater in HEATERS if fields.get(heater) is not None}
+    return {heater: _target(heater, fields[heater], strict) for heater in HEATERS if fields.get(heater) is not None}
 
 
 def sanitise_presets(raw: Any) -> list[dict[str, Any]]:

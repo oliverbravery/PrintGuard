@@ -1464,6 +1464,30 @@ async def test_a_printer_that_does_not_answer_holds_up_nobody_elses_poll(monkeyp
     assert read_meanwhile == "paused", "a printer waited on one that was not answering"
 
 
+async def test_a_printer_that_does_not_answer_does_not_stretch_the_poll_of_the_others(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.1)
+    platform = FakePlatform()
+    answer = platform.http
+    live_reads = 0
+
+    async def http(method: str, url: str, **request: Any) -> tuple[int, Any]:
+        nonlocal live_reads
+        if "dead.lan" in url and url.endswith("/api/job"):
+            await asyncio.sleep(1.5)
+            raise OSError("timed out")
+        if "live.lan" in url and url.endswith("/api/job"):
+            live_reads += 1
+        return await answer(method, url, **request)
+
+    monkeypatch.setattr(platform, "http", http)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await _add_printers(engine, "live.lan", "dead.lan")
+        live_reads = 0
+        await asyncio.sleep(1.0)
+
+    assert live_reads >= 5, f"a printer that never answered held every other printer's poll back: {live_reads} reads in 1 s"
+
+
 async def test_a_printer_removed_while_it_answers_a_poll_is_not_reported(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
     platform = FakePlatform()
@@ -1507,6 +1531,69 @@ async def test_brief_outage_reattaches_without_notifying(monkeypatch) -> None:
         assert camera.frame_source is not dropped_source and camera.online, "a dropped camera waited on the grace period to recover"
         assert not [e for e in events if e.get("event") == "warning"], "an outage inside the grace period warned"
         assert not _pushes(platform), "an outage inside the grace period pushed a notification"
+
+
+def _recording_notifier(real):
+    class Recorder(type(real)):
+        def __init__(self) -> None:
+            self.sent: list[tuple[str, bool]] = []
+
+        async def send(self, http, config, title, body, image, *, urgent: bool = True) -> None:
+            self.sent.append((title, urgent))
+
+    return Recorder()
+
+
+async def test_a_recovery_is_sent_quietly_and_a_fault_or_defect_is_urgent(monkeypatch) -> None:
+    from printguard.engine import engine as engine_module
+    from printguard.engine.notifiers import NOTIFIERS
+
+    notifier = _recording_notifier(NOTIFIERS["ntfy"])
+    monkeypatch.setitem(NOTIFIERS, "ntfy", notifier)
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    monkeypatch.setattr(watchdog, "RESTART_AFTER_S", 10.0)
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.05)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}, "fault_grace_s": 0.05}})
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True, "consecutive": 1}})
+        camera = next(iter(engine.cameras.values()))
+        source = camera.frame_source
+        source.online = False
+        await asyncio.sleep(0.4)
+        source.online = True
+        camera.frame_source = source
+        for _ in range(100):
+            if any(event.get("event") == "warning" and event["recovered"] for event in events):
+                break
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(0.1)
+
+    by_title = {title: urgent for title, urgent in notifier.sent}
+    assert by_title["PrintGuard warning"] is True, "a fault was sent quietly"
+    assert by_title["PrintGuard recovered"] is False, "a recovery rang as urgent"
+    assert any(title.startswith("PrintGuard: ") and urgent for title, urgent in notifier.sent), "a defect alert was not urgent"
+
+
+async def test_an_alert_whose_picture_could_not_be_encoded_says_so(monkeypatch) -> None:
+    platform = FakePlatform(infer_s=0.02, failing=True)
+
+    async def no_picture(rgb: np.ndarray) -> None:
+        return None
+
+    monkeypatch.setattr(platform, "encode_jpeg", no_picture)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True, "consecutive": 1}})
+        await asyncio.sleep(1.0)
+
+    assert _of(events, "alert"), "no alert was raised"
+    warnings = [e["message"] for e in _of(events, "warning")]
+    assert any("without a picture" in message for message in warnings), warnings
 
 
 async def test_sustained_outage_keeps_reminding(monkeypatch) -> None:
@@ -1802,11 +1889,41 @@ async def test_printer_heat_sets_each_target_then_refreshes_the_state() -> None:
         assert device["nozzle"] == {"actual": 24.6, "target": 0.0} and device["bed"] == {"actual": 23.1, "target": 0.0}
         assert engine.state_event()["printers"][0]["device_state"]["nozzle"] == {"actual": 24.6, "target": 0.0}
 
-        await engine.handle({"cmd": "printer.heat", "id": printer_id, "nozzle": 9000, "req_id": 4})
-        clamped = next(r for r in reversed(platform.http_requests) if r["method"] == "POST")
-        assert clamped["json"] == {"command": "target", "targets": {"tool0": 350.0}}, "a target is clamped to what a hotend can take"
         await engine.handle({"cmd": "printer.heat", "id": printer_id, "req_id": 5})
         assert any(e.get("event") == "error" and e.get("req_id") == 5 for e in events), "naming no heater is refused"
+
+
+@pytest.mark.parametrize(
+    ("fields", "named"),
+    [
+        ({"nozzle": 400}, "nozzle"),
+        ({"nozzle": 351}, "nozzle"),
+        ({"bed": 150.5}, "bed"),
+        ({"bed": 2100}, "bed"),
+        ({"nozzle": -1}, "nozzle"),
+        ({"nozzle": "210"}, "nozzle"),
+        ({"bed": True}, "bed"),
+        ({"bed": False}, "bed"),
+        ({"nozzle": 210, "bed": 400}, "bed"),
+    ],
+)
+async def test_a_heater_target_out_of_range_or_not_a_number_is_refused_and_sends_nothing(fields: dict, named: str) -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "printer.heat", "id": printer_id, "req_id": 4, **fields})
+        error = next(e for e in events if e.get("event") == "error" and e.get("req_id") == 4)
+        assert error["message"].startswith(f"{named} temperature must be a number from 0 to"), error
+        assert not [r for r in platform.http_requests if r["method"] == "POST"], "a heater was sent a target that was refused"
+
+
+async def test_the_hottest_and_coolest_heater_targets_are_still_taken() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "printer.heat", "id": printer_id, "nozzle": 350, "bed": 0, "req_id": 4})
+        assert not [e for e in events if e.get("event") == "error"]
+        assert len([r for r in platform.http_requests if r["method"] == "POST"]) == 2
 
 
 async def test_preheat_presets_default_and_are_sanitised() -> None:
@@ -1848,6 +1965,100 @@ async def test_a_number_that_is_not_finite_is_refused_by_name(unbounded: float) 
             assert error["message"].startswith(f"{field} must be a finite number"), error
         assert not [r for r in platform.http_requests if r["method"] == "POST"], "a heater was sent a target that is not a number"
         assert before == (engine.monitors[monitor_id], camera.brightness, camera.crop, engine.settings["preheat"])
+
+
+class _SlowCameraPlatform(FakePlatform):
+    release_s = 0.0
+    open_s = 0.0
+
+    async def release_camera(self, camera_id: str, source: dict) -> None:
+        await asyncio.sleep(self.release_s)
+        await super().release_camera(camera_id, source)
+
+    async def open_camera(self, camera_id: str, source: dict):
+        await asyncio.sleep(self.open_s)
+        return await super().open_camera(camera_id, source)
+
+
+def _webcam(url: str, key: str = "webcam"):
+    async def cameras(http, config):
+        return [{"key": key, "name": "cam", "source": {"kind": "url", "url": url}}]
+
+    return cameras
+
+
+async def test_a_poll_of_the_old_service_answering_during_a_provider_change_is_not_kept(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    old_answer = asyncio.Event()
+
+    async def old_state(http, config):
+        await old_answer.wait()
+        return DeviceState(DeviceStatus.IDLE)
+
+    async def new_state(http, config):
+        raise RuntimeError("new service is unreachable")
+
+    async def no_cameras(http, config):
+        return []
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "fetch_state", old_state)
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", _webcam("http://old/stream"))
+    monkeypatch.setattr(INTEGRATIONS["klipper"], "fetch_state", new_state)
+    monkeypatch.setattr(INTEGRATIONS["klipper"], "cameras", no_cameras)
+    platform = _SlowCameraPlatform()
+    platform.release_s = 0.3
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.1)
+        assert engine.cameras.values(), "the old service's camera was not registered"
+        printer = engine.printers.get(printer_id)
+        poll = asyncio.create_task(engine.watchdog.refresh(printer))
+        await asyncio.sleep(0.05)
+        edit = asyncio.create_task(
+            engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"provider": "klipper", "config": {"base_url": "http://new"}}})
+        )
+        await asyncio.sleep(0.1)
+        old_answer.set()
+        await asyncio.gather(poll, edit)
+
+    assert printer.reported_status is None and printer.device_state is None, "the old service's answer stuck on the printer's new one"
+
+
+async def test_a_camera_listed_from_the_old_service_is_not_registered_after_a_provider_change(monkeypatch) -> None:
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", _webcam("http://old/stream"))
+    monkeypatch.setattr(INTEGRATIONS["klipper"], "cameras", _webcam("http://new/stream", "abc123"))
+    platform = _SlowCameraPlatform()
+    platform.open_s = 0.3
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.05)
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"provider": "klipper", "config": {"base_url": "http://new"}}})
+        await asyncio.sleep(1.0)
+        urls = [camera.source["url"] for camera in engine.cameras.values()]
+
+    assert urls == ["http://new/stream"], urls
+
+
+async def test_a_reconcile_queued_behind_another_does_not_reach_a_printer_removed_meanwhile(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def cameras(http, config):
+        calls.append("cameras")
+        return [{"key": "webcam", "name": "cam", "source": {"kind": "url", "url": "http://old/stream"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", cameras)
+    platform = _SlowCameraPlatform()
+    platform.open_s = 0.3
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.05)
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"name": "renamed"}})
+        await asyncio.sleep(0.05)
+        await engine.handle({"cmd": "printer.remove", "id": printer_id})
+        await asyncio.sleep(0.8)
+
+    assert calls == ["cameras"], "a printer that was removed had its service asked for cameras again"
+    assert not engine.cameras.values()
 
 
 async def test_provider_change_clears_stale_printer_state(monkeypatch) -> None:
@@ -2011,6 +2222,25 @@ async def test_discovery_hides_registered_devices() -> None:
         await engine.handle({"cmd": "camera.add", "name": "Cam", "source": {"kind": "device", "device_id": "/dev/video0"}})
         await engine.handle({"cmd": "discover", "req_id": 2})
         assert next(e for e in events if e.get("req_id") == 2 and e["event"] == "discovered")["sources"] == []
+
+
+async def test_discovery_does_not_offer_the_hubs_own_camera_streams(monkeypatch) -> None:
+    async def webcam(http, config):
+        return [{"key": "webcam", "name": "cam", "source": {"kind": "url", "url": "http://op/stream"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", webcam)
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        await _register_printer(engine)
+        await asyncio.sleep(0.1)
+        own = [camera.id for camera in engine.cameras.values()]
+        assert len(own) == 2 and any(camera_id.endswith("-webcam") for camera_id in own)
+        platform.devices = [{"kind": "path", "path": camera_id, "label": camera_id} for camera_id in own]
+        platform.devices.append({"kind": "path", "path": "someone-elses", "label": "someone-elses"})
+        await engine.handle({"cmd": "discover", "req_id": 2})
+        listed = next(e for e in events if e.get("req_id") == 2 and e["event"] == "discovered")["sources"]
+
+    assert [source["path"] for source in listed] == ["someone-elses"]
 
 
 async def test_discovery_hides_a_device_registered_under_the_name_it_shows() -> None:
@@ -2212,6 +2442,26 @@ async def test_history_buckets_and_alert_snapshots() -> None:
     assert stats["alerts"] == 1 and len(snaps) == 1, "the cooldown holds a sustained defect to one alert and one snapshot"
     assert snaps[0]["action"] == "none" and snaps[0]["score"] >= 0.6, "snapshot carries the alert's action and score"
     assert base64.b64decode(snapshot["jpeg"]) == b"\xff\xd8fake", "snapshot bytes did not round-trip over the protocol"
+
+
+def test_watch_time_is_the_time_readings_spanned_and_not_the_minutes_they_touched() -> None:
+    from printguard.engine.history import MonitorHistory
+
+    brief = MonitorHistory()
+    for second in range(50, 65):
+        brief.record(float(second), 0.1, 0.75)
+    assert brief.series([])["stats"]["watch_min"] == 0, "15 seconds of watching straddling a minute read as 2 minutes"
+
+    long = MonitorHistory()
+    for second in range(0, 301):
+        long.record(float(second), 0.1, 0.75)
+    assert long.series([])["stats"]["watch_min"] == 5
+
+    paused = MonitorHistory()
+    for second in (*range(0, 61), *range(3600, 3661)):
+        paused.record(float(second), 0.1, 0.75)
+    stats = paused.series([])["stats"]
+    assert stats["watch_min"] == 2 and isinstance(stats["watch_min"], int), "the hour the monitor stood down counted as watched"
 
 
 async def test_result_events_are_bounded_without_losing_history() -> None:
@@ -2516,6 +2766,40 @@ async def test_a_refused_print_waits_and_sends_the_rest_after_the_limit_resets(m
     assert sorted(upload["frame"] for upload in uploads) == sorted(frame["id"] for frame in review["frames"]), "no frame is uploaded twice"
 
 
+async def test_a_print_dismissed_before_its_upload_begins_sends_nothing_and_leaves_no_send_behind(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    uploads = _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine)
+        await asyncio.gather(
+            engine.handle({"cmd": "review.send", "id": review["id"]}),
+            engine.handle({"cmd": "review.dismiss", "id": review["id"]}),
+        )
+        await asyncio.sleep(0.2)
+        status = engine.state_event()["reviews"][0]["status"]
+
+    assert not uploads and status == "dismissed"
+    assert not engine._sends, "a send that stopped before it began was never cleared"
+    assert not _of(events, "error")
+
+
+async def test_a_print_whose_monitor_is_gone_is_dropped_with_a_message_and_not_left_sending(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    uploads = _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine)
+        await engine.handle({"cmd": "review.send", "id": review["id"]})
+        engine.monitors.clear()
+        await asyncio.sleep(0.3)
+        listed = engine.state_event()["reviews"]
+
+    assert not uploads and not listed, "frames of a monitor that no longer exists were kept or sent"
+    assert not engine._sends
+    assert any("monitor was removed" in e["message"] for e in _of(events, "error")), _of(events, "error")
+
+
 async def test_a_reset_time_already_past_on_the_hubs_clock_does_not_retry_every_tick(monkeypatch) -> None:
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.05)
     platform = FakePlatform(infer_s=0.02)
@@ -2533,7 +2817,8 @@ async def test_a_reset_time_already_past_on_the_hubs_clock_does_not_retry_every_
         queued = engine.state_event()["reviews"][0]
 
     assert len(attempts) == 1, f"a hub whose clock is ahead of the inbox's asked {len(attempts)} times in half a second"
-    assert queued["code"] == "global_daily" and queued["retry_at"] > time.time() + engine_module.FEEDBACK_RETRY_S - 60
+    assert queued["code"] == "global_daily"
+    assert time.time() + engine_module.FEEDBACK_RECHECK_S - 5 < queued["retry_at"] < time.time() + engine_module.FEEDBACK_RECHECK_S + 5, "a reset time already past was put off for hours"
 
 
 async def test_an_unreachable_inbox_keeps_the_frames_and_tries_again_later(monkeypatch) -> None:
@@ -3925,6 +4210,94 @@ async def test_a_printer_being_sent_a_file_is_not_sent_a_second(monkeypatch) -> 
         assert "already being sent a file" in next(e for e in _of(events, "error") if e.get("req_id") == 2)["message"]
 
 
+async def _cancelled_after(engine: Engine, message: dict, seconds: float) -> None:
+    task = asyncio.create_task(engine.handle(message, lambda event: None))
+    await asyncio.sleep(seconds)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_a_camera_removal_cancelled_while_its_source_is_released_still_finishes() -> None:
+    platform = FakePlatform()
+    release = platform.release_camera
+
+    async def slow_release(camera_id: str, source: dict) -> None:
+        await asyncio.sleep(0.2)
+        await release(camera_id, source)
+
+    platform.release_camera = slow_release
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        camera = engine.cameras.values()[0]
+        await _cancelled_after(engine, {"cmd": "camera.remove", "id": camera.id}, 0.05)
+        await asyncio.sleep(0.5)
+        assert not engine.cameras.values(), "the camera stayed registered"
+        assert [m["camera_id"] for m in engine.monitors.values()] == [""], "its monitor stayed bound to it"
+        assert platform.state["cameras"] == [], "state.json still lists it"
+
+
+async def test_a_printer_removal_cancelled_while_its_connection_closes_still_finishes(monkeypatch) -> None:
+    closed: list[dict | None] = []
+
+    async def slow_close(config=None):
+        await asyncio.sleep(0.2)
+        closed.append(config)
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "close", slow_close)
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await _cancelled_after(engine, {"cmd": "printer.remove", "id": printer_id}, 0.05)
+        await asyncio.sleep(0.5)
+        assert not engine.printers.values(), "the printer stayed registered"
+        assert engine.monitors[monitor_id]["printer_id"] == "", "its monitor kept the printer"
+        assert platform.state["printers"] == [], "state.json still lists it"
+        assert closed, "its connection was never closed"
+
+
+async def test_a_monitor_removal_cancelled_while_its_frames_are_deleted_still_finishes(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    remove = platform.files.remove
+
+    async def slow_remove(key: str) -> None:
+        await asyncio.sleep(0.1)
+        await remove(key)
+
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await _finished_review(engine, 0.6)
+        assert engine.state_event()["reviews"]
+        monkeypatch.setattr(platform.files, "remove", slow_remove)
+        await _cancelled_after(engine, {"cmd": "monitor.remove", "id": monitor_id}, 0.05)
+        await asyncio.sleep(1.0)
+        assert not engine.monitors, "the monitor stayed registered"
+        assert not engine.state_event()["reviews"], "the prints of a monitor that is gone stayed listed"
+        assert platform.state["monitors"] == []
+
+
+async def test_a_print_start_cancelled_while_the_file_is_sent_says_so(monkeypatch) -> None:
+    from test_gcode import PRUSA
+
+    platform = FakePlatform()
+    platform.device_status = "Operational"
+
+    async def slow_upload(http, config, filename, data) -> None:
+        await asyncio.sleep(0.5)
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "print_file", slow_upload)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await platform.files.store("abcd1234.gcode", _chunks(PRUSA))
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "benchy.gcode"})
+        await _cancelled_after(engine, {"cmd": "print.start", "id": "abcd1234", "printer_id": printer_id}, 0.1)
+        errors = [e["message"] for e in _of(events, "error")]
+
+    assert any("benchy" in message and "interrupted" in message for message in errors), errors
+    assert not engine._starting
+
+
 async def test_print_add_rewrites_temperatures_and_drops_a_file_it_cannot() -> None:
     from test_gcode import PRUSA_HEATED, bgcode
 
@@ -4138,6 +4511,100 @@ async def test_a_poll_begun_before_a_pause_does_not_undo_the_read_made_after_it(
     assert [alert["action"] for alert in _of(events, "alert")] == ["pause"], "the paused print was paused again"
 
 
+async def test_a_camera_that_is_slow_to_open_is_given_the_time_it_takes_by_a_plain_request(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "REQUEST_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(engine_module, "CAMERA_OPEN_WAIT_S", 0.6)
+    platform = FakePlatform()
+    open_camera = platform.open_camera
+
+    async def slow_open(camera_id: str, source: dict):
+        await asyncio.sleep(0.4)
+        return await open_camera(camera_id, source)
+
+    monkeypatch.setattr(platform, "open_camera", slow_open)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.request({"cmd": "camera.add", "name": "slow", "source": {"kind": "fake"}})
+        assert len(engine.cameras.values()) == 1
+
+
+async def test_refreshing_a_printers_cameras_is_given_the_time_each_takes_to_open(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "REQUEST_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(engine_module, "CAMERA_OPEN_WAIT_S", 0.3)
+    platform = FakePlatform()
+    open_camera = platform.open_camera
+
+    async def slow_open(camera_id: str, source: dict):
+        await asyncio.sleep(0.25)
+        return await open_camera(camera_id, source)
+
+    async def two_cameras(http, config):
+        return [{"key": key, "name": key, "source": {"kind": "url", "url": f"http://op/{key}"}} for key in ("a", "b")]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", two_cameras)
+    monkeypatch.setattr(platform, "open_camera", slow_open)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await _register_printer(engine)
+        await engine.request({"cmd": "printer.cameras.refresh"})
+        assert len(engine.cameras.values()) == 2
+
+
+async def test_a_runtime_switch_is_given_the_time_the_model_takes_to_load(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "REQUEST_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(engine_module, "RUNTIME_LOAD_ALLOWANCE_S", 0.6)
+    platform = FakePlatform()
+    configure = platform.configure
+
+    async def slow_configure(settings: dict) -> None:
+        await asyncio.sleep(0.4)
+        await configure(settings)
+
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        monkeypatch.setattr(platform, "configure", slow_configure)
+        await engine.request({"cmd": "settings.update", "patch": {"inference_runtime": "onnx"}})
+        assert engine.settings["inference_runtime"] == "onnx"
+
+
+async def test_a_poll_begun_before_a_manual_pause_does_not_undo_it(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    platform = FakePlatform(infer_s=0.02)
+    answer = platform.http
+    hold = False
+    held = asyncio.Event()
+    release = asyncio.Event()
+
+    async def http(method: str, url: str, **request: Any) -> tuple[int, Any]:
+        nonlocal hold
+        if method == "POST" and "/api/job" in url:
+            platform.device_status = "Paused"
+        answered = await answer(method, url, **request)
+        if hold and method == "GET" and url.endswith("/api/job"):
+            hold = False
+            held.set()
+            await release.wait()
+        return answered
+
+    monkeypatch.setattr(platform, "http", http)
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
+        printer_id = await _register_printer(engine)
+        patch = {"printer_id": printer_id, "on_defect": "pause", "consecutive": 1, "cooldown_s": 0}
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": patch})
+        await engine.watchdog.poll_devices()
+        printer = engine.printers.get(printer_id)
+        hold = True
+        poll = asyncio.create_task(engine.watchdog.poll_devices())
+        await asyncio.wait_for(held.wait(), 1.0)
+        await engine.handle({"cmd": "printer.action", "id": printer_id, "action": "pause"})
+        platform.failing = True
+        release.set()
+        await poll
+        after_the_old_answer = printer.reported_status
+        await asyncio.sleep(0.3)
+
+    assert after_the_old_answer == "paused", "an answer from before a manual pause replaced the read after it"
+    assert not _of(events, "alert"), "a print paused by hand was alerted on and sent a second pause"
+
+
 async def test_a_monitor_switched_off_while_its_printer_answers_shows_no_alert() -> None:
     platform = FakePlatform(infer_s=0.02)
     platform.action_delay_s = 0.3
@@ -4329,6 +4796,67 @@ async def test_one_stream_written_two_ways_is_one_camera() -> None:
         assert len(engine.cameras.values()) == 2, "a path is told apart by its case"
 
 
+@pytest.mark.parametrize(
+    ("first", "again"),
+    [
+        ("rtsp://cam.local/live", "rtsp://cam.local:554/live"),
+        ("rtsp://cam.local:554/live", "rtsp://cam.local/live"),
+        ("http://cam.local/video", "http://cam.local:80/video"),
+        ("https://cam.local/video", "https://cam.local:443/video"),
+        ("http://cam.local:8090/video", "http://cam.local:08090/video"),
+        ("http://127.0.0.1:8090/video", "http://127.1:8090/video"),
+        ("http://127.0.0.1:8090/video", "http://2130706433:8090/video"),
+        ("rtsp://cam.local/live", "rtsp://cam.local/live/"),
+        ("rtsp://cam.local/live", "rtsp://cam.local/live?"),
+        ("rtsp://cam.local/live", "rtsp://cam.local./live"),
+        ("rtsp://cam.local/live", "rtsp://cam.local/%6Cive"),
+        ("rtsp://cam.local/live", "rtsp://user:pw@cam.local/live"),
+        ("rtsp://a:b@cam.local/live", "rtsp://c:d@cam.local/live"),
+        ("http://cam.local/s?a=1&b=2", "http://cam.local/s?b=2&a=1"),
+        ("http://cam.local/s?a=1&b=2", "http://cam.local/s?a=1&&b=2"),
+        ("http://[::1]:8090/video", "http://[0:0:0:0:0:0:0:1]:8090/video"),
+        ("http://cam.local", "http://cam.local/"),
+    ],
+)
+async def test_every_way_of_writing_one_stream_is_one_camera(first: str, again: str) -> None:
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
+        await engine.request({"cmd": "camera.add", "source": {"kind": "url", "url": first}})
+        with pytest.raises(RuntimeError, match="already registered"):
+            await engine.request({"cmd": "camera.add", "source": {"kind": "url", "url": again}})
+
+
+@pytest.mark.parametrize(
+    ("first", "other"),
+    [
+        ("rtsp://cam.local/live", "rtsp://cam.local/Live"),
+        ("rtsp://cam.local/live", "rtsps://cam.local/live"),
+        ("rtsp://cam.local/live", "rtsp://cam.local:555/live"),
+        ("http://cam.local/video", "https://cam.local/video"),
+        ("http://cam.local/video", "http://cam.local:443/video"),
+        ("http://127.0.0.1/video", "http://127.0.0.2/video"),
+        ("http://cam.local/s?a=1", "http://cam.local/s?a=2"),
+        ("http://cam.local/a%2Fb", "http://cam.local/a/b"),
+    ],
+)
+async def test_streams_that_differ_are_told_apart(first: str, other: str) -> None:
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
+        await engine.request({"cmd": "camera.add", "source": {"kind": "url", "url": first}})
+        await engine.request({"cmd": "camera.add", "source": {"kind": "url", "url": other}})
+        assert len(engine.cameras.values()) == 2
+
+
+async def test_a_device_registered_by_hand_is_not_registered_again_when_the_deployment_declares_it() -> None:
+    platform = FakePlatform()
+    platform.devices = [{"kind": "device", "device_id": "/dev/video0", "label": "USB cam", "declared": False}]
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await engine.request({"cmd": "camera.add", "name": "bench cam", "source": {"kind": "device", "device_id": "/dev/video0"}})
+    platform.devices = [{"kind": "device", "device_id": "/dev/video0", "label": "USB cam", "declared": True}]
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        cameras = engine.cameras.values()
+        assert [(camera.name, camera.declared) for camera in cameras] == [("bench cam", False)], "one device became two cameras"
+        await engine.request({"cmd": "camera.remove", "id": cameras[0].id})
+
+
 async def test_two_adds_of_one_stream_at_once_register_one_camera(monkeypatch) -> None:
     platform = FakePlatform()
     opening = platform.open_camera
@@ -4467,7 +4995,59 @@ async def test_a_wrong_shaped_record_is_dropped_at_start_and_the_rest_load(caplo
         assert [len(state[kind]) for kind in ("tokens", "printers", "monitors", "reviews", "prints", "cameras")] == [1, 1, 1, 0, 0, 1]
     finally:
         await restarted.stop()
-    assert caplog.text.count("dropping an unreadable record") == 8
+    assert caplog.text.count("could not be read and was dropped") == 8
+    assert len(restarted.startup_warnings) == 8
+
+
+async def test_a_monitor_stored_with_no_printer_is_kept_with_its_printer_cleared() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        pass
+    saved = platform.state
+    platform.state = {**saved, "monitors": [{**saved["monitors"][0], "printer_id": None}]}
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        assert [monitor["printer_id"] for monitor in restarted.monitors.values()] == [""]
+        assert restarted.startup_warnings == []
+    finally:
+        await restarted.stop()
+
+
+async def test_what_start_dropped_or_worked_around_is_kept_for_a_dashboard_that_connects_later() -> None:
+    platform = FakePlatform()
+    platform.notices = [Notice("Intel GPU cannot run the model, so detection is not using it: out of memory")]
+    manifest = {
+        "id": "local-thing",
+        "name": "Local thing",
+        "version": "1.0.0",
+        "permissions": ["net"],
+        "reasons": {"net": "reads my printer"},
+        "urls": ["http://127.1/*"],
+    }
+    platform.state = {
+        "monitors": [{"id": "m9", "name": "Bench", "on_defect": "explode"}],
+        "plugins": [{"id": "local-thing", "manifest": manifest, "sources": {}, "digests": {}, "source": {"kind": "file"}, "granted": [], "installed": 1.0}],
+        "settings": {"glass": {"opacity": 0.4, "tone": "x"}},
+    }
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        await asyncio.sleep(0.05)
+        heard: list[dict] = []
+        engine.add_sink(heard.append)
+        platform.notices = [Notice("live view unavailable: refused")]
+        await asyncio.sleep(1.2)
+        warnings = engine.state_event()["startup_warnings"]
+    finally:
+        await engine.stop()
+
+    assert "Intel GPU cannot run the model, so detection is not using it: out of memory" in warnings
+    assert any("saved monitor (Bench)" in warning and "on_defect" in warning for warning in warnings), warnings
+    assert any("saved plugin (local-thing)" in warning and "net:local" in warning for warning in warnings), warnings
+    assert any("glass" in warning for warning in warnings), warnings
+    assert len(warnings) == 4, "something raised after start was kept with what start raised"
+    assert heard[0]["startup_warnings"] == warnings, "a dashboard connecting later is handed them in its first snapshot"
 
 
 async def test_a_wrong_shaped_layout_is_reset_without_the_theme() -> None:
