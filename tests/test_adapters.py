@@ -1772,3 +1772,15 @@ async def test_a_bambu_upload_is_not_cut_off_by_a_deadline(monkeypatch) -> None:
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_product", lambda config: "Bambu Lab A1")
     await INTEGRATIONS["bambu"].print_file(None, BAMBU_CONFIG, "big.3mf", sliced_3mf(plate=1))
     assert uploaded == ["big.3mf"]
+
+
+@pytest.mark.parametrize("password", ["pa/ss-w0rd", "pa?ss-w0rd", "pa#ss-w0rd", "pa/s?s#w0rd"])
+def test_a_password_holding_a_url_delimiter_is_still_scrubbed(password: str) -> None:
+    from printguard.engine import reports
+
+    url = f"http://olly:{password}@octopi.local:5000/api"
+    scrubbed = reports.scrub_url(url)
+    assert password not in scrubbed and "olly" not in scrubbed, "everything before the last @ is credentials"
+    assert scrubbed.startswith("http://") and "octopi.local:5000" in scrubbed
+    assert {"olly", password} <= reports.url_secrets(url)
+    assert reports.scrub_urls({"base_url": url})["base_url"] == scrubbed
