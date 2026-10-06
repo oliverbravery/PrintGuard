@@ -112,9 +112,9 @@ class PrinterFields(BaseModel):
 
 
 class _FiniteNumbers(BaseModel):
-    """Base for the request bodies that carry a number, refusing NaN and Infinity."""
+    """Base for the request bodies that carry a number, refusing NaN, Infinity and text or a boolean in place of one."""
 
-    model_config = ConfigDict(allow_inf_nan=False)
+    model_config = ConfigDict(allow_inf_nan=False, strict=True)
 
 
 class MonitorFields(_FiniteNumbers):
@@ -224,6 +224,7 @@ class CameraOut(_ReadModel):
     in_use: bool | None = None
     online: bool | None = None
     standby: bool | None = None
+    reason: str | None = None
     last_result: LastResult | None = None
     brightness: float | None = None
     contrast: float | None = None

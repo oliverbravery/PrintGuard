@@ -455,6 +455,31 @@ async def test_heat_route_needs_control_and_returns_the_printer() -> None:
         assert (await client.post("/printers/nope/heat", json={"bed": 60}, headers=control)).status_code == 404
 
 
+async def test_a_number_sent_as_a_boolean_or_text_is_refused_not_converted() -> None:
+    async with api(("manage",)) as (client, engine, platform, monitor_id, printer_id, camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        refused = [
+            (client.post, f"/printers/{printer_id}/heat", {"nozzle": True}),
+            (client.post, f"/printers/{printer_id}/heat", {"bed": "60"}),
+            (client.patch, f"/monitors/{monitor_id}", {"threshold": True}),
+            (client.patch, f"/monitors/{monitor_id}", {"consecutive": "3"}),
+            (client.patch, f"/cameras/{camera_id}", {"brightness": "1.5"}),
+        ]
+        for send, path, body in refused:
+            assert (await send(path, json=body, headers=manage)).status_code == 422, (path, body)
+        assert not [r for r in platform.http_requests if r["method"] == "POST"], "a heater was sent a target that is not a number"
+        assert engine.monitors[monitor_id]["threshold"] == 0.75
+        assert (await client.post(f"/printers/{printer_id}/heat", json={"nozzle": 200}, headers=manage)).status_code == 200
+
+
+async def test_a_camera_cannot_be_added_on_the_stream_the_hub_publishes_for_another() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, _printer_id, camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        refused = await client.post("/cameras", json={"source": {"kind": "path", "path": camera_id}}, headers=manage)
+        assert refused.status_code >= 400 and "already registered" in refused.text
+        assert len(engine.cameras.items) == 1
+
+
 @pytest.mark.parametrize("literal", [b"NaN", b"Infinity", b"-Infinity"])
 async def test_a_number_that_is_not_finite_is_refused_at_the_boundary(literal: bytes) -> None:
     """Python's json writes these literals for a float that is not finite, and reads them back."""

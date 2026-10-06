@@ -79,6 +79,8 @@ class Camera:
         inferring: Whether an inference on this camera is in flight.
         in_use: Whether an enabled monitor is bound to this camera.
         online: Whether the frame source is currently delivering frames.
+        reason: Why the last attempt to open the source failed, or None while
+            it has not or the camera is open. Not persisted.
     """
 
     id: str
@@ -101,6 +103,7 @@ class Camera:
     next_due: float = 0.0
     last_done: float = 0.0
     last_result: dict[str, Any] | None = None
+    reason: str | None = None
     frame_source: FrameSource | None = field(default=None, repr=False)
 
     @property
@@ -143,6 +146,7 @@ class Camera:
             "in_use": self.in_use,
             "online": self.online,
             "standby": self.standby,
+            "reason": self.reason,
             "last_result": self.last_result,
             "brightness": round(self.brightness, 2),
             "contrast": round(self.contrast, 2),

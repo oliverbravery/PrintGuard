@@ -7,6 +7,7 @@ import ipaddress
 import re
 import socket
 import string
+import sys
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -16,7 +17,7 @@ from .urls import DEFAULT_PORTS
 _WEBRTC_SCHEMES = ("webrtc", "whep", "wheps", "whip", "whips")
 _WHEP_SCHEMES = ("whep", "wheps")
 _WEBRTC_PATH_SEGMENTS = frozenset({"webrtc", "whep", "whip"})
-_DEFAULT_PORTS = {**DEFAULT_PORTS, "rtmp": 1935, "rtmps": 443}
+_DEFAULT_PORTS = {**DEFAULT_PORTS, "rtmp": 1935, "rtmps": 443, "whep": 80, "wheps": 443}
 _UNRESERVED = frozenset(string.ascii_letters + string.digits + "-._~")
 _IPV4_SHORTHAND = re.compile(r"(0x[0-9a-f]+|\d+)(\.(0x[0-9a-f]+|\d+)){0,3}")
 
@@ -98,21 +99,27 @@ def same_stream(url: str) -> str:
         trailing slash, dot or bare ``?``, with its host in lower case and its
         query parameters in order, and with the escapes that spell a letter or
         digit decoded. A path keeps its case, since a server tells them apart.
+        A WHEP endpoint is written with the ``whep`` or ``wheps`` scheme
+        MediaMTX pulls it with, however it was typed. An address that cannot
+        be read as a URL stands for itself, tidied.
     """
     tidy = tidy_stream_url(url).partition("#")[0]
-    parts = urlsplit(tidy)
-    if not parts.netloc:
-        return tidy
     try:
+        parts = urlsplit(tidy)
         port = parts.port
     except ValueError:
         return tidy
+    if not parts.netloc:
+        return tidy
+    scheme = parts.scheme
+    if whep_endpoint(tidy):
+        scheme = "wheps" if scheme in ("https", "wheps") else "whep"
     host = _plain_host(parts.hostname or "")
     if ":" in host:
         host = f"[{host}]"
-    shown_port = f":{port}" if port is not None and port != _DEFAULT_PORTS.get(parts.scheme) else ""
+    shown_port = f":{port}" if port is not None and port != _DEFAULT_PORTS.get(scheme) else ""
     query = "&".join(sorted(pair for pair in parts.query.split("&") if pair))
-    return _plain_percent_escapes(f"{parts.scheme}://{host}{shown_port}{parts.path.rstrip('/')}{'?' + query if query else ''}")
+    return _plain_percent_escapes(f"{scheme}://{host}{shown_port}{parts.path.rstrip('/')}{'?' + query if query else ''}")
 
 
 def declared_camera_id(device_id: str) -> str:
@@ -140,6 +147,7 @@ CAMERA_DEFAULTS: dict[str, Any] = {
 }
 
 _CLAMP = {"brightness": (0.25, 2.0), "contrast": (0.25, 2.0), "sharpness": (0.0, 2.0), "detect_fps": (0.1, 60.0)}
+_CROP_MIN = 0.01
 _ROTATIONS = (0, 90, 180, 270)
 
 
@@ -148,17 +156,17 @@ def _sanitise_crop(raw: Any) -> dict[str, float] | None:
         return None
     if not isinstance(raw, dict):
         raise ValueError("a crop holds x, y, w and h, each a share of the frame")
-    x = clamp("crop x", raw.get("x", 0), 0.0, 1.0)
-    y = clamp("crop y", raw.get("y", 0), 0.0, 1.0)
-    w = clamp("crop w", raw.get("w", 1), 0.01, 1.0 - x)
-    h = clamp("crop h", raw.get("h", 1), 0.01, 1.0 - y)
+    x = clamp("crop x", raw.get("x", 0), 0.0, 1.0 - _CROP_MIN)
+    y = clamp("crop y", raw.get("y", 0), 0.0, 1.0 - _CROP_MIN)
+    w = clamp("crop w", raw.get("w", 1), _CROP_MIN, 1.0 - x)
+    h = clamp("crop h", raw.get("h", 1), _CROP_MIN, 1.0 - y)
     if x == 0 and y == 0 and w == 1 and h == 1:
         return None
     return {"x": x, "y": y, "w": w, "h": h}
 
 
 def _sanitise_rotation(raw: Any) -> int:
-    if raw not in _ROTATIONS:
+    if isinstance(raw, bool) or raw not in _ROTATIONS:
         raise ValueError("rotation is 0, 90, 180 or 270")
     return int(raw)
 
@@ -192,3 +200,35 @@ def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] 
     record["crop"] = _sanitise_crop(record.get("crop"))
     record["rotation"] = _sanitise_rotation(record.get("rotation"))
     return record
+
+
+def stored_camera(record: dict[str, Any]) -> dict[str, Any]:
+    """Reads a camera back from the state store, with its tuning as a command would have left it.
+
+    Args:
+        record: One camera as ``Camera.persisted`` wrote it.
+
+    Returns:
+        The fields a ``Camera`` is built from.
+
+    Raises:
+        KeyError: If the record has no id, name, source or frame rate.
+        ValueError: If a value is not of the kind its setting takes.
+    """
+    source = record["source"]
+    if not isinstance(source, dict) or not isinstance(source.get("kind"), str) or not all(isinstance(source.get(key, ""), str) for key in ("device_id", "path", "url")):
+        raise ValueError("its source is not a device, a stream or a published path")
+    if not isinstance(record["name"], str):
+        raise ValueError("its name is text")
+    printer_id, declared = record.get("printer_id"), record.get("declared", False)
+    if not (printer_id is None or isinstance(printer_id, str)) or not isinstance(declared, bool):
+        raise ValueError("its printer is an id and declared is true or false")
+    tuning = sanitise_camera(record["id"], {key: record[key] for key in CAMERA_DEFAULTS if key in record})
+    return {
+        **tuning,
+        "name": record["name"],
+        "source": source,
+        "printer_id": printer_id,
+        "declared": declared,
+        "max_fps": clamp("max_fps", record["max_fps"], 0.0, sys.float_info.max),
+    }

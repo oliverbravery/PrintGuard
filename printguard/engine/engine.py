@@ -12,6 +12,7 @@ import base64
 import contextvars
 import functools
 import logging
+import sys
 import time
 import traceback
 import uuid
@@ -20,15 +21,16 @@ from typing import Any, Awaitable, Callable, Coroutine
 
 import numpy as np
 
-from . import appearance, credentials, feedback, gcode, logs, oauth, plugins, reports, updates, urls, vision
-from .cameras import CAMERA_DEFAULTS, declared_camera_id, same_stream, sanitise_camera, tidy_stream_url
+from . import credentials, feedback, gcode, logs, oauth, plugins, reports, updates, urls, vision
+from .bounds import clamp
+from .cameras import declared_camera_id, same_stream, sanitise_camera, stored_camera, tidy_stream_url
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
 from .monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor, stored_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import Frame, Platform, as_chunks
-from .printers import PREHEAT_DEFAULTS, sanitise_presets, sanitise_printer, sanitise_targets
-from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers
+from .printers import PREHEAT_DEFAULTS, sanitise_printer, sanitise_targets
+from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers, stored_print
 from .registry import (
     Camera,
     CameraRegistry,
@@ -43,9 +45,10 @@ from .registry import (
 )
 from .reviews import Review, ReviewLibrary, frame_key
 from .scheduler import Scheduler
+from .settings import CHECKS, require_broker
 from .sockets import SocketBroker
 from .tokens import new_token
-from .watchdog import GRACE_DEFAULT_S, Watchdog, clamp_grace
+from .watchdog import GRACE_DEFAULT_S, Watchdog
 
 logger = logging.getLogger(__name__)
 
@@ -230,20 +233,23 @@ class Engine:
 
         A stored plugin manifest goes back through ``sanitise_manifest``, since
         one written by an earlier version is missing whatever has been added
-        since. A record of any kind that no longer reads is dropped and logged,
-        so one of them cannot keep the hub from starting. A stored theme, set
-        of custom themes, glass or layout no dashboard could render is put back
-        to its default on its own, since nobody can reach the settings to fix
-        it from a blank page.
+        since. A record of any kind that no longer reads is dropped and warned
+        of, so one of them cannot keep the hub from starting. A stored setting
+        no command could have written is put back to its default on its own,
+        since a theme no dashboard could render leaves nobody a page to fix it
+        from, and any other would refuse every edit after it.
         """
         persisted = self.platform.load_state() or {}
         self.settings = {**SETTINGS_DEFAULTS, **{k: v for k, v in persisted.get("settings", {}).items() if k in SETTINGS_DEFAULTS}}
-        for key, check in appearance.CHECKS.items():
+        unusable = []
+        for key, check in CHECKS.items():
             try:
                 self.settings[key] = check(self.settings[key])
             except (TypeError, ValueError) as exc:
-                self._warn_at_start(f"The saved {key} setting could not be used, so it was reset: {logs.describe(exc)}")
                 self.settings[key] = SETTINGS_DEFAULTS[key]
+                unusable.append(f"The saved {key} setting could not be used, so it was reset: {logs.describe(exc)}")
+        for warning in unusable:
+            self._warn_at_start(warning)
         await self.platform.configure(self.settings)
         for notice in self.platform.take_notices():
             self._warn_at_start(notice.message)
@@ -253,16 +259,18 @@ class Engine:
             "tokens": lambda record: self.tokens.add(Token(**record)),
             "printers": self._restore_printer,
             "monitors": lambda record: self.monitors.update({record["id"]: stored_monitor(record)}),
-            "reviews": lambda record: self.reviews.restore([record]),
-            "prints": lambda record: self.prints.add(PrintFile(**record)),
+            "reviews": self._restore_review,
+            "prints": lambda record: self.prints.add(PrintFile(**stored_print(record))),
             "plugins": lambda record: self.plugins.add(Plugin(**{**record, "manifest": plugins.sanitise_manifest(record["manifest"])})),
             "cameras": self._restore_camera,
         }
         for kind, restore in restorers.items():
             for record in persisted.get(kind, []):
                 try:
+                    if not isinstance(record, dict) or not isinstance(record.get("id"), str):
+                        raise ValueError("it has no id")
                     restore(record)
-                except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                except (AttributeError, KeyError, OverflowError, TypeError, ValueError) as exc:
                     label = record.get("name") or record.get("id") if isinstance(record, dict) else None
                     self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}")
         await self.reconcile_declared_cameras()
@@ -301,26 +309,27 @@ class Engine:
 
     def _restore_printer(self, record: dict[str, Any]) -> None:
         printer = sanitise_printer(record["id"], record)
-        self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=printer["config"], reported_status=record.get("reported_status")))
+        reported_status = record.get("reported_status")
+        if not (reported_status is None or isinstance(reported_status, str)):
+            raise ValueError("its last status is text")
+        self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=printer["config"], reported_status=reported_status))
 
     def _restore_camera(self, record: dict[str, Any]) -> None:
-        settings = sanitise_camera(record["id"], {key: record[key] for key in CAMERA_DEFAULTS if key in record})
-        camera = Camera(
-            id=record["id"],
-            name=record["name"],
-            source=record["source"],
-            printer_id=record.get("printer_id"),
-            declared=record.get("declared", False),
-            max_fps=record["max_fps"],
-            detect_fps=settings["detect_fps"],
-            brightness=settings["brightness"],
-            contrast=settings["contrast"],
-            sharpness=settings["sharpness"],
-            crop=settings["crop"],
-            rotation=settings["rotation"],
-        )
+        camera = Camera(**stored_camera(record))
         self.cameras.add(camera)
         self._schedule_attach(camera)
+
+    def _restore_review(self, record: dict[str, Any]) -> None:
+        frames, submission = record.get("frames", []), record.get("submission")
+        if not isinstance(frames, list) or not all(isinstance(frame, dict) and {"id", "ts", "score", "kind", "size"} <= frame.keys() for frame in frames):
+            raise ValueError("its kept frames are not a list of frames")
+        if not (submission is None or isinstance(submission, dict) and isinstance(submission.get("labels"), dict) and isinstance(submission.get("sent"), list)):
+            raise ValueError("what was chosen to send is not a set of labels")
+        if record.get("status") not in ("running", "ready", "dismissed", "queued", "sent") or (record["status"] == "queued" and submission is None):
+            raise ValueError("it has a status it cannot have, or is queued with nothing chosen to send")
+        clamp("started", record.get("started"), 0.0, sys.float_info.max)
+        clamp("spacing_s", record.get("spacing_s"), 0.0, sys.float_info.max)
+        self.reviews.restore([record])
 
     async def stop(self) -> None:
         """Cancels background loops and inferences in flight, then closes every frame source.
@@ -648,13 +657,16 @@ class Engine:
         A failure logs at debug only: the ticker retries every few seconds,
         so per-attempt warnings would flood the tail, and the watchdog
         already raises an edge-triggered warning when a watched camera's
-        outage sustains.
+        outage sustains. The camera keeps the reason for as long as it stays
+        closed, so its entry can say why it is offline.
         """
         try:
             source = await self.platform.open_camera(camera.id, camera.source)
         except Exception as exc:
             logger.debug("camera '%s' (%s) failed to attach: %s", camera.name, camera.id, exc)
+            camera.reason = self._scrubbed(logs.describe(exc))
             return
+        camera.reason = None
         if self.cameras.get(camera.id) is not camera:
             source.close()
             await self.platform.release_camera(camera.id, camera.source)
@@ -977,18 +989,21 @@ class Engine:
         read the first camera's stream as a second camera.
         """
         sources = await self.platform.discover_cameras()
-        registered = self._registered_addresses()
-        fresh = [
-            s
-            for s in sources
-            if _address(s) not in registered
-            and s.get("label") not in registered
-            and not (s["kind"] == "path" and s["path"] in self.cameras.items)
-        ]
+        fresh = [s for s in sources if not self._stream_taken(s) and s.get("label") not in self._registered_addresses()]
         self.emit({"event": "discovered", "sources": fresh, "req_id": message.get("req_id")})
 
     def _registered_addresses(self) -> set[Any]:
         return {_address(camera.source) for camera in self.cameras.values()}
+
+    def _stream_taken(self, source: dict[str, Any]) -> bool:
+        """Whether a camera is already registered, or being opened, on a source.
+
+        Every way a camera arrives asks this first, so one stream is never two
+        cameras however it was spelt or whichever command got there first.
+        """
+        publishes_a_camera = source.get("kind") == "path" and source.get("path") in self.cameras.items
+        address = _address(source)
+        return publishes_a_camera or bool(address) and address in self._registered_addresses() | self._adding
 
     async def _cmd_camera_add(self, message: dict[str, Any]) -> None:
         """Registers a camera once it opens.
@@ -1002,7 +1017,7 @@ class Engine:
             source["url"] = tidy_stream_url(str(source["url"]))
         reports.require_splittable(source.values())
         address = _address(source)
-        if address and address in self._registered_addresses() | self._adding:
+        if self._stream_taken(source):
             raise ValueError("that camera is already registered")
         camera_id = uuid.uuid4().hex[:8]
         camera = Camera(
@@ -1067,7 +1082,23 @@ class Engine:
         camera = self.cameras.remove(camera_id)
         await self._cancel_attach(camera_id)
         if camera:
-            await self.platform.release_camera(camera.id, camera.source)
+            await self._tidy_up(f"release the camera '{camera.name}'", self.platform.release_camera(camera.id, camera.source))
+
+    async def _tidy_up(self, what: str, work: Awaitable[Any]) -> None:
+        """Runs the clean-up that follows a record being removed, warning when it fails.
+
+        The record is already gone from the registry and the saved state is
+        written when the command ends, so a failure here must not end the
+        command and leave the two disagreeing.
+
+        Args:
+            what: The clean-up, as the warning names it.
+            work: The awaitable that does it.
+        """
+        try:
+            await work
+        except Exception as exc:
+            self.emit({"event": "warning", "message": f"Could not {what}: {logs.describe(exc)}"})
 
     async def _cancel_attach(self, camera_id: str) -> None:
         task = self._attach_tasks.pop(camera_id, None)
@@ -1175,18 +1206,24 @@ class Engine:
                 camera = self.cameras.get(camera_id)
                 if camera:
                     if camera.source != source:
-                        await self._move_camera(camera, source)
-                        changed = True
+                        if self._stream_taken(source):
+                            self.emit({"event": "warning", "message": f"Could not move the camera '{camera.name}' of printer '{printer.name}': that stream is already registered"})
+                        else:
+                            await self._move_camera(camera, source)
+                            changed = True
                     continue
-                if _address(source) and _address(source) in self._registered_addresses():
+                if self._stream_taken(source):
                     logger.info("printer '%s' camera '%s' is already registered", printer.name, descriptor["name"])
                     continue
                 camera = Camera(id=camera_id, name=descriptor["name"], source=source, printer_id=printer.id, max_fps=15.0)
+                self._adding.add(_address(source))
                 try:
                     source = await self.platform.open_camera(camera_id, camera.source)
                 except Exception as exc:
                     self.emit({"event": "warning", "message": f"Could not open the camera '{descriptor['name']}' of printer '{printer.name}': {logs.describe(exc)}"})
                     continue
+                finally:
+                    self._adding.discard(_address(camera.source))
                 if not unchanged():
                     source.close()
                     await self.platform.release_camera(camera_id, camera.source)
@@ -1250,7 +1287,7 @@ class Engine:
         if was != (existing.provider, existing.config):
             existing.device_state = None
             existing.reported_status = None
-            await INTEGRATIONS[was[0]].close(was[1])
+            await self._tidy_up(f"close the old connection to printer '{existing.name}'", INTEGRATIONS[was[0]].close(was[1]))
         if was[0] != existing.provider:
             for camera in [c for c in self.cameras.values() if c.printer_id == existing.id]:
                 await self._drop_camera(camera.id)
@@ -1260,7 +1297,7 @@ class Engine:
         printer = self.printers.remove(message["id"])
         if not printer:
             raise LookupError(f"no printer {message['id']}")
-        await INTEGRATIONS[printer.provider].close(printer.config)
+        await self._tidy_up(f"close the connection to printer '{printer.name}'", INTEGRATIONS[printer.provider].close(printer.config))
         self._reconciles.pop(message["id"], None)
         for camera in [c for c in self.cameras.values() if c.printer_id == message["id"]]:
             await self._drop_camera(camera.id)
@@ -1389,8 +1426,8 @@ class Engine:
         if not record:
             raise LookupError(f"no print {message['id']}")
         files = self.platform.files
-        await files.remove(record.file_key)
-        await files.remove(record.thumbnail_key)
+        await self._tidy_up(f"delete the stored file of '{record.name}'", files.remove(record.file_key))
+        await self._tidy_up(f"delete the preview of '{record.name}'", files.remove(record.thumbnail_key))
 
     async def _cmd_print_start(self, message: dict[str, Any]) -> None:
         """Sends a file to a printer and starts it, once every check passes.
@@ -1481,7 +1518,7 @@ class Engine:
             raise LookupError(f"no monitor {message['id']}")
         logger.info("monitor %s removed", message["id"])
         self.history.pop(message["id"], None)
-        await self.reviews.forget(message["id"])
+        await self._tidy_up("delete the kept frames of a removed monitor", self.reviews.forget(message["id"]))
         self._results.pop(message["id"], None)
         self._result_emitted_at.pop(message["id"], None)
 
@@ -1583,23 +1620,12 @@ class Engine:
         if "catalogue_url" in patch:
             patch["catalogue_url"] = credentials.keep_url(patch["catalogue_url"], self.settings["catalogue_url"])
         settings = {**self.settings, **patch}
-        if settings["inference_runtime"] not in ("auto", "litert", "onnx"):
-            raise ValueError("inference runtime must be auto, litert or onnx")
-        if settings["feedback"] not in ("ask", "off"):
-            raise ValueError("feedback must be ask or off")
-        mqtt_port = patch.get("mqtt", {}).get("port") or 0
-        if not (type(mqtt_port) is int and 0 <= mqtt_port <= 65535):
-            raise ValueError("MQTT port must be a whole number from 1 to 65535")
-        if not isinstance(settings["update_check"], bool):
-            raise ValueError("update_check is true or false")
-        if not isinstance(settings["catalogue_url"], str):
-            raise ValueError("catalogue_url is an address")
+        settings.update({key: check(settings[key]) for key, check in CHECKS.items()})
+        if "mqtt" in patch:
+            require_broker(settings["mqtt"])
         for provider, config in patch.get("notifiers", {}).items():
             reports.require_splittable(config.values())
             NOTIFIERS[provider].require(config)
-        settings["fault_grace_s"] = clamp_grace(settings["fault_grace_s"])
-        settings["preheat"] = sanitise_presets(settings["preheat"])
-        settings.update(appearance.sanitise(settings))
         if settings["inference_runtime"] != self.settings["inference_runtime"]:
             await self._switch_runtime(settings)
         self.settings = {**self.settings, **{key: settings[key] for key in patch}}
