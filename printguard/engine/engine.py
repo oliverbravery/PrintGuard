@@ -1170,12 +1170,13 @@ class Engine:
 
         Raises:
             RuntimeError: If the service takes no targets, or rejects one.
-            ValueError: If the command names no heater.
+            ValueError: If the command names no heater, or a target is out of
+                range or not a number.
         """
         printer = self.printers.get(message["id"])
         if not printer:
             raise LookupError(f"no printer {message['id']}")
-        targets = sanitise_targets(message)
+        targets = sanitise_targets(message, strict=True)
         if not targets:
             raise ValueError("a heat command names a nozzle or bed target")
         adapter = INTEGRATIONS[printer.provider]

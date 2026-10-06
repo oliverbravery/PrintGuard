@@ -1802,11 +1802,41 @@ async def test_printer_heat_sets_each_target_then_refreshes_the_state() -> None:
         assert device["nozzle"] == {"actual": 24.6, "target": 0.0} and device["bed"] == {"actual": 23.1, "target": 0.0}
         assert engine.state_event()["printers"][0]["device_state"]["nozzle"] == {"actual": 24.6, "target": 0.0}
 
-        await engine.handle({"cmd": "printer.heat", "id": printer_id, "nozzle": 9000, "req_id": 4})
-        clamped = next(r for r in reversed(platform.http_requests) if r["method"] == "POST")
-        assert clamped["json"] == {"command": "target", "targets": {"tool0": 350.0}}, "a target is clamped to what a hotend can take"
         await engine.handle({"cmd": "printer.heat", "id": printer_id, "req_id": 5})
         assert any(e.get("event") == "error" and e.get("req_id") == 5 for e in events), "naming no heater is refused"
+
+
+@pytest.mark.parametrize(
+    ("fields", "named"),
+    [
+        ({"nozzle": 400}, "nozzle"),
+        ({"nozzle": 351}, "nozzle"),
+        ({"bed": 150.5}, "bed"),
+        ({"bed": 2100}, "bed"),
+        ({"nozzle": -1}, "nozzle"),
+        ({"nozzle": "210"}, "nozzle"),
+        ({"bed": True}, "bed"),
+        ({"bed": False}, "bed"),
+        ({"nozzle": 210, "bed": 400}, "bed"),
+    ],
+)
+async def test_a_heater_target_out_of_range_or_not_a_number_is_refused_and_sends_nothing(fields: dict, named: str) -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "printer.heat", "id": printer_id, "req_id": 4, **fields})
+        error = next(e for e in events if e.get("event") == "error" and e.get("req_id") == 4)
+        assert error["message"].startswith(f"{named} temperature must be a number from 0 to"), error
+        assert not [r for r in platform.http_requests if r["method"] == "POST"], "a heater was sent a target that was refused"
+
+
+async def test_the_hottest_and_coolest_heater_targets_are_still_taken() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "printer.heat", "id": printer_id, "nozzle": 350, "bed": 0, "req_id": 4})
+        assert not [e for e in events if e.get("event") == "error"]
+        assert len([r for r in platform.http_requests if r["method"] == "POST"]) == 2
 
 
 async def test_preheat_presets_default_and_are_sanitised() -> None:
