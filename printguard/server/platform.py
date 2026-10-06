@@ -27,7 +27,7 @@ import httpx
 import numpy as np
 import websockets
 from av.video.reformatter import VideoReformatter
-from ..engine import vision
+from ..engine import logs, vision
 from ..engine.platform import Frame, Notice
 from ..engine.reports import scrub_url
 from .bambu_camera import open_bambu_jpeg_stream
@@ -995,7 +995,8 @@ class ServerPlatform:
 
         try:
             return await asyncio.to_thread(encode)
-        except Exception:
+        except Exception as exc:
+            logger.warning("a frame could not be encoded as JPEG: %s", logs.describe(exc))
             return None
 
     async def decode_jpeg(self, data: bytes) -> np.ndarray | None:

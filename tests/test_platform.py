@@ -995,3 +995,13 @@ async def test_a_camera_pulled_through_the_hub_names_the_address_it_was_given(
 
     assert named in str(raised.value)
     assert "127.0.0.1" not in str(raised.value) and "CAMPASS" not in str(raised.value)
+
+
+async def test_a_frame_that_cannot_be_encoded_is_logged_not_swallowed(caplog: pytest.LogCaptureFixture) -> None:
+    """The alert went out with no picture and no word of why."""
+    holder = SimpleNamespace()
+    with caplog.at_level(logging.WARNING, logger="printguard.server.platform"):
+        assert await ServerPlatform.encode_jpeg(holder, np.zeros((240, 320, 4), dtype=np.uint8)) is None
+
+    assert [record.levelname for record in caplog.records] == ["WARNING"]
+    assert "JPEG" in caplog.text
