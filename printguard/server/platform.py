@@ -839,13 +839,14 @@ class ServerPlatform:
         else:
             raise ValueError(f"cannot open source kind {source['kind']!r}")
         reader = source.get("device_id", camera_id)
-        closing = self._closing.pop(reader, None)
-        if closing is not None and not await asyncio.to_thread(closing.stopped, READER_STOP_WAIT_S):
-            self._closing[reader] = closing
-            raise RuntimeError(
-                "this camera's last capture stopped answering and cannot be closed, so it is not opened again. "
-                "Restart PrintGuard to free it"
-            )
+        closing = self._closing.get(reader)
+        if closing is not None:
+            if not await asyncio.to_thread(closing.stopped, READER_STOP_WAIT_S):
+                raise RuntimeError(
+                    "this camera's last capture stopped answering and cannot be closed, so it is not opened again. "
+                    "Restart PrintGuard to free it"
+                )
+            self._closing.pop(reader, None)
         av_source = AVSource(
             target,
             publish_url,

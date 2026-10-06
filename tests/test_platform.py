@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import fcntl
+import gc
 import io
 import json
 import logging
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import weakref
 from contextlib import ExitStack
 from fractions import Fraction
 from pathlib import Path
@@ -819,3 +821,37 @@ async def test_a_quiet_device_is_released_when_its_camera_stands_down(monkeypatc
         source.close()
 
     assert released, "a device that delivers nothing was held open after nothing needed it"
+
+
+async def test_a_reader_that_cannot_be_stopped_is_remembered_when_the_wait_for_it_is_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The entry was taken out before the wait, so cancelling the wait forgot it and the next open started a second capture thread."""
+    release = threading.Event()
+    opened: list[int] = []
+
+    def stuck_stream(host: str, access_code: str) -> object:
+        opened.append(1)
+        release.wait()
+        raise OSError("gone")
+
+    monkeypatch.setattr("printguard.server.platform.open_bambu_jpeg_stream", stuck_stream)
+    monkeypatch.setattr("printguard.server.platform.OPEN_WAIT_S", 0.2)
+    monkeypatch.setattr("printguard.server.platform.READER_STOP_WAIT_S", 1.0)
+    platform = object.__new__(ServerPlatform)
+    platform.mediamtx = SimpleNamespace(rtsp_url=lambda path: f"rtsp://127.0.0.1:9/{path}")
+    platform._sources, platform._closing, platform._notices = {}, {}, []
+    camera = {"kind": "bambu", "host": "printer", "access_code": "code"}
+
+    try:
+        with pytest.raises(RuntimeError, match="no frames from camera cam1"):
+            await platform.open_camera("cam1", camera)
+        waiting = asyncio.ensure_future(platform.open_camera("cam1", camera))
+        await asyncio.sleep(0.1)
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        with pytest.raises(RuntimeError, match="stopped answering and cannot be closed"):
+            await platform.open_camera("cam1", camera)
+        assert opened == [1]
+    finally:
+        release.set()
+
