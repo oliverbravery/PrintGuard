@@ -95,6 +95,37 @@ def test_a_pattern_reaching_this_network_is_told_apart_from_one_that_does_not() 
     assert not any(urls.reaches_local(pattern) for pattern in public)
 
 
+WILDCARD_PATTERNS = [
+    "http://*.local/*",
+    "https://*.lan/*",
+    "http://*.home.arpa/*",
+    "ws://*.internal/*",
+    "http://*.localhost:8000/*",
+    "https://*.github.com/*",
+    "https://*.example.com/*",
+    "http://*.168.1.50/*",
+]
+
+
+@pytest.mark.parametrize("pattern", WILDCARD_PATTERNS[:5])
+def test_a_wildcard_over_a_local_suffix_reaches_this_network(pattern: str) -> None:
+    assert urls.reaches_local(pattern)
+
+
+@pytest.mark.parametrize("pattern", WILDCARD_PATTERNS[5:])
+def test_a_wildcard_over_a_public_name_does_not(pattern: str) -> None:
+    assert not urls.reaches_local(pattern)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="the dashboard's copy of the rules runs on node")
+def test_the_dashboard_sorts_wildcard_patterns_as_the_engine_does() -> None:
+    script = "import('./src/urls.ts').then((urls) => console.log(JSON.stringify(JSON.parse(process.argv[1]).map(urls.reachesLocal))))"
+    answered = subprocess.run(
+        ["node", "-e", script, json.dumps(WILDCARD_PATTERNS)], cwd=Path(__file__).resolve().parent.parent / "web", capture_output=True, text=True, check=True
+    )
+    assert json.loads(answered.stdout) == [urls.reaches_local(pattern) for pattern in WILDCARD_PATTERNS]
+
+
 @pytest.mark.parametrize("host", ["2130706433", "127.1", "0x7f.0.0.1", "017700000001", "192.168.257", "0xc0a80132"])
 def test_an_address_is_local_however_it_is_spelt(host: str) -> None:
     assert urls.is_local_address(host)

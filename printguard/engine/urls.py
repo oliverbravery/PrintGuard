@@ -166,7 +166,7 @@ def reaches_local(pattern: str) -> bool:
     ``*://*/*`` the widest thing a plugin can ask for.
     """
     rule = parse(pattern)
-    return rule is not None and (rule["host"] == "*" or is_local_address(rule["host"].removeprefix("*.")))
+    return rule is not None and (rule["host"] == "*" or is_local_address(rule["host"].replace("*.", "any.", 1)))
 
 
 def resolves_local(url: str) -> bool:
