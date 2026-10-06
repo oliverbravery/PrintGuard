@@ -22,11 +22,11 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Changed
 
 - The hub only answers to IP addresses, `localhost`, names with no dot, names ending `.local`,
-  `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost`, and the addresses in `PRINTGUARD_ORIGINS`, which
-  stops a DNS rebinding page reaching it. If you open PrintGuard at any other name, such as a
-  domain, a Tailscale `ts.net` name or `printguard.fritz.box`, add it to `PRINTGUARD_ORIGINS`
-  with its `http://` or `https://` before updating. The API and MCP server are held to the same
-  rule. [Host and origin checking](docs/deployment.md#host-and-origin-checking).
+  `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost`, and the addresses in
+  `PRINTGUARD_ORIGINS`, which stops a DNS rebinding page reaching it. If you open PrintGuard at any
+  other name, such as a domain, a Tailscale `ts.net` name or `printguard.fritz.box`, add it to
+  `PRINTGUARD_ORIGINS` with its `http://` or `https://` before updating. The API and MCP server are
+  held to the same rule. [Host and origin checking](docs/deployment.md#host-and-origin-checking).
 - The hub won't start when `state.json` is there but can't be read, such as with the wrong owner on
   the data directory, and the log says so. It used to start as an empty hub.
 - Alert snapshots in the risk history survive a restart. They're kept 512 pixels on the short
@@ -66,7 +66,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   it is lowered.
 - A file tagged only for a printer you then remove stays tagged, so it can't start on another
   printer until you tag it for one.
-- The same camera device or stream address can't be registered twice.
+- The same camera device or stream address can't be registered twice, however the address is
+  written.
 - The ntfy topic address is treated as a secret, so it's hidden in **Settings** and left out of
   bug reports and API responses.
 - The engine and camera publish WebSockets refuse a connection with no `Origin` header.
@@ -82,24 +83,20 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - Removing a camera, printer, monitor, print or API token that doesn't exist is an error, where it
   used to answer as if it had worked. The REST API answers 400.
 - A monitor can't be bound to a camera or printer that isn't registered.
-- A monitor or camera setting sent with a value it doesn't take is refused, where it used to be
-  changed to a default. An unknown setting is refused too.
-- A REST edit that changes a printer's, notifier's or the MQTT broker's address has to send its key
-  or password again.
+- A monitor or camera setting sent with the wrong kind of value, such as text for a switch, is
+  refused, where it used to be changed to a default. An unknown setting is refused too.
 - Once a token is issued, the MCP server refuses a connection without one. It used to answer with an
   empty tool list.
 - The MCP server answers at `/mcp` as well as `/mcp/`.
 - `PRINTGUARD_ORIGINS` matches whatever the capitals or a `:443`, and the hub warns at start about
   an entry with no `http://` or `https://`.
-- A stream address registers once however it's written. Spaces around it are dropped, and a capital
-  in its scheme or host no longer makes it a second camera or stops it opening.
-- A pause or cancel the printer never answers is reported as failed after 45 seconds, 135 on a
-  Centauri Carbon 2. It could take 4.5 minutes.
+- A pause or cancel the printer never answers is reported as failed after 45 seconds, 135 on an
+  Elegoo printer. On a Centauri Carbon 2 it could take 4.5 minutes.
 - A plugin update that answers other plugins on a new channel or asks for a new sign-in scope waits
   for you to accept it.
-- Recent events no longer hold a printer's progress updates, so an alert stays in them.
+- Recent events no longer hold a printer's status updates, so an alert stays in them.
 - To run a MediaMTX of your own with the shipped `mediamtx.yml`, use 1.19.0 or newer.
-- Light theme accent and red are a shade darker so selected buttons meet AA contrast.
+- Light theme accent and red are a shade darker for contrast.
 - Temperatures corrected on upload stop at 350°C for the nozzle and 150°C for the bed.
 - A settings edit naming an alert channel that doesn't exist is refused.
 - The image declares port 1935 as well as 8000 and 8554.
@@ -157,8 +154,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - An unrecognised MQTT payload no longer disables a monitor.
 - A damaged `state.json` is kept as `state.json.corrupt`, where it used to be overwritten with an
   empty hub.
-- Editing settings or a printer over REST no longer wipes its secrets. A secret sent blank keeps
-  the saved one.
+- Editing settings or a printer over REST no longer wipes its secrets. A secret sent blank keeps the
+  saved one, unless the edit also changes the address, when the key or password has to be sent
+  again.
 - Adding a slow camera over REST or MCP no longer times out at 15 seconds.
 - MCP returns alert snapshots as images.
 - The dashboard shows when it has lost the hub and re-sends unsaved changes once it reconnects.
@@ -271,7 +269,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - Layout edits no longer jump back for a moment after you change them.
 - The dashboard loads in Safari with **Block All Cookies** on.
 - A heater target the printer refuses goes back to the printer's value.
-- A camera published from a browser stops capturing when it's removed from another device.
+- A camera published from a browser stops capturing when it fails to register or is removed from
+  another device.
 - A feed the browser won't autoplay, such as on an iPhone in Low Power Mode, shows "Tap to play".
 - An edit made just before closing the tab is saved.
 - A dashboard left open through an update reloads itself onto the new version.
@@ -284,7 +283,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A pause refused because the print is already paused or over is no longer announced as
   "AUTOMATIC PAUSE FAILED".
 - A stalled camera watched by several monitors is restarted once, not once per monitor.
-- Stopping the hub no longer lets an inference in flight start a pause after the printers are closed.
+- Stopping the hub no longer lets an inference in flight start a pause after the printers are
+  closed.
 - Test connection says when OctoPrint, Moonraker or PrusaLink rejects the key or password, where it
   read offline. The log says why a printer went offline.
 - An original Centauri Carbon shows the time left on a print, and a command a Carbon 2 refuses no
@@ -293,26 +293,21 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A printer's webcam you had already added by hand is no longer added a second time, and one that
   can't be opened shows a warning on the dashboard.
 - One unreadable entry in `state.json` no longer stops the hub starting. It's left out and logged.
-- A print whose frames could not be sent goes back to waiting for review, where it read
-  "Sent 0 frames".
 - A temperature correction on upload also moves `M109 R` and `M190 R` waits.
-- The REST API checks the token before it reads a request body.
 - A print whose file has gone from the data directory answers 404 without naming the path.
 - A streaming server that can't start no longer fills the log a bug report attaches.
-- A very thin image sent to `/classify` no longer uses hundreds of megabytes.
+- A very thin image sent to `/api/v1/classify` no longer uses hundreds of megabytes.
 - Toasts no longer run off the edge of a phone screen, and the header wraps on narrow tablets.
 - The Add monitor dialog stays open with what you typed if the add fails.
 - The "saved" chip only shows on the form that saved.
-- Alerts say what happened to the print, such as "print paused", and an alert-only monitor no
-  longer reads "(none)".
-- A connection test result clears when you edit the form it tested.
-- The print viewer's 32 MB limit holds behind a proxy that compresses the file.
-- A camera published from a browser resumes after its webcam is unplugged and the page reopened.
-- The dashboard retries a hub connection that never answers after 10 seconds.
+- Dashboard alerts say what happened to the print, such as "print paused", and one from an
+  alert-only monitor no longer reads "(none)".
+- A printer's connection test result clears when you edit the form it tested.
+- After 10 seconds the dashboard retries a hub connection that never answers.
 - Stream and printer addresses are no longer capitalised or corrected by an iPhone's keyboard.
 - Small touch targets are larger, focus rings no longer appear after a tap, and more controls are
   named for screen readers.
-- Alert sounds from plugins play in Safari after your first tap or key press. A sound held back for
+- Alert tones from plugins play in Safari after your next tap or key press. A tone held back for
   more than a second is dropped, where they used to all play at once.
 - The guide and website say watchdog warnings come after the grace period.
 - The **Register printer** form keeps what you typed when the registration fails.
@@ -340,13 +335,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A plugin address pattern with an IPv6 host matches.
 - A bearer token with a non-ASCII character answers 401, where it was a server error.
 - A live view that fails in a browser that plays HLS itself, such as Safari, is tried again.
-- A camera published from a browser stops capturing when it fails to register.
 - The add camera forms clear once the camera registers.
 - The Glass popover has a fixed place in browsers without CSS anchor positioning.
 - Glass applies to sheets, and a background picture the browser can't decode is ignored.
 - **Start at login** works on macOS when the app's path contains `&` or `<`.
 - The macOS app reports its version, and the desktop app includes the third-party notices.
 - The desktop app's log file is written as UTF-8.
+- A stream address sent over the API with spaces around it or a capital in its scheme opens.
 
 ### Security
 
@@ -369,6 +364,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   server by navigating its own frame or over WebRTC.
 - A web page on another origin can no longer read a camera stream through the hub.
 - `state.json` is never readable by other accounts while it's being saved.
+- The REST API checks the token before it reads a request body.
 
 ## [2.5.0] - 2026-09-21
 
