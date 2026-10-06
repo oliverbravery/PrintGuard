@@ -762,8 +762,19 @@ class Engine:
         self.save()
 
     async def monitor_snapshot(self, monitor_id: str, snap_id: str) -> bytes | None:
-        """Returns the JPEG bytes of a frame kept from a monitor's prints, or None."""
-        return await self.reviews.read(monitor_id, snap_id)
+        """Returns the JPEG bytes of a frame kept from a monitor's prints.
+
+        Args:
+            monitor_id: The monitor the frame was kept for.
+            snap_id: The frame's id.
+
+        Returns:
+            The JPEG, or None when the monitor has no such frame or its file has gone from the store.
+        """
+        try:
+            return await self.reviews.read(monitor_id, snap_id)
+        except FileNotFoundError:
+            return None
 
     def settle_reviews(self) -> bool:
         """Ends the review of every print that is over, returning whether any did."""

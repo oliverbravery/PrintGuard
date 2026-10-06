@@ -807,3 +807,18 @@ async def test_a_printer_config_patched_with_nan_leaves_the_stored_one_alone() -
 
         assert response.status_code == 422
         assert "note" not in engine.printers.get(printer_id).config
+
+
+async def test_a_snapshot_whose_file_is_gone_is_a_404_that_names_no_path(tmp_path) -> None:
+    from printguard.server.platform import DiskFileStore
+
+    async with api(("read",)) as (client, engine, platform, monitor_id, _printer, _camera, tokens):
+        platform.files = DiskFileStore(tmp_path)
+        engine.reviews.restore(
+            [{"id": "r1", "monitor_id": monitor_id, "started": 0.0, "spacing_s": 60.0, "frames": [{"id": "f1", "ts": 1.0, "score": 0.9, "kind": "alert", "action": "none", "size": 3}]}]
+        )
+        gone = await client.get(f"/monitors/{monitor_id}/snapshots/f1", headers={"Authorization": f"Bearer {tokens['read']}"})
+        await engine.handle({"cmd": "snapshot.get", "monitor_id": monitor_id, "id": "f1"}, lambda event: None)
+
+        assert gone.status_code == 404 and str(tmp_path) not in gone.text
+        assert not any(str(tmp_path) in event.get("message", "") for event in engine.recent_events())

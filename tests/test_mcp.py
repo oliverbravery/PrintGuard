@@ -182,3 +182,24 @@ async def test_a_tool_call_carrying_nan_is_refused_and_registers_nothing() -> No
         assert not list(engine.printers.items)
     finally:
         await engine.stop()
+
+
+async def test_a_snapshot_whose_file_is_gone_is_a_tool_error_that_names_no_path(tmp_path) -> None:
+    from fastmcp.exceptions import ToolError
+
+    from printguard.server.platform import DiskFileStore
+
+    engine, mcp, camera_id = await _server()
+    try:
+        engine.platform.files = DiskFileStore(tmp_path)
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "M", "camera_id": camera_id}})
+        monitor_id = next(iter(engine.monitors))
+        engine.reviews.restore(
+            [{"id": "r1", "monitor_id": monitor_id, "started": 0.0, "spacing_s": 60.0, "frames": [{"id": "f1", "ts": 1.0, "score": 0.9, "kind": "alert", "action": "none", "size": 3}]}]
+        )
+        async with Client(mcp) as client:
+            with pytest.raises(ToolError) as refused:
+                await client.call_tool("get_monitor_snapshot", {"monitor_id": monitor_id, "snap_id": "f1"})
+        assert str(tmp_path) not in str(refused.value)
+    finally:
+        await engine.stop()
