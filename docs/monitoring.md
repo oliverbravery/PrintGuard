@@ -59,7 +59,8 @@ Open a monitor from the dashboard to change these. They save as you move them.
 > it, and choose pause or cancel if you want the print stopped.
 
 The same panel pauses, resumes or cancels the print by hand, and sets the printer's
-[temperatures](printers.md#temperatures-and-preheat).
+[temperatures](printers.md#temperatures-and-preheat). It offers Pause unless the print is paused,
+Resume only while it is paused and Cancel only while it is printing or paused.
 
 ## When a monitor watches
 
