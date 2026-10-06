@@ -1200,6 +1200,57 @@ test("the saved chip shows only on the form that saved", async ({ page }) => {
   await expect(panel.getByText(/saved/)).toBeVisible();
 });
 
+test("a settings tab shows saved only for what it saved itself", async ({ page }) => {
+  await dashboard(page, { dialog: "settings", settingsTab: "updates" });
+  const acknowledge = async () => {
+    await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
+    await emit(page, { event: "state", ...engine(), req_id: (await lastSent(page, "settings.update")).req_id });
+  };
+  await page.evaluate(() => (window as any).__pg.getState().updateSettings({ theme: "light" }));
+  await acknowledge();
+  await page.getByRole("tab", { name: "Updates" }).click();
+  await expect(page.getByText(/saved ✓/)).toBeHidden();
+  await page.getByRole("tab", { name: "Advanced" }).click();
+  await expect(page.getByText(/saved ✓/)).toBeHidden();
+
+  await page.getByRole("switch", { name: "Ask me to review frames after a print" }).click();
+  await acknowledge();
+  await expect(page.getByText(/saved ✓/)).toBeVisible();
+  await page.getByRole("tab", { name: "Updates" }).click();
+  await expect(page.getByText(/saved ✓/)).toBeHidden();
+});
+
+test("the updates tab opens the release notes whether or not an update is waiting", async ({ page }) => {
+  await dashboard(page, { dialog: "settings", settingsTab: "updates" });
+  await page.getByRole("tab", { name: "Updates" }).click();
+  await page.getByRole("button", { name: "Release notes" }).click();
+  expect(await page.evaluate(() => (window as any).__pg.getState().dialog)).toBe("update");
+});
+
+test("a token revoke greys out only its own button, and a token name stays until the hub accepts it", async ({ page }) => {
+  const tokens = [
+    { id: "t1", name: "ci", scope: "read", hint: "pg_aaaa" },
+    { id: "t2", name: "ha", scope: "control", hint: "pg_bbbb" },
+  ];
+  await dashboard(page, { engine: engine({ tokens }), dialog: "settings", settingsTab: "api" });
+  await page.getByRole("tab", { name: "API" }).click();
+  await page.getByRole("button", { name: "Revoke" }).first().click();
+  await expect(page.getByRole("button", { name: "Revoke" }).first()).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Revoke" }).last()).toBeEnabled();
+
+  const name = page.getByRole("textbox", { name: "Token name" });
+  await name.fill("backup");
+  await page.getByRole("button", { name: "Generate" }).click();
+  const created = await lastSent(page, "token.create");
+  await emit(page, { event: "error", message: "no", req_id: created.req_id });
+  await expect(name).toHaveValue("backup");
+  await expect(page.getByRole("alert").filter({ hasText: "no" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Generate" }).click();
+  await emit(page, { event: "state", ...engine({ tokens }), req_id: (await lastSent(page, "token.create")).req_id });
+  await expect(name).toHaveValue("");
+});
+
 test("an alert says what happened to the print, and nothing for alert only", async ({ page }) => {
   await dashboard(page, { engine: engine({ monitors: [monitor({ alert: { score: 0.9, action: "none", ts: 1 } })] }), detailId: "m1" });
   await emit(page, { event: "alert", monitor_id: "m1", score: 0.9, action: "none", ts: 1 });
@@ -1257,7 +1308,7 @@ test("a connection or alert test that was never sent leaves its button free", as
   expect(
     await page.evaluate(() => {
       const store = (window as any).__pg.getState();
-      store.testNotifier("ntfy", {});
+      store.testNotifier("ntfy", "ntfy", {});
       return (window as any).__pg.getState().testingNotifier;
     }),
   ).toBeNull();
