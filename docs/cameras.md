@@ -35,7 +35,9 @@ space around it is dropped.
 ## Printer cameras
 
 If a registered printer exposes a webcam, PrintGuard registers it as a camera for you, with no
-stream URL to copy. **Refresh** picks up a camera attached after the printer was registered.
+stream URL to copy. **Refresh** picks up a camera attached after the printer was registered. A
+webcam that can't be listed or won't open raises a warning on the dashboard and isn't added, so
+press **Refresh** once it's reachable.
 [Where a printer's webcam is read from](printers.md#where-a-printers-webcam-is-read-from) covers
 how a relative stream path from OctoPrint or Moonraker becomes an address.
 
@@ -53,7 +55,7 @@ runs on the frames it read, so a re-encode that fails costs the live view and no
 |---|---|
 | `rtsp://`, `rtsps://` | IP cameras and most NVRs |
 | `rtmp://` | Cameras and encoders that serve RTMP |
-| `http://`, `https://` | MJPEG, such as `http://<host>/webcam/?action=stream` from mjpg-streamer or Crowsnest |
+| `http://`, `https://` | MJPEG, such as `http://<host>/webcam/?action=stream` from mjpg-streamer or Crowsnest. An address whose path ends in `/whep` is pulled as WHEP |
 | `whep://`, `wheps://` | WebRTC sources with a WHEP endpoint, such as go2rtc at `whep://<host>:1984/api/webrtc?src=<stream>` |
 
 Cameras with their own WebRTC signalling, including camera-streamer and Creality feeds, have no

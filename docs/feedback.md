@@ -23,12 +23,14 @@ Send.
 | Frames | How many per print |
 |---|---|
 | The frame that fired each alert | The last 40 |
-| The highest scoring frames that didn't alert | 5 |
+| The highest scoring frames under the alert threshold, at least a minute apart | 5 |
 | Ordinary frames spread evenly over the print | Up to 19, starting at one a minute |
 
-Frames are scaled to 512px and stored in the hub's data directory, so they survive a restart.
-The hub keeps the last 20 prints or 200 MB and drops the oldest first. The alert frames are the
-ones the risk history shows under **Risky moments**.
+A frame is kept as the model was given it, after the camera's rotation, crop and adjustments. One
+over 512px on its shorter side is scaled down to that. Frames are stored in the hub's data
+directory, so they survive a restart. The hub keeps the last 20 prints or 200 MB across every
+monitor and drops the oldest finished print first. The alert frames are the ones the risk
+history shows under **Risky moments**.
 
 A print ends when its printer reports idle or an error, or when you switch its monitor off, so a
 paused print stays open. A monitor
@@ -53,8 +55,8 @@ isn't offered for review.
 - The frames you kept, with the label you gave each one.
 - Each frame's risk score, time and which of the three kinds above it is.
 - A random ID for the print and for each frame.
-- The monitor's alert threshold.
-- The type of printer connection, such as `klipper`, and the printer model if you typed one.
+- The monitor's alert threshold at the time you send.
+- The type of printer connection, such as `klipper` or `none`, and the printer model if you typed one.
 - The PrintGuard version.
 - A random ID for your hub, issued the first time you send.
 
@@ -78,7 +80,8 @@ Worker's secret key. The Worker's request logs are switched off.
 
 The inbox runs on Cloudflare's free tier, which has a fixed amount of room, so the Worker caps
 what it takes. A frame that hits a limit stays on your hub and sends by itself once the limit resets, unless
-20 newer prints or 200 MB push its print out first.
+20 newer prints or 200 MB push its print out first. A print also waits when the inbox is full,
+closed or can't be reached, and the hub tries it again every six hours.
 
 | Limit | Value | What you see |
 |---|---|---|
@@ -90,7 +93,8 @@ what it takes. A frame that hits a limit stays on your hub and sends by itself o
 
 Daily limits reset at midnight UTC, and the review sheet shows that time in your own time zone.
 A print that is waiting has **Try now** and **Cancel sending** on its sheet. A frame the hub
-skips isn't counted as sent, and sending a frame again doesn't count twice.
+skips isn't counted as sent, and sending a frame again doesn't count twice. A print none of
+whose frames could be sent goes back to waiting for a review.
 
 The limit for everyone is shared, so a handful of busy networks can use it up for the day.
 Your frames wait on your hub until it resets.

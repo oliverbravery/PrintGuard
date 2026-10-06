@@ -187,7 +187,8 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
               <details className="text-[0.7rem] text-text-2">
                 <summary className="cursor-pointer hover:text-text-1">What's sent</summary>
                 <p className="mt-1.5 leading-relaxed">
-                  The frames shown here with the labels you gave them, each frame's risk score and time, this monitor's alert
+                  The frames shown here with the labels you gave them, each frame's risk score, time and whether it was an
+                  alert, a near miss or an ordinary frame, a random ID for the print and for each frame, this monitor's alert
                   threshold, the type of printer connection, the printer model if you type one, the PrintGuard version and a
                   random ID for this hub. No names or camera URLs. The inbox sees your IP address, as any server does, and keeps
                   only a hash of it until the next day for the daily limit. Frames are stored privately in the EU and used

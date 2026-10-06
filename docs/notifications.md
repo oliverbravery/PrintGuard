@@ -19,8 +19,9 @@ from filling your phone.
 1. Open **Settings**, then the **Alerts** tab.
 2. Enable a channel and fill in its form. Each form links the service's own setup guide or API
    reference.
-3. Send a test alert from the form, which uses what you typed and carries a blank picture where
-   a real alert carries a snapshot, then press **Save channels**.
+3. Press **Send test alert**, which uses what you typed and carries a blank picture where a real
+   alert carries a snapshot, then press **Save channels**. A channel with a starred field left
+   blank isn't saved, and the error names the field.
 4. Turn on **Push notifications** on each monitor that should use it.
 
 Every enabled channel gets every notice, so there's no routing to set up. A monitor with
@@ -45,13 +46,14 @@ a print through these same channels.
 | Notice | When | Carries |
 |---|---|---|
 | Defect alert | A defect holds for a monitor's consecutive count | A snapshot, the score and whether the print was paused, cancelled or left running. A pause or cancel that failed is called out |
-| Fault warning | A camera drops or freezes, or a printer's state can't be read | Which one, and whether the monitor has stopped watching or can no longer pause the print |
+| Fault warning | A camera drops or freezes, a watching monitor has no camera, or a printer's state can't be read while its monitor watches | Which one, and whether the monitor has stopped watching or can no longer pause the print |
 | Recovery | A faulted camera or printer has stayed healthy | |
 
 A monitor set to **Alert only** says so in the alert, so you know the print is still running. A
-pause or cancel is tried up to three times in 45 seconds before it's reported as failed. A
-Centauri Carbon 2 gets 135 seconds, since it answers only once it has finished moving. A print
-that is already paused or over when the printer refuses counts as done.
+pause or cancel is tried up to three times in 45 seconds before it's reported as failed. An
+Elegoo printer gets 135 seconds, since a Centauri Carbon 2 answers only once it has finished
+moving. A pause the printer refuses counts as done when the print is already paused or over, and
+a cancel when it's already over.
 
 A monitor's [cooldown](monitoring.md#monitor-settings) holds back its whole response to the next
 defect, the pause or cancel included. Pushes with the same outcome are also at least 30 seconds
@@ -65,19 +67,24 @@ A channel that fails to deliver raises an error on the dashboard. It isn't retri
 that refuses the snapshot is sent the alert again as text, and the dashboard error says the
 picture was refused.
 
+Give a channel the address it answers on, not one that redirects to it. A 301 or 302 turns the
+alert into a read, so PrintGuard reports it as failed and names the address to use.
+
 ## Faults and the grace period
 
 A print nobody is watching is worth hearing about, so faults notify you too, for every monitor
-with **Push notifications** on. Three rules keep that from turning into a stream of messages.
+with **Push notifications** on. These rules keep that from turning into a stream of messages.
 
 | Rule | Value |
 |---|---|
-| A fault has to last this long before it's pushed | **Fault grace period** in the Alerts tab. Two minutes by default, from 30 seconds to 15 minutes |
-| An outage nobody has answered is announced again | Every 30 minutes |
+| A fault has to last this long before it's announced | **Fault grace period (seconds)** in the Alerts tab. Two minutes by default, from 30 seconds to 15 minutes |
+| A feed counts as frozen | After 30 seconds without a scored frame, and the grace period starts then |
+| A fault that is still there is announced again | Every 30 minutes for as long as it lasts |
 | A recovery is announced once the feed has held | One minute, doubling after each relapse up to 15 minutes, and back to one minute after 15 minutes healthy |
 
 Raise the grace period for a wireless camera that drops out and comes straight back. It can't be
-turned off, and the dashboard shows every fault as it happens whatever it's set to.
+turned off. The dashboard's warning waits for it too, and until then only the camera's own
+status reads offline.
 
 A camera that reconnects quickly enough to clear the grace period every time gets one warning
 for the whole unstable episode, once it has been missing for more than a tenth of the last ten

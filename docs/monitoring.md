@@ -33,8 +33,9 @@ flowchart LR
 
 The score is the model's own confidence that the frame shows a failing print, so 0.5 is where it
 changes its mind. It only ever approaches 1, and few frames of a real failure pass 0.95, which is
-why the threshold stops there. One bad frame does nothing. A defect has to hold for a run of frames before the
-monitor acts, and the cooldown keeps one failure from alerting twice.
+why the threshold stops there. At the default settings one bad frame does nothing. A defect has
+to hold for a run of frames before the monitor acts, and the cooldown keeps one failure from
+alerting twice.
 
 ## Monitor settings
 
@@ -48,7 +49,7 @@ Open a monitor from the dashboard to change these. They save as you move them.
 | **Alert threshold** | 0.75 | 0.05 to 0.95 | The score a frame has to reach to count as a defect |
 | **Consecutive detections to alert** | 3 | 1 to 30 | How many flagged frames in a row it takes to act |
 | **On sustained defect** | Alert only | | Alert only, pause the print or cancel the print. Without a linked printer the last two only alert |
-| **Cooldown (seconds)** | 60 | 0 to 600 | The quiet gap after acting before the monitor can act again. At 0 every further flagged frame acts. It ends when the print does, and a pause or cancel the printer didn't take is tried again after 30 seconds at most |
+| **Cooldown (seconds)** | 60 | 0 to 600 | The quiet gap after acting before the monitor can act again. At 0 the next flagged frame acts once the last response has finished. It ends when the print does, and a pause or cancel the printer didn't take is tried again after 30 seconds at most |
 | **Push notifications** | Off | | Sends this monitor's alerts and warnings to your [alert channels](notifications.md) |
 
 > [!IMPORTANT]
@@ -61,9 +62,10 @@ The same panel pauses, resumes or cancels the print by hand, and sets the printe
 ## When a monitor watches
 
 A monitor with no printer watches all the time. A monitor with a printer watches unless the
-printer reports idle, paused or an error, so it also watches before the printer has answered
-and through a state PrintGuard can't read. Losing contact keeps whatever the printer last
-reported, so one that drops off mid-print is still watched. [Failing safely](architecture.md#failing-safely) has the reasoning.
+printer reports idle, paused or an error, so it also watches before the printer has answered.
+Losing contact, or a state PrintGuard can't read, keeps whatever the printer last reported, so
+one that drops off mid-print is still watched and one switched off after a print stays in
+standby. [Failing safely](architecture.md#failing-safely) has the reasoning.
 
 ## Tuning the camera
 
@@ -91,7 +93,8 @@ rate, since the consecutive count is in frames.
 
 ## Risk history
 
-A monitor's panel shows the live score on a gauge beside the last few minutes of it.
+A monitor's panel shows the live score on a gauge beside its last 240 readings, about a minute
+of them at five a second.
 **View detailed history** opens the full page.
 
 | Part | Shows |
@@ -100,10 +103,10 @@ A monitor's panel shows the live score on a gauge beside the last few minutes of
 | Risky moments | A snapshot of what the camera saw each time the monitor raised an alert |
 
 The chart is kept in memory as one-minute buckets covering the last 24 hours of watching, with
-the last 50 alerts, so restarting the hub clears it. The alert snapshots are kept on disk, up to
-40 for each of the last 20 prints, and survive a restart. Deleting a monitor deletes its
-snapshots. The
-[REST API](api.md#rest-api) serves the same history and snapshots.
+the last 50 alerts, so restarting the hub clears it. The alert snapshots are kept on disk with
+the other [frames kept from each print](feedback.md#whats-kept-on-your-hub), up to 40 a print,
+and survive a restart. Deleting a monitor deletes its snapshots. The [REST API](api.md#rest-api)
+serves the same history and snapshots.
 
 ## Reviewing a print
 
