@@ -901,8 +901,8 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     testPrinter(target, provider, config) {
-      set({ printerTest: null, testing: target });
-      get().send({ cmd: "printer.test", provider, config });
+      const asked = get().send({ cmd: "printer.test", provider, config }) !== null;
+      set({ printerTest: null, testing: asked ? target : null });
     },
 
     addPublishedCamera(name, path) {
@@ -912,8 +912,8 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     testNotifier(provider, config) {
-      set({ notifyTest: null, testingNotifier: provider });
-      get().send({ cmd: "notify.test", provider, config });
+      const asked = get().send({ cmd: "notify.test", provider, config }) !== null;
+      set({ notifyTest: null, testingNotifier: asked ? provider : null });
     },
 
     signIn(pluginId) {

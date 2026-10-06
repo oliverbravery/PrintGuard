@@ -1137,6 +1137,27 @@ test("a printer test result goes when the form it tested is edited, and a traili
   await expect(page.getByRole("textbox", { name: "Address" })).toHaveAttribute("autocapitalize", "none");
 });
 
+test("a connection or alert test that was never sent leaves its button free", async ({ page }) => {
+  const schema = { properties: { url: { title: "Address" } } };
+  const printer = { id: "p1", name: "MK4", provider: "octoprint", config: { url: "http://mk4" }, online: true, device_state: null };
+  const integrations = [{ id: "octoprint", label: "OctoPrint", docs_url: "", formats: [], heater_control: true, schema }];
+  await dashboard(page, { engine: engine({ printers: [printer], integrations }), dialog: "printers" });
+  await page.evaluate(() => (window as any).__pg.setState({ link: { send: () => false, close() {} } }));
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("button", { name: "Test connection" }).click();
+
+  await expect(page.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Test connection" })).toBeEnabled();
+  expect(await page.evaluate(() => (window as any).__pg.getState().testing)).toBeNull();
+  expect(
+    await page.evaluate(() => {
+      const store = (window as any).__pg.getState();
+      store.testNotifier("ntfy", {});
+      return (window as any).__pg.getState().testingNotifier;
+    }),
+  ).toBeNull();
+});
+
 test("a device scan that was never sent does not read as scanning, or as finished", async ({ page }) => {
   await dashboard(page, { dialog: "cameras" });
   await page.evaluate(() => (window as any).__pg.setState({ link: { send: () => false, close() {} } }));
