@@ -947,6 +947,55 @@ async def test_a_printer_camera_follows_its_printers_new_address(monkeypatch) ->
         assert camera.frame_source not in (None, first_source), "the camera is attached again at the new address"
 
 
+async def test_refresh_keeps_a_printer_camera_that_works_and_moves_one_that_does_not(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "CAMERA_SETTLE_S", 0.3)
+
+    async def webcam(http, config):
+        return [{"key": "webcam", "name": "Shop cam", "source": {"kind": "fake", "fps": 20.0, "url": "http://op/webcam"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", webcam)
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.1)
+        camera = engine.cameras.values()[0]
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "m", "camera_id": camera.id}})
+        camera.source = {"kind": "fake", "fps": 20.0, "url": "http://op:5000/webcam"}
+        await engine.handle({"cmd": "printer.cameras.refresh"})
+        assert camera.source["url"] == "http://op:5000/webcam", "a camera that delivers frames was moved to an address that may be wrong"
+        camera.frame_source.online = False
+        await engine.handle({"cmd": "printer.cameras.refresh"})
+        assert camera.source["url"] == "http://op/webcam", "a camera that delivers nothing stayed at an address that does not work"
+        assert camera.printer_id == printer_id
+
+
+async def test_a_printer_that_answers_after_boot_has_its_cameras_listed_once(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "CAMERA_SETTLE_S", 0.1)
+    asked: list[str] = []
+
+    async def webcam(http, config):
+        asked.append(config["base_url"])
+        return [{"key": "webcam", "name": "Shop cam", "source": {"kind": "fake", "fps": 20.0, "url": "http://op/webcam"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", webcam)
+    platform = FakePlatform()
+    platform.state = {
+        "printers": [{"id": "p1", "name": "P", "provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}],
+        "cameras": [{"id": "p1-webcam", "name": "Shop cam", "source": {"kind": "device", "device_id": "/dev/gone"}, "printer_id": "p1", "max_fps": 15.0}],
+    }
+    platform.responses["http://op/api/job"] = (500, {})
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.watchdog.refresh(engine.printers.get("p1"))
+        await asyncio.sleep(0.3)
+        assert asked == [] and not _of(events, "warning"), "a printer that was switched off at boot was asked for its cameras"
+        del platform.responses["http://op/api/job"]
+        await engine.watchdog.refresh(engine.printers.get("p1"))
+        await asyncio.sleep(0.4)
+        assert asked == ["http://op"] and engine.cameras.get("p1-webcam").source["url"] == "http://op/webcam", "the camera kept the address it was saved at"
+        await engine.watchdog.refresh(engine.printers.get("p1"))
+        await asyncio.sleep(0.2)
+        assert asked == ["http://op"], "the printer was asked again after it had answered"
+
+
 async def test_testing_a_printer_closes_the_connection_it_opened(monkeypatch) -> None:
     closed: list[dict | None] = []
 

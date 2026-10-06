@@ -37,7 +37,9 @@ in the compose file stays that one camera, and you can still remove it.
 ## Printer cameras
 
 If a registered printer exposes a webcam, PrintGuard registers it as a camera for you, with no
-stream URL to copy. **Refresh** picks up a camera attached after the printer was registered. A
+stream URL to copy. **Refresh** picks up a camera attached after the printer was registered, and PrintGuard also
+checks each printer's cameras once after it first answers at start. Neither moves a camera that is
+delivering frames or that no monitor watches. A
 webcam that won't open raises a warning on the dashboard and isn't added, so press **Refresh**
 once it's reachable. So does a service that can't be asked for its webcams, but OctoPrint and
 Moonraker answering with an error just list none, so no camera appears and nothing says why.

@@ -55,6 +55,7 @@ RESULT_EVENT_INTERVAL_S = 0.2
 REATTACH_EVERY_TICKS = 10
 REQUEST_TIMEOUT_S = 15.0
 CAMERA_OPEN_WAIT_S = 25.0
+CAMERA_SETTLE_S = 10.0
 CAMERAS_OPENED_IN_TURN = 4
 RUNTIME_LOAD_ALLOWANCE_S = 60.0
 RECENT_EVENTS_MAX = 100
@@ -267,6 +268,7 @@ class Engine:
                     self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}")
         await self.reconcile_declared_cameras()
         self.cameras.sync_in_use(self.monitors, self.printers)
+        self.watchdog.reconcile_cameras_once_read(self.printers.items)
         self.settle_reviews()
         runtime = self.platform.plugin_runtime
         if runtime is not None:
@@ -1136,17 +1138,21 @@ class Engine:
         add/update: the user triggers it from the camera registry to pick up a
         camera attached to a printer's service after it was registered.
         """
-        await asyncio.gather(*(self.reconcile_printer_cameras(printer) for printer in self.printers.values()))
+        await asyncio.gather(*(self.reconcile_printer_cameras(printer, keep_working=True) for printer in self.printers.values()))
 
-    async def reconcile_printer_cameras(self, printer: Printer) -> None:
+    async def reconcile_printer_cameras(self, printer: Printer, keep_working: bool = False) -> None:
         """Registers any cameras a printer's service exposes that are not known yet.
 
-        Runs when a printer is added or updated, and on demand via
-        printer.cameras.refresh. A deterministic id keyed by the adapter's camera
+        Runs when a printer is added or updated, on demand via
+        printer.cameras.refresh, and once for each printer after its first
+        read at boot. A deterministic id keyed by the adapter's camera
         key makes this idempotent; cameras the service stops exposing are left in
-        place and go only when the printer does. A camera whose address changed
-        with the printer's connection details is attached again at the new one,
-        keeping its name and tuning. One printer is reconciled by one caller at
+        place and go only when the printer does. A camera whose address differs
+        from what the service now says is attached again at the new one,
+        keeping its name and tuning, unless ``keep_working`` is set and it is
+        delivering frames, resting because nothing watches it, or does within
+        CAMERA_SETTLE_S, since the address PrintGuard works out can be wrong
+        where the one it holds works. One printer is reconciled by one caller at
         a time, so a camera is never opened twice, and a camera whose printer
         went while it was opening is closed again. A stream already registered
         by hand stays the one camera on it. A printer removed or edited to
@@ -1178,7 +1184,7 @@ class Engine:
                 source = dict(descriptor["source"])
                 camera = self.cameras.get(camera_id)
                 if camera:
-                    if camera.source != source:
+                    if camera.source != source and not (keep_working and await self._is_working(camera)):
                         await self._move_camera(camera, source)
                         changed = True
                     continue
@@ -1203,6 +1209,15 @@ class Engine:
                 changed = True
             if changed:
                 self._sync()
+
+    async def _is_working(self, camera: Camera) -> bool:
+        """Whether a camera delivers frames or rests as nothing watches it, waiting up to CAMERA_SETTLE_S for one still opening."""
+        deadline = time.monotonic() + CAMERA_SETTLE_S
+        while not (camera.online or camera.standby):
+            if time.monotonic() > deadline:
+                return False
+            await asyncio.sleep(0.2)
+        return True
 
     def _schedule_reconcile(self, printer: Printer) -> None:
         task = asyncio.create_task(self.reconcile_printer_cameras(printer))

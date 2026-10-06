@@ -244,7 +244,8 @@ same from the address you registered:
 
 An OctoPrint container published as `5000:80` can't be told apart from OctoPrint's own port, so
 its webcam is looked for on port 80. Publish it on another port, or set an absolute stream URL
-in OctoPrint's webcam settings, which is used as it is.
+in OctoPrint's webcam settings, which is used as it is. Refresh and a restart keep a camera that
+already works, so one registered before you updated stays where it was.
 
 A Moonraker webcam set to the MediaMTX or go2rtc WebRTC service is pulled from that server's
 WHEP endpoint. One set to camera-streamer is read from its MJPEG stream, since camera-streamer
