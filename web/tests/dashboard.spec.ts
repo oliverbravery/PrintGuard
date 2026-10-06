@@ -559,6 +559,38 @@ test("sounds held back by the autoplay policy are dropped, not played together l
   await expect.poll(() => page.evaluate(() => (window as any).__tones)).toBe(1);
 });
 
+test("a sound file asked for by a plugin that is only a worker is fetched and played", async ({ page }) => {
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__played = [];
+    win.Audio = class {
+      constructor(public src: string) {}
+      play() {
+        win.__played.push(this.src);
+        return Promise.resolve();
+      }
+    };
+  });
+  const plugin = {
+    id: "chimes",
+    manifest: {
+      id: "chimes", name: "Chimes", version: "1.0.0", description: "", author: "", homepage: "", permissions: ["sound"],
+      reasons: {}, surfaces: [], platforms: [], urls: [], secrets: {}, provides: {}, consumes: [], oauth: {}, events: [], tick_s: 0,
+    },
+    files: ["worker.js", "ding.mp3"], digests: {}, source: { kind: "zip" }, granted: ["sound"], config: {}, secrets_set: [],
+    verified: false, enabled: true, installed: 0, failure: null,
+  };
+  const state = engine({ plugins: [plugin], plugin_assets: { mp3: "audio/mpeg" }, plugin_event_permissions: {} });
+  await dashboard(page, { engine: state });
+  await emit(page, { event: "state", ...state });
+  const asked = await sent(page, "plugin.code");
+  expect(asked.id).toBe("chimes");
+
+  await emit(page, { event: "plugin_code", id: "chimes", sources: { "worker.js": "" }, assets: { "ding.mp3": "AAAA" }, req_id: asked.req_id });
+  await emit(page, { event: "plugin_effect", id: "chimes", effect: { kind: "sound", asset: "ding.mp3" } });
+  expect(await page.evaluate(() => (window as any).__played)).toEqual([expect.stringMatching(/^blob:/)]);
+});
+
 test("a camera floating in picture in picture keeps playing behind a dialog and in a hidden tab", async ({ page }) => {
   let starts = 0;
   await page.route(/\/hls\/c1\//, () => void starts++);

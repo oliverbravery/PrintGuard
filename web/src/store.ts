@@ -408,6 +408,7 @@ export const useStore = create<PgStore>((set, get) => {
       [
         ...[...wanted].filter((id) => !hosts.has(id)),
         ...engine.plugins.filter((p) => p.enabled && p.files.includes("panel.html") && !get().pluginPanels[p.id]).map((p) => p.id),
+        ...engine.plugins.filter((p) => p.enabled && p.granted.includes("sound") && !get().pluginAssets[p.id]).map((p) => p.id),
       ].filter((id) => !get().pluginFailures[id]),
     );
     for (const id of missing) {
