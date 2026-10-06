@@ -39,8 +39,8 @@ const frameId = (index: number) => index.toString(16).padStart(12, "0");
 const register = (address: string, headers: Record<string, string> = { "Content-Type": "application/json" }) =>
   exports.default.fetch(`${ORIGIN}/register`, { method: "POST", headers: { "CF-Connecting-IP": address, ...headers }, body: "{}" });
 
-const upload = (token: string, address: string, frame: string, body: Uint8Array = JPEG, changes: Record<string, unknown> = {}) =>
-  exports.default.fetch(`${ORIGIN}/frame`, {
+const frameRequest = (token: string, address: string, frame: string, body: Uint8Array = JPEG, changes: Record<string, unknown> = {}) =>
+  new Request(`${ORIGIN}/frame`, {
     method: "PUT",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -51,6 +51,53 @@ const upload = (token: string, address: string, frame: string, body: Uint8Array 
     },
     body,
   });
+
+const upload = (token: string, address: string, frame: string, body: Uint8Array = JPEG, changes: Record<string, unknown> = {}) =>
+  exports.default.fetch(frameRequest(token, address, frame, body, changes));
+
+type PendingPut = { key: string; finish: (error?: Error) => Promise<void> };
+
+const holdingPuts = (bucket: R2Bucket) => {
+  const pending: PendingPut[] = [];
+  const held = new Proxy(bucket, {
+    get(target, property) {
+      const value = Reflect.get(target, property);
+      if (property !== "put") return typeof value === "function" ? value.bind(target) : value;
+      return (key: string, body: Uint8Array, options: R2PutOptions) =>
+        new Promise((resolve, reject) =>
+          pending.push({ key, finish: async (error) => (error ? reject(error) : resolve(await target.put(key, body, options))) }),
+        );
+    },
+  });
+  return { bucket: held, pending };
+};
+
+const countingCalls = (bucket: R2Bucket, method: "put" | "list") => {
+  const calls: unknown[][] = [];
+  const counted = new Proxy(bucket, {
+    get(target, property) {
+      const value = Reflect.get(target, property);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        if (property === method) calls.push(args);
+        return value.apply(target, args);
+      };
+    },
+  });
+  return { bucket: counted, calls };
+};
+
+const until = async (condition: () => boolean) => {
+  while (!condition()) await new Promise((resolve) => setTimeout(resolve, 1));
+};
+
+const gateState = () =>
+  runInDurableObject(env.GATE.getByName("gate"), (_gate, state) => ({
+    rows: state.storage.sql.exec<{ scope: string; key: string; n: number }>("SELECT scope, key, n FROM counts ORDER BY scope, key").toArray(),
+    stored: state.storage.kv.get<number>("stored_bytes") ?? 0,
+  }));
+
+const hubCount = async (hub: string) => (await gateState()).rows.find(({ scope, key }) => scope === "hub" && key === hub)?.n;
 
 const NEW = { bytes: 10, uploads: 1 };
 
@@ -168,6 +215,61 @@ describe("uploading a frame", () => {
     const response = await worker.fetch(new Request(`${ORIGIN}/register`, { method: "POST" }), { ...env, ACCEPTING: "false" });
     expect(response.status).toBe(503);
     expect(await code(response)).toBe("closed");
+  });
+});
+
+describe("two requests for one frame at once", () => {
+  const PUT_REFUSED = new Error("put: Reduce your concurrent request rate for the same object. (10058)");
+
+  const startRace = async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const hub = token.split(".")[0];
+    const racing = holdingPuts(env.FRAMES);
+    const raced = { ...env, FRAMES: racing.bucket };
+    const holder = worker.fetch(frameRequest(token, "203.0.113.60", frameId(7000)), raced).then(
+      (response) => response.status,
+      () => "failed",
+    );
+    await until(() => racing.pending.length === 1);
+    const duplicate = worker.fetch(frameRequest(token, "198.51.100.9", frameId(7000)), raced);
+    await until(() => racing.pending.length === 2);
+    return { hub, puts: racing.pending, holder, duplicate };
+  };
+
+  const expectCountedOnce = async (hub: string) => {
+    expect((await env.FRAMES.list({ prefix: hub })).objects.map((object) => object.size)).toEqual([JPEG.byteLength]);
+    expect(await hubCount(hub)).toBe(1);
+    const { stored } = await gateState();
+    const inBucket = (await env.FRAMES.list()).objects.reduce((bytes, object) => bytes + object.size, 0);
+    expect(stored).toBe(inBucket);
+  };
+
+  it("keeps the frame counted when the first write fails after the second one lands", async () => {
+    const { hub, puts, holder, duplicate } = await startRace();
+    await puts[1].finish();
+    expect((await duplicate).status).toBe(201);
+    await puts[0].finish(PUT_REFUSED);
+    expect(await holder).toBe("failed");
+    await expectCountedOnce(hub);
+  });
+
+  it("counts the frame when the first write fails before the second one lands", async () => {
+    const { hub, puts, holder, duplicate } = await startRace();
+    await puts[0].finish(PUT_REFUSED);
+    expect(await holder).toBe("failed");
+    await puts[1].finish();
+    expect((await duplicate).status).toBe(201);
+    await expectCountedOnce(hub);
+  });
+
+  it("takes the count back when every write fails", async () => {
+    const { hub, puts, holder, duplicate } = await startRace();
+    await puts[0].finish(PUT_REFUSED);
+    await puts[1].finish(PUT_REFUSED);
+    expect(await holder).toBe("failed");
+    await expect(duplicate).rejects.toThrow();
+    expect((await env.FRAMES.list({ prefix: hub })).objects).toEqual([]);
+    expect(await hubCount(hub)).toBe(0);
   });
 });
 

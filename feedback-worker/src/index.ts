@@ -83,6 +83,7 @@ async function storeFrame(request: Request, env: Env): Promise<Response> {
     await gate.release(hub, network, key, reserved);
     throw error;
   }
+  if (reserved.uploads === 0) await gate.stored(hub, network, key, jpeg.byteLength);
   return Response.json({}, { status: 201 });
 }
 

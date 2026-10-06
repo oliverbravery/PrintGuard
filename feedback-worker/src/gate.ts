@@ -54,8 +54,17 @@ export class Gate extends DurableObject<Env> {
   }
 
   release(hub: string, network: string, frame: string, reservation: Reservation): void {
+    if (reservation.uploads === 0 || this.count("stored", frame) > 0) return;
     this.tally(hub, network, -reservation.bytes, -reservation.uploads);
     this.add("frame", frame, -reservation.bytes);
+  }
+
+  stored(hub: string, network: string, frame: string, bytes: number): void {
+    if (this.count("frame", frame) === 0) {
+      this.tally(hub, network, bytes, 1);
+      this.add("frame", frame, bytes);
+    }
+    this.add("stored", frame, 1);
   }
 
   beginRecount(): void {
