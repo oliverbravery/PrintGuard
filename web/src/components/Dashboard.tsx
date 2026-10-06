@@ -96,9 +96,8 @@ export function Dashboard() {
         tabIndex={-1}
         className="mx-auto max-w-[1500px] px-4 py-5 sm:px-6"
       >
-        {monitors.length === 0 ? (
-          <GettingStarted />
-        ) : (
+        {monitors.length === 0 && <GettingStarted />}
+        {visible.length > 0 && (
           <Sortable
             ids={visible.map((m) => m.id)}
             strategy={rectSortingStrategy}

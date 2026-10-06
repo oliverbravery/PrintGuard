@@ -626,6 +626,15 @@ test("an updated plugin restarts on its new code and is read again for the conse
   await expect.poll(() => drawn(page)).toBe("v2{}");
 });
 
+test("a plugin panel is drawn on a hub with no monitors yet, beneath the way to add one", async ({ page }) => {
+  await dashboard(page);
+  await emit(page, { event: "state", ...withPlugins([demoPlugin()]), monitors: [], cameras: [] });
+  await emit(page, { event: "plugin_code", id: "demo", sources: { "plugin.js": showing("v1") }, assets: {}, req_id: await askedForCode(page) });
+
+  await expect(page.getByRole("heading", { name: "Demo" })).toBeVisible();
+  await expect(page.getByText("Register a camera", { exact: true }).first()).toBeVisible();
+});
+
 test("a removed plugin leaves nothing of its own behind and frees its files", async ({ page }) => {
   await dashboard(page);
   await page.evaluate(() => {
