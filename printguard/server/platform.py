@@ -680,6 +680,17 @@ class DiskFileStore:
         """Where a key's bytes live, for serving straight from disk."""
         return self.root / key
 
+    @staticmethod
+    def _create_private(path: Path) -> Any:
+        """Opens a file for writing that nobody but the hub's user may read.
+
+        Held to the mode before anything is written too, since one left behind
+        by a hub that was killed keeps the mode it had.
+        """
+        path.touch(mode=0o600)
+        path.chmod(0o600)
+        return path.open("wb")
+
     async def store(self, key: str, chunks: AsyncIterable[bytes]) -> int:
         """Writes a file from its chunks, replacing any under that key.
 
@@ -689,7 +700,7 @@ class DiskFileStore:
         partial = self.path(f"{key}.part")
         size = 0
         try:
-            with await asyncio.to_thread(partial.open, "wb") as handle:
+            with await asyncio.to_thread(self._create_private, partial) as handle:
                 async for chunk in chunks:
                     await asyncio.to_thread(handle.write, chunk)
                     size += len(chunk)

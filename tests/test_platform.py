@@ -945,3 +945,21 @@ def test_a_live_view_listener_that_never_answers_fails_the_push_instead_of_stall
 
     assert not thread.is_alive(), "the push never gave up on a listener that does not answer"
     assert isinstance(outcome[0], av.error.FFmpegError)
+
+
+async def test_a_stored_file_is_readable_only_by_whoever_runs_the_hub(tmp_path: Path) -> None:
+    """Review frames and sliced files sat at 0644 beside a state file at 0600."""
+
+    async def chunks() -> object:
+        yield b"G28\n"
+
+    store = DiskFileStore(tmp_path)
+    leftover = tmp_path / "benchy.gcode.part"
+    leftover.write_bytes(b"from a hub that was killed")
+    leftover.chmod(0o644)
+
+    await store.store("benchy.gcode", chunks())
+    await store.store("frame.jpg", chunks())
+
+    assert oct((tmp_path / "benchy.gcode").stat().st_mode)[-3:] == "600"
+    assert oct((tmp_path / "frame.jpg").stat().st_mode)[-3:] == "600"
