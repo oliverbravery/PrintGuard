@@ -626,6 +626,15 @@ test("an updated plugin restarts on its new code and is read again for the conse
   await expect.poll(() => drawn(page)).toBe("v2{}");
 });
 
+test("a plugin's secret field is never filled by a password manager", async ({ page }) => {
+  await dashboard(page, { engine: withPlugins([demoPlugin({ manifest: { ...demoPlugin().manifest, secrets: { api_key: "Your key" } } })]) });
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await emit(page, { event: "catalogue", plugins: [] });
+  await page.getByRole("button", { name: "Demo", exact: true }).click();
+
+  await expect(page.getByPlaceholder("Not set")).toHaveAttribute("autocomplete", "new-password");
+});
+
 test("a plugin panel is drawn on a hub with no monitors yet, beneath the way to add one", async ({ page }) => {
   await dashboard(page);
   await emit(page, { event: "state", ...withPlugins([demoPlugin()]), monitors: [], cameras: [] });

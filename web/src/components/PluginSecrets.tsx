@@ -42,6 +42,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
           <input
             className="field"
             type="password"
+            autoComplete="new-password"
             placeholder={plugin.secrets_set.includes(name) ? "Stored, type to replace" : "Not set"}
             value={draft[name] ?? ""}
             onChange={(event) => setDraft({ ...draft, [name]: event.target.value })}
