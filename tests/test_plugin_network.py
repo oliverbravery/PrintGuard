@@ -142,6 +142,18 @@ async def test_an_answer_at_the_cap_arrives_whole(gzipped: bool) -> None:
     assert asked == ["gzip"], "the plugin asked for an encoding nothing here can count while it inflates"
 
 
+@pytest.mark.parametrize("body", ['{"temp": 1e999}', '{"temp": NaN}', "[Infinity]"])
+async def test_an_answer_holding_a_number_json_does_not_allow_is_handed_over_as_text(body: str) -> None:
+    """A dashboard drops its socket on an event it cannot parse, so this must never reach one as a number."""
+    platform = FakePlatform()
+    over_httpx(platform, lambda request: httpx.Response(200, content=body.encode()))
+    async with engine_with(platform, manifest("net", urls=[f"{API}/v1/*"])) as engine:
+        answer = await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/feed"})
+
+    assert next(e["body"] for e in answer if e["event"] == "http") == body
+    json.dumps(answer, allow_nan=False)
+
+
 async def test_a_compressed_answer_is_refused_while_it_inflates() -> None:
     """48 MB of zeros is 47 KB of gzip, and httpx inflates each chunk whole before handing it over."""
     bomb = gzip.compress(bytes(48 * 1024 * 1024))
