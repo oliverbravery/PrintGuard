@@ -9,7 +9,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Generic, Protocol, TypeVar
 
+from . import credentials
 from .cameras import CAMERA_DEFAULTS
+from .integrations import INTEGRATIONS
 from .monitors import monitor_watching
 from .platform import FrameSource
 
@@ -126,11 +128,11 @@ class Camera:
         self.last_result = result
 
     def public(self) -> dict[str, Any]:
-        """Serialises the camera with live stats for the state event."""
+        """Serialises the camera with live stats for the state event, its source without credentials."""
         return {
             "id": self.id,
             "name": self.name,
-            "source": self.source,
+            "source": credentials.public_config(self.source, credentials.SOURCE_SECRETS),
             "printer_id": self.printer_id,
             "declared": self.declared,
             "max_fps": round(self.max_fps, 2),
@@ -209,12 +211,19 @@ class Printer:
         return changed
 
     def public(self) -> dict[str, Any]:
-        """Serialises the printer with its live state for the state event."""
+        """Serialises the printer with its live state for the state event.
+
+        The config goes without its secret fields, which ``secrets_set`` names
+        where one is stored. A provider this version has no adapter for
+        declares none, so every field of its config is taken as one.
+        """
+        secrets = INTEGRATIONS[self.provider].secret_keys() if self.provider in INTEGRATIONS else set(self.config)
         return {
             "id": self.id,
             "name": self.name,
             "provider": self.provider,
-            "config": self.config,
+            "config": credentials.public_config(self.config, secrets),
+            "secrets_set": credentials.secrets_set(self.config, secrets),
             "device_state": self.device_state,
             "online": self.online,
         }

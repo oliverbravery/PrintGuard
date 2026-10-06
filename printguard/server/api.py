@@ -20,9 +20,6 @@ from fastapi.routing import APIRoute
 from pydantic import AfterValidator, BaseModel, ConfigDict
 
 from ..engine.engine import Engine
-from ..engine.integrations import INTEGRATIONS
-from ..engine.notifiers import NOTIFIERS
-from ..engine.reports import is_url, scrub_url, scrub_urls
 from ..engine.tokens import SCOPE_ORDER, expand_scope, hash_secret
 from .events import require_finite
 from .prints import PrintUpload, capped, file_response, receive_print
@@ -269,93 +266,18 @@ def _find(items: list[dict[str, Any]], item_id: str, kind: str) -> dict[str, Any
     raise HTTPException(404, f"no {kind} {item_id!r}")
 
 
-def _secret_keys(adapter: Any) -> set[str]:
-    return adapter.secret_keys() if adapter else set()
-
-
-def _public_config(config: dict[str, Any], adapter: Any) -> dict[str, Any]:
-    """Drops the values an adapter's schema marks secret and scrubs the URLs left."""
-    return scrub_urls({key: value for key, value in config.items() if key not in _secret_keys(adapter)})
-
-
-ADDRESS_FIELDS = ("base_url", "host", "port", "url")
-"""The config fields that say where a stored secret is sent."""
-
-
-def _stored_secrets(config: dict[str, Any], stored: dict[str, Any], secrets: set[str]) -> dict[str, Any]:
-    """Puts back the credentials a client could not have read.
-
-    A read gives a config with its secret fields dropped and its URLs scrubbed,
-    so a client that edits one and sends it back has neither. A secret is only
-    put back for the address it was stored with, or an edit could point a
-    printer or the broker somewhere else and have the hub present the key there.
-
-    Args:
-        config: The config a client sent.
-        stored: The config the engine holds for the same thing.
-        secrets: The fields its schema marks secret.
-
-    Returns:
-        The client's config, with each secret field it left out or blank and
-        each URL it sent back scrubbed taken from the stored one. A secret
-        field sent as null is cleared, which is the one way to remove one.
-
-    Raises:
-        HTTPException: 400 when the address changed and a stored secret was
-            left out or blank.
-    """
-    kept = {key: stored[key] for key in secrets if key in stored and config.get(key, "") == ""}
-    cleared = {key: "" for key in secrets if key in config and config[key] is None}
-    unscrubbed = {key: stored[key] for key, value in config.items() if is_url(stored.get(key)) and value == scrub_url(stored[key])}
-    merged = {**config, **kept, **cleared, **unscrubbed}
-    held = sorted(key for key, value in kept.items() if value)
-    if held and any(merged.get(field) != stored.get(field) for field in ADDRESS_FIELDS):
-        raise HTTPException(400, f"send {' and '.join(held)} again, since a stored secret is only kept for the address it was saved with")
-    return merged
-
-
-def _public_printer(printer: dict[str, Any]) -> dict[str, Any]:
-    config = _public_config(printer.get("config", {}), INTEGRATIONS.get(printer.get("provider") or ""))
-    return {**printer, "config": config}
-
-
-def _public_camera(camera: dict[str, Any]) -> dict[str, Any]:
-    """Drops camera-source credentials a printer integration embedded."""
-    source = {key: value for key, value in (camera.get("source") or {}).items() if key != "access_code"}
-    if source.get("url"):
-        source["url"] = scrub_url(source["url"])
-    return {**camera, "source": source}
-
-
 def public_state(engine: Engine) -> dict[str, Any]:
-    """The engine snapshot with linked-service credentials stripped.
+    """The engine snapshot without what only the dashboard is given.
 
-    The dashboard reads the engine's full state over the WebSocket, where trust
-    is total; this read surface - REST and the MCP tools derived from it - must
-    report status without leaking the printer and notifier credentials those
-    configs embed, nor the access codes a printer-exposed camera source carries.
-    Redaction reuses the secret fields each adapter's schema already declares
-    rather than enumerating credentials here, so a notifier this version does
-    not know, whose secret fields nothing declares, is left out whole. A
-    plugin's store is left out
-    whatever the token's scope, since a plugin may keep a session or anything
-    else it was told in it, and nothing on this surface writes one. The API
-    tokens are left out as well, since only the dashboard issues and revokes
-    them and a read token has no call to list the others.
+    The snapshot already carries no stored secret. A plugin's store is left
+    out whatever the token's scope, since a plugin may keep a session or
+    anything else it was told in it, and nothing on this surface writes one.
+    The API tokens are left out as well, since only the dashboard issues and
+    revokes them and a read token has no call to list the others.
     """
     state = engine.state_event()
     del state["tokens"]
     state["plugins"] = [{key: value for key, value in plugin.items() if key != "config"} for plugin in state["plugins"]]
-    state["printers"] = [_public_printer(printer) for printer in state["printers"]]
-    state["cameras"] = [_public_camera(camera) for camera in state["cameras"]]
-    notifiers = state["settings"].get("notifiers", {})
-    mqtt = state["settings"].get("mqtt") or {}
-    state["settings"] = {
-        **state["settings"],
-        "notifiers": {pid: _public_config(config, NOTIFIERS[pid]) for pid, config in notifiers.items() if pid in NOTIFIERS},
-        "mqtt": {**mqtt, "password": ""} if mqtt.get("password") else mqtt,
-        "catalogue_url": scrub_url(state["settings"]["catalogue_url"]),
-    }
     return state
 
 
@@ -476,11 +398,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
 
         A secret config field left out or blank keeps its stored value, and null clears it.
         """
-        patch = body.model_dump(exclude_none=True)
-        stored = engine.printers.get(printer_id)
-        if stored and "config" in patch and patch.get("provider", stored.provider) == stored.provider:
-            patch["config"] = _stored_secrets(patch["config"], stored.config, _secret_keys(INTEGRATIONS.get(stored.provider)))
-        await engine.request({"cmd": "printer.update", "id": printer_id, "patch": patch})
+        await engine.request({"cmd": "printer.update", "id": printer_id, "patch": body.model_dump(exclude_none=True)})
         return _find(public_state(engine)["printers"], printer_id, "printer")
 
     @api.delete("/printers/{printer_id}", operation_id="remove_printer", tags=["manage"])
@@ -621,13 +539,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
 
         A notifier secret or the MQTT password left out or blank keeps its stored value, and null clears it.
         """
-        patch = body.model_dump(exclude_none=True)
-        stored = engine.settings.get("notifiers", {})
-        for provider, config in patch.get("notifiers", {}).items():
-            patch["notifiers"][provider] = _stored_secrets(config, stored.get(provider, {}), _secret_keys(NOTIFIERS.get(provider)))
-        if "mqtt" in patch:
-            patch["mqtt"] = _stored_secrets(patch["mqtt"], engine.settings.get("mqtt") or {}, {"password"})
-        await engine.request({"cmd": "settings.update", "patch": patch})
+        await engine.request({"cmd": "settings.update", "patch": body.model_dump(exclude_none=True)})
         return public_state(engine)["settings"]
 
     @api.post("/notifiers/test", operation_id="test_notifier", tags=["manage"])

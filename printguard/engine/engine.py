@@ -20,7 +20,7 @@ from typing import Any, Awaitable, Callable, Coroutine
 
 import numpy as np
 
-from . import appearance, feedback, gcode, logs, oauth, plugins, reports, updates, urls, vision
+from . import appearance, credentials, feedback, gcode, logs, oauth, plugins, reports, updates, urls, vision
 from .cameras import CAMERA_DEFAULTS, declared_camera_id, same_stream, sanitise_camera, tidy_stream_url
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
@@ -395,6 +395,10 @@ class Engine:
         the dashboard stops its half of a plugin when the hub has stopped the
         other. ``startup_warnings`` is what start found wrong, kept until the
         hub restarts for a dashboard that was not there to hear it.
+
+        No stored secret is in it. Each config goes without its secret fields
+        and with its addresses scrubbed, and ``secrets_set`` names the ones
+        that are stored, so a form can say a field is saved without reading it.
         """
         plugins_running = self.platform.plugin_runtime is not None
         return {
@@ -416,7 +420,8 @@ class Engine:
                 }
                 for monitor in self.monitors.values()
             ],
-            "settings": self.settings,
+            "settings": credentials.public_settings(self.settings),
+            "secrets_set": credentials.settings_secrets_set(self.settings),
             "tokens": [t.public() for t in self.tokens.values()],
             "stats": self.scheduler.stats(),
             "integrations": integrations_meta(),
@@ -1223,13 +1228,19 @@ class Engine:
     async def _cmd_printer_update(self, message: dict[str, Any]) -> None:
         """Applies a patch to a printer, forgetting the status read through connection details it no longer has.
 
+        A secret the patch's config leaves out or blank keeps its stored
+        value, unless the provider changed, and one sent as null is cleared.
+
         The new details are in place before anything is awaited, so an answer
         from the service it had is dropped instead of landing on the new one.
         """
         existing = self.printers.get(message["id"])
         if not existing:
             raise LookupError(f"no printer {message['id']}")
-        record = sanitise_printer(existing.id, message.get("patch", {}), existing.persisted())
+        patch = dict(message.get("patch", {}))
+        if "config" in patch and patch.get("provider", existing.provider) == existing.provider:
+            patch["config"] = credentials.keep_stored(patch["config"], existing.config, INTEGRATIONS[existing.provider].secret_keys())
+        record = sanitise_printer(existing.id, patch, existing.persisted())
         INTEGRATIONS[record["provider"]].require(record["config"])
         reports.require_splittable(record["config"].values())
         was = (existing.provider, existing.config)
@@ -1291,19 +1302,24 @@ class Engine:
         """Reads a printer's state from connection details that need not be registered.
 
         A connection the adapter keeps open is closed again, unless a
-        registered printer is the one using it.
+        registered printer is the one using it. With the ``id`` of a registered
+        printer of the same provider, a secret the config leaves blank is the
+        one stored for it.
         """
         adapter = INTEGRATIONS.get(message.get("provider") or "")
         if not adapter:
             raise RuntimeError(f"unknown provider {message.get('provider')!r}")
         config = message.get("config", {})
+        stored = self.printers.get(message.get("id") or "")
         try:
+            if stored and stored.provider == adapter.id:
+                config = credentials.keep_stored(config, stored.config, adapter.secret_keys())
             adapter.require(config)
             state = await adapter.fetch_state(self.platform.http, config)
             ok = state.status.value not in ("offline", "unknown")
             self.emit({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
         except Exception as exc:
-            self.emit({"event": "printer_test", "ok": False, "status": None, "error": logs.describe(exc), "req_id": message.get("req_id")})
+            self.emit({"event": "printer_test", "ok": False, "status": None, "error": self._scrubbed(logs.describe(exc)), "req_id": message.get("req_id")})
         finally:
             used = (adapter.connection_key(p.config) for p in self.printers.values() if p.provider == adapter.id)
             if adapter.connection_key(config) not in used:
@@ -1523,29 +1539,49 @@ class Engine:
         )
 
     async def _cmd_notify_test(self, message: dict[str, Any]) -> None:
-        """Sends a test alert with a blank picture, the request a defect alert makes."""
+        """Sends a test alert with a blank picture, the request a defect alert makes.
+
+        A secret the config leaves blank is the one stored for that notifier.
+        """
         adapter = NOTIFIERS.get(message.get("provider") or "")
         if not adapter:
             raise RuntimeError(f"unknown notifier {message.get('provider')!r}")
         try:
-            adapter.require(message.get("config", {}))
+            config = credentials.keep_stored(message.get("config", {}), self.settings["notifiers"].get(adapter.id, {}), adapter.secret_keys())
+            adapter.require(config)
             picture = await self.platform.encode_jpeg(np.zeros(TEST_PICTURE_SHAPE, np.uint8))
-            await adapter.send(self.platform.http, message.get("config", {}), "PrintGuard test", "Notifications are working.", picture)
+            await adapter.send(self.platform.http, config, "PrintGuard test", "Notifications are working.", picture)
             self.emit({"event": "notify_test", "provider": adapter.id, "ok": True, "req_id": message.get("req_id")})
         except Exception as exc:
-            self.emit({"event": "notify_test", "provider": adapter.id, "ok": False, "error": logs.describe(exc), "req_id": message.get("req_id")})
+            self.emit({"event": "notify_test", "provider": adapter.id, "ok": False, "error": self._scrubbed(logs.describe(exc)), "req_id": message.get("req_id")})
 
     async def _cmd_settings_update(self, message: dict[str, Any]) -> None:
         """Applies a settings patch, switching the inference runtime first if it changes.
 
         Only the keys the patch names are written once the switch is done, so
-        a change another client made while it ran is kept.
+        a change another client made while it ran is kept. A notifier secret
+        or the MQTT password left out or blank keeps its stored value and null
+        clears it, and the catalogue address sent back as the snapshot shows
+        it keeps its login.
 
         Raises:
-            ValueError: If a value in the patch is not one the setting takes.
+            ValueError: If a value in the patch is not one the setting takes,
+                or an address changed while a stored secret was being kept.
             RuntimeError: If the runtime could not be switched.
         """
         patch = {k: v for k, v in message.get("patch", {}).items() if k in SETTINGS_DEFAULTS}
+        for provider in patch.get("notifiers", {}):
+            if provider not in NOTIFIERS:
+                raise ValueError(f"unknown notifier {provider!r}")
+        if "notifiers" in patch:
+            patch["notifiers"] = {
+                provider: credentials.keep_stored(config, self.settings["notifiers"].get(provider, {}), NOTIFIERS[provider].secret_keys())
+                for provider, config in patch["notifiers"].items()
+            }
+        if "mqtt" in patch:
+            patch["mqtt"] = credentials.keep_stored(patch["mqtt"], self.settings["mqtt"], credentials.MQTT_SECRETS)
+        if "catalogue_url" in patch:
+            patch["catalogue_url"] = credentials.keep_url(patch["catalogue_url"], self.settings["catalogue_url"])
         settings = {**self.settings, **patch}
         if settings["inference_runtime"] not in ("auto", "litert", "onnx"):
             raise ValueError("inference runtime must be auto, litert or onnx")
@@ -1559,8 +1595,6 @@ class Engine:
         if not isinstance(settings["catalogue_url"], str):
             raise ValueError("catalogue_url is an address")
         for provider, config in patch.get("notifiers", {}).items():
-            if provider not in NOTIFIERS:
-                raise ValueError(f"unknown notifier {provider!r}")
             reports.require_splittable(config.values())
             NOTIFIERS[provider].require(config)
         settings["fault_grace_s"] = clamp_grace(settings["fault_grace_s"])
