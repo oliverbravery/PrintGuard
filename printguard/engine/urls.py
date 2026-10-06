@@ -32,7 +32,7 @@ PATTERN = re.compile(
 )
 
 LOCAL_HOSTNAMES = ("localhost",)
-LOCAL_SUFFIXES = (".local", ".localhost", ".internal", ".home", ".lan")
+LOCAL_SUFFIXES = (".local", ".localhost", ".internal", ".home", ".lan", ".home.arpa")
 """Names that resolve inside a network by convention rather than by address."""
 
 

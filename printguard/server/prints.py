@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import HTTPException
@@ -58,6 +59,24 @@ def record_of(engine: Engine, print_id: str) -> PrintFile:
     if record is None:
         raise HTTPException(404, f"no print {print_id!r}")
     return record
+
+
+def stored_path(engine: Engine, record: PrintFile, key: str) -> Path:
+    """Where the store keeps one of a print's files.
+
+    Args:
+        engine: The hub's engine.
+        record: The print the file belongs to.
+        key: The file's key in the store.
+
+    Raises:
+        HTTPException: 404 when the file is gone from the data directory, which
+            would otherwise be answered with the path it was looked for at.
+    """
+    path = store_of(engine).path(key)
+    if not path.is_file():
+        raise HTTPException(404, f"print {record.id!r} has lost its file")
+    return path
 
 
 async def receive_print(engine: Engine, upload: PrintUpload, body: AsyncIterator[bytes]) -> PrintFile:
@@ -181,7 +200,7 @@ async def capped(body: AsyncIterator[bytes], limit: int) -> AsyncIterator[bytes]
 def file_response(engine: Engine, print_id: str) -> Response:
     """The stored file, for downloading."""
     record = record_of(engine, print_id)
-    return FileResponse(store_of(engine).path(record.file_key), media_type="application/octet-stream", filename=record.filename)
+    return FileResponse(stored_path(engine, record, record.file_key), media_type="application/octet-stream", filename=record.filename)
 
 
 async def gcode_response(engine: Engine, print_id: str) -> Response:
@@ -191,7 +210,7 @@ async def gcode_response(engine: Engine, print_id: str) -> Response:
         HTTPException: 404 for binary gcode, which has no text to draw from.
     """
     record = record_of(engine, print_id)
-    path = store_of(engine).path(record.file_key)
+    path = stored_path(engine, record, record.file_key)
     if record.ext == "3mf":
         _, plate = await asyncio.to_thread(lambda: gcode.plate_gcode(path.read_bytes()))
         return Response(plate, media_type="text/plain")
@@ -210,7 +229,7 @@ def thumbnail_response(engine: Engine, print_id: str) -> Response:
     if record.thumbnail is None:
         raise HTTPException(404, f"print {print_id!r} has no preview")
     return FileResponse(
-        store_of(engine).path(record.thumbnail_key),
+        stored_path(engine, record, record.thumbnail_key),
         media_type=record.thumbnail,
         headers={"Cache-Control": THUMBNAIL_CACHE_CONTROL},
     )

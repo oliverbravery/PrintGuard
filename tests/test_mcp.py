@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 from unittest.mock import AsyncMock
 
+import httpx
 import mcp.types as mt
 import pytest
 from fastmcp import Client
@@ -13,7 +14,7 @@ from fastmcp import Client
 from fakes import FakePlatform
 from printguard.engine.engine import Engine
 from printguard.server.api import ApiAuth, build_api_app
-from printguard.server.mcp import build_mcp
+from printguard.server.mcp import build_mcp, build_mcp_app
 
 READ_TOOLS = {
     "get_state",
@@ -120,5 +121,37 @@ async def test_unauthorised_control_call_is_denied() -> None:
         async with Client(mcp) as client:
             with pytest.raises(Exception):
                 await client.call_tool("control_printer", {"printer_id": "x", "action": "pause"})
+    finally:
+        await engine.stop()
+
+
+async def test_a_session_is_not_opened_without_a_bearer_once_tokens_exist() -> None:
+    """The tool filter alone answered the handshake with the server's name and version."""
+    engine = Engine(FakePlatform())
+    await engine.start()
+    auth = ApiAuth(internal_token="INT")
+    api_app = build_api_app(auth)
+    api_app.state.engine = engine
+    app = build_mcp_app(api_app, lambda: engine, auth, "INT")
+    handshake = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}},
+    }
+    accept = {"Accept": "application/json, text/event-stream"}
+    try:
+        async with app.lifespan(app), httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+            open_hub = await client.post("/", json=handshake, headers=accept)
+            assert open_hub.status_code == 200 and "PrintGuard" in open_hub.text
+
+            events = await engine.request({"cmd": "token.create", "name": "agent", "scope": "read"})
+            token = next(e["token"] for e in events if e.get("event") == "token_created")
+            for headers in (accept, {**accept, "Authorization": "Bearer pg_wrong"}):
+                refused = await client.post("/", json=handshake, headers=headers)
+                assert refused.status_code == 401 and refused.headers["www-authenticate"] == "Bearer"
+                assert "PrintGuard" not in refused.text
+            held = await client.post("/", json=handshake, headers={**accept, "Authorization": f"Bearer {token}"})
+            assert held.status_code == 200 and "PrintGuard" in held.text
     finally:
         await engine.stop()

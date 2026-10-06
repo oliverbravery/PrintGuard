@@ -33,7 +33,7 @@ import printguard
 
 from ..engine import logs, oauth
 from ..engine.engine import Engine
-from ..engine.urls import LOCAL_HOSTNAMES, LOCAL_SUFFIXES
+from ..engine.urls import DEFAULT_PORTS, LOCAL_HOSTNAMES, LOCAL_SUFFIXES
 from .api import ApiAuth, build_api_app
 from .events import ConflatedEventQueue
 from .mcp import build_mcp_app
@@ -61,6 +61,22 @@ class WebStaticFiles(StaticFiles):
         return response
 
 
+def normalised_origin(origin: str) -> str:
+    """An origin the way a browser writes it, so one listed another way still matches.
+
+    Args:
+        origin: An ``Origin`` header or a ``PRINTGUARD_ORIGINS`` entry.
+
+    Returns:
+        Its scheme and host in lower case, with the port left off when it is
+        the scheme's own.
+    """
+    parts = urlsplit(origin.strip())
+    host = parts.hostname or ""
+    port = "" if parts.port in (None, DEFAULT_PORTS.get(parts.scheme)) else f":{parts.port}"
+    return f"{parts.scheme}://{f'[{host}]' if ':' in host else host}{port}"
+
+
 def origin_allowed(connection: HTTPConnection, allowed: set[str], *, required: bool = False) -> bool:
     """Rejects cross-site WebSocket handshakes, uploads and stream reads the auth proxy cannot screen.
 
@@ -74,7 +90,7 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str], *, required: b
 
     Args:
         connection: The request or handshake.
-        allowed: The origins listed in ``PRINTGUARD_ORIGINS``.
+        allowed: The origins listed in ``PRINTGUARD_ORIGINS``, normalised.
         required: Whether a request that names no origin is refused. A script
             uploading a file sends none, but every browser names one on a
             WebSocket handshake, so the two sockets only a dashboard opens ask
@@ -83,7 +99,7 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str], *, required: b
     origin = connection.headers.get("origin")
     if not origin:
         return not required
-    if origin.rstrip("/") in allowed:
+    if normalised_origin(origin) in allowed:
         return True
     host = connection.headers.get("x-forwarded-host") or connection.headers.get("host")
     return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
@@ -129,6 +145,19 @@ def host_trusted(host: str, named: set[str]) -> bool:
     except ValueError:
         return "." not in name or name in LOCAL_HOSTNAMES or name.endswith(LOCAL_SUFFIXES) or name in named
     return True
+
+
+class McpSlash:
+    """Answers ``/mcp`` as ``/mcp/``, since a mount only takes the path with the slash."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Passes a request on, adding the slash to one for the bare mount path."""
+        if scope["type"] == "http" and scope["path"] == "/mcp":
+            scope = {**scope, "path": "/mcp/", "raw_path": b"/mcp/"}
+        await self._app(scope, receive, send)
 
 
 class HostGuard:
@@ -225,7 +254,10 @@ def create_app() -> FastAPI:
     mediamtx_binary = os.environ.get("MEDIAMTX_BINARY")
     mediamtx_config = os.environ.get("MEDIAMTX_CONFIG", str(REPO_ROOT / "mediamtx.yml"))
     update_asset = os.environ.get("UPDATE_ASSET") or None
-    allowed_origins = {o.strip().rstrip("/") for o in os.environ.get("PRINTGUARD_ORIGINS", "").split(",") if o.strip()}
+    listed_origins = [o.strip() for o in os.environ.get("PRINTGUARD_ORIGINS", "").split(",") if o.strip()]
+    allowed_origins = {normalised_origin(o) for o in listed_origins if urlsplit(o).hostname}
+    for unreadable in (o for o in listed_origins if not urlsplit(o).hostname):
+        logger.warning("PRINTGUARD_ORIGINS entry %s is ignored because it has no scheme. Write it as https://%s", unreadable, unreadable)
     internal_token = secrets.token_urlsafe(32)
     api_auth = ApiAuth(internal_token)
     api_app = build_api_app(api_auth)
@@ -275,7 +307,7 @@ def create_app() -> FastAPI:
     async def gate_allows(request: Request) -> bool:
         """Asks a gating plugin whether a request may proceed.
 
-        Answers are cached per credential and path for a few seconds so a
+        Answers are cached per credential, path and query for a few seconds so a
         dashboard polling HLS does not wake the sandbox on every segment.
         Refusals are never cached, so signing in takes effect at once. The
         cache holds a fixed number of answers, so a flood of made-up cookies
@@ -284,7 +316,13 @@ def create_app() -> FastAPI:
         runtime = app.state.engine.platform.plugin_runtime
         if runtime is None or request.url.path.startswith(GATE_EXEMPT_PREFIXES + runtime.gate_paths()):
             return True
-        key = (request.headers.get("cookie", ""), request.headers.get("authorization", ""), request.method, request.url.path)
+        key = (
+            request.headers.get("cookie", ""),
+            request.headers.get("authorization", ""),
+            request.method,
+            request.url.path,
+            request.url.query,
+        )
         if key in gate_cache:
             return True
         verdict = await runtime.authorise(plugin_request(request, request.method))
@@ -311,6 +349,7 @@ def create_app() -> FastAPI:
             return await call_next(request)
         return Response("refused by a plugin", status_code=403)
 
+    app.add_middleware(McpSlash)
     app.add_middleware(HostGuard, named={urlsplit(origin).hostname or "" for origin in allowed_origins})
 
     @app.api_route("/plugins/{plugin_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
@@ -504,7 +543,11 @@ def create_app() -> FastAPI:
                 if frame.get("bytes") is None:
                     await websocket.close(code=1003, reason="a recording is sent as binary frames")
                     raise WebSocketDisconnect(1003)
-                source.feed(frame["bytes"])
+                try:
+                    source.feed(frame["bytes"])
+                except OverflowError as flooded:
+                    await websocket.close(code=1009, reason=str(flooded))
+                    raise WebSocketDisconnect(1009) from flooded
         except WebSocketDisconnect:
             connected = False
         finally:

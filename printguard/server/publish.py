@@ -20,16 +20,35 @@ from av.video.reformatter import VideoReformatter
 logger = logging.getLogger(__name__)
 
 
+MAX_QUEUED_BYTES = 32 * 1024 * 1024
+
+
 class ChunkStream:
-    """Blocking file-like view over WebSocket chunks for PyAV."""
+    """Blocking file-like view over WebSocket chunks for PyAV.
+
+    The remux reads at the speed the recording plays, so a sender faster than
+    that is refused once ``MAX_QUEUED_BYTES`` wait to be read, rather than
+    having the hub hold all of it. The socket's thread counts what it feeds
+    and the remux's thread what it takes, so neither count is written twice.
+    """
 
     def __init__(self) -> None:
         self._chunks: queue.Queue[bytes | None] = queue.Queue()
         self._buffer = bytearray()
         self._eof = False
+        self._fed = 0
+        self._taken = 0
 
     def feed(self, chunk: bytes | None) -> None:
-        """Queues a chunk, where None marks the end of the stream."""
+        """Queues a chunk, where None marks the end of the stream.
+
+        Raises:
+            OverflowError: When more is already waiting than the stream holds.
+        """
+        if chunk is not None:
+            if self._fed - self._taken > MAX_QUEUED_BYTES:
+                raise OverflowError("the recording arrives faster than it plays")
+            self._fed += len(chunk)
         self._chunks.put(chunk)
 
     def read(self, size: int = -1) -> bytes:
@@ -38,6 +57,7 @@ class ChunkStream:
             if chunk is None:
                 self._eof = True
             else:
+                self._taken += len(chunk)
                 self._buffer.extend(chunk)
         cut = len(self._buffer) if size < 0 else size
         out = bytes(self._buffer[:cut])

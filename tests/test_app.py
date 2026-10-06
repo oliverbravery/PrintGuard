@@ -687,3 +687,121 @@ async def test_a_starting_hub_clears_the_files_no_print_or_review_names(tmp_path
 
 def test_a_host_that_cannot_be_read_is_not_trusted() -> None:
     assert not host_trusted("[::1", set())
+
+
+def test_a_hub_answers_to_a_home_arpa_name_with_no_setup() -> None:
+    """RFC 8375 keeps it for home networks, and it is the domain pfSense hands out."""
+    assert host_trusted("tower.home.arpa:8000", set())
+    assert not host_trusted("tower.in-addr.arpa", set())
+
+
+async def test_an_origin_listed_in_another_case_or_with_its_own_port_is_still_allowed(monkeypatch) -> None:
+    """A proxy that rewrites Host leaves the list as the only thing the socket's origin can match."""
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", "https://Hub.Example.com:443/, hub.example.net")
+    told: list[str] = []
+    monkeypatch.setattr("printguard.server.app.logger.warning", lambda message, *args: told.append(message % args))
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
+
+    async def upload_from(origin: str) -> int:
+        headers = {"host": "printguard:8000", "origin": origin}
+        return (await client.post("/api/prints?filename=a.stl", content=b"solid", headers=headers)).status_code
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert await upload_from("https://hub.example.com") == 400, "the origin was refused, where the file should have been"
+        assert await upload_from("https://hub.example.com:8443") == 403
+        assert await upload_from("http://hub.example.com") == 403
+        assert await upload_from("null") == 403, "an entry with no scheme let a sandboxed page in"
+        assert (await client.get("/api/health", headers={"host": "hub.example.net"})).status_code == 403
+
+    assert len(told) == 2 and "hub.example.net is ignored because it has no scheme" in told[0]
+
+
+async def test_a_recording_sent_faster_than_it_plays_closes_the_publish_socket(monkeypatch) -> None:
+    from printguard.server import publish
+
+    stalled = threading.Event()
+    monkeypatch.setattr(publish, "MAX_QUEUED_BYTES", 4)
+    monkeypatch.setattr(app_module, "remux", lambda source, url: stalled.wait(2))
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(plugin_runtime=None))
+    try:
+        async with Tab(app, "/api/publish/cam") as camera:
+            for _ in range(3):
+                camera.send(bytes=b"\x1a\x45\xdf\xa3")
+            assert await camera.closed() == 1009
+    finally:
+        stalled.set()
+
+
+async def test_a_gate_answer_is_not_reused_for_another_query() -> None:
+    runtime = StubRuntime(verdict=True)
+    app = app_with(runtime)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/?share=one")
+        await client.get("/?share=two")
+        await client.get("/?share=one")
+
+    assert [request["query"] for request in runtime.seen] == [{"share": "one"}, {"share": "two"}]
+
+
+def mounted(app, path: str):
+    """The sub-application the hub mounts at a path."""
+    return next(route.app for route in app.routes if getattr(route, "path", None) == path)
+
+
+async def test_the_mcp_server_answers_without_the_trailing_slash(tmp_path, monkeypatch) -> None:
+    """The static mount took the bare path and answered a POST with a 405."""
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+
+    monkeypatch.setenv("STATIC_DIR", str(tmp_path))
+    engine = Engine(FakePlatform())
+    await engine.start()
+    app = create_app()
+    mounted(app, "/api/v1").state.engine = app.state.engine = engine
+    handshake = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}},
+    }
+    accept = {"Accept": "application/json, text/event-stream"}
+    try:
+        async with (
+            mounted(app, "/mcp").lifespan(app),
+            httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8000") as client,
+        ):
+            for path in ("/mcp", "/mcp/"):
+                answer = await client.post(path, json=handshake, headers=accept)
+                assert answer.status_code == 200 and "PrintGuard" in answer.text, path
+    finally:
+        await engine.stop()
+
+
+async def test_a_print_whose_file_is_gone_is_a_404_that_names_no_path(tmp_path) -> None:
+    from fakes import FakePlatform
+    from test_gcode import PRUSA
+
+    from printguard.engine.engine import Engine
+    from printguard.server.platform import DiskFileStore
+
+    platform = FakePlatform()
+    platform.files = DiskFileStore(tmp_path)
+    engine = Engine(platform)
+    await engine.start()
+    app = create_app()
+    mounted(app, "/api/v1").state.engine = app.state.engine = engine
+    octet = {"Content-Type": "application/octet-stream", "origin": "http://test"}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            print_id = (await client.post("/api/prints?filename=benchy.gcode", content=PRUSA, headers=octet)).json()["id"]
+            for kept in tmp_path.iterdir():
+                kept.unlink()
+            for path in (f"/api/prints/{print_id}/gcode", f"/api/prints/{print_id}/thumbnail", f"/api/v1/prints/{print_id}/file"):
+                gone = await client.get(path)
+                assert gone.status_code == 404 and str(tmp_path) not in gone.text, path
+    finally:
+        await engine.stop()

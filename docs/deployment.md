@@ -169,13 +169,16 @@ is called DNS rebinding.
 | An IP address, such as `http://192.168.1.20:8000` | None |
 | `localhost`, which is what the desktop app uses | None |
 | A name with no dot in it, such as `http://tower:8000` or a Tailscale machine name | None |
-| A name ending `.local`, `.lan`, `.home`, `.internal` or `.localhost` | None |
+| A name ending `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost` | None |
 | Any other name, such as `hub.example.com` or `<machine>.<tailnet>.ts.net` | List it in `PRINTGUARD_ORIGINS` |
 
 ```yaml
     environment:
       PRINTGUARD_ORIGINS: "https://hub.example.com"   # comma-separate several
 ```
+
+Each entry needs its scheme. Capitals and a `:443` or `:80` make no difference, and the hub
+logs a warning at start for an entry it can't read.
 
 Every request for a name that isn't covered gets a `403` that says which line to add, and the
 hub logs the same line once for each name. That includes the REST API, the MCP server and

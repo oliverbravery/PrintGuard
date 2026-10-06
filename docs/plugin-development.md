@@ -720,7 +720,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | What it sees | The same request shape a route gets, with no body. WebSocket handshakes are asked about too, as a `GET` |
 | Under load | A request that waits more than 5 seconds for the gate to be free is refused on its own. The gate is not disabled for it |
 | What stays open | `/api/health` and the gating plugin's own pages, so uptime checks keep working and it can serve its own sign-in page |
-| Caching | An approval is cached for 10 seconds per cookie, authorization header, method and path. A refusal is never cached, so signing in takes effect at once |
+| Caching | An approval is cached for 10 seconds per cookie, authorization header, method, path and query string. A refusal is never cached, so signing in takes effect at once |
 
 ## Limits
 

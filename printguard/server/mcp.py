@@ -8,7 +8,9 @@ content, and classify takes an image the caller supplies (base64) and returns
 the model's verdict. A single
 authorization check resolves the caller's bearer token against the live,
 UI-managed token set through the same ApiAuth the REST layer uses, hiding and
-blocking any tool the caller's scope does not cover.
+blocking any tool the caller's scope does not cover. The HTTP transport asks
+the same question before a session opens, so once tokens exist a caller without
+one is not told the server's name and version either.
 """
 
 from __future__ import annotations
@@ -26,6 +28,10 @@ from fastmcp.server.middleware import AuthMiddleware
 from fastmcp.server.providers.openapi import MCPType, RouteMap
 from fastmcp.utilities.types import Image
 from starlette.applications import Starlette
+from starlette.datastructures import Headers
+from starlette.middleware import Middleware
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..engine.engine import Engine
 from .api import MAX_FRAME_BYTES, ApiAuth, route_scope
@@ -113,6 +119,28 @@ def build_mcp(
     return mcp
 
 
+class BearerGate:
+    """Answers 401 to a request with no valid bearer once tokens exist.
+
+    The tool filter alone lets such a caller open a session and read the
+    server's name, version and instructions, with an empty tool list.
+    """
+
+    def __init__(self, app: ASGIApp, auth: ApiAuth, get_engine: Callable[[], Engine]) -> None:
+        self._app = app
+        self._auth = auth
+        self._get_engine = get_engine
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Passes a request on, or refuses one whose token resolves to nothing."""
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+        elif self._auth.resolve(Headers(scope=scope).get("authorization"), self._get_engine().token_scopes()) is None:
+            await JSONResponse({"detail": "missing or invalid token"}, 401, {"WWW-Authenticate": "Bearer"})(scope, receive, send)
+        else:
+            await self._app(scope, receive, send)
+
+
 def build_mcp_app(
     api_app: FastAPI,
     get_engine: Callable[[], Engine],
@@ -121,4 +149,4 @@ def build_mcp_app(
 ) -> Starlette:
     """Builds the mountable Streamable HTTP app exposing the MCP server."""
     mcp = build_mcp(api_app, get_engine, auth, internal_token)
-    return mcp.http_app(path="/")
+    return mcp.http_app(path="/", middleware=[Middleware(BearerGate, auth=auth, get_engine=get_engine)])
