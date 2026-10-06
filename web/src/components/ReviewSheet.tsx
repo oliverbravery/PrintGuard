@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { clock, isDailyLimit, LIMIT_REASON, sending, waitingMessage } from "../review";
+import { clock, framesLabel, isDailyLimit, LIMIT_REASON, sending, waitingMessage } from "../review";
 import { useStore } from "../store";
 import type { Monitor, ReviewFrame, ReviewSummary } from "../types";
 import { Sheet } from "./Dialog";
@@ -76,7 +76,7 @@ function Progress({ review, onClose }: { review: ReviewSummary; onClose: () => v
   if (review.status === "sent")
     return (
       <div className="space-y-4 px-5 py-4">
-        <p className="text-sm text-text-1">Sent {review.sent} frames. Thank you.</p>
+        <p className="text-sm text-text-1">Sent {framesLabel(review.sent)}. Thank you.</p>
         <button className="btn btn-primary w-full" onClick={onClose}>
           Done
         </button>
@@ -85,14 +85,14 @@ function Progress({ review, onClose }: { review: ReviewSummary; onClose: () => v
   if (sending(review))
     return (
       <p className="px-5 py-4 text-sm text-text-1" role="status">
-        Sending {review.sent} of {review.chosen} frames…
+        Sending {review.sent} of {framesLabel(review.chosen)}…
       </p>
     );
   return (
     <div className="space-y-3 px-5 py-4">
       {review.sent > 0 && (
         <p className="text-sm text-text-1">
-          Sent {review.sent} of {review.chosen} frames.
+          Sent {review.sent} of {framesLabel(review.chosen)}.
         </p>
       )}
       <p className="text-sm text-text-1" role="status">
@@ -147,7 +147,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
       {(review.status === "ready" || review.status === "dismissed") && (
         <div className="space-y-4 px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <p className="text-sm text-text-1">
-            PrintGuard kept {review.frames} frames from this print. Label them and send them to me, and I'll use them to train the detection model.
+            PrintGuard kept {framesLabel(review.frames)} from this print. Label them and send them to me, and I'll use them to train the detection model.
           </p>
           <div>
             <span className="label mb-2 block">Did this print finish fine?</span>
@@ -208,7 +208,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
               </button>
             )}
             <button className="btn btn-primary flex-1" disabled={!outcome || kept.length === 0 || isPending("review.send")} onClick={submit}>
-              Send {kept.length} frames
+              Send {framesLabel(kept.length)}
             </button>
           </div>
         </div>

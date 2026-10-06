@@ -209,6 +209,12 @@ test("a tile asks about its last print only", async ({ page }) => {
   expect(await page.evaluate(() => (window as any).__pg.getState().reviewId)).toBe("r2");
 });
 
+test("one kept frame is not called frames on the tile or in the review sheet", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review({ frames: 1 })] }), reviewId: "r1" });
+  await expect(page.getByRole("button", { name: "Review 1 frame from the last print" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Prusa · review" }).getByText("PrintGuard kept 1 frame from this print.")).toBeVisible();
+});
+
 test("a review answered before its frames arrive still marks the alert frames, and a frame left out can be put back", async ({ page }) => {
   const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "review.get").length);
   const picture = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";

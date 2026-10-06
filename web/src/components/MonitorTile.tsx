@@ -1,5 +1,5 @@
 import { section, toggleHidden, togglePinned } from "../layout";
-import { awaitingReview } from "../review";
+import { awaitingReview, framesLabel } from "../review";
 import { useStore } from "../store";
 import type { DeviceState, Monitor } from "../types";
 import { Feed } from "./Feed";
@@ -126,7 +126,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
       {awaiting && !handle && (
         <div className="px-4 pb-2.5">
           <button className="btn relative z-[3] w-full !text-[0.7rem]" onClick={() => openReview(awaiting.id)}>
-            Review {awaiting.frames} frames from the last print
+            Review {framesLabel(awaiting.frames)} from the last print
           </button>
         </div>
       )}
