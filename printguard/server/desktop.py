@@ -315,6 +315,20 @@ def _listening_socket(port: int) -> socket.socket:
     return listener
 
 
+def _health(port: int) -> Any:
+    """What localhost answers on a port's health route, or None if nothing sensible does."""
+    try:
+        return httpx.get(f"http://localhost:{port}/api/health", trust_env=False).json()
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def _hub_running(port: int) -> bool:
+    """Whether a PrintGuard hub, of any version, already serves a port."""
+    health = _health(port)
+    return isinstance(health, dict) and health.get("ok") is True and "version" in health
+
+
 class _Server:
     """Runs the hub's uvicorn server on a background daemon thread."""
 
@@ -340,11 +354,7 @@ class _Server:
         A program listening on the port over IPv6 does not stop the hub binding it over
         IPv4, and localhost resolves to IPv6 first, so the window would show that program.
         """
-        try:
-            health = httpx.get(f"http://localhost:{self._port}/api/health", trust_env=False).json()
-        except (httpx.HTTPError, ValueError):
-            return False
-        return health == {"ok": True, "version": metadata.version("printguard")}
+        return _health(self._port) == {"ok": True, "version": metadata.version("printguard")}
 
     def start(self) -> bool | None:
         """Starts serving and waits for startup to complete.
@@ -514,7 +524,8 @@ def main() -> None:
     """Console entry point that serves the hub behind a tray icon on the main thread.
 
     The window runs in a child process; closing it leaves the tray and the hub
-    server running so the printer stays watched, and the tray's Quit exits.
+    server running so the printer stays watched, and the tray's Quit exits. Opened while
+    another copy is already running, it shows that copy's dashboard in the browser and exits.
     """
     _configure_environment()
     _set_windows_app_id()
@@ -523,6 +534,10 @@ def main() -> None:
     if _autostart_enabled():
         _set_autostart(True)
     port = int(os.environ.get("PORT", "8000"))
+    if _hub_running(port):
+        logger.info("PrintGuard is already running on :%d, so its dashboard is opening in the browser", port)
+        webbrowser.open(_webview_url(port))
+        return
     server = _Server(port)
     started = server.start()
     if started is None:
