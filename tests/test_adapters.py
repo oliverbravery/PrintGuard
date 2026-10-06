@@ -1002,6 +1002,14 @@ def _fake_centauri(client: FakeCentauri):
     return connect
 
 
+async def test_elegoo_centauri_past_its_estimate_has_no_negative_time_left(monkeypatch) -> None:
+    client = FakeCentauri()
+    client.state.print_info = SimpleNamespace(total_ticks=3000.0, current_ticks=3300.0)
+    monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
+    state = await INTEGRATIONS["elegoo"].fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    assert state.remaining_s == 0
+
+
 @pytest.mark.parametrize(
     ("print_status", "expected"),
     [
