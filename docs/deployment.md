@@ -296,6 +296,7 @@ The desktop app also keeps `printguard.log` there with `printguard.log.1` and `.
 Windows its window's own storage in the `webview` folder. On macOS the window's storage is
 WebKit's, under `~/Library/WebKit`. **Start at login** is kept outside the data directory, as a
 file in `~/Library/LaunchAgents` on macOS and a value under the `Run` registry key on Windows.
+The installed app points it at itself each time it starts, and a copy run from a disk image or from source leaves it alone.
 
 To back up, copy that directory with the hub stopped. In Docker the hub runs as root unless you
 [set a user](#running-the-container-as-your-own-user), so a bind-mounted `state.json` belongs
