@@ -193,10 +193,14 @@ def _unpacked(archive: zipfile.ZipFile, name: str) -> bytes:
     understates it would otherwise be unpacked whole before it was refused.
 
     Raises:
-        ValueError: If the file declares more than the cap.
+        ValueError: If the file declares more than the cap or is stored
+            with a compression other than deflate, which cannot be bounded.
         zipfile.BadZipFile: If it holds more than it declares.
     """
-    declared = archive.getinfo(name).file_size
+    info = archive.getinfo(name)
+    if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+        raise ValueError(f"{name} in this 3mf uses a compression PrintGuard does not read")
+    declared = info.file_size
     if declared > MAX_MEMBER_BYTES:
         raise ValueError(f"{name} in this 3mf unpacks to more than {MAX_MEMBER_BYTES // 1024 // 1024} MB")
     with archive.open(name) as member:

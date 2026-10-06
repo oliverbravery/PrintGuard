@@ -414,3 +414,21 @@ def test_a_plate_that_understates_its_size_is_not_unpacked_whole() -> None:
     finally:
         tracemalloc.stop()
     assert peak < 4 * 1024 * 1024, f"{peak // 1024 // 1024} MB was inflated for a plate that declared 1 KB"
+
+
+@pytest.mark.parametrize("compression", [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_a_3mf_member_packed_with_anything_but_deflate_is_refused_before_it_is_read(compression: int) -> None:
+    packed = io.BytesIO()
+    with zipfile.ZipFile(packed, "w", compression) as archive:
+        archive.writestr("Metadata/plate_1.gcode", b"G1 X1\n")
+    with pytest.raises(ValueError, match="compression PrintGuard does not read"):
+        gcode.inspect(packed.getvalue(), "3mf")
+    with pytest.raises(ValueError, match="compression PrintGuard does not read"):
+        gcode.retemper(packed.getvalue(), "3mf", {"nozzle": 210.0})
+
+
+def test_a_3mf_stored_without_compression_is_still_read() -> None:
+    packed = io.BytesIO()
+    with zipfile.ZipFile(packed, "w", zipfile.ZIP_STORED) as archive:
+        archive.writestr("Metadata/plate_1.gcode", PRUSA)
+    assert gcode.inspect(packed.getvalue(), "3mf").meta["slicer"] == "PrusaSlicer 2.8.1"
