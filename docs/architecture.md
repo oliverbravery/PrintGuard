@@ -525,8 +525,9 @@ The timings are constants at the top of [`engine/watchdog.py`](../printguard/eng
 | `RECOVER_HOLD_S`, `FLAP_HOLD_MAX_S` | 60 s, 900 s | The first recovery hold, and the ceiling it doubles towards |
 | `STALL_GRACE_S` | 30 s | How long an online camera may go without a completed inference before it counts as stalled |
 | `COVERAGE_WINDOW_S`, `COVERAGE_MIN` | 600 s, 0.9 | The window and share behind the coverage condition |
-| `RESTART_AFTER_S`, `RESTART_COOLDOWN_S` | 15 s, 60 s | How long a camera faults before it is re-attached, and the gap between attempts |
+| `RESTART_AFTER_S`, `RESTART_COOLDOWN_S` | 15 s, 60 s | How long a camera faults before it is re-attached, and the gap between attempts on one camera |
 | `ACT_ATTEMPTS`, `ACT_RETRY_S` | 3, 1 s | Printer action attempts and their spacing |
+| `ACT_DEADLINE_S` | 45 s | How long those attempts get in all, on top of what the adapter allows a slow action |
 | `ACT_FAILED_COOLDOWN_S` | 30 s | The longest a failed printer action waits before the next defect frame tries it again |
 | `NOTIFY_COOLDOWN_S` | 30 s | The floor between defect notifications with the same outcome for one monitor |
 

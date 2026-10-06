@@ -2,7 +2,7 @@ const SCHEMES = ["http", "https", "ws", "wss", "rtsp", "rtsps"];
 const WILDCARD_SCHEMES = ["http", "https"];
 const DEFAULT_PORTS: Record<string, number> = { http: 80, https: 443, ws: 80, wss: 443, rtsp: 554, rtsps: 322 };
 const LOCAL_HOSTNAMES = ["localhost"];
-const LOCAL_SUFFIXES = [".local", ".localhost", ".internal", ".home", ".lan"];
+const LOCAL_SUFFIXES = [".local", ".localhost", ".internal", ".home", ".lan", ".home.arpa"];
 const LOCAL_V4 = [
   "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
   "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4",
