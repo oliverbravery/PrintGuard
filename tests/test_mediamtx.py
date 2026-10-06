@@ -239,3 +239,14 @@ async def test_the_bundled_server_is_handed_the_api_login_in_its_environment(tmp
         "MTX_AUTHINTERNALUSERS_1_PERMISSIONS_0_ACTION": "api",
     }
 
+
+async def test_stop_wins_against_a_server_that_is_still_launching(tmp_path) -> None:
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text("import time\ntime.sleep(600)\n")
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), "http://127.0.0.1:9", ("printguard", "secret"), _nothing)
+    server._supervisor = asyncio.ensure_future(server._run())
+    await asyncio.sleep(0)
+
+    await asyncio.wait_for(server.stop(), 8)
+
+    assert server._process is None or server._process.returncode is not None

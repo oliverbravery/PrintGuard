@@ -236,6 +236,9 @@ class EmbeddedMediaMTX:
                     logger.error("MediaMTX failed to launch (%s); retrying", exc)
                 await asyncio.sleep(RESTART_DELAY_S)
                 continue
+            if self._stopping:
+                await self._terminate()
+                return
             self._bind_lifetime(self._process.pid)
             restoring = asyncio.ensure_future(self._restore()) if replacement else None
             try:
@@ -300,11 +303,15 @@ class EmbeddedMediaMTX:
     async def stop(self) -> None:
         """Stops supervising and terminates the server."""
         self._stopping = True
-        if self._process is not None and self._process.returncode is None:
-            self._process.terminate()
-            try:
-                await asyncio.wait_for(self._process.wait(), STOP_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                self._process.kill()
+        await self._terminate()
         if self._supervisor is not None:
             await self._supervisor
+
+    async def _terminate(self) -> None:
+        if self._process is None or self._process.returncode is not None:
+            return
+        self._process.terminate()
+        try:
+            await asyncio.wait_for(self._process.wait(), STOP_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            self._process.kill()
