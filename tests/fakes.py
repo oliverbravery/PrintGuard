@@ -110,6 +110,15 @@ class FakePluginRuntime:
     async def reload(self, running: Any, failed_gates: Any) -> None:
         pass
 
+    async def serve(self, plugin_id: str, request: dict[str, Any]) -> None:
+        return None
+
+    async def authorise(self, request: dict[str, Any]) -> None:
+        return None
+
+    def gate_paths(self) -> tuple[str, ...]:
+        return ()
+
     async def close(self) -> None:
         pass
 
