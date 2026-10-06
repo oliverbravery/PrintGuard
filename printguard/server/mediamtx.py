@@ -6,8 +6,10 @@ API reference: https://bluenviron.github.io/mediamtx/
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
+import signal
 import subprocess
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit, urlunsplit
@@ -22,6 +24,10 @@ logger = logging.getLogger(__name__)
 READY_TIMEOUT_S = 10.0
 RESTART_DELAY_S = 2.0
 STOP_TIMEOUT_S = 5.0
+SIGNALLED_GRACE_S = 5.0
+"""How long a server that was ended by SIGINT or SIGTERM is given before it is
+treated as a failure: a Ctrl+C or a stop sent to the hub's process group reaches
+the server first, ahead of the hub saying it is stopping."""
 API_USER_ENV = "MTX_AUTHINTERNALUSERS_1"
 
 
@@ -189,7 +195,7 @@ class EmbeddedMediaMTX:
         self._restarted = restarted
         self._process: asyncio.subprocess.Process | None = None
         self._supervisor: asyncio.Task[None] | None = None
-        self._stopping = False
+        self._stop_requested = asyncio.Event()
         self._watcher: subprocess.Popen[bytes] | None = None
         self._watch_fd = -1
         self._job: Any = None
@@ -221,7 +227,7 @@ class EmbeddedMediaMTX:
         replacement = False
         failures = 0
         loop = asyncio.get_running_loop()
-        while not self._stopping:
+        while not self._stop_requested.is_set():
             launched = loop.time()
             try:
                 self._process = await asyncio.create_subprocess_exec(
@@ -236,7 +242,7 @@ class EmbeddedMediaMTX:
                     logger.error("MediaMTX failed to launch (%s); retrying", exc)
                 await asyncio.sleep(RESTART_DELAY_S)
                 continue
-            if self._stopping:
+            if self._stop_requested.is_set():
                 await self._terminate()
                 return
             self._bind_lifetime(self._process.pid)
@@ -247,7 +253,10 @@ class EmbeddedMediaMTX:
                 if restoring is not None:
                     restoring.cancel()
             self._release_lifetime()
-            if self._stopping:
+            if code in (-signal.SIGINT, -signal.SIGTERM):
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(self._stop_requested.wait(), SIGNALLED_GRACE_S)
+            if self._stop_requested.is_set():
                 return
             failures = failures + 1 if loop.time() - launched < READY_TIMEOUT_S else 1
             if failures & (failures - 1) == 0:
@@ -302,7 +311,7 @@ class EmbeddedMediaMTX:
 
     async def stop(self) -> None:
         """Stops supervising and terminates the server."""
-        self._stopping = True
+        self._stop_requested.set()
         await self._terminate()
         if self._supervisor is not None:
             await self._supervisor

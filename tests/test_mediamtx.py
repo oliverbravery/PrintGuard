@@ -193,6 +193,46 @@ async def test_a_server_that_cannot_stay_up_is_logged_less_and_less_often(tmp_pa
     assert len(restarts) in ((exits - 1).bit_length(), exits.bit_length()), "one line for the first, second, fourth and eighth exit in a row"
 
 
+async def test_a_server_ended_by_the_signal_that_stops_the_hub_is_not_reported_or_restarted(tmp_path, monkeypatch) -> None:
+    """A Ctrl+C reaches the server with the hub, ahead of the hub saying it is stopping."""
+    monkeypatch.setattr("printguard.server.mediamtx.RESTART_DELAY_S", 0)
+    monkeypatch.setattr("printguard.server.mediamtx.READY_TIMEOUT_S", 0.5)
+    launches = tmp_path / "launches"
+    launches.write_text("")
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text(f"import os, signal\nopen({str(launches)!r}, 'a').write('x')\nos.kill(os.getpid(), signal.SIGTERM)\n")
+    logged: list[str] = []
+    monkeypatch.setattr("printguard.server.mediamtx.logger.error", lambda message, *args: logged.append(message % args))
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), "http://127.0.0.1:9", ("printguard", "secret"), _nothing)
+
+    await server.start()
+    await server.stop()
+
+    assert launches.read_text() == "x", "the server was started again while the hub was stopping"
+    assert not [line for line in logged if "exited" in line]
+
+
+async def test_a_server_ended_by_a_signal_while_the_hub_runs_on_is_still_restarted(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("printguard.server.mediamtx.RESTART_DELAY_S", 0)
+    monkeypatch.setattr("printguard.server.mediamtx.READY_TIMEOUT_S", 0.5)
+    monkeypatch.setattr("printguard.server.mediamtx.SIGNALLED_GRACE_S", 0.1)
+    launches = tmp_path / "launches"
+    launches.write_text("")
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text(f"import os, signal\nopen({str(launches)!r}, 'a').write('x')\nos.kill(os.getpid(), signal.SIGTERM)\n")
+    logged: list[str] = []
+    monkeypatch.setattr("printguard.server.mediamtx.logger.error", lambda message, *args: logged.append(message % args))
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), "http://127.0.0.1:9", ("printguard", "secret"), _nothing)
+
+    await server.start()
+    async with asyncio.timeout(10):
+        while len(launches.read_text()) < 2:
+            await asyncio.sleep(0.01)
+    await server.stop()
+
+    assert "MediaMTX exited (code -15); restarting" in logged
+
+
 def test_the_shipped_config_grants_the_control_api_to_nobody() -> None:
     """A web page in a browser on the same computer can reach the loopback listeners.
 
