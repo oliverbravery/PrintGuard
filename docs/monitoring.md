@@ -45,7 +45,9 @@ Open a monitor from the dashboard to change these. They save as you move them.
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
-| **Watch this monitor** | On | | Turns the monitor off without deleting it |
+| **Watch this monitor** | On | | Turns the monitor off without deleting it. A switched-off monitor reads **off** on its tile |
+| **Camera** | The one chosen when the monitor is made | Any registered camera, or none | The camera whose frames the monitor scores. With none the monitor doesn't watch |
+| **Printer** | The one chosen when the monitor is made | Any registered printer, or none | The printer the monitor follows and can pause or cancel. With none it only alerts |
 | **Alert threshold** | 0.75 | 0.05 to 0.95 | The score a frame has to reach to count as a defect |
 | **Consecutive detections to alert** | 3 | 1 to 30 | How many flagged frames in a row it takes to act |
 | **On sustained defect** | Alert only | | Alert only, pause the print or cancel the print. Without a linked printer the last two only alert |
@@ -61,8 +63,9 @@ The same panel pauses, resumes or cancels the print by hand, and sets the printe
 
 ## When a monitor watches
 
-A monitor with no printer watches all the time. A monitor with a printer watches unless the
-printer reports idle, paused or an error, so it also watches before the printer has answered.
+A monitor with a camera and no printer watches all the time. A monitor with a printer watches
+unless the printer reports idle, paused or an error, so it also watches before the printer has
+answered. One with no camera, or switched off, doesn't watch.
 Losing contact, or a state PrintGuard can't read, keeps whatever the printer last reported, so
 one that drops off mid-print is still watched and one switched off after a print stays in
 standby. [Failing safely](architecture.md#failing-safely) has the reasoning.
@@ -80,7 +83,7 @@ the frames the [API](api.md) returns.
 | **Brightness** | 1 | 0.25 to 2 | Lifts a dim chamber or tames a bright one |
 | **Contrast** | 1 | 0.25 to 2 | Separates the print from a background of a similar shade |
 | **Sharpness** | 0 | 0 to 2 | Brings out strands on a soft camera. The live view sharpens the picture at the size it's shown, so it looks stronger there than in the frame the model gets |
-| **Detection rate** | 60 a second | 0.5 up to the camera's own frame rate, or from 0.1 over the API | The most frames a second the model scores from this camera |
+| **Detection rate** | 60 a second | 0.5 up to the camera's own frame rate, never above 60, or from 0.1 over the API | The most frames a second the model scores from this camera |
 
 The model only watches a square of each camera's view. Until you crop a camera that square is the
 middle of the frame, so on a wide camera the sides of the bed go unwatched. Crop it to a square
@@ -93,19 +96,25 @@ rate, since the consecutive count is in frames.
 
 ## Risk history
 
-A monitor's panel shows the live score on a gauge beside its last 240 readings, about a minute
-of them at five a second.
+A monitor's panel shows the live score on a gauge beside its last 240 readings, which is 48
+seconds at best since the dashboard hears of five results a second at most.
 **View detailed history** opens the full page.
 
 | Part | Shows |
 |---|---|
+| Stat tiles | Average and peak score, the share of frames over the threshold, frames scored, alerts and watch time |
 | Risk per period | The score charted over the last hour, 6 hours, 24 hours or everything kept |
+| Prints | Each finished print kept from this monitor, with its frame count and review status. A print still running isn't listed |
 | Risky moments | A snapshot of what the camera saw each time the monitor raised an alert |
+
+Watch time is how long the readings spanned, in whole minutes. A gap of more than 30 seconds
+between two readings, such as the monitor standing down or losing its camera, isn't counted.
 
 The chart is kept in memory as one-minute buckets covering the last 24 hours of watching, with
 the last 50 alerts, so restarting the hub clears it. The alert snapshots are kept on disk with
 the other [frames kept from each print](feedback.md#whats-kept-on-your-hub), up to 40 a print,
-and survive a restart. Deleting a monitor deletes its snapshots. The [REST API](api.md#rest-api)
+and survive a restart. Deleting a monitor deletes every print kept from it, including ones still waiting for a
+review. The [REST API](api.md#rest-api)
 serves the same history and snapshots.
 
 ## Reviewing a print
