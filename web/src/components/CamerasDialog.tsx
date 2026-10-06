@@ -197,8 +197,18 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
     discover();
   });
   const devices = (discovered ?? []).filter((s) => s.kind === "device");
+  const register = () => {
+    const device = devices.find((d) => d.device_id === deviceId)!;
+    onAdd(name || device.label || "Camera", { kind: "device", device_id: deviceId, label: device.label });
+  };
   return (
-    <div className="space-y-3">
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        register();
+      }}
+    >
       {discovering && <p className="mono text-[0.7rem] text-text-2 boot-cursor">scanning devices</p>}
       {discovered && !devices.length && (
         <>
@@ -217,19 +227,12 @@ function DevicePicker({ onAdd, hint }: { onAdd: (name: string, source: CameraSou
             ))}
           </select>
           <input className="field" aria-label="Name" placeholder="Name (e.g. Ender 3 nozzle cam)" value={name} onChange={(e) => setName(e.target.value)} />
-          <button
-            className="btn btn-primary w-full"
-            disabled={!deviceId || busy}
-            onClick={() => {
-              const device = devices.find((d) => d.device_id === deviceId)!;
-              onAdd(name || device.label || "Camera", { kind: "device", device_id: deviceId, label: device.label });
-            }}
-          >
+          <button className="btn btn-primary w-full" type="submit" disabled={!deviceId || busy}>
             {busy ? "Measuring fps…" : "Register camera"}
           </button>
         </>
       )}
-    </div>
+    </form>
   );
 }
 
@@ -298,7 +301,13 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
         ))}
       </div>
       {tab === "url" && (
-        <div className="space-y-3">
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            send({ cmd: "camera.add", name: name || "Stream", source: { kind: "url", url: url.trim() } });
+          }}
+        >
           <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
           <input
             className="field"
@@ -311,16 +320,10 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
-          <button
-            className="btn btn-primary w-full"
-            disabled={!url.trim() || isPending("camera.add")}
-            onClick={() => {
-              send({ cmd: "camera.add", name: name || "Stream", source: { kind: "url", url: url.trim() } });
-            }}
-          >
+          <button className="btn btn-primary w-full" type="submit" disabled={!url.trim() || isPending("camera.add")}>
             {isPending("camera.add") ? "Registering…" : "Register stream"}
           </button>
-        </div>
+        </form>
       )}
       {tab === "machine" && (
         <div className="space-y-3">
@@ -335,7 +338,13 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
         </div>
       )}
       {tab === "browser" && (
-        <div className="space-y-3">
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void publish();
+          }}
+        >
           <p className="text-xs text-text-1">
             Streams this device's camera to the hub. It reconnects if the hub restarts and resumes
             when you reopen this page on this device.
@@ -349,10 +358,10 @@ function AddCamera({ onDeviceAdd }: { onDeviceAdd: (name: string, source: Camera
             ))}
           </select>
           <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn btn-primary w-full" disabled={!deviceId || busy || isPending("camera.add")} onClick={publish}>
+          <button className="btn btn-primary w-full" type="submit" disabled={!deviceId || busy || isPending("camera.add")}>
             {busy ? "Publishing…" : isPending("camera.add") ? "Registering…" : "Publish & register"}
           </button>
-        </div>
+        </form>
       )}
     </div>
   );

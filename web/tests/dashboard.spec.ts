@@ -1060,6 +1060,13 @@ test("a camera form empties once its camera is registered, and its fields are na
   await expect(page.getByRole("combobox", { name: "Printer" })).toBeVisible();
 });
 
+test("Enter in a camera's name or address registers it", async ({ page }) => {
+  await dashboard(page, { dialog: "cameras" });
+  await page.getByRole("textbox", { name: "Stream URL" }).fill("rtsp://garage/stream");
+  await page.getByRole("textbox", { name: "Name" }).press("Enter");
+  expect(await sent(page, "camera.add")).toMatchObject({ name: "Stream", source: { kind: "url", url: "rtsp://garage/stream" } });
+});
+
 test("a camera's address is shown without its password, and an idle one reads none", async ({ page }) => {
   const source = { kind: "url", url: "rtsp://admin:p@ss/w0rd@cam.local/stream?token=1" };
   await dashboard(page, { engine: engine({ cameras: [camera({ source, in_use: false })] }) });
