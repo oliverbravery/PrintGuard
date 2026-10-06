@@ -519,7 +519,10 @@ class Watchdog:
             if self._streaks.get(mid) != 0 and monitor["enabled"]:
                 monitor["alert"] = alert
             self._engine.emit({"event": "alert", "monitor_id": mid, **alert})
-            await self._notify(monitor, score, action, await self._engine.platform.encode_jpeg(frame.rgb))
+            picture = await self._engine.platform.encode_jpeg(frame.rgb)
+            if picture is None:
+                self._engine.emit({"event": "warning", "monitor_id": mid, "message": f"The alert for '{monitor['name']}' went without a picture, since its frame could not be encoded", "recovered": False})
+            await self._notify(monitor, score, action, picture)
             try:
                 await self._engine.note_alert(mid, alert, frame)
             finally:

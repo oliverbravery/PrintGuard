@@ -1578,6 +1578,24 @@ async def test_a_recovery_is_sent_quietly_and_a_fault_or_defect_is_urgent(monkey
     assert any(title.startswith("PrintGuard: ") and urgent for title, urgent in notifier.sent), "a defect alert was not urgent"
 
 
+async def test_an_alert_whose_picture_could_not_be_encoded_says_so(monkeypatch) -> None:
+    platform = FakePlatform(infer_s=0.02, failing=True)
+
+    async def no_picture(rgb: np.ndarray) -> None:
+        return None
+
+    monkeypatch.setattr(platform, "encode_jpeg", no_picture)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"notify": True, "consecutive": 1}})
+        await asyncio.sleep(1.0)
+
+    assert _of(events, "alert"), "no alert was raised"
+    warnings = [e["message"] for e in _of(events, "warning")]
+    assert any("without a picture" in message for message in warnings), warnings
+
+
 async def test_sustained_outage_keeps_reminding(monkeypatch) -> None:
     from printguard.engine import engine as engine_module
 
