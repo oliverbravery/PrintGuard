@@ -553,13 +553,17 @@ service finally answers on.
 
 A body over 256 KB fails the request, whether it is JSON, text or `binary`. The size is counted
 after decompression and before base64. PrintGuard asks for gzip or nothing, and an answer in any
-other encoding fails the same way. Nothing is cut short, so no `http` event arrives and the
-dashboard shows an error naming the host.
+other encoding fails the same way. Nothing is cut short, so no `http` event arrives. The error names the host and shows in the
+dashboard that sent the request, so one from a worker goes to the log and not the dashboard.
 
 ### Sockets
 
 `ctx.socket` opens a WebSocket under a tag and `socket` events carry it, with `state` saying
-`open`, `message` or `closed`. PrintGuard drops it when the plugin is disabled, reinstalled or removed, is stopped for failing, or loses `net` or `net:local`. A socket still connecting at that moment is closed as soon as it opens. The manifest needs `socket` in `events` and a `ws` or `wss` pattern in `urls`.
+`open`, `message` or `closed`. PrintGuard drops it when the plugin is disabled, reinstalled or removed, when its worker fails or
+its route answers badly, or when it loses `net` or `net:local`. A `plugin.js` or `panel.html` that
+stops in the dashboard tells the hub nothing, so its sockets stay open until one of those. A socket
+still connecting at that moment is closed as soon as it opens. The manifest needs `socket` in
+`events` and a `ws` or `wss` pattern in `urls`.
 
 A redirect is not followed here either. The socket fails to open, so declare the address the
 service finally answers on.
@@ -581,7 +585,8 @@ A worker has no screen and no speakers of its own, so its `ctx.notify`, `ctx.sou
 `ctx.background` are carried out by whichever dashboards are open. Nothing happens while none
 are.
 
-`ctx.sound` takes a list of tones or the name of an audio asset.
+`ctx.sound` takes a list of tones or the name of an audio asset, and a worker can name one as
+well as a `plugin.js` can.
 
 ```js
 plugin.on("alert", (event, ctx) => {
@@ -682,7 +687,8 @@ plugin.on("tick", (event, ctx) => ctx.publish({ channel: "now-playing", body: { 
 ```
 
 Both sides show up in the consent dialog. A disabled plugin answers nobody, and a call nobody
-answers expires after 30 seconds.
+answers expires after 30 seconds. A call takes the first answer, so a second one to the same
+call, such as another open dashboard sends, is ignored.
 
 ## Routes and gate
 
@@ -709,14 +715,17 @@ plugin.route((request, ctx) => ({
 |---|---|
 | `status` | 200 unless you say otherwise |
 | `type` | The content type, `text/plain` unless you say otherwise |
-| `body` | A string |
-| `headers` | `set-cookie`, `location` and `cache-control`. Anything else is dropped |
+| `body` | A string. It counts towards the 512 KB a worker may answer with, so a larger page disables the plugin |
+| `headers` | An object of strings, of which `set-cookie`, `location` and `cache-control` are kept and anything else is dropped |
+
+A `status` that is not a whole number from 100 to 599, or `headers` that are not an object of
+strings, stops the plugin. The request gets a 502 and the plugin is disabled and reported.
 
 Every response goes out under a content security policy with `sandbox allow-forms allow-scripts`
 and `frame-ancestors 'none'`. The page gets an opaque origin, so it cannot act as the dashboard or
 be framed by it. The same policy keeps the page to what its own response carries.
 
-| A page | |
+| A page a route serves | |
 |---|---|
 | Scripts and styles | Inline only. A `<script src>` or a stylesheet link is refused, your own routes included |
 | Images, audio, video and fonts | `data:` addresses, and `blob:` for all but fonts |
@@ -736,15 +745,16 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | What it sees | The same request shape a route gets, with no body. WebSocket handshakes are asked about too, as a `GET` |
 | Under load | A request that waits more than 5 seconds for the gate to be free is refused on its own. The gate is not disabled for it |
 | What stays open | `/api/health` and the gating plugin's own pages, so uptime checks keep working and it can serve its own sign-in page |
-| Caching | An approval is cached for 10 seconds per cookie, authorization header, method, path and query string. A refusal is never cached, so signing in takes effect at once |
+| Caching | An approval is cached for 10 seconds per cookie, authorisation header, method, path and query string. A refusal is never cached, so signing in takes effect at once |
 
 ## Limits
 
 | What | Limit |
 |---|---|
 | Source file | 256 KB each |
+| Zip | 12 MB. The dashboard refuses a larger file before sending it. A compression other than stored or deflate is refused |
 | Asset | 4 MB each, 12 MB across a plugin. An install is refused at the file that passes either |
-| README in a zip | 64 KB |
+| README in a zip | 64 KB. A larger one is left out, and so is an image over 4 MB, and the plugin installs without it |
 | Media | 8 images |
 | Secrets | 8, each value 4 KB |
 | OAuth scopes | 20 |
@@ -755,7 +765,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | Effects | 32 per call. The rest are dropped |
 | `plugin.js` call | 4 seconds, then the plugin is stopped |
 | Worker call | 96 MB of memory and 400 million units of wasmtime fuel, then the plugin is disabled. A call that waits more than 5 seconds to start is dropped |
-| Worker output | 512 KB per call, the store and effects together, then the plugin is disabled. So is one whose output is not an object carrying a list of effects |
+| Worker output | 512 KB per call, the store, the effects and a route's response body together, then the plugin is disabled. So is one whose output is not an object carrying a list of effects |
 | Node tree | 400 nodes |
 | Node text | `label` 80 characters, `action` 60, `placeholder` 60 |
 | `select` options | 60 |
