@@ -408,7 +408,9 @@ test("the consent dialog names where a plugin signs in and where it gets its tok
       },
     });
     win.__pg.getState().openSettings("plugins");
+    win.__pgEvent({ event: "catalogue", plugins: [] });
   });
+  await page.getByRole("button", { name: "Installed" }).click();
   await page.getByRole("switch", { name: "Enable Picture in picture" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Enable Picture in picture" });
