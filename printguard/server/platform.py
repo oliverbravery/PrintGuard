@@ -29,7 +29,7 @@ import websockets
 from av.video.reformatter import VideoReformatter
 from ..engine import logs, vision
 from ..engine.platform import Frame, Notice
-from ..engine.reports import scrub_url
+from ..engine.reports import scrub_url, url_secrets
 from .bambu_camera import open_bambu_jpeg_stream
 from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
@@ -734,6 +734,7 @@ class ServerPlatform:
         self.assets = vision.assets_from_dicts(meta, protos)
         self._client = httpx.AsyncClient(follow_redirects=True)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client, mediamtx_login)
+        self.secrets = frozenset(url_secrets(mediamtx_api) | url_secrets(mediamtx_rtsp))
         self._sources: dict[str, AVSource] = {}
         self._closing: dict[str, AVSource] = {}
         self._notices: list[Notice] = []

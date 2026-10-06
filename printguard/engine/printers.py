@@ -30,7 +30,9 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
         base: Existing record when updating, else None.
 
     Returns:
-        A complete, validated printer record: id, name, provider and config.
+        A complete, validated printer record: id, name, provider and config,
+        which keeps only the fields the provider's schema declares so a field
+        another service marks secret cannot linger in it unhidden.
 
     Raises:
         ValueError: If the provider is missing or not a known integration.
@@ -41,7 +43,8 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
         raise ValueError(f"unknown printer provider {provider!r}")
     record["provider"] = provider
     record["name"] = (str(record.get("name") or "").strip()) or INTEGRATIONS[provider].label
-    record["config"] = dict(record.get("config") or {})
+    declared = INTEGRATIONS[provider].schema["properties"]
+    record["config"] = {key: value for key, value in (record.get("config") or {}).items() if key in declared}
     return record
 
 

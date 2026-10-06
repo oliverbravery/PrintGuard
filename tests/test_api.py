@@ -732,7 +732,7 @@ async def test_a_stored_secret_is_not_kept_for_an_address_that_changed() -> None
         await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": BASIC_NTFY}, "mqtt": mqtt}})
 
         moved = await client.patch(f"/printers/{printer_id}", json={"config": {"base_url": "http://elsewhere.example"}}, headers=manage)
-        assert moved.status_code == 400 and "api_key" in moved.json()["detail"]
+        assert moved.status_code == 400 and "API key" in moved.json()["detail"]
         assert engine.printers.get(printer_id).config == OCTOPRINT["config"]
 
         for moved_broker in ({"host": "elsewhere.example"}, {"host": "broker", "port": 8883}, {"host": "broker", "port": 8883, "password": ""}):
@@ -746,6 +746,30 @@ async def test_a_stored_secret_is_not_kept_for_an_address_that_changed() -> None
         assert engine.printers.get(printer_id).config == resent
         assert (await client.patch("/settings", json={"mqtt": {"host": "elsewhere.example", "password": None}}, headers=manage)).status_code == 200
         assert engine.settings["mqtt"] == {"host": "elsewhere.example", "password": ""}
+
+
+async def test_a_provider_switch_over_rest_keeps_none_of_the_old_config() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        manage = {"Authorization": f"Bearer {tokens['manage']}"}
+        bare = await client.patch(f"/printers/{printer_id}", json={"provider": "klipper"}, headers=manage)
+        assert bare.status_code == 400 and engine.printers.get(printer_id).config == OCTOPRINT["config"]
+
+        switched = await client.patch(f"/printers/{printer_id}", json={"provider": "klipper", "config": {"base_url": "http://op"}}, headers=manage)
+        assert switched.status_code == 200 and engine.printers.get(printer_id).config == {"base_url": "http://op"}
+        back = await client.patch(f"/printers/{printer_id}", json={"provider": "octoprint"}, headers=manage)
+        assert back.status_code == 400 and "api_key" not in engine.printers.get(printer_id).config
+
+
+async def test_an_address_with_a_hidden_part_is_a_400_over_rest() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        hidden = await client.patch(
+            f"/printers/{printer_id}",
+            json={"config": {"base_url": "http://op/api/[redacted]", "api_key": "k"}},
+            headers={"Authorization": f"Bearer {tokens['manage']}"},
+        )
+
+        assert hidden.status_code == 400 and hidden.json()["detail"] == "the address has a hidden part, type it in full"
+        assert engine.printers.get(printer_id).config == OCTOPRINT["config"]
 
 
 async def test_the_read_surface_does_not_list_the_api_tokens() -> None:
@@ -771,7 +795,7 @@ async def test_a_private_catalogues_credentials_stay_out_of_the_state() -> None:
         private = "https://reader:hunter2pass@raw.example.com/catalogue.json?token=s3cr3tvalue"
         await engine.handle({"cmd": "settings.update", "patch": {"catalogue_url": private}})
         state = (await client.get("/state", headers={"Authorization": f"Bearer {tokens['read']}"})).json()
-        assert state["settings"]["catalogue_url"] == "https://raw.example.com/catalogue.json?token=[redacted]"
+        assert state["settings"]["catalogue_url"] == "https://raw.example.com/[redacted]?token=[redacted]"
         assert engine.settings["catalogue_url"] == private, "the dashboard still reads the address it saved"
 
 
@@ -830,10 +854,29 @@ async def test_a_snapshot_whose_file_is_gone_is_a_404_that_names_no_path(tmp_pat
         assert not any(str(tmp_path) in event.get("message", "") for event in engine.recent_events())
 
 
+async def test_starting_a_print_whose_file_is_gone_is_a_400_that_names_no_path(tmp_path) -> None:
+    from printguard.server.platform import DiskFileStore
+
+    async with api(("manage",)) as (client, engine, platform, _monitor_id, printer_id, _camera_id, tokens):
+        platform.files = DiskFileStore(tmp_path)
+        platform.device_status = "Operational"
+
+        async def body():
+            yield b"G1 X1\n"
+
+        await platform.files.store("abcd1234.gcode", body())
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "a.gcode"})
+        (tmp_path / "abcd1234.gcode").unlink()
+        gone = await client.post("/prints/abcd1234/start", json={"printer_id": printer_id}, headers={"Authorization": f"Bearer {tokens['manage']}"})
+
+        assert gone.status_code == 400 and gone.json()["detail"] == "print 'abcd1234' has lost its file"
+        assert not any(str(tmp_path) in event.get("message", "") for event in engine.recent_events())
+
+
 async def test_moving_a_printer_without_its_key_is_a_400_that_keeps_both() -> None:
     async with api(("manage",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
         headers = {"Authorization": f"Bearer {tokens['manage']}"}
         moved = await client.patch(f"/printers/{printer_id}", json={"config": {"base_url": "http://elsewhere"}}, headers=headers)
 
-        assert moved.status_code == 400 and "send api_key again" in moved.text and "k" not in moved.json()["detail"].split()
+        assert moved.status_code == 400 and "send API key again" in moved.text and "k" not in moved.json()["detail"].split()
         assert engine.printers.get(printer_id).config == OCTOPRINT["config"]

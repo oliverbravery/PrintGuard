@@ -172,6 +172,11 @@ class Platform(Protocol):
     files: FileStore
     """Where uploaded print files and kept frames are stored."""
 
+    secrets: frozenset[str]
+    """Credentials the deployment holds outside the engine's state, such as the
+    login in the address of an external video server. The engine scrubs them
+    from every message and report."""
+
     async def configure(self, settings: dict[str, Any]) -> None:
         """Applies platform-owned settings before inference starts."""
         ...

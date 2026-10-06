@@ -211,7 +211,7 @@ async def test_a_test_alert_makes_the_request_a_defect_alert_does() -> None:
     """A channel can take text and refuse a picture, which a text-only test would not find."""
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[]) as (engine, events):
-        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {"url": "http://ntfy/topic"}, "req_id": 1})
+        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {"url": "http://ntfy/topic"}, "req_id": 1}, events.append)
     (request,) = [request for request in platform.http_requests if request["url"] == "http://ntfy/topic"]
     assert request["method"] == "PUT" and request["headers"]["Filename"] == "snapshot.jpg"
     assert request["data"] == await platform.encode_jpeg(np.zeros((1, 1, 3), np.uint8))
@@ -380,8 +380,8 @@ async def test_an_error_that_says_nothing_is_reported_by_its_type(monkeypatch) -
         printer_id = await _register_printer(engine)
         monkeypatch.setattr(platform, "http", time_out)
         await engine.handle({"cmd": "printer.action", "id": printer_id, "action": "pause", "req_id": 4})
-        await engine.handle({"cmd": "printer.test", **OCTOPRINT})
-        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {"url": "http://ntfy/topic"}})
+        await engine.handle({"cmd": "printer.test", **OCTOPRINT}, events.append)
+        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {"url": "http://ntfy/topic"}}, events.append)
         assert next(e for e in events if e["event"] == "error" and e.get("req_id") == 4)["message"] == "TimeoutError"
         assert next(e for e in events if e["event"] == "printer_test")["error"] == "TimeoutError"
         assert next(e for e in events if e["event"] == "notify_test")["error"] == "TimeoutError"
@@ -1012,10 +1012,10 @@ async def test_testing_a_printer_closes_the_connection_it_opened(monkeypatch) ->
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[]) as (engine, events):
         untried = {"base_url": "http://other", "api_key": "k"}
-        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "config": untried})
+        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "config": untried}, events.append)
         assert closed == [untried], "a test of unregistered details leaves no connection open"
         printer_id = await _register_printer(engine)
-        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "config": engine.printers.get(printer_id).config})
+        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "config": engine.printers.get(printer_id).config}, events.append)
         assert closed == [untried], "a registered printer keeps its connection"
         assert [event["ok"] for event in _of(events, "printer_test")] == [True, True]
 
@@ -1039,10 +1039,10 @@ async def test_testing_from_the_edit_form_keeps_the_connection_the_printer_is_us
     stored = {"family": "centauri", "host": "10.0.0.9", "access_code": "Ab3dEf"}
     async with running_engine(FakePlatform(), camera_fps=[]) as (engine, events):
         await engine.handle({"cmd": "printer.add", "printer": {"name": "P", "provider": "elegoo", "config": stored}})
-        await engine.handle({"cmd": "printer.test", "provider": "elegoo", "config": {**stored, "api_key": ""}})
+        await engine.handle({"cmd": "printer.test", "provider": "elegoo", "config": {**stored, "api_key": ""}}, events.append)
         assert closed == [], "the test closed the connection the registered printer polls over"
         elsewhere = {**stored, "host": "10.0.0.10"}
-        await engine.handle({"cmd": "printer.test", "provider": "elegoo", "config": elsewhere})
+        await engine.handle({"cmd": "printer.test", "provider": "elegoo", "config": elsewhere}, events.append)
         assert closed == [elsewhere]
 
 
@@ -1084,7 +1084,7 @@ async def test_a_printer_missing_a_required_field_is_refused_by_name(provider: s
         assert blank in _of(events, "error")[-1]["message"]
 
         errors = len(_of(events, "error"))
-        await engine.handle({"cmd": "printer.test", "provider": provider, "config": partial})
+        await engine.handle({"cmd": "printer.test", "provider": provider, "config": partial}, events.append)
         (tested,) = _of(events, "printer_test")
         assert not tested["ok"] and blank in tested["error"]
         assert len(_of(events, "error")) == errors, "a failed test is reported once"
@@ -1096,7 +1096,7 @@ async def test_an_alert_channel_missing_a_required_field_is_refused_by_name() ->
         await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"telegram": {"bot_token": "t"}}}})
         assert not engine.settings["notifiers"] and "Chat ID" in _of(events, "error")[-1]["message"]
 
-        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {}})
+        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {}}, events.append)
         (tested,) = _of(events, "notify_test")
         assert not tested["ok"] and "Topic URL" in tested["error"] and not platform.http_calls
 
@@ -5311,7 +5311,8 @@ async def test_a_private_catalogues_credentials_are_scrubbed_from_a_report() -> 
     async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
         private = "https://reader:hunter2pass@raw.example.com/catalogue.json?token=s3cr3tvalue"
         await engine.handle({"cmd": "settings.update", "patch": {"catalogue_url": private}})
-        assert reports.diagnostics(engine)["settings"]["catalogue_url"] == "https://raw.example.com/catalogue.json?token=[redacted]"
+        assert reports.diagnostics(engine)["settings"]["custom_catalogue"] is True
+        assert "raw.example.com" not in json.dumps(reports.diagnostics(engine))
         assert {"hunter2pass", "token=s3cr3tvalue"} <= reports.collect_secrets(engine)
 
 
@@ -5411,13 +5412,13 @@ async def test_no_stored_secret_is_in_the_state_or_in_any_event() -> None:
         state = engine.state_event()
         shown = state["printers"][0]
         await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"name": "Renamed", "config": shown["config"]}})
-        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": shown["config"]})
-        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": {"base_url": "http://unreachable"}})
+        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": shown["config"]}, events.append)
+        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": {"base_url": "http://unreachable"}}, events.append)
         engine.printers.get(printer_id).config = {"base_url": "http://unreachable", "api_key": "octo-KEY-4f7a2c"}
-        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": {"base_url": "http://unreachable"}})
+        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": {"base_url": "http://unreachable"}}, events.append)
         engine.printers.get(printer_id).config = dict(SECRET_PRINTER)
         for provider in NOTIFIERS:
-            await engine.handle({"cmd": "notify.test", "provider": provider, "config": state["settings"]["notifiers"][provider]})
+            await engine.handle({"cmd": "notify.test", "provider": provider, "config": state["settings"]["notifiers"][provider]}, events.append)
         await engine.handle({"cmd": "settings.update", "patch": {key: state["settings"][key] for key in ("notifiers", "mqtt", "catalogue_url")}})
         await engine.handle({"cmd": "settings.update", "patch": {"mqtt": {"host": "elsewhere"}}})
         await engine.handle({"cmd": "report.bundle"})
@@ -5428,7 +5429,7 @@ async def test_no_stored_secret_is_in_the_state_or_in_any_event() -> None:
     assert _leaked(events, secrets) == []
     tests = _of(events, "printer_test")
     assert [test["ok"] for test in tests] == [True, False, False]
-    assert "api_key" in tests[1]["error"] and "refused" in tests[2]["error"]
+    assert "API key" in tests[1]["error"] and "refused" in tests[2]["error"]
     assert all(secret in saved for secret in secrets), "the hub no longer holds what it needs to sign in"
     assert shown["config"] == {"base_url": "http://octopi.local"} and shown["secrets_set"] == ["api_key"]
     assert state["secrets_set"] == {
@@ -5437,7 +5438,7 @@ async def test_no_stored_secret_is_in_the_state_or_in_any_event() -> None:
     }
     assert state["settings"]["mqtt"] == {"enabled": False, "host": "broker", "username": "pg"}
     assert all(not set(config) & NOTIFIERS[provider].secret_keys() for provider, config in state["settings"]["notifiers"].items())
-    assert state["settings"]["catalogue_url"] == "https://raw.example.com/catalogue.json?token=[redacted]"
+    assert state["settings"]["catalogue_url"] == "https://raw.example.com/[redacted]?token=[redacted]"
     sources = {camera["id"]: camera["source"] for camera in state["cameras"]}
     assert sources["chamber"] == {"kind": "bambu", "host": "192.168.1.70"}
     assert [source["url"] for source in sources.values() if "url" in source] == ["rtsp://192.168.1.60/stream?token=[redacted]"]
@@ -5471,6 +5472,118 @@ async def test_a_blank_secret_is_kept_and_a_null_one_is_cleared() -> None:
     assert platform.state["settings"]["mqtt"] == {"host": "broker", "password": ""}
 
 
+async def test_changing_a_printers_provider_keeps_none_of_its_old_config() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id, secrets = await _seed_secrets(engine)
+        printer = engine.printers.get(printer_id)
+
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"provider": "klipper"}})
+        assert (printer.provider, printer.config) == ("octoprint", SECRET_PRINTER) and len(_of(events, "error")) == 1, "a switch with no config of its own is refused whole"
+
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": {"base_url": "http://octopi.local", "api_key": "", "password": "typed-PASS-1d4e"}}})
+        assert printer.config == SECRET_PRINTER, "a field the provider does not declare is not stored"
+
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"provider": "klipper", "config": {"base_url": "http://octopi.local"}}})
+        assert (printer.provider, printer.config) == ("klipper", {"base_url": "http://octopi.local"})
+        assert engine.state_event()["printers"][0]["secrets_set"] == []
+
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"provider": "octoprint"}})
+        assert printer.provider == "klipper" and "api_key" not in printer.config, "switching back does not restore the key"
+        assert not [secret for secret in ("PRINTERPASS-9d1", "octo-KEY-4f7a2c") if secret in json.dumps([engine.state_event(), events, platform.state])]
+
+
+async def test_the_scrub_knows_every_services_secret_fields() -> None:
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
+        await engine.handle({"cmd": "printer.add", "printer": {"name": "P", **OCTOPRINT}})
+        engine.printers.get(next(iter(engine.printers.items))).config = {"base_url": "http://op", "password": "left-PASS-1234", "api_key": "left-KEY-5678"}
+        assert {"left-PASS-1234", "left-KEY-5678"} <= reports.collect_secrets(engine)
+
+
+@pytest.mark.parametrize(
+    ("private", "token"),
+    [
+        ("https://cat.example.com/tok_k9f8-a7s6_d5f4/catalogue.json", "tok_k9f8-a7s6_d5f4"),
+        ("https://cat.example.com/k9f8a7s6/catalogue.json", "k9f8a7s6"),
+        ("https://reader:CATPASS-6a0f@cat.example.com/acme-plugins/catalogue.json?token=cattok-3b7d", "acme-plugins"),
+    ],
+)
+async def test_a_private_catalogues_whole_path_is_hidden(private: str, token: str) -> None:
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"catalogue_url": private}})
+        shown = engine.state_event()["settings"]["catalogue_url"]
+        assert shown.startswith("https://cat.example.com/[redacted]") and token not in json.dumps([engine.state_event(), reports.diagnostics(engine)])
+        assert token in reports.collect_secrets(engine) and token not in engine._scrubbed(f"fetching {private} failed")
+
+        await engine.handle({"cmd": "settings.update", "patch": {"catalogue_url": shown}})
+        assert engine.settings["catalogue_url"] == private, "the shown address is the stored one"
+
+        await engine.handle({"cmd": "settings.update", "patch": {"catalogue_url": plugins.CATALOGUE_URL}})
+        assert engine.state_event()["settings"]["catalogue_url"] == plugins.CATALOGUE_URL, "the public default is not hidden"
+
+
+async def test_a_typed_connection_secret_reaches_only_the_tab_that_tested_it() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    answer = platform.http
+
+    async def quoting_what_it_was_sent(method: str, url: str, **kwargs):
+        if "unreachable" in url or "telegram" in url:
+            raise OSError(f"refused {url} with {kwargs.get('headers')}")
+        return await answer(method, url, **kwargs)
+
+    platform.http = quoting_what_it_was_sent
+    async with running_engine(platform, camera_fps=[]) as (engine, other_tabs):
+        asked: list[dict] = []
+        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "config": {"base_url": "http://unreachable", "api_key": "typed-KEY-93b1"}}, asked.append)
+        await engine.handle({"cmd": "notify.test", "provider": "telegram", "config": {"chat_id": "9", "bot_token": "typed-BOT-93b1"}}, asked.append)
+
+    results = _of(asked, "printer_test") + _of(asked, "notify_test")
+    assert [event["ok"] for event in results] == [False, False] and all("refused" in event["error"] for event in results)
+    assert _leaked(results, ["typed-KEY-93b1", "typed-BOT-93b1"]) == []
+    assert not _of(other_tabs, "printer_test") and not _of(other_tabs, "notify_test")
+
+
+async def test_a_login_the_deployment_holds_is_scrubbed_from_messages() -> None:
+    platform = FakePlatform()
+    platform.secrets = frozenset({"mtx-user", "MTX-PASS-77b1"})
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        engine.emit({"event": "warning", "message": "live view unavailable: rtsp://mtx-user:MTX-PASS-77b1@127.0.0.1:8554/cam1 refused", "recovered": False})
+        assert _leaked([events, engine.recent_events(), reports.diagnostics(engine)], ["MTX-PASS-77b1"]) == []
+        assert "MTX-PASS-77b1" not in "\n".join(logs.recent())
+
+
+async def test_an_address_with_a_hidden_part_is_refused_and_an_unchanged_one_restored() -> None:
+    stored = "http://octopi.local/hassio_ingress/AbCdEf0123456789AbCdEf/"
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "printer.add", "printer": {"name": "P", "provider": "octoprint", "config": {"base_url": stored, "api_key": "k"}}})
+        printer = engine.printers.get(next(iter(engine.printers.items)))
+        shown = engine.state_event()["printers"][0]["config"]
+        assert shown["base_url"] == "http://octopi.local/hassio_ingress/[redacted]/"
+
+        await engine.handle({"cmd": "printer.update", "id": printer.id, "patch": {"config": shown}})
+        assert printer.config["base_url"] == stored and not _of(events, "error")
+
+        hidden = "http://elsewhere.local/hassio_ingress/[redacted]/"
+        await engine.handle({"cmd": "printer.update", "id": printer.id, "patch": {"config": {"base_url": hidden, "api_key": "k"}}})
+        await engine.handle({"cmd": "printer.add", "printer": {"name": "Q", "provider": "octoprint", "config": {"base_url": hidden, "api_key": "k"}}})
+        await engine.handle({"cmd": "camera.add", "name": "c", "source": {"kind": "url", "url": "rtsp://cam.local/[redacted]"}})
+        assert [event["message"] for event in _of(events, "error")] == ["the address has a hidden part, type it in full"] * 3
+        assert printer.config["base_url"] == stored and len(engine.printers.values()) == 1 and not engine.cameras.values()
+
+
+async def test_a_print_whose_file_is_gone_is_not_started_and_names_no_path() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        platform.device_status = "Operational"
+        await platform.files.store("abcd1234.gcode", _chunks(b"G1 X1\n"))
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "benchy.gcode", "printer_ids": [printer_id]})
+        del platform.files.blobs["abcd1234.gcode"]
+        await engine.handle({"cmd": "print.start", "id": "abcd1234", "printer_id": printer_id, "req_id": 1})
+
+    assert [event["message"] for event in _of(events, "error")] == ["print 'abcd1234' has lost its file"]
+
+
 async def test_a_kept_secret_is_refused_for_an_address_that_changed() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[]) as (engine, events):
@@ -5485,8 +5598,8 @@ async def test_a_kept_secret_is_refused_for_an_address_that_changed() -> None:
         for move in moves:
             await engine.handle(move)
         refusals = [event["message"] for event in _of(events, "error")]
-        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": {"base_url": "http://elsewhere.example"}})
-        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {"url": "https://elsewhere.example/topic"}})
+        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": {"base_url": "http://elsewhere.example"}}, events.append)
+        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {"url": "https://elsewhere.example/topic"}}, events.append)
         sent_elsewhere = [request for request in platform.http_requests if "elsewhere" in request["url"]]
         untouched = (engine.printers.get(printer_id).config, engine.settings["mqtt"], engine.settings["notifiers"])
 
@@ -5494,10 +5607,10 @@ async def test_a_kept_secret_is_refused_for_an_address_that_changed() -> None:
         moved = engine.printers.get(printer_id).config
 
     said = "again, since a stored secret is only kept for the address it was saved with"
-    assert refusals == [f"send api_key {said}", f"send password {said}", f"send password {said}", f"send token {said}"]
+    assert refusals == [f"send API key {said}", f"send Password {said}", f"send Password {said}", f"send Access token {said}"]
     assert [(test["ok"], test["error"]) for test in _of(events, "printer_test") + _of(events, "notify_test")] == [
-        (False, f"send api_key {said}"),
-        (False, f"send token {said}"),
+        (False, f"send API key {said}"),
+        (False, f"send Access token {said}"),
     ]
     assert not sent_elsewhere, "a stored secret was presented to an address it was not saved for"
     assert untouched == (SECRET_PRINTER, SECRET_MQTT, notifiers)
@@ -5512,10 +5625,10 @@ async def test_a_test_signs_in_with_the_stored_secret() -> None:
         printer_id, _ = await _seed_secrets(engine)
         shown = engine.state_event()
         platform.http_requests.clear()
-        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": shown["printers"][0]["config"]})
-        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "config": shown["printers"][0]["config"]})
-        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {}})
-        await engine.handle({"cmd": "notify.test", "provider": "telegram", "config": {"chat_id": "9", "bot_token": "typed-token"}})
+        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": shown["printers"][0]["config"]}, events.append)
+        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "config": shown["printers"][0]["config"]}, events.append)
+        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {}}, events.append)
+        await engine.handle({"cmd": "notify.test", "provider": "telegram", "config": {"chat_id": "9", "bot_token": "typed-token"}}, events.append)
         requests = list(platform.http_requests)
 
     assert [(test["ok"], test.get("error")) for test in _of(events, "printer_test")] == [(True, None), (False, "OctoPrint needs API key filled in")]
@@ -5552,8 +5665,8 @@ async def test_a_plugin_granted_everything_is_shown_no_stored_secret() -> None:
         printer_id, secrets = await _seed_secrets(engine)
         shown = engine.state_event()["printers"][0]["config"]
         await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": shown}})
-        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": shown})
-        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {}})
+        await engine.handle({"cmd": "printer.test", "provider": "octoprint", "id": printer_id, "config": shown}, events.append)
+        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {}}, events.append)
         await asyncio.sleep(0.3)
         everything = list(plugins.PERMISSIONS)
         views = [plugins.project_state(engine.state_event(), everything), *(plugins.project_event(event, everything) for event in events)]

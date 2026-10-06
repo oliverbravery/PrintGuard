@@ -61,9 +61,13 @@ class Adapter(ABC):
             "schema": self.schema,
         }
 
+    def secret_fields(self) -> dict[str, str]:
+        """Config property names the schema marks secret (credentials), each with its title."""
+        return {key: prop["title"] for key, prop in self.schema.get("properties", {}).items() if prop.get("secret")}
+
     def secret_keys(self) -> set[str]:
         """Config property names the schema marks secret (credentials)."""
-        return {key for key, prop in self.schema.get("properties", {}).items() if prop.get("secret")}
+        return set(self.secret_fields())
 
     def require(self, config: dict[str, Any]) -> None:
         """Refuses a configuration that leaves a field the service needs blank.
