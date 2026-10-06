@@ -12,6 +12,7 @@ import base64
 import contextvars
 import functools
 import logging
+import re
 import time
 import traceback
 import uuid
@@ -59,6 +60,8 @@ CAMERAS_OPENED_IN_TURN = 4
 RUNTIME_LOAD_ALLOWANCE_S = 60.0
 RECENT_EVENTS_MAX = 100
 TEST_PICTURE_SHAPE = (180, 320, 3)
+NUMBERED_LABEL = re.compile(r" \(\d+\)$")
+"""The number a platform appends to the label of each of several cameras of one model."""
 RECENT_EVENT_TYPES = ("alert", "warning", "error")
 SCRUBBED_EVENT_TYPES = ("warning", "error")
 EVENT_LOG_LEVELS = {"alert": logging.INFO, "warning": logging.WARNING, "error": logging.ERROR, "device": logging.DEBUG}
@@ -971,20 +974,26 @@ class Engine:
         """Lists the sources that are not registered yet.
 
         A Windows camera registered before 2.6.0 has the name it shows as its
-        device id where the hub now lists its device path, so a source whose
-        label is registered is that same camera. A stream the hub publishes
-        for one of its own cameras is not offered, since registering it would
-        read the first camera's stream as a second camera.
+        device id where the hub now lists its device path, and the listing
+        numbers cameras of one model, so a source whose label without its
+        number is a registered name is that camera. Opening by name reached the
+        first of them, so only the first is hidden for each such registration.
+        A stream the hub publishes for one of its own cameras is not offered,
+        since registering it would read the first camera's stream as a second
+        camera.
         """
         sources = await self.platform.discover_cameras()
         registered = self._registered_addresses()
-        fresh = [
-            s
-            for s in sources
-            if _address(s) not in registered
-            and s.get("label") not in registered
-            and not (s["kind"] == "path" and s["path"] in self.cameras.items)
-        ]
+        unlisted_by_name = [camera.source["device_id"] for camera in self.cameras.values() if camera.source["kind"] == "device"]
+        fresh: list[dict[str, Any]] = []
+        for source in sources:
+            shown_as = NUMBERED_LABEL.sub("", source.get("label") or "")
+            if _address(source) in registered or (source["kind"] == "path" and source["path"] in self.cameras.items):
+                continue
+            if shown_as in unlisted_by_name:
+                unlisted_by_name.remove(shown_as)
+                continue
+            fresh.append(source)
         self.emit({"event": "discovered", "sources": fresh, "req_id": message.get("req_id")})
 
     def _registered_addresses(self) -> set[Any]:

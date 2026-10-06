@@ -2256,6 +2256,22 @@ async def test_discovery_hides_a_device_registered_under_the_name_it_shows() -> 
         assert next(e for e in events if e.get("req_id") == 2 and e["event"] == "discovered")["sources"] == []
 
 
+async def test_discovery_hides_only_the_first_of_two_same_model_cameras_when_one_was_added_by_name() -> None:
+    """On 2.5.0 the second one could not be added at all, and the first was opened by the name they share."""
+    platform = FakePlatform()
+    platform.devices = [{"kind": "device", "device_id": "HD Pro Webcam C920", "label": "HD Pro Webcam C920", "declared": False}]
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "camera.add", "name": "Cam", "source": {"kind": "device", "device_id": "HD Pro Webcam C920"}})
+        platform.devices = [
+            {"kind": "device", "device_id": "@device_pnp_usb#6", "label": "HD Pro Webcam C920 (1)", "declared": False},
+            {"kind": "device", "device_id": "@device_pnp_usb#7", "label": "HD Pro Webcam C920 (2)", "declared": False},
+        ]
+        await engine.handle({"cmd": "discover", "req_id": 2})
+        listed = next(e for e in events if e.get("req_id") == 2 and e["event"] == "discovered")["sources"]
+
+    assert [source["device_id"] for source in listed] == ["@device_pnp_usb#7"]
+
+
 async def test_what_the_platform_worked_around_is_raised_as_a_warning(monkeypatch: pytest.MonkeyPatch) -> None:
     """An accelerator passed over for the CPU, or a live view that cannot publish, was only a log line."""
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)

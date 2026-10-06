@@ -208,6 +208,18 @@ def test_macos_opens_a_camera_by_the_name_it_shows(monkeypatch: pytest.MonkeyPat
     assert _video_devices() == [("FaceTime HD Camera", "FaceTime HD Camera")]
 
 
+def test_the_macos_camera_bridge_is_installed_with_the_hub_and_not_only_the_desktop_extra() -> None:
+    """`uv sync && uv run printguard` on a Mac failed to add a USB camera with no module named objc."""
+    from importlib import metadata
+
+    from packaging.requirements import Requirement
+
+    bridge = next(Requirement(line) for line in metadata.requires("printguard") if line.startswith("pyobjc-framework-cocoa"))
+
+    assert bridge.marker is not None and "extra" not in str(bridge.marker)
+    assert bridge.marker.evaluate({"sys_platform": "darwin"}) and not bridge.marker.evaluate({"sys_platform": "linux"})
+
+
 def test_provider_library_that_cannot_load_leaves_the_cpu(tmp_path: Path) -> None:
     """A GPU image whose provider libraries the host cannot supply must still start.
 
