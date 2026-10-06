@@ -213,6 +213,7 @@ PLUGIN_REQUEST_HEADERS = ("cookie", "authorization", "accept", "content-type", "
 PLUGIN_RESPONSE_HEADERS = ("set-cookie", "location", "cache-control")
 PLUGIN_BODY_LIMIT = 64 * 1024
 SOCKET_COMMANDS_IN_FLIGHT = 16
+WEBSOCKET_MAX_BYTES = 24 * 1024 * 1024
 PLUGIN_PAGE_CSP = (
     "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; "
     "font-src data:; connect-src 'none'; form-action 'self'; base-uri 'none'; sandbox allow-forms allow-scripts; frame-ancestors 'none'"
@@ -580,7 +581,7 @@ def main() -> None:
     the root handlers, and without access logs - per-request lines for the
     HLS polling would drown the tail that bug reports attach.
     """
-    uvicorn.run(create_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), log_config=None, access_log=False)
+    uvicorn.run(create_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), log_config=None, access_log=False, ws_max_size=WEBSOCKET_MAX_BYTES)
 
 
 if __name__ == "__main__":

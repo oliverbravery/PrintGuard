@@ -302,10 +302,10 @@ class _Server:
     """Runs the hub's uvicorn server on a background daemon thread."""
 
     def __init__(self, port: int) -> None:
-        from .app import create_app
+        from .app import WEBSOCKET_MAX_BYTES, create_app
 
         self._port = port
-        self._server = uvicorn.Server(uvicorn.Config(create_app(), log_config=None, access_log=False))
+        self._server = uvicorn.Server(uvicorn.Config(create_app(), log_config=None, access_log=False, ws_max_size=WEBSOCKET_MAX_BYTES))
         self._server.install_signal_handlers = lambda: None
         self._thread = threading.Thread(target=self._serve, daemon=True)
 

@@ -864,3 +864,26 @@ async def test_an_origin_entry_with_a_trailing_dot_still_names_the_hub(monkeypat
         assert (await client.get("/api/health", headers={"host": "hub.example.com."})).status_code == 200
         upload = await client.post("/api/prints?filename=a.stl", content=b"solid", headers={"host": "printguard:8000", "origin": "https://hub.example.com"})
         assert upload.status_code == 400, "the origin was refused, where the file should have been"
+
+
+def test_the_hub_takes_a_websocket_message_big_enough_for_a_plugin_zip(monkeypatch) -> None:
+    """A 12 MiB zip travels as base64 in one frame, which uvicorn's own 16 MiB limit already closes."""
+    served: dict = {}
+    monkeypatch.setattr(app_module.uvicorn, "run", lambda app, **options: served.update(options))
+    app_module.main()
+
+    assert served["ws_max_size"] == app_module.WEBSOCKET_MAX_BYTES
+    assert app_module.WEBSOCKET_MAX_BYTES > 12 * 1024 * 1024 * 4 // 3
+
+
+def test_the_desktop_app_serves_the_same_websocket_limit(monkeypatch) -> None:
+    pytest.importorskip("pystray")
+    pytest.importorskip("webview")
+    from printguard.server import desktop
+
+    configs: list[dict] = []
+    monkeypatch.setattr(desktop.uvicorn, "Config", lambda app, **options: configs.append(options))
+    monkeypatch.setattr(desktop.uvicorn, "Server", lambda config: SimpleNamespace())
+    desktop._Server(8000)
+
+    assert configs[0]["ws_max_size"] == app_module.WEBSOCKET_MAX_BYTES
