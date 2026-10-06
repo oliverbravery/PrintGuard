@@ -31,9 +31,7 @@ from typing import Any
 
 import httpx
 import platformdirs
-import pystray
 import uvicorn
-import webview
 from PIL import Image
 
 from ..engine import logs
@@ -47,6 +45,7 @@ READY_TIMEOUT_S = 30.0
 STOP_TIMEOUT_S = 10.0
 FAILURE_LOG_LINES = 30
 WIN_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+TRANSIENT_LOCATIONS = ("/Volumes/", "/AppTranslocation/")
 WEBVIEW2_DOWNLOAD = "https://developer.microsoft.com/microsoft-edge/webview2/"
 
 FAILURE_PAGE = Template("""<!doctype html>
@@ -196,6 +195,8 @@ def _run_webview(
     root.addHandler(logging.handlers.QueueHandler(log_records))
     root.setLevel(logging.INFO)
     try:
+        import webview
+
         if sys.platform == "darwin":
             _enable_wkwebview_media()
         if sys.platform == "win32" and ("url" in contents or awaiting):
@@ -230,26 +231,30 @@ def _starting_page() -> str:
     return STARTING_PAGE.substitute(log=html.escape(os.environ["LOG_FILE"]))
 
 
-def _wait_until_answering(port: int, abandoned: threading.Event) -> bool:
-    """Waits for the hub to answer on a port.
+def _wait_until_answering(port: int, abandoned: threading.Event, timeout: float | None = None) -> bool:
+    """Waits for a PrintGuard hub to answer on a port.
+
+    Whatever else answers on the port is not waited for, since a window opened on it would
+    show that program.
 
     Args:
         port: The port the hub serves on.
         abandoned: Set to stop waiting.
+        timeout: Seconds to wait, or None to wait until it answers.
 
     Returns:
-        True once the hub answers, False if the wait was abandoned first.
+        True once the hub answers, False if the wait was abandoned or ran out first.
     """
+    deadline = None if timeout is None else time.monotonic() + timeout
     while not abandoned.wait(1.0):
-        try:
-            httpx.get(f"http://localhost:{port}/api/health", trust_env=False)
-        except httpx.HTTPError:
-            continue
-        return True
+        if _hub_running(port):
+            return True
+        if deadline is not None and time.monotonic() >= deadline:
+            break
     return False
 
 
-def _open_when_serving(window: webview.Window, port: int) -> None:
+def _open_when_serving(window: Any, port: int) -> None:
     """Swaps the starting page for the dashboard once the hub answers, giving up when the window closes."""
     closed = threading.Event()
     window.events.closed += closed.set
@@ -330,21 +335,26 @@ def _hub_running(port: int) -> bool:
 
 
 class _Server:
-    """Runs the hub's uvicorn server on a background daemon thread."""
+    """Runs the hub's uvicorn server on a background daemon thread.
+
+    Attributes:
+        port_held: True once another program was found holding the port the server needs.
+    """
 
     def __init__(self, port: int) -> None:
         from .app import WEBSOCKET_MAX_BYTES, create_app
 
         self._port = port
         self._server = uvicorn.Server(uvicorn.Config(create_app(), log_config=None, access_log=False, ws_max_size=WEBSOCKET_MAX_BYTES))
-        self._server.install_signal_handlers = lambda: None
         self._thread = threading.Thread(target=self._serve, daemon=True)
+        self.port_held = False
 
     def _serve(self) -> None:
         try:
             listener = _listening_socket(self._port)
         except OSError:
             logger.error("another program holds port %d, so the hub server cannot listen on it", self._port)
+            self.port_held = True
             return
         self._server.run(sockets=[listener])
 
@@ -397,6 +407,17 @@ def _autostart_args() -> list[str]:
     if getattr(sys, "frozen", False):
         return [sys.executable]
     return [sys.executable, "-m", "printguard.server.desktop"]
+
+
+def _refresh_autostart() -> None:
+    """Repoints an existing login entry at this copy when it is the installed app.
+
+    A copy run from source or from a mounted disk image names a path that will not
+    be there at the next login, so only the installed app takes the entry over.
+    """
+    stable_location = not any(location in sys.executable for location in TRANSIENT_LOCATIONS)
+    if getattr(sys, "frozen", False) and stable_location and _autostart_enabled():
+        _set_autostart(True)
 
 
 def _macos_plist() -> Path:
@@ -496,7 +517,7 @@ def _load_icon() -> Image.Image:
     return template
 
 
-def _show_tray(icon: pystray.Icon) -> None:
+def _show_tray(icon: Any) -> None:
     """Reveals the tray icon, rebuilding it as a crisp macOS menu-bar template.
 
     pystray sizes the status-bar NSImage to the menu-bar thickness in pixels, so on Retina it
@@ -520,26 +541,58 @@ def _show_tray(icon: pystray.Icon) -> None:
     icon._status_item.button().setImage_(image)
 
 
+def _show_running_copy(port: int) -> None:
+    """Opens the dashboard of the copy already serving the port in the browser."""
+    logger.info("PrintGuard is already running on :%d, so its dashboard is opening in the browser", port)
+    webbrowser.open(_webview_url(port))
+
+
+def _reopen_from_finder(window: _Window) -> Any:
+    """Opens the window when macOS reopens the running app.
+
+    Launching a running app again never starts a second process on macOS. It sends the
+    running one a reopen request, which pystray's status item ignores.
+
+    Args:
+        window: The window to open.
+
+    Returns:
+        The application delegate, which AppKit holds only weakly, so the caller keeps it.
+    """
+    import AppKit
+
+    class ReopenDelegate(AppKit.NSObject):
+        def applicationShouldHandleReopen_hasVisibleWindows_(self, application, has_visible_windows):
+            window.open()
+            return True
+
+    delegate = ReopenDelegate.alloc().init()
+    AppKit.NSApplication.sharedApplication().setDelegate_(delegate)
+    return delegate
+
+
 def main() -> None:
     """Console entry point that serves the hub behind a tray icon on the main thread.
 
     The window runs in a child process; closing it leaves the tray and the hub
     server running so the printer stays watched, and the tray's Quit exits. Opened while
-    another copy is already running, it shows that copy's dashboard in the browser and exits.
+    another copy is already running or still starting, it shows that copy's dashboard in the
+    browser and exits.
     """
     _configure_environment()
     _set_windows_app_id()
     logs.setup_from_env()
     logger.info("desktop app starting (frozen=%s, data=%s)", getattr(sys, "frozen", False), os.environ["DATA_DIR"])
-    if _autostart_enabled():
-        _set_autostart(True)
     port = int(os.environ.get("PORT", "8000"))
     if _hub_running(port):
-        logger.info("PrintGuard is already running on :%d, so its dashboard is opening in the browser", port)
-        webbrowser.open(_webview_url(port))
+        _show_running_copy(port)
         return
     server = _Server(port)
     started = server.start()
+    if server.port_held and _wait_until_answering(port, threading.Event(), READY_TIMEOUT_S):
+        _show_running_copy(port)
+        return
+    _refresh_autostart()
     if started is None:
         window = _Window(html=_starting_page(), awaiting=port)
     else:
@@ -547,6 +600,9 @@ def main() -> None:
     window.open()
     if sys.platform == "darwin":
         _watch_termination(window, server)
+        reopen_delegate = _reopen_from_finder(window)
+
+    import pystray
 
     def open_window(icon: pystray.Icon, item: pystray.MenuItem) -> None:
         window.open()
