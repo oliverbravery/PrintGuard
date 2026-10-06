@@ -15,7 +15,7 @@ import logging
 import time
 import traceback
 import uuid
-from collections import deque
+from collections import defaultdict, deque
 from typing import Any, Awaitable, Callable
 
 import numpy as np
@@ -153,6 +153,7 @@ class Engine:
         self._plugin_calls: dict[str, list[float]] = {}
         self._pending_calls: dict[str, tuple[str, str, str, float]] = {}
         self._answered_calls: dict[str, tuple[str, float]] = {}
+        self._sign_in_refreshes: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
         self._requester: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = contextvars.ContextVar("requester", default=None)
         self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
@@ -1955,14 +1956,19 @@ class Engine:
         return plugin.manifest["name"]
 
     async def _refresh_sign_in(self, plugin: Plugin) -> None:
-        """Renews a plugin's access token before a request goes out on it."""
+        """Renews a plugin's access token before a request goes out on it.
+
+        One renewal runs at a time for a plugin, so a request that waited on it
+        finds the new token rather than spending the refresh token again.
+        """
         if not plugin.manifest["oauth"]:
             return
-        held = plugin.secrets
-        renewed = await self.oauth.refreshed(self._provider(plugin), held)
-        if renewed is not None:
-            plugin.secrets = {**plugin.secrets, **{key: value for key, value in renewed.items() if held.get(key) != value}}
-            self.save()
+        async with self._sign_in_refreshes[plugin.id]:
+            held = plugin.secrets
+            renewed = await self.oauth.refreshed(self._provider(plugin), held)
+            if renewed is not None:
+                plugin.secrets = {**plugin.secrets, **{key: value for key, value in renewed.items() if held.get(key) != value}}
+                self.save()
 
     async def _cmd_plugin_effect(self, message: dict[str, Any]) -> None:
         """Hands a plugin's effect to the dashboards that can perform it.

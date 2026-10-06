@@ -328,6 +328,25 @@ async def test_a_sign_in_and_a_rotated_refresh_token_survive_a_restart() -> None
     assert platform.state["plugins"][0]["secrets"][oauth.REFRESH] == "rt-2", "the provider has retired the token a restart would bring back"
 
 
+async def test_two_requests_on_an_expired_token_refresh_it_once() -> None:
+    """A provider that rotates refresh tokens retires the one the second refresh would send."""
+    platform = FakePlatform()
+    platform.responses[f"{API}/token"] = (200, {"access_token": "at-1", "refresh_token": "rt-1"})
+    async with engine_with(platform, SIGNS_IN) as engine:
+        await engine.finish_sign_in((await start_sign_in(engine))["state"][0], "code-1")
+        engine.plugins.get("demo").secrets[oauth.EXPIRES] = "0"
+        platform.responses[f"{API}/token"] = (200, {"access_token": "at-2", "refresh_token": "rt-2"})
+        platform.http_requests.clear()
+
+        ask = {"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now"}
+        await asyncio.gather(engine.request(ask), engine.request(ask))
+
+        refreshes = [r for r in platform.http_requests if r["url"] == f"{API}/token"]
+        assert len(refreshes) == 1, "the second request refreshed with a token the first had already used"
+        sent = [r for r in platform.http_requests if r["url"] == f"{API}/v1/now"]
+        assert len(sent) == 2
+
+
 class SlowPlatform(FakePlatform):
     """Holds every socket open until told, the way a slow handshake does."""
 
