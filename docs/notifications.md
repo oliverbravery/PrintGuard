@@ -49,7 +49,9 @@ a print through these same channels.
 | Recovery | A faulted camera or printer has stayed healthy | |
 
 A monitor set to **Alert only** says so in the alert, so you know the print is still running. A
-pause or cancel is tried three times before it's reported as failed.
+pause or cancel is tried up to three times in 45 seconds before it's reported as failed. A
+Centauri Carbon 2 gets 135 seconds, since it answers only once it has finished moving. A print
+that is already paused or over when the printer refuses counts as done.
 
 A monitor's [cooldown](monitoring.md#monitor-settings) holds back its whole response to the next
 defect, the pause or cancel included. Pushes with the same outcome are also at least 30 seconds

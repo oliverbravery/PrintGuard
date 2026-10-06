@@ -10,6 +10,7 @@ configured notifiers so the user hears about them away from the dashboard.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 import time
 from collections import deque
@@ -47,6 +48,7 @@ COVERAGE_MIN = 0.9
 ACT_ATTEMPTS = 3
 ACT_RETRY_S = 1.0
 ACT_FAILED_COOLDOWN_S = 30.0
+ACT_DEADLINE_S = 45.0
 
 
 def clamp_grace(seconds: Any) -> float:
@@ -84,6 +86,8 @@ class Watchdog:
         self._warned: set[str] = set()
         self._last_warned: dict[str, float] = {}
         self._restarted: dict[str, float] = {}
+        self._reads = itertools.count()
+        self._answered: dict[str, int] = {}
         self._online_since: dict[str, float] = {}
         self._coverage: dict[str, deque[bool]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
@@ -109,21 +113,26 @@ class Watchdog:
     async def poll_devices(self) -> float:
         """Refreshes every registered printer's state.
 
-        They are read together, so one that does not answer holds up nobody
-        else's state. A change in the status a printer last reported is saved,
-        so a hub restarted while the printer is switched off still knows it was
-        idle.
+        They are read together and each is followed as soon as it answers, so
+        one that does not answer holds up nobody else's state or camera.
 
         Returns:
             Seconds until the next poll.
         """
-        printers = self._engine.printers.values()
-        reported = [printer.reported_status for printer in printers]
-        if any(await asyncio.gather(*(self._read(printer) for printer in printers))):
-            self.follow_printers()
-        if reported != [printer.reported_status for printer in self._engine.printers.values()]:
-            self._engine.save()
+        await asyncio.gather(*(self._refresh(printer) for printer in self._engine.printers.values()))
         return DEVICE_POLL_S
+
+    async def _refresh(self, printer: "Printer") -> None:
+        """Reads a printer and re-gates its monitors when its state changed.
+
+        A change in the status it last reported is saved, so a hub restarted
+        while the printer is switched off still knows it was idle.
+        """
+        reported = printer.reported_status
+        if await self._read(printer):
+            self.follow_printers()
+        if printer.reported_status != reported:
+            self._engine.save()
 
     async def _read(self, printer: "Printer") -> bool:
         """Reads a printer's state, taking a service that cannot be reached as offline.
@@ -132,7 +141,10 @@ class Watchdog:
         reading it would open the connection its removal just closed, and one
         removed while it was answering has its answer dropped. So has one whose
         connection details were edited meanwhile, since the answer came from
-        an address it no longer has.
+        an address it no longer has, and one that lands after the answer to a
+        read begun later, such as a poll still in flight when the re-read that
+        follows a pause has already answered. A read that fails is logged when
+        it takes the printer offline, not on every poll after that.
 
         Returns:
             Whether the state changed.
@@ -141,14 +153,24 @@ class Watchdog:
         if not adapter or self._engine.printers.get(printer.id) is not printer:
             return False
         asked = (printer.provider, printer.config)
+        turn = next(self._reads)
+        failure: Exception | None = None
         try:
             snapshot = (await adapter.fetch_state(self._engine.platform.http, printer.config)).public()
-        except Exception:
+        except Exception as exc:
+            failure = exc
             snapshot = DeviceState(DeviceStatus.OFFLINE).public()
-        if self._engine.printers.get(printer.id) is not printer or (printer.provider, printer.config) != asked:
+        if (
+            self._engine.printers.get(printer.id) is not printer
+            or (printer.provider, printer.config) != asked
+            or turn < self._answered.get(printer.id, 0)
+        ):
             return False
+        self._answered[printer.id] = turn
         changed = printer.observe(snapshot)
         if changed:
+            if failure:
+                logger.warning("printer '%s' could not be read: %s", printer.name, logs.describe(failure))
             self._engine.emit({"event": "device", "printer_id": printer.id, **snapshot})
         return changed
 
@@ -197,7 +219,8 @@ class Watchdog:
         of the print, so the share of the last COVERAGE_WINDOW_S it delivered
         frames for is warned on separately. A printer that reports nothing
         usable only counts while its monitor is watching, since one switched
-        off after a print leaves its monitor in standby.
+        off after a print leaves its monitor in standby. A monitor switched
+        off or unlinked from its printer forgets that fault.
 
         A watching monitor whose camera is not registered is as unwatched as
         one whose camera is offline, and is warned about the same way. A
@@ -213,9 +236,12 @@ class Watchdog:
             mid = monitor["id"]
             watching = monitor_watching(monitor, self._engine.printers)
             printer = self._engine.printers.get(monitor["printer_id"]) if monitor.get("printer_id") else None
-            if monitor.get("enabled") and printer is not None:
+            device_key = f"device:{mid}"
+            if not monitor.get("enabled") or printer is None:
+                self._forget(device_key)
+            else:
                 await self._edge(
-                    f"device:{mid}",
+                    device_key,
                     printer.online or not watching,
                     now,
                     grace,
@@ -257,7 +283,7 @@ class Watchdog:
                 f"Camera '{camera.name}' is offline, so '{monitor['name']}' is NOT being monitored",
                 f"Camera '{camera.name}' is back, so '{monitor['name']}' is monitored again",
             )
-            if not camera.online and self._due_restart(offline_key, now):
+            if not camera.online and self._due_restart(offline_key, camera, now):
                 await self._engine.restart_camera(camera)
             if not camera.online and offline_key in self._warned:
                 self._forget(stall_key)
@@ -276,7 +302,7 @@ class Watchdog:
                     f"Camera '{camera.name}' feed has stalled, so '{monitor['name']}' is NOT being monitored",
                     f"Camera '{camera.name}' feed recovered, so '{monitor['name']}' is monitored again",
                 )
-            if camera.online and not progressing and self._due_restart(stall_key, now):
+            if camera.online and not progressing and self._due_restart(stall_key, camera, now):
                 await self._engine.restart_camera(camera)
             await self._cover(monitor, camera, offline_key in self._warned or stall_key in self._warned, camera.online and progressing, now)
         return WATCH_TICK_S
@@ -328,16 +354,18 @@ class Watchdog:
             f"Camera '{camera.name}' is steady again, so '{monitor['name']}' is monitored reliably",
         )
 
-    def _due_restart(self, key: str, now: float) -> bool:
+    def _due_restart(self, key: str, camera: "Camera", now: float) -> bool:
         """Whether a faulting camera is due to be torn down and attached afresh.
 
         A camera source reconnects on its own, so re-attaching is the heavier
         fallback for one that has wedged rather than the first response. It
-        runs on its own timer and is rate limited, so it neither waits for the
-        grace period nor fires repeatedly at a camera that is flapping.
+        runs on its own timer and is rate limited per camera, so it neither
+        waits for the grace period nor fires repeatedly at a camera that is
+        flapping or that several monitors watch.
 
         Args:
             key: Watch key for the fault condition.
+            camera: The camera the fault is on.
             now: Current monotonic time.
 
         Returns:
@@ -345,10 +373,10 @@ class Watchdog:
         """
         if now - self._down_since.get(key, now) < RESTART_AFTER_S:
             return False
-        restarted = self._restarted.get(key)
+        restarted = self._restarted.get(camera.id)
         if restarted is not None and now - restarted < RESTART_COOLDOWN_S:
             return False
-        self._restarted[key] = now
+        self._restarted[camera.id] = now
         return True
 
     async def _edge(
@@ -444,7 +472,8 @@ class Watchdog:
 
         The alert stays on the monitor unless a clean frame arrived while the
         printer was answering. A monitor stood down meanwhile keeps it, since
-        the pause that stood it down is the one being announced. A command the
+        the pause that stood it down is the one being announced, while one
+        switched off meanwhile had its alert cleared and stays clear. A command the
         printer did not take is tried again after ACT_FAILED_COOLDOWN_S at the
         latest, whatever the monitor's own cooldown.
         """
@@ -457,7 +486,7 @@ class Watchdog:
             if action == "failed":
                 self._cooldown_until[mid] = min(self._cooldown_until.get(mid, 0.0), time.monotonic() + ACT_FAILED_COOLDOWN_S)
             alert = {"score": round(score, 3), "action": action, "ts": time.time()}
-            if self._streaks.get(mid) != 0:
+            if self._streaks.get(mid) != 0 and monitor["enabled"]:
                 monitor["alert"] = alert
             self._engine.emit({"event": "alert", "monitor_id": mid, **alert})
             await self._notify(monitor, score, action, await self._engine.platform.encode_jpeg(frame.rgb))
@@ -465,29 +494,50 @@ class Watchdog:
                 await self._engine.note_alert(mid, alert, frame)
             finally:
                 printer = self._engine.printers.get(monitor["printer_id"])
-                if action not in ("none", "failed") and printer and await self._read(printer):
-                    self.follow_printers()
-                    self._engine.save()
+                if action not in ("none", "failed") and printer:
+                    await self._refresh(printer)
         finally:
             self.responding.discard(mid)
             if self._engine.settle_reviews():
                 self._engine.save()
 
     async def _act(self, monitor: dict[str, Any]) -> str:
+        """Sends a monitor's defect action to its printer, trying again when it is not taken.
+
+        A printer that did not take the command is read again before the next
+        try. One that is already paused, or whose print is already over, has
+        nothing left to stop, so the action counts as taken. The tries share
+        one deadline, ACT_DEADLINE_S on top of what the adapter says a slow
+        action can take, so a printer that never answers cannot hold the alert
+        back for as long as its client is willing to wait.
+
+        Returns:
+            The action taken, ``none`` when the monitor has none to take, or
+            ``failed``.
+        """
         wanted = monitor.get("on_defect", "none")
         printer = self._engine.printers.get(monitor.get("printer_id") or "")
         adapter = INTEGRATIONS.get(printer.provider) if printer else None
         if wanted == "none" or not adapter or printer is None:
             return "none"
         action = DeviceAction.PAUSE if wanted == "pause" else DeviceAction.CANCEL
-        last_error: Exception | None = None
-        for _ in range(ACT_ATTEMPTS):
-            try:
-                await adapter.send(self._engine.platform.http, printer.config, action)
-                return wanted
-            except Exception as exc:
-                last_error = exc
-                await asyncio.sleep(ACT_RETRY_S)
+        stopped = ENDED_STATUSES if wanted == "cancel" else (*ENDED_STATUSES, DeviceStatus.PAUSED.value)
+        deadline = ACT_DEADLINE_S + adapter.slow_action_s
+        last_error: Exception = TimeoutError(f"the printer did not answer within {deadline:.0f} s")
+        try:
+            async with asyncio.timeout(deadline):
+                for _ in range(ACT_ATTEMPTS):
+                    try:
+                        await adapter.send(self._engine.platform.http, printer.config, action)
+                        return wanted
+                    except Exception as exc:
+                        last_error = exc
+                    await self._refresh(printer)
+                    if printer.online and printer.device_state["status"] in stopped:
+                        return wanted
+                    await asyncio.sleep(ACT_RETRY_S)
+        except TimeoutError:
+            pass
         logger.debug("printer action traceback for '%s'", monitor["name"], exc_info=last_error)
         self._engine.emit({"event": "error", "message": f"{monitor['name']}: automatic {wanted} failed: {logs.describe(last_error)}"})
         return "failed"

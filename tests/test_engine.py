@@ -4062,3 +4062,195 @@ async def test_the_frame_that_cancels_a_print_stays_in_that_prints_review(monkey
         both = engine.state_event()["reviews"]
     assert [(review["status"], review["alerts"]) for review in cancelled] == [("ready", 1)], "the cancelled print ends with its alert frame in it"
     assert [(review["status"], review["alerts"]) for review in both] == [("ready", 1), ("ready", 0)], "the next print starts a review of its own"
+
+
+async def test_a_printer_that_does_not_answer_holds_up_nobody_elses_camera(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    platform = FakePlatform(infer_s=0.02)
+    platform.device_status = "Operational"
+    _, release = await _one_slow_printer(platform, monkeypatch, "slow.lan")
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        await _add_printers(engine, "slow.lan", "quick.lan")
+        camera = engine.cameras.values()[0]
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": {"printer_id": engine.printers.values()[1].id}})
+        await engine.watchdog.poll_devices()
+        asleep = camera.in_use
+        platform.device_status = "Printing"
+        release.clear()
+        poll = asyncio.create_task(engine.watchdog.poll_devices())
+        for _ in range(50):
+            if camera.in_use:
+                break
+            await asyncio.sleep(0.01)
+        woken_meanwhile = camera.in_use
+        release.set()
+        await poll
+
+    assert not asleep and woken_meanwhile, "a printer that started printing waited on another's answer before its camera woke"
+
+
+async def test_a_poll_begun_before_a_pause_does_not_undo_the_read_made_after_it(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    platform = FakePlatform(infer_s=0.02)
+    answer = platform.http
+    hold = False
+    held = asyncio.Event()
+    release = asyncio.Event()
+
+    async def http(method: str, url: str, **request: Any) -> tuple[int, Any]:
+        nonlocal hold
+        if method == "POST" and "/api/job" in url:
+            platform.device_status = "Paused"
+        answered = await answer(method, url, **request)
+        if hold and method == "GET" and url.endswith("/api/job"):
+            hold = False
+            held.set()
+            await release.wait()
+        return answered
+
+    monkeypatch.setattr(platform, "http", http)
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
+        printer_id = await _register_printer(engine)
+        patch = {"printer_id": printer_id, "on_defect": "pause", "consecutive": 1, "cooldown_s": 0}
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": patch})
+        await engine.watchdog.poll_devices()
+        printer = engine.printers.get(printer_id)
+        hold = True
+        poll = asyncio.create_task(engine.watchdog.poll_devices())
+        await asyncio.wait_for(held.wait(), 1.0)
+        platform.failing = True
+        for _ in range(100):
+            if printer.reported_status == "paused":
+                break
+            await asyncio.sleep(0.01)
+        release.set()
+        await poll
+        after_the_old_answer = printer.reported_status
+        await asyncio.sleep(0.3)
+
+    assert after_the_old_answer == "paused", "an answer from before the pause replaced the one read after it"
+    assert [alert["action"] for alert in _of(events, "alert")] == ["pause"], "the paused print was paused again"
+
+
+async def test_a_monitor_switched_off_while_its_printer_answers_shows_no_alert() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.action_delay_s = 0.3
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id, "on_defect": "pause", "consecutive": 1}})
+        platform.failing = True
+        await asyncio.wait_for(platform.action_started.wait(), 2.0)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        await asyncio.sleep(0.8)
+        monitor = engine.state_event()["monitors"][0]
+
+    assert [alert["action"] for alert in _of(events, "alert")] == ["pause"], "the pause that went through is still announced"
+    assert monitor["alert"] is None, "a monitor switched off got its alert back once the printer answered"
+
+
+async def test_a_monitor_switched_off_forgets_that_its_printer_could_not_be_read(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.05)
+    monkeypatch.setattr(watchdog, "GRACE_MIN_S", 0.0)
+    monkeypatch.setattr(watchdog, "RECOVER_HOLD_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    platform.device_status = "Detecting serial connection"
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "settings.update", "patch": {"fault_grace_s": 0.2}})
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await asyncio.sleep(1.0)
+        warned = [e for e in _of(events, "warning") if "Cannot tell whether the printer" in e["message"]]
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        await asyncio.sleep(0.2)
+        platform.device_status = "Printing"
+        await asyncio.sleep(0.2)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": True}})
+        await asyncio.sleep(0.6)
+
+    assert warned, "the unreadable printer was never warned about"
+    assert not [e for e in _of(events, "warning") if e["recovered"]], "a monitor switched back on announced a recovery from before it was switched off"
+
+
+async def test_a_stalled_camera_two_monitors_watch_is_attached_afresh_once(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "WATCH_TICK_S", 0.02)
+    monkeypatch.setattr(watchdog, "STALL_GRACE_S", 0.1)
+    monkeypatch.setattr(watchdog, "RESTART_AFTER_S", 0.05)
+    platform = FakePlatform(infer_s=0.01)
+    open_camera = platform.open_camera
+
+    async def frozen(camera_id: str, source: dict[str, Any]) -> Any:
+        opened = await open_camera(camera_id, source)
+        opened.frozen = True
+        return opened
+
+    monkeypatch.setattr(platform, "open_camera", frozen)
+    async with running_engine(platform, camera_fps=[20.0]) as (engine, _):
+        camera = engine.cameras.values()[0]
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "second", "camera_id": camera.id}})
+        await asyncio.sleep(0.8)
+        released = list(platform.released_cameras)
+
+    assert released == [camera.id], "each monitor tore the one camera down in turn"
+
+
+async def test_a_printer_that_never_answers_a_pause_is_given_up_on(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    monkeypatch.setattr(watchdog, "ACT_DEADLINE_S", 0.2)
+    platform = FakePlatform(infer_s=0.02)
+    platform.action_delay_s = 30.0
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": {"printer_id": printer_id, "on_defect": "pause", "consecutive": 1}})
+        platform.failing = True
+        await asyncio.sleep(1.0)
+
+    assert [alert["action"] for alert in _of(events, "alert")] == ["failed"], "the alert waited on a printer that was not answering"
+    assert any("automatic pause failed: the printer did not answer within" in error["message"] for error in _of(events, "error"))
+
+
+async def test_a_pause_refused_by_a_print_already_paused_is_not_a_failure(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    platform = FakePlatform(infer_s=0.02)
+    platform.reject_actions = True
+
+    async def paused_at_the_printer() -> None:
+        platform.device_status = "Paused"
+
+    _answering(platform, paused_at_the_printer)
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": {"printer_id": printer_id, "on_defect": "pause", "consecutive": 1}})
+        await engine.watchdog.poll_devices()
+        platform.failing = True
+        await asyncio.sleep(1.0)
+        watching = engine.state_event()["monitors"][0]["watching"]
+
+    assert [alert["action"] for alert in _of(events, "alert")] == ["pause"], "a print that is paused was announced as one that could not be"
+    assert platform.http_calls.count(("POST", "http://op/api/job")) == 1, "a paused printer was sent the pause again"
+    assert not _of(events, "error") and not watching
+
+
+async def test_a_printer_that_cannot_be_read_is_logged_once_with_the_reason(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    platform = FakePlatform()
+
+    async def refused(method: str, url: str, **request: Any) -> tuple[int, Any]:
+        raise ConnectionError("connection refused")
+
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await _register_printer(engine)
+        await asyncio.sleep(0.05)
+        monkeypatch.setattr(platform, "http", refused)
+        with caplog.at_level(logging.WARNING, logger="printguard.engine.watchdog"):
+            await engine.watchdog.poll_devices()
+            await engine.watchdog.poll_devices()
+
+    assert [record.getMessage() for record in caplog.records if record.name == "printguard.engine.watchdog"] == [
+        "printer 'P' could not be read: connection refused"
+    ]
+
