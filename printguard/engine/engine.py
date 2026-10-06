@@ -2104,13 +2104,14 @@ class Engine:
             await runtime.reload(running, {plugin.id for plugin in self.plugins.values() if plugin.failure and plugin.may("gate")})
 
     def plugin_failed(self, plugin_id: str, reason: str) -> None:
-        """Disables a plugin its runtime could not keep running, closes its sockets and says why."""
+        """Disables a plugin its runtime could not keep running, drops it from the runtime, closes its sockets and says why."""
         plugin = self.plugins.get(plugin_id)
         if plugin is None or not plugin.enabled:
             return
         plugin.enabled = False
         plugin.failure = reason
         asyncio.ensure_future(self.sockets.drop_for(plugin_id))
+        asyncio.ensure_future(self._reload_plugins())
         self.emit({"event": "error", "message": f"plugin {plugin.manifest['name']} stopped: {reason}"})
         self._sync()
 

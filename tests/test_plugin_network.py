@@ -462,3 +462,28 @@ def test_an_update_that_answers_on_a_new_channel_or_asks_for_a_new_scope_is_wide
     assert not plugins.widens(accepted, declared(provides={}, oauth={**sign_in, "scopes": []}))
     assert plugins.widens(accepted, declared(provides={"status": "what is playing", "queue": "what is next"}))
     assert plugins.widens(accepted, declared(oauth={**sign_in, "scopes": ["read", "write"]}))
+
+
+async def test_a_plugin_that_fails_is_handed_back_to_its_runtime_without_it() -> None:
+    reloads: list[list[str]] = []
+
+    class Runtime:
+        def attach(self, request, failed) -> None:
+            pass
+
+        def on_event(self, event) -> None:
+            pass
+
+        async def reload(self, running, failed_gates) -> None:
+            reloads.append([plugin.id for plugin in running])
+
+        async def close(self) -> None:
+            pass
+
+    platform = FakePlatform()
+    platform.plugin_runtime = Runtime()
+    async with engine_with(platform, manifest("net", urls=["wss://93.184.216.34/*"])) as engine:
+        engine.plugin_failed("demo", "answered with a status of its own making")
+        await asyncio.sleep(0.05)
+
+    assert reloads[-1] == []

@@ -186,7 +186,6 @@ class StartBody(BaseModel):
 
 
 UPLOAD_TIMEOUT_S = 600.0
-CAMERA_OPEN_TIMEOUT_S = OPEN_WAIT_S + REQUEST_TIMEOUT_S
 UPLOAD_BODY = {
     "requestBody": {
         "required": True,
@@ -585,7 +584,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         payload = {"cmd": "camera.add", "source": body.source.model_dump(exclude_none=True)}
         if body.name is not None:
             payload["name"] = body.name
-        await engine.request(payload, timeout=CAMERA_OPEN_TIMEOUT_S)
+        await engine.request(payload)
         return public_state(engine)["cameras"]
 
     @api.patch("/cameras/{camera_id}", operation_id="update_camera", tags=["manage"], response_model=CameraOut)
@@ -609,7 +608,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
     @api.post("/cameras/refresh-printers", operation_id="refresh_printer_cameras", tags=["manage"])
     async def refresh_printer_cameras(engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:
         """Re-checks every registered printer and registers any newly exposed cameras."""
-        await engine.request({"cmd": "printer.cameras.refresh"}, timeout=CAMERA_OPEN_TIMEOUT_S)
+        await engine.request({"cmd": "printer.cameras.refresh"})
         return public_state(engine)["cameras"]
 
     @api.get("/events", operation_id="recent_events", tags=["read"])
