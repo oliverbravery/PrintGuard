@@ -45,7 +45,7 @@ export function PermissionList({ plugin, permissions }: { plugin: { manifest: Pl
                     ))}
                 </ul>
               )}
-              {permission.id === "oauth" && (
+              {permission.id === "oauth" && plugin.manifest.oauth.authorize_url && (
                 <>
                   <span className="block text-text-2">{plugin.manifest.oauth.label}</span>
                   <SignInAddresses oauth={plugin.manifest.oauth} />
