@@ -876,6 +876,17 @@ test("closing settings part way through a theme puts the saved theme back", asyn
   await expect(page.locator("html")).toHaveAttribute("data-glass", "");
 });
 
+test("a theme saved while the hub is away stays in the editor with what was typed", async ({ page }) => {
+  await dashboard(page, { dialog: "settings", settingsTab: "appearance" });
+  await page.getByRole("button", { name: "+ New" }).click();
+  await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
+  await page.evaluate(() => (window as any).__pg.setState({ link: { send: () => false, close() {} } }));
+  await page.getByRole("button", { name: "Save theme" }).click();
+
+  await expect(page.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Theme name" })).toHaveValue("Workshop");
+});
+
 test("a theme started from dark keeps dark text on its accent", async ({ page }) => {
   await dashboard(page);
   const themed = { ...engine().settings, theme: "mine", themes: [{ id: "mine", name: "Mine", base: "dark", colors: {} }] };
