@@ -11,13 +11,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Added
 
-- A detection rate for each camera, under **Cameras**. Lower it to cut the load PrintGuard puts on a
+- A detection rate for each camera, under Cameras. Lower it to cut the load PrintGuard puts on a
   shared host. A defect takes longer to confirm at a lower rate. It's `detect_fps` over the API and
   MCP server. Thanks to @eikaramba.
 - A review at the end of each print. PrintGuard keeps a few frames per print on your hub, and you
   can label them and send them to help train the detection model. Nothing is sent unless you send
-  it. **Settings**, under **Advanced**, switches the review off, which also stops frames other than
-  alert snapshots being kept. [What's sent](https://github.com/oliverbravery/PrintGuard/blob/main/docs/feedback.md). Thanks to @eikaramba.
+  it, and the training inbox keeps no logs or traces. Settings, under Advanced, switches the review
+  off, which also stops frames other than alert snapshots being kept. [What's sent](https://github.com/oliverbravery/PrintGuard/blob/main/docs/feedback.md). Thanks to @eikaramba.
 
 ### Changed
 
@@ -27,42 +27,48 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   other name, such as a domain, a Tailscale `ts.net` name or `printguard.fritz.box`, add it to
   `PRINTGUARD_ORIGINS` with its `http://` or `https://` before updating. The API and MCP server are
   held to the same rule. [Host and origin checking](https://github.com/oliverbravery/PrintGuard/blob/main/docs/deployment.md#host-and-origin-checking).
-- `PRINTGUARD_ORIGINS` matches whatever the capitals, a `:443` or a trailing dot, the hub warns at
-  start about an entry with no `http://` or `https://` or one it can't read and ignores it, and an
-  `Origin` header that can't be read is refused. The engine and camera publish WebSockets refuse a connection with no `Origin` header.
-- The hub won't start when `state.json` is there but can't be read, such as with the wrong owner on
-  the data directory, and the log says so. It used to start as an empty hub.
+- `PRINTGUARD_ORIGINS` matches whatever the capitals, a `:443` or a trailing dot, and only takes
+  `http://` and `https://` entries. The hub warns at start about one with another scheme, no scheme
+  or one it can't read, and ignores it. An `Origin` has to match the scheme and port you opened the
+  hub on, so behind a proxy that ends TLS send `X-Forwarded-Proto`. A request with no `Host` header,
+  an `Origin` header that can't be read, or an engine or camera publish WebSocket with no `Origin`
+  is refused.
+- The hub won't start when `state.json` is there but can't be read, or when the data directory
+  can't be written, such as with the wrong owner on it, and the log names the directory and its
+  owner. An unreadable file used to start an empty hub.
 - Alert snapshots in the risk history survive a restart. They're kept 512 pixels on the short
   side, 40 a print, for the last 20 prints or 200 MB. The chart and the alert log still reset.
 - The history's watch time is how long the readings spanned, in whole minutes with gaps over 30
-  seconds left out, and each history bucket carries the seconds it `watched`.
+  seconds left out, and each history bucket carries the seconds it `watched`, never more than 60.
 - Review frames, snapshots and sliced files are stored readable by the hub's user only. Files stored
   before 2.6.0 keep the permissions they had.
-- A recovery notice is sent quietly, so only a fault warning or a defect alert rings as urgent. ntfy
-  leaves out its urgent priority, Pushover sends at normal priority or lower, and Telegram and
-  Discord suppress the notification.
+- A recovery notice, and one sent by a plugin or the API, goes quietly, so only the test alert, a
+  fault warning and a defect alert ring as urgent. ntfy leaves out its urgent priority, Pushover
+  sends at normal priority or lower, and Telegram and Discord suppress the notification.
 - Live scores, alerts, warnings, printer status and errors only reach a plugin granted
-  **Read the dashboard**.
+  Read the dashboard.
 - A plugin's request or WebSocket doesn't follow redirects, and its sign-in endpoints must be
   https. An installed plugin that signs in over plain http is removed when the hub starts.
-- A plugin that signs in to a service on your own network needs **Reach your own network**.
+- A plugin that signs in to a service on your own network needs Reach your own network.
 - A plugin that lists a local address written as `127.1`, `0x7f.0.0.1` or one long number, or a
-  wildcard over a local suffix such as `*.local` or `*.lan`, needs **Reach your own network** to
+  wildcard over a local suffix such as `*.local` or `*.lan`, needs Reach your own network to
   install. `.home.arpa` names count as your own network for plugins.
 - A plugin request with a secret anywhere before the path of its address is refused, and so is
   one with `..` in its path.
-- A plugin's `panel.html` can't use inline handlers such as `onclick="..."`, and makes no sound,
-  audio or video, unless its plugin was granted `sound`.
+- A plugin's `panel.html` can't use inline handlers such as `onclick="..."` or load a script from
+  an address, and makes no sound, audio or video, unless its plugin was granted `sound`.
 - A plugin's `ctx.background` only takes a base64 `data:` URL of a PNG, JPEG, WebP or GIF.
 - A plugin can only call, publish to or answer another plugin over its link.
 - A plugin that doesn't run on your platform is refused when it's installed from GitHub or a
   zip and when it's updated. Only the plugin store used to check.
+- A manifest that asks for sign-in without describing it is refused.
 - An update that changes where a plugin signs in signs it out and has to be accepted again.
 - The consent dialog and the update view show the addresses a plugin signs in at.
 - A plugin's README is shown as Markdown only, so it can't put forms, audio, video or its own
-  styling on the plugin's page.
+  styling on the plugin's page, and its images load from the plugin's own repository only.
 - An answer to a plugin's request over 256 KB fails the request, where text used to be cut short.
-- A plugin zip over 12 MB is refused in the dashboard before it's sent, and one with a member
+- A plugin zip over 12 MB is refused in the dashboard before it's sent and again by the hub, and a
+  member that unpacks larger than the zip says is cut off at the limit. One with a member
   compressed any way but stored or deflate is refused.
 - A plugin gate's answer is kept per query string as well as per path.
 - A plugin route that answers a status outside 100 to 599, or headers that aren't text, stops the
@@ -73,55 +79,71 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A plugin worker's `state` handler runs on the hub's once-a-second tick, not on every command, and
   a worker call saves only the keys it changed.
 - `/api/v1/state` and the MCP `get_state` tool no longer return what a plugin has stored or list the
-  API tokens. `startup_warnings` lists what the hub found wrong or worked around at start.
+  API tokens. `startup_warnings` lists what the hub found wrong or worked around at start, and
+  `secrets_set`, `reviews` and `feedback_hub` are new.
 - The dashboard, API and MCP server show the query values of a camera or printer address as
   `[redacted]`, so `?action=stream` reads back as `?action=[redacted]`. A path segment of 16 or
-  more letters and digits, or a UUID, is redacted too.
-- A bug report takes 10 MB of attachments in total, down from 20 MB.
+  more letters and digits, or a UUID, is redacted too. An address that shows `[redacted]` is refused
+  when you save it, with "type it in full".
+- A bug report takes 10 MB of attachments in total, down from 20 MB. Its diagnostics no longer
+  carry the MQTT broker's address or login, the theme or layout, or the file a printer is printing,
+  and the dialog lists what is sent.
 - A printer can't be registered with a required field left blank, and an alert channel can't be
   saved or tested with one.
-- Changing a printer's or the MQTT broker's address needs its key or password typed again.
+- Changing a printer's, an alert channel's or the MQTT broker's address needs its key or password
+  typed again, and the whole address, since the one shown leaves out any login it carries.
 - A printer or notifier address with a stray square bracket is refused when you save it. A printer
   saved with a `[` in its password needs it written as `%5B`.
-- An MQTT port must be a whole number from 1 to 65535. Text such as "1883", decimals and anything
-  over 65535 are refused.
+- An MQTT port must be a whole number from 1 to 65535. Text such as "1883", 0, decimals and
+  anything over 65535 are refused, and so is turning the Home Assistant bridge on with no host.
 - The test alert carries a picture, so a channel that can't take one shows up at setup.
 - Sliced files over 32 MB upload without the 3D toolpath or a drawn preview.
-- A 3mf whose sliced plate or preview image unpacks to more than 512 MB is refused, including one
-  that understates its size. So is one with a member compressed any way but stored or deflate, and
-  so is an empty print file.
+- A 3mf is refused when its files unpack to more than 512 MB between them, including one that
+  understates its size, when any member is compressed any way but stored or deflate, when it's
+  damaged, and when the print file is empty. A file with a print time over a year, or a filament
+  amount or temperature no slicer would write, is refused and leaves nothing in the library, and
+  the slicer and printer names it carries are cut to 80 characters.
 - The alert threshold stops at 0.95, since a higher one almost never alerted. A monitor set above
   it is lowered.
 - A heater target above 350°C for the nozzle or 150°C for the bed, or one that isn't a number, is
-  refused, where it used to be clamped. Preheat presets and the temperatures corrected on upload
-  still stop at those limits, and so do a file's other shifted temperatures.
+  refused over the REST API, MCP server and dashboard socket, where it used to be clamped. The
+  dashboard's own heater field, preheat presets and the temperatures corrected on upload still stop
+  at those limits, and so do a file's other shifted temperatures.
 - A file tagged only for a printer you then remove stays tagged, so it can't start on another
   printer until you tag it for one.
 - The same camera device or stream address can't be registered twice, whether it's written with a
   default port, a trailing dot or slash, `127.1`, another spelling of an IPv6 address, its query in
-  another order or with credentials.
-- The ntfy topic address is treated as a secret, so it's hidden in **Settings** and left out of
+  another order or with credentials. That includes a printer's webcam you add by hand while the
+  printer is opening it, the same WHEP endpoint written `http` or `whep`, and a path that is
+  another camera's own stream.
+- The ntfy topic address is treated as a secret, so it's hidden in Settings and left out of
   bug reports and API responses.
 - A theme or layout of the wrong shape is refused when saved, and one already stored is reset
   when the hub starts.
 - The dashboard and website serve their own fonts and no longer contact Google Fonts.
+- The interactive API docs pages are gone, so the hub no longer loads Swagger UI or ReDoc from a
+  CDN. The schema is at `/api/v1/openapi.json`.
 - `POST /api/v1/classify` and the MCP `classify_frame` tool refuse a frame over 32 MB or 50
   megapixels.
-- PrusaLink takes a **Username**, for a Raspberry Pi set up with one other than `maker`.
+- PrusaLink takes a Username, for a Raspberry Pi set up with one other than `maker`.
 - Empty values in the camera and print details read "none".
 - Removing a camera, printer, monitor, print or API token that doesn't exist is an error, where it
   used to answer as if it had worked. The REST API answers 400.
 - A monitor can't be bound to a camera or printer that isn't registered.
-- A monitor or camera setting sent over the dashboard's socket with the wrong kind of value, such as
-  text for a switch, is refused, where text for a switch used to read as on. An unknown setting is
-  refused too. The REST API and MCP server still drop a field they don't know.
+- A monitor or camera setting with the wrong kind of value is refused, such as text for a switch,
+  which used to read as on, and a number sent as text or `true`, which also covers the grace period
+  and preheat targets. That holds over the dashboard socket, the REST API and the MCP server. An
+  unknown setting is refused over the socket, and the REST API and MCP server still drop a field
+  they don't know.
 - A camera rotation of -90 or 450 is refused.
 - Once a token is issued, the MCP server refuses a connection without one. It used to answer with an
   empty tool list.
 - The MCP server answers at `/mcp` as well as `/mcp/`.
+- Once a token exists, a bearer token with a non-ASCII character answers 401, where it was a server
+  error.
 - Adding a camera waits up to 40 seconds for a first frame, refreshing a printer's cameras 115 and
-  switching the inference runtime 85, over the dashboard, REST API, MCP server and plugins alike.
-  REST used to give up at 15.
+  switching the inference runtime 85, over the REST API, MCP server, Home Assistant and plugins.
+  REST used to give up at 15. The dashboard's socket has no deadline.
 - A pause or cancel the printer never answers is reported as failed after 45 seconds, 135 on an
   Elegoo printer, when PrintGuard sends it after a defect. On a Centauri Carbon 2 it could take 4.5
   minutes. A pause you send waits 15 seconds over the REST API, 105 on an Elegoo printer.
@@ -130,11 +152,14 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - Recent events no longer hold a printer's status updates, so an alert stays in them.
 - To run a MediaMTX of your own with the shipped `mediamtx.yml`, use 1.19.0 or newer. The file
   grants no login for its API, so add one and put it in `MEDIAMTX_API`.
+- Running from source needs Python 3.12.4 or newer.
+- The image and both desktop apps include `LICENSE.md` and the notices for the Intel GPU packages,
+  WebView2 and the other native wheels.
 - Light theme accent and red are a shade darker for contrast, and the dark theme's red a shade
   lighter.
 - A settings edit naming an alert channel that doesn't exist is refused.
 - The image declares port 1935 as well as 8000 and 8554.
-- A USB camera missing when the container starts stays under **Cameras** as offline and keeps its
+- A USB camera missing when the container starts stays under Cameras as offline and keeps its
   name, crop and tuning. Remove it there if it's gone for good.
 - Resume is only offered while a print is paused, Cancel while one is printing or paused, and Pause
   not while it's paused. A switched-off monitor reads "off".
@@ -142,6 +167,310 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Fixed
 
+- A damaged `state.json` is kept as `state.json.corrupt`, where it used to be overwritten with an
+  empty hub. So is one of the wrong shape, such as `null` or a list. A second damaged file is kept
+  beside it as `state.json.corrupt.1` and so on, so the first is never replaced, and a file saved
+  with a byte order mark, as Notepad does, is read.
+- One unreadable entry in `state.json`, or a setting of the wrong kind, no longer stops the hub
+  starting. The entry is left out or the setting goes back to its default, with the reason in the
+  log and a startup warning, and a print's file is kept.
+- Saving state no longer runs on the event loop, so a slow disk such as an SD card doesn't stall
+  detection. A save that fails is reported once.
+- Editing settings or a printer over REST no longer wipes its secrets. A secret sent blank or left
+  out keeps the saved one and `null` clears it, unless the edit also changes the address, when the
+  key or password has to be sent again.
+- Removing a camera, printer, monitor or print, or editing a printer, finishes even when the tab
+  that asked disconnects or the request times out. A removal whose clean-up fails still removes it
+  and warns.
+- Quitting while a camera is opening no longer risks saving a state with cameras missing.
+- A settings change made while the inference runtime is switching is no longer undone, and a
+  camera that stalls during a switch is restarted.
+- Two people starting a print on one printer at the same moment no longer send it two files.
+- An error from a printer or notification that timed out says what kind of failure it was, where the
+  reason used to be blank.
+- A failed update check is tried again after 15 minutes, not the next day.
+- A print upload that times out no longer leaves its file behind. When the hub starts it deletes
+  unfinished uploads and the files in `prints/` with a name it generated that no print or review
+  uses, and keeps the files of a record it couldn't read.
+- A very thin image sent to `/api/v1/classify` no longer uses hundreds of megabytes.
+- A streaming server that can't start no longer fills the log a bug report attaches, stopping the
+  hub while it launches no longer hangs, and Ctrl+C no longer reports the video server as failed.
+- Correcting a large file's temperatures on upload uses about half the memory it did.
+- A camera looking at a still scene holds a steady score, where a grainy webcam used to jump
+  from frame to frame. Frames are shrunk for the model the way it was trained, which also stops
+  noise pulling a failing print's score under the threshold.
+- A GPU or NPU that's offered but can't run the model, or returns output it can't use, is skipped,
+  and detection falls back to the next device or the CPU with a notice on the dashboard and in the
+  log. Some failures used to stop PrintGuard starting.
+- A slow camera no longer holds the cameras beside it to a few detections a second.
+- An inference cancelled while its camera restarts no longer stops that camera detecting.
+- A heater target, threshold or camera setting sent as NaN or Infinity is refused. NaN used to be
+  read as the top of the range, so a nozzle target of NaN heated to 350°C. A REST body carrying
+  either answers 422, and the engine socket refuses a command that carries them.
+- A camera that stays connected while its feed is frozen or the model keeps failing on it is
+  reported as stalled after the fault grace period.
+- A camera that keeps freezing and briefly recovering is reported as an unreliable feed, and one
+  warned about as unreliable is no longer announced as steady again while it's offline.
+- A stalled camera watched by several monitors is restarted once, not once per monitor.
+- A monitor with no camera warns that it has none and no longer reads as watching.
+- Switching a monitor off resets its defect streak, and removing one clears what the watchdog held
+  for it.
+- A monitor that stands down forgets its camera faults, so the next print starts with the full
+  fault grace period.
+- A cooldown of zero no longer repeats the pause or cancel command on every defect frame.
+- A defect cooldown no longer carries into the next print, and a pause or cancel the printer didn't
+  take is tried again after 30 seconds if the defect is still there, however short the cooldown.
+- A defect in the first 30 seconds after the hub starts is pushed, and a full disk no longer stops
+  an alert or the next pause attempt.
+- A pause that worked is pushed even when a failed attempt was pushed seconds earlier.
+- A pause refused because the print is already paused or over is no longer announced as
+  "AUTOMATIC PAUSE FAILED".
+- A status read that began before a pause, resume, cancel, heater target or print start, whether
+  PrintGuard or you sent it, no longer replaces the one read after it, which could pause a paused
+  print a second time.
+- A pause no longer waits behind a slow command, such as registering a stream, sent from the
+  same tab.
+- Stopping the hub no longer lets an inference in flight start a pause after the printers are
+  closed.
+- A command that worked is no longer reported as failed when the status read after it fails.
+- Camera adjustments no longer hold up the hub while a frame is prepared, and neither does
+  uploading a large print file.
+- The camera frame from the API, MCP server and plugins is no longer a stale one while the camera
+  is on standby.
+- A stream FFmpeg can open but can't decode, such as an SVG, no longer ends the hub. Adding it fails
+  with "no decoder for this stream", a saved one shows offline with that reason, and an image
+  sent to `/api/v1/classify` answers "could not decode image".
+- A `whep://` or MediaMTX path camera that fails names the address you gave with its credentials
+  removed, and a mistyped stream address says "PrintGuard can't use that address" and why, where it
+  showed a raw MediaMTX 404.
+- A saved camera that can't be opened shows why it's offline, on its entry in the registry and in
+  the camera rail, and keeps trying. The API's camera carries it as `reason`.
+- A crop that runs off the frame is moved back inside it.
+- Discover no longer lists the hub's own camera streams, so one can't become a second camera, and
+  on Windows it no longer lists a camera you already added by name as the second of two of the same
+  model.
+- A USB, MJPEG or Bambu A1 or P1 camera keeps detecting when its live view can't start, such as
+  with another program on port 8554 beside the desktop app. It used to read as offline.
+- A live view that stops answering is given up on after 3 seconds and is pushed from a thread of its
+  own, so it never delays detection.
+- A sleeping camera's live view comes back after the video server restarts, not only at the next
+  print.
+- A Linux webcam with no MJPEG format opens with its other formats.
+- A USB camera that stops answering no longer piles up capture threads, and one that delivers no
+  frames is released when it stands down.
+- A Mac running from source can add its cameras, where it failed with no module named `objc`.
+- Two USB cameras of the same model can both be added in the Windows app.
+- A Bambu A1 or P1 camera is given its measured frame rate, not 25 fps, and gives up on a frame that
+  never finishes arriving or can't be right.
+- A printer's webcam you had already added by hand is no longer added a second time, and one that
+  can't be opened shows a warning on the dashboard. A printer's camera follows the printer to a new
+  address or access code.
+- A webcam is found where it used to be missed. OctoPrint's on port 5000, a Moonraker one with a
+  relative address when the printer is on another port, and one on MediaMTX or go2rtc, which is
+  pulled over WHEP in place of its web page or a still. Press Refresh under Printer cameras or
+  restart the hub to pick them up. A camera that already works is left where it is.
+- A Moonraker webcam with no `uid` is registered under its name.
+- Restarting PrintGuard while an idle printer is switched off no longer warns that the printer
+  and its camera are offline. The printer's last status is kept across restarts. Thanks to
+  @dnstkrv for the report.
+- An unexpected error in a printer poll or health check is reported and retried, where it could stop
+  printer status updating until a restart.
+- A printer that isn't answering no longer delays status updates from the others, or the wake of
+  their cameras when one starts printing.
+- A printer whose address you edit no longer keeps the status read from the old one, and its old
+  service can't register a camera on the new one.
+- A printer that answers with a number the dashboard can't read, such as NaN, shows offline and no
+  longer drops the dashboard.
+- Removing a printer while its webcam is still opening no longer leaves that camera behind.
+- Changing a printer's service keeps its files tagged and carries none of the old service's
+  settings or saved key across to the new one.
+- A printer or alert channel at an address that redirects fails when you test it and when it's used,
+  and names the address to register. A pause, heater target, print start or text alert used to be
+  reported as done and never arrive.
+- A Bambu pause, cancel, heater target or print start the printer rejects is reported as failed,
+  including with Developer Mode off or a wrong access code.
+- PrintGuard holds one connection to a Bambu printer, where it used to reconnect and ask for a
+  full report every 5 seconds. It reads the printer on threads of its own, so inference doesn't
+  hold it up, and a printer that never reports says to check the serial number.
+- A Bambu upload starts the print, where it could hang after sending the file.
+- Bambu H2C, H2D and H2S printers start an uploaded print.
+- A Bambu printer whose last job failed reads as idle, and it can start a print from the library
+  after a cancelled or failed job.
+- A large 3mf sent to a Bambu printer is no longer cut off after five minutes.
+- Test connection gives the reason when a Bambu printer refuses the connection.
+- An Elegoo Centauri Carbon command the printer refuses is reported as failed.
+- An Elegoo Centauri Carbon that stops reporting shows as offline.
+- A paused Centauri Carbon whose connection drops is found again, so it can be resumed.
+- A Centauri connection a cancelled request left opening is closed.
+- A heater target outside what an Elegoo Centauri takes no longer drops its connection.
+- Resuming a Centauri Carbon 2 through the API, MCP server or Home Assistant waits for the
+  printer, where it used to time out after 15 seconds.
+- A Centauri Carbon 2 that is starting up, loading filament, levelling or calibrating is no
+  longer read as idle or printing.
+- An original Centauri Carbon shows the time left on a print, never below zero once it runs over its
+  estimate, and a command a Carbon 2 refuses no longer drops its connection.
+- A file OctoPrint stores but doesn't start is reported as a failed print.
+- A Klipper print that uploads but doesn't start is reported as failed, on an Elegoo Neptune 4
+  or OrangeStorm too.
+- Prusa uploads skip read-only storage, PrusaLink's error state reads as error and a printer with
+  no job reports its own state. Its attention and busy states read as unknown, since a warning can
+  sit over a print that keeps running, so watching carries on. A PrusaLink upload sends the file
+  once, not twice.
+- Test connection says when OctoPrint, Moonraker or PrusaLink rejects the key or password, or doesn't
+  answer like its API, where it read offline. The log says why a printer went offline, and an
+  address that redirects names where it went.
+- A print start cut short by a cancelled request says to check whether it started.
+- A print whose file has gone from the data directory answers 404 to a download and 400 to a start,
+  without naming the path.
+- A temperature correction on upload also moves `M109 R` and `M190 R` waits.
+- A file sliced with several filaments shows the temperature of the one its first layer prints
+  with, and changing it moves only that filament.
+- Tagging a file for two printers in quick succession keeps both.
+- A binary gcode file whose metadata and previews inflate past 16 MB is refused.
+- A desktop notification the system won't schedule or refuses is reported as failed.
+- ntfy alerts send when a monitor name has accents or other non-ASCII characters.
+- A defect alert reaches a self-hosted ntfy server with attachments switched off. It's sent as
+  text and the dashboard says the picture was refused.
+- An alert whose picture can't be encoded is sent without it, and the dashboard says so.
+- A notification channel that never answers no longer holds up the others.
+- Home Assistant shows the hub as unavailable after it stops.
+- Home Assistant commands run side by side, in order for one monitor, so a slow printer holds up
+  only its own buttons, and one that times out says which command it was.
+- The MQTT bridge recovers from a bad setting. A `+` or `#` in the base topic or discovery prefix is
+  reported once.
+- An MQTT broker that's down raises one warning, not one every 5 seconds, so alerts stay in the
+  recent events.
+- Two hubs on one MQTT broker no longer disconnect each other.
+- An unrecognised MQTT payload no longer disables a monitor.
+- Removing a monitor also clears its Home Assistant state and snapshot topics. One removed while the
+  MQTT bridge was off is cleared when the bridge comes back, as long as the hub hasn't restarted.
+- MCP returns alert snapshots as images.
+- The dashboard shows when it has lost the hub and re-sends unsaved changes once it reconnects. Its
+  boot screen says what to check when the hub isn't answering, and it retries a connection that
+  never answers after 10 seconds.
+- A connection test, an alert channel test, a diagnostics download or a plugin sign-in only shows in
+  the dashboard tab that started it, and a failed command no longer clears another test's spinner.
+  A key typed for a test no longer comes back in its error. A test button no longer sticks when its
+  test was never sent, and a dashboard only shows the errors of commands it sent itself.
+- A printer's connection test result shows only under the printer tested, and clears when you edit
+  the form it tested.
+- A button pressed while the dashboard is reconnecting says the command wasn't sent, and the
+  dashboard reconnects on its own when its connection has died without closing.
+- A heater target the printer refuses goes back to the printer's value.
+- A setting the hub refuses goes back on screen at once. Layout edits no longer jump back for a
+  moment after you change them, and a setting changed while another is still saving no longer sends
+  the first one again.
+- Deleting a monitor or camera right after renaming it no longer reports an error for the rename.
+- Closing Settings while editing a custom theme no longer leaves the theme controls dead, and
+  the theme editor stays open when a save never reached the hub.
+- Selecting text and releasing outside a dialog no longer closes it.
+- Copy buttons work when the hub is reached over plain http.
+- Download logs saves the file in the desktop app.
+- Clicking the defect banner on a tile opens the monitor.
+- A tile whose camera is offline, or whose monitor is switched off or on standby, no longer shows
+  its last score and rate as live, and an offline camera shows no rate or risk in the camera list
+  or history sheet. Switching a monitor off clears its "DEFECT DETECTED" banner.
+- Deleting a monitor from its panel no longer leaves the other tiles on "starting stream", and a
+  history or review sheet closes when its monitor is removed elsewhere.
+- The history sheet asks the hub for the history once, not on every result, and loads an alert's
+  snapshot as it nears the screen. The history chart leaves a gap between prints and says when it's
+  still loading.
+- A page that fails to draw says so and offers a reload, where the dashboard used to go blank.
+- A notice raised while a dialog is open is read out by a screen reader.
+- Sliders give a screen reader their value as it's shown on screen.
+- A camera floated with picture in picture keeps playing when you switch tabs or open a dialog.
+- A feed the browser won't autoplay, such as on an iPhone in Low Power Mode, shows "Tap to play".
+- A live view that fails in a browser that plays HLS itself, such as Safari, is tried again.
+- A camera published from a browser stops capturing when it fails to register or is removed from
+  another device, and one that's unplugged says so once.
+- The add camera forms clear once the camera registers, and Enter in a camera's name or address
+  registers it.
+- A stream address sent over the API with spaces around it or a capital in its scheme opens.
+- A sliced file your browser can't draw a preview for uploads without one.
+- A file dropped just outside the print library's drop zone uploads, where the browser used to
+  open it.
+- The upload sheet stays open while the file uploads and keeps what you typed if the hub refuses it.
+- Removing or sending one file, camera or printer no longer greys out the same button on the
+  others.
+- Print times read "2h 0m", not "1h 60m", and a file uploaded seconds ago reads "just now".
+- One kept frame reads "frame", not "frames".
+- The print library scrolls as a whole on a phone held sideways, where its list was squeezed into
+  a strip.
+- Sheets and the page keep clear of the right safe area on a phone held sideways.
+- Toasts no longer run off the edge of a phone screen, and the header wraps on narrow tablets.
+- The Add monitor dialog stays open with what you typed if the add fails.
+- The Register printer form keeps what you typed when the registration fails.
+- A token's name stays in its form until the hub accepts it, and Revoke greys out only that
+  token's button. The saved chip only shows on the form or tab that saved.
+- Switching an alert channel off and on keeps what you typed in it.
+- Dashboard alerts say what happened to the print, such as "print paused", and one from an
+  alert-only monitor no longer reads "(none)".
+- Stream and printer addresses are no longer capitalised or corrected by an iPhone's keyboard.
+- Small touch targets are larger, focus rings no longer appear after a tap, and more controls are
+  named for screen readers, including progress bars, file inputs and Glass sliders.
+- Form fields and the setup checklist's Open buttons have names for screen readers.
+- Glass keeps accent and status colours readable and distinct over a background picture, and applies
+  to sheets. A background picture the browser can't decode is ignored, and the popover opens in a
+  fixed place in browsers that can't anchor it to its button.
+- A custom theme started from dark keeps readable text on its accent buttons.
+- The landing page's links that open in a new tab show their icon.
+- The guide and website say watchdog warnings come after the grace period.
+- Guide buttons open the settings tab they name.
+- A removed bug report attachment can be attached again, and the attach button works from the
+  keyboard.
+- The bug report dialog says it sends the dashboard's address, your browser's user agent and
+  window size.
+- Opening Updates no longer contacts GitHub when the daily check is off. It has a Release notes
+  button, and the links in the notes open on GitHub.
+- The consecutive detections slider goes up to 30, matching the API.
+- An edit made just before closing the tab is saved.
+- A dashboard left open through an update reloads itself onto the new version.
+- The dashboard loads in Safari with Block All Cookies on.
+- The How PrintGuard works dialog scrolls on a short screen, where it covered its own buttons.
+- `PRINTGUARD_PLUGINS=off` switches off every plugin, including the half that runs in your
+  dashboard, and the hub answers nothing a plugin sends for itself. It used to stop only the half
+  on the hub.
+- A plugin that's switched off can't make requests.
+- A hub plugin that returns a malformed answer is switched off and reported, where it could stop
+  every plugin's timer until a restart.
+- A plugin answer holding NaN or Infinity no longer drops every open dashboard.
+- A plugin sign-in survives a restart straight after connecting, works from a hub opened as
+  `localhost.lan`, and keeps a secret typed while it finishes.
+- A plugin is signed out once when its provider refuses the refresh token, where it kept asking.
+- Plugin sign-in opens its tab as you click Connect, so Safari no longer blocks it, and works
+  with a provider whose authorise address already has a query. One answered after 10 minutes is
+  refused.
+- A plugin sign-in no longer ends in a server error when the provider sends a token lifetime
+  that isn't a number.
+- Two plugin requests on an expired token refresh it once, and a late duplicate answer to a plugin
+  is ignored.
+- Updating a plugin installed from a branch, as `owner/repo@branch`, follows that branch. Reinstall
+  one installed on 2.5.0 to pick it up.
+- An updated plugin restarts on its new code, and its stored data written while the hub was away is
+  sent when it reconnects.
+- A GitHub plugin install or update fails with the status when a file errors, instead of leaving
+  that file out.
+- A plugin whose `plugin.json` isn't an object is refused cleanly, and the manifest schema's `urls`
+  pattern compiles in editors.
+- A plugin address pattern with a capital letter in its path, such as Telegram's
+  `/bot*/sendMessage`, matches, and reinstalling keeps its consent. A zip keeps its credentials and
+  stored data but asks for its permissions again.
+- A plugin address pattern with many wildcards can't stall the hub, and one with an IPv6 host
+  matches.
+- A plugin's WebSocket closes when the plugin is stopped for failing or loses its network
+  permission.
+- A plugin whose README contains an SVG link no longer blanks the dashboard.
+- A plugin panel receives the names of the secrets its plugin holds as `pg.secrets`, never the
+  values, and its scripts run wherever they sit in its markup. It's drawn on a hub with no monitors
+  too, and a password manager doesn't fill a plugin's secret field.
+- The store page of a plugin that signs in no longer crashes while it loads.
+- A button a plugin draws says so when its command couldn't be sent.
+- The Spotify panel polls only while you're signed in. Once Spotify turns the sign-in down it stops
+  asking and says to disconnect and connect again. Spotify is 1.0.1, and installed copies show an
+  update.
+- A worker-only plugin granted `sound` plays its own audio files.
+- Alert tones from plugins play in Safari after your next tap or key press, on iPhone and iPad too.
+  A tone held back for more than a second is dropped, where they used to all play at once.
 - The Windows desktop app opens its window when the zip was downloaded in a browser and
   extracted with Explorer. It used to show only the tray icon.
 - The Windows desktop app no longer opens a terminal window for its video server.
@@ -149,281 +478,17 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   anyway and could show that program's page in its window.
 - The Windows desktop app opens the dashboard in your browser on a PC without WebView2, where
   it used to show a blank window. It does the same while the hub is still starting.
-- Opening the desktop app a second time while it runs opens the dashboard in your browser, where
-  it showed a failure page.
-- A desktop app window that fails to open writes the reason to the log.
-- A camera looking at a still scene holds a steady score, where a grainy webcam used to jump
-  from frame to frame. Frames are shrunk for the model the way it was trained, which also stops
-  noise pulling a failing print's score under the threshold.
-- Restarting PrintGuard while an idle printer is switched off no longer warns that the printer
-  and its camera are offline. The printer's last status is kept across restarts. Thanks to
-  @dnstkrv for the report.
-- `PRINTGUARD_PLUGINS=off` switches off every plugin, including the half that runs in your
-  dashboard. It used to stop only the half on the hub.
-- An unexpected error in a printer poll or health check is reported and retried, where it could stop
-  printer status updating until a restart.
-- A monitor with no camera warns that it has none and no longer reads as watching.
-- A printer's camera follows the printer to a new address or access code.
-- A Bambu pause, cancel, heater target or print start the printer rejects is reported as failed,
-  including with Developer Mode off or a wrong access code.
-- PrintGuard holds one connection to a Bambu printer, where it used to reconnect and ask for a
-  full report every 5 seconds.
-- A Bambu upload no longer waits on the data channel's TLS shutdown, which the printer never
-  answers, so the print starts.
-- Bambu H2C, H2D and H2S printers start an uploaded print.
-- An Elegoo Centauri Carbon command the printer refuses is reported as failed.
-- An Elegoo Centauri Carbon that stops reporting shows as offline.
-- A paused Centauri Carbon whose connection drops is found again, so it can be resumed.
-- A file OctoPrint stores but doesn't start is reported as a failed print.
-- A desktop notification the system refuses is reported as failed.
-- A Klipper print that uploads but doesn't start is reported as failed, on an Elegoo Neptune 4
-  or OrangeStorm too.
-- OctoPrint's webcam is found when OctoPrint is registered on port 5000. Press **Refresh** under
-  **Printer cameras** in the camera registry to pick it up.
-- Prusa uploads skip read-only storage and are sent as `text/x.gcode`. PrusaLink's attention state
-  reads as paused and its error state as error, and a printer with no job reports its own state.
-- ntfy alerts send when a monitor name has accents or other non-ASCII characters.
-- A cooldown of zero no longer repeats the pause or cancel command on every defect frame.
-- Switching a monitor off resets its defect streak.
-- A monitor that stands down forgets its camera faults, so the next print starts with the full
-  fault grace period.
-- A plugin sign-in survives a restart straight after connecting.
-- Updating a plugin installed from a branch, as `owner/repo@branch`, follows that branch. Reinstall
-  one installed on 2.5.0 to pick it up.
-- A GitHub plugin install or update fails with the status when a file errors, instead of leaving
-  that file out.
-- Two plugin requests on an expired token refresh it once, and a late duplicate answer to a plugin
-  is ignored.
-- A plugin whose `plugin.json` isn't an object is refused cleanly, and the manifest schema's `urls`
-  pattern compiles in editors.
-- Home Assistant shows the hub as unavailable after it stops.
-- The MQTT bridge recovers from a bad setting. A `+` or `#` in the base topic or discovery prefix is
-  reported once, and the bridge reports reconnected only once it has subscribed.
-- Two hubs on one MQTT broker no longer disconnect each other.
-- An unrecognised MQTT payload no longer disables a monitor.
-- A damaged `state.json` is kept as `state.json.corrupt`, where it used to be overwritten with an
-  empty hub. So is one of the wrong shape, such as `null` or a list.
-- A monitor stored with no printer is kept, with the printer cleared.
-- Editing settings or a printer over REST no longer wipes its secrets. A secret sent blank or left
-  out keeps the saved one and `null` clears it, unless the edit also changes the address, when the
-  key or password has to be sent again.
-- A stream FFmpeg can open but can't decode, such as an SVG, no longer ends the hub. Adding it fails
-  with "no decoder for this stream", a saved one shows offline with that reason, and an image
-  sent to `/api/v1/classify` answers "could not decode image".
-- A `whep://` or MediaMTX path camera that fails names the address you gave with its credentials
-  removed, and a mistyped stream address says "PrintGuard can't use that address" and why, where it
-  showed a raw MediaMTX 404.
-- Discover no longer lists the hub's own camera streams, so one can't become a second camera.
-- An alert whose picture can't be encoded is sent without it, and the dashboard says so.
-- A live view that stops answering is given up on after 3 seconds, so detection carries on.
-- MCP returns alert snapshots as images, and a snapshot whose picture is gone answers 404 without
-  naming a path.
-- The dashboard shows when it has lost the hub and re-sends unsaved changes once it reconnects.
-- A connection test, an alert channel test, a diagnostics download or a plugin sign-in only shows in
-  the dashboard tab that started it, and a failed command no longer clears another test's spinner.
-  A test button no longer sticks when its test was never sent, and a dashboard only shows the errors
-  of commands it sent itself.
-- Closing **Settings** while editing a custom theme no longer leaves the theme controls dead, and
-  the theme editor stays open when a save never reached the hub.
-- Selecting text and releasing outside a dialog no longer closes it.
-- Copy buttons work when the hub is reached over plain http.
-- **Download logs** saves the file in the desktop app.
-- Clicking the defect banner on a tile opens the monitor.
-- A tile whose camera is offline, or whose monitor is switched off or on standby, no longer shows
-  its last score and rate as live, and an offline camera shows no rate or risk in the camera list
-  or history sheet. Switching a monitor off clears its "DEFECT DETECTED" banner.
-- A notice raised while a dialog is open is read out by a screen reader.
-- Sliders give a screen reader their value as it's shown on screen.
-- A camera that stays connected while its feed is frozen or the model keeps failing on it is
-  reported as stalled after the fault grace period.
-- A pause, heater target, print start or text alert sent to an address that redirects with a
-  301 or 302 is reported as failed and names the address to register. It used to be reported as
-  done and never arrive. An ntfy picture alert is followed and delivered.
-- A hub plugin that returns a malformed answer is switched off and reported, where it could stop
-  every plugin's timer until a restart. A plugin that fails is dropped from the runtime.
-- A slow camera no longer holds the cameras beside it to a few detections a second.
-- A camera warned about as unreliable is no longer announced as steady again while it's offline.
-- A USB, MJPEG or Bambu A1 or P1 camera keeps detecting when its live view can't start, such as
-  with another program on port 8554 beside the desktop app. It used to read as offline.
-- A Linux webcam with no MJPEG format opens with its other formats.
-- A GPU or NPU that's offered but can't run the model is skipped, and detection falls back to the
-  next device or the CPU with a notice on the dashboard and in the log. Some failures used to stop
-  PrintGuard starting.
-- A Bambu printer whose last job failed reads as idle, and it can start a print from the library
-  after a cancelled or failed job.
-- A defect alert reaches a self-hosted ntfy server with attachments switched off. It's sent as
-  text and the dashboard says the picture was refused.
-- A file sliced with several filaments shows the temperature of the one its first layer prints
-  with, and changing it moves only that filament.
-- A heater target, threshold or camera setting sent as NaN or Infinity is refused. NaN used to be
-  read as the top of the range, so a nozzle target of NaN heated to 350°C. A REST body carrying
-  either answers 422, and the engine socket refuses a command that carries them.
-- A pause no longer waits behind a slow command, such as registering a stream, sent from the
-  same tab.
-- An MQTT broker that's down raises one warning, not one every 5 seconds, so alerts stay in the
-  recent events.
-- A plugin address pattern with a capital letter in its path, such as Telegram's
-  `/bot*/sendMessage`, matches. Reinstall the plugin to pick it up.
-- A plugin address pattern with many wildcards can't stall the hub.
-- A plugin's WebSocket closes when the plugin is stopped for failing or loses its network
-  permission.
-- A plugin whose README contains an SVG link no longer blanks the dashboard.
-- A plugin panel receives the names of the secrets its plugin holds as `pg.secrets`, never the
-  values, and its scripts run wherever they sit in its markup.
-- The Spotify panel polls only while you're signed in, and offers Reconnect Spotify when the token is
-  rejected.
-- A worker-only plugin granted `sound` plays its own audio files.
-- Deleting a monitor from its panel no longer leaves the other tiles on "starting stream".
-- The history sheet no longer asks the hub for the whole history on every result.
-- A button pressed while the dashboard is reconnecting says the command wasn't sent, and the
-  dashboard reconnects on its own when its connection has died without closing.
-- A camera floated with picture in picture keeps playing when you switch tabs or open a dialog.
-- A sliced file your browser can't draw a preview for uploads without one.
-- Links in the release notes under **Updates** open on GitHub.
-- A defect cooldown no longer carries into the next print, and a pause or cancel the printer didn't
-  take is tried again after 30 seconds if the defect is still there.
-- A pause that worked is pushed even when a failed attempt was pushed seconds earlier.
-- A notification channel that never answers no longer holds up the others.
-- A printer that isn't answering no longer delays status updates from the others, or the wake of
-  their cameras when one starts printing.
-- A camera that keeps freezing and briefly recovering is reported as an unreliable feed.
-- The camera frame from the API, MCP server and plugins is no longer a stale one while the camera
-  is on standby.
-- Camera adjustments no longer hold up the hub while a frame is prepared.
-- A printer whose address you edit no longer keeps the status read from the old one, and its old
-  service can't register a camera on the new one.
-- A command that worked is no longer reported as failed when the status read after it fails.
-- Removing a printer while its webcam is still opening no longer leaves that camera behind.
-- Removing a camera, printer, monitor or print, or editing a printer, finishes even when the tab
-  that asked disconnects or the request times out.
-- Quitting while a camera is opening no longer risks saving a state with cameras missing.
-- A settings change made while the inference runtime is switching is no longer undone.
-- Two people starting a print on one printer at the same moment no longer send it two files.
-- An error from a printer or notification that timed out says what kind of failure it was, where the
-  reason used to be blank.
-- A failed update check is tried again after 15 minutes, not the next day.
-- A PrusaLink upload sends the file once, not twice.
-- A Moonraker webcam on MediaMTX or go2rtc is pulled over WHEP, where its web page or a still
-  used to be registered.
-- A heater target outside what an Elegoo Centauri takes no longer drops its connection.
-- Resuming a Centauri Carbon 2 through the API, MCP server or Home Assistant waits for the
-  printer, where it used to time out after 15 seconds.
-- A Centauri Carbon 2 that is starting up, loading filament, levelling or calibrating is no
-  longer read as idle or printing.
-- Removing a monitor also clears its Home Assistant state and snapshot topics. One removed while the
-  MQTT bridge was off is cleared when the bridge comes back, as long as the hub hasn't restarted.
-- A print upload that times out no longer leaves its file behind. When the hub starts it deletes
-  unfinished uploads and any file in `prints/` that no print or review uses, except while a
-  `state.json.corrupt` waits to be put back, when it deletes only the unfinished uploads.
-- A plugin sign-in no longer ends in a server error when the provider sends a token lifetime
-  that isn't a number.
-- Plugin sign-in opens its tab as you click **Connect**, so Safari no longer blocks it.
-- A page that fails to draw says so and offers a reload, where the dashboard used to go blank.
-- Correcting a large file's temperatures on upload uses about half the memory it did.
-- A sliced file with an absurdly large number in its comments is refused, where it used to stop
-  the dashboard loading until it was removed.
-- Tagging a file for two printers in quick succession keeps both.
-- A file dropped just outside the print library's drop zone uploads, where the browser used to
-  open it.
-- Removing or sending one file, camera or printer no longer greys out the same button on the
-  others.
-- Print times read "2h 0m", not "1h 60m".
-- A sleeping camera's live view comes back after the video server restarts, not only at the next
-  print.
-- Two USB cameras of the same model can both be added in the Windows app.
+- Opening the desktop app a second time, while it runs or while it's still starting, opens the
+  dashboard in your browser, where it showed a failure page. On macOS, opening the running app again
+  shows its window.
 - The desktop app shows "PrintGuard is still starting" and opens the dashboard when it's ready,
   where a slow first launch used to say it could not start.
-- A Bambu A1 or P1 camera is given its measured frame rate, not 25 fps.
-- Uploading a large print file no longer stalls detection while it's written.
-- A USB camera that stops answering no longer piles up capture threads.
-- **Start at login** follows the copy of the app you last opened.
-- Layout edits no longer jump back for a moment after you change them, and a setting changed while
-  another is still saving no longer sends the first one again.
-- The dashboard loads in Safari with **Block All Cookies** on.
-- A heater target the printer refuses goes back to the printer's value, and a preheat preset is
-  clamped to 350°C and 150°C when you edit or apply it.
-- A camera published from a browser stops capturing when it fails to register or is removed from
-  another device, and one that's unplugged says so once. A browser camera's path carries a
-  timestamp.
-- A feed the browser won't autoplay, such as on an iPhone in Low Power Mode, shows "Tap to play".
-- An edit made just before closing the tab is saved.
-- A dashboard left open through an update reloads itself onto the new version.
-- The **How PrintGuard works** dialog scrolls on a short screen, where it covered its own buttons.
-- A status read that began before a pause, resume, cancel, heater target or print start, whether
-  PrintGuard or you sent it, no longer replaces the one read after it, which could pause a paused
-  print a second time.
-- A pause refused because the print is already paused or over is no longer announced as
-  "AUTOMATIC PAUSE FAILED".
-- A stalled camera watched by several monitors is restarted once, not once per monitor.
-- Stopping the hub no longer lets an inference in flight start a pause after the printers are
-  closed.
-- Test connection says when OctoPrint, Moonraker or PrusaLink rejects the key or password, or doesn't
-  answer like its API, where it read offline. The log says why a printer went offline, and a
-  PrusaLink address that redirects names where it went.
-- An original Centauri Carbon shows the time left on a print, never below zero once it runs over its
-  estimate, and a command a Carbon 2 refuses no longer drops its connection.
-- A large 3mf sent to a Bambu printer is no longer cut off after five minutes.
-- A printer's webcam you had already added by hand is no longer added a second time, and one that
-  can't be opened shows a warning on the dashboard.
-- One unreadable entry in `state.json` no longer stops the hub starting. It's left out and logged.
-- A temperature correction on upload also moves `M109 R` and `M190 R` waits.
-- A print whose file has gone from the data directory answers 404 without naming the path.
-- A streaming server that can't start no longer fills the log a bug report attaches, and stopping the
-  hub while it launches no longer hangs.
-- A very thin image sent to `/api/v1/classify` no longer uses hundreds of megabytes.
-- Toasts no longer run off the edge of a phone screen, and the header wraps on narrow tablets.
-- The Add monitor dialog stays open with what you typed if the add fails.
-- The "saved" chip only shows on the form that saved.
-- Dashboard alerts say what happened to the print, such as "print paused", and one from an
-  alert-only monitor no longer reads "(none)".
-- A printer's connection test result clears when you edit the form it tested.
-- After 10 seconds the dashboard retries a hub connection that never answers.
-- Stream and printer addresses are no longer capitalised or corrected by an iPhone's keyboard.
-- Small touch targets are larger, focus rings no longer appear after a tap, and more controls are
-  named for screen readers, including progress bars, review frames, file inputs and Glass sliders.
-- Alert tones from plugins play in Safari after your next tap or key press. A tone held back for
-  more than a second is dropped, where they used to all play at once.
-- The guide and website say watchdog warnings come after the grace period.
-- The **Register printer** form keeps what you typed when the registration fails.
-- The history chart leaves a gap between prints and says when it's still loading.
-- Glass keeps accent and status colours readable over a background picture.
-- A custom theme started from dark keeps readable text on its accent buttons.
-- Guide buttons open the settings tab they name.
-- A removed bug report attachment can be attached again, and the attach button works from the
-  keyboard.
-- Opening **Updates** no longer contacts GitHub when the daily check is off.
-- Form fields and the setup checklist's **Open** buttons have names for screen readers.
-- A plugin that's switched off can't make requests.
-- The consecutive detections slider goes up to 30, matching the API.
-- The bug report dialog says it sends the dashboard's address, your browser's user agent and
-  window size.
-- A Moonraker webcam with a relative address is found when the printer is registered on a port
-  other than Moonraker's own.
-- Test connection gives the reason when a Bambu printer refuses the connection.
-- Changing a printer's service no longer untags its files.
-- A binary gcode file whose metadata and previews inflate past 16 MB is refused.
-- A plugin sign-in works with a provider whose authorise address already has a query, and one
-  answered after 10 minutes is refused.
-- A plugin address pattern with an IPv6 host matches.
-- Once a token exists, a bearer token with a non-ASCII character answers 401, where it was a server
-  error.
-- A live view that fails in a browser that plays HLS itself, such as Safari, is tried again.
-- The add camera forms clear once the camera registers.
-- The Glass popover has a fixed place in browsers without CSS anchor positioning.
-- Glass applies to sheets, and a background picture the browser can't decode is ignored.
-- **Start at login** works on macOS when the app's path contains `&` or `<`.
+- A desktop app window that fails to open writes the reason to the log, and the log file is written
+  as UTF-8.
+- Start at login follows the installed app and is left alone by a copy run from a disk image or
+  from source. It works on macOS when the app's path contains `&` or `<`.
 - The macOS app reports its version, and the desktop app includes the third-party notices.
-- The desktop app's log file is written as UTF-8.
-- A stream address sent over the API with spaces around it or a capital in its scheme opens.
-- A review whose monitor was deleted is discarded with an error instead of sticking on "Sending", and
-  one the training inbox asks to retry at a time that has already passed retries in a minute.
-- The training inbox answers a frame it already holds as stored without writing it again, refuses
-  control characters in a label, and, when full, recounts its bucket at most once an hour, so pulling
-  frames reopens it within the hour. Its pull discards a frame over 4096 by 4096 pixels or an object
-  that isn't a frame, strips the JPEG comment, and no longer stops on a label that only looks encoded.
-- Only the standard image is tagged `latest`, so a GPU image can't take the default tag. A release
-  re-run moves an unpublished draft to the current commit and notes, and the release stays a draft
-  until the desktop builds are attached.
+- Only the standard image is tagged `latest`, so a GPU image can't take the default tag.
 
 ### Security
 
@@ -431,20 +496,27 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   request to the stream server exhaust its memory.
 - PyJWT is updated to 2.15.1 and DOMPurify to 3.4.16, past the advisories against the versions
   2.5.0 carried.
+- Other websites can't put the dashboard in a frame.
+- A plugin panel can't load a script from another address, so a remote script can't read what the
+  panel is shown.
 - A new API token's secret is only sent to the dashboard tab that created it, where every open
   tab used to receive it.
 - Saved keys, passwords and topic addresses are no longer sent to the dashboard, so they can't be
   read back from it. The field reads "Saved. Leave blank to keep it". Typing replaces the saved
-  one and **Clear** removes it.
+  one and Clear removes it. A provider switch carries no saved key across.
 - A plugin that gates the hub and then fails refuses requests, the dashboard included, where it used
   to leave the hub open. A flood of requests can no longer switch a healthy gate off. Start the hub
   with `PRINTGUARD_PLUGINS=off` to remove a failed one.
 - A password or key in a printer, notifier or camera address no longer appears in warnings, errors,
   the log or bug reports, including a password that contains `/`, `?` or `#`. An address with an `@`
   later in its path or query is redacted from the start of the address to the last `@`.
+- A login in `MEDIAMTX_API` or `MEDIAMTX_RTSP` is scrubbed from warnings, errors, the log and bug
+  reports.
 - Bug reports scrub credentials containing quotes, backslashes or non-ASCII letters.
+- A printer's or alert channel's request never follows a redirect, so an API key can't go on to
+  another host.
 - A private plugin catalogue's token is scrubbed from the dashboard, the API, bug reports and the
-  log.
+  log wherever it sits in the address, and its address shows only its host.
 - A web page open in a browser on the same computer as the desktop app can no longer read your
   camera addresses and passwords, or run a command, through the video server's control port.
 - A dashboard plugin without the network permission can no longer send what it reads to another
