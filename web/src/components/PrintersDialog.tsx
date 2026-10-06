@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import type { AdapterMeta, Printer } from "../types";
+import { useSubmit } from "../submit";
+import type { AdapterConfig, AdapterMeta, Printer } from "../types";
 import { Dialog } from "./Dialog";
 import { DeviceChip } from "./MonitorTile";
-import { SchemaForm } from "./SchemaForm";
+import { SchemaForm, withoutSecrets } from "./SchemaForm";
 import { TestRow } from "./TestRow";
 
 const NEW_PRINTER = "new";
@@ -12,7 +13,7 @@ function providerLabel(integrations: AdapterMeta[], id: string): string {
   return integrations.find((i) => i.id === id)?.label ?? id;
 }
 
-function PrinterTest({ id, provider, config }: { id: string; provider: string; config: Record<string, string> }) {
+function PrinterTest({ id, provider, config }: { id: string; provider: string; config: AdapterConfig }) {
   const { printerTest, testing, testPrinter } = useStore();
   const target = JSON.stringify([id, provider, config]);
   return (
@@ -21,7 +22,7 @@ function PrinterTest({ id, provider, config }: { id: string; provider: string; c
       busyLabel="Testing…"
       busy={testing === target}
       disabled={!provider || testing !== null}
-      onTest={() => testPrinter(target, provider, config)}
+      onTest={() => testPrinter(target, provider, config, id === NEW_PRINTER ? undefined : id)}
       result={
         printerTest?.target === target
           ? {
@@ -38,9 +39,10 @@ function PrinterRow({ printer }: { printer: Printer }) {
   const { engine, send, isPending } = useStore();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(printer.name);
-  const [config, setConfig] = useState<Record<string, string>>(printer.config ?? {});
+  const [config, setConfig] = useState<AdapterConfig>(printer.config ?? {});
   const integrations = engine?.integrations ?? [];
   const meta = integrations.find((i) => i.id === printer.provider);
+  const save = useSubmit(() => setConfig((draft) => withoutSecrets(meta, draft)));
 
   useEffect(() => setName(printer.name), [printer.id, printer.name]);
   useEffect(() => setConfig(printer.config ?? {}), [printer.id]);
@@ -72,15 +74,20 @@ function PrinterRow({ printer }: { printer: Printer }) {
       {open && meta && (
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
           <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <SchemaForm meta={meta} value={config} onChange={setConfig} />
+          <SchemaForm meta={meta} value={config} saved={printer.secrets_set} onChange={setConfig} />
           <PrinterTest id={printer.id} provider={printer.provider} config={config} />
           <button
             className="btn btn-primary w-full !py-1.5"
             disabled={!dirty || isPending("printer.update", printer.id)}
-            onClick={() => send({ cmd: "printer.update", id: printer.id, patch: { name: name.trim(), config } })}
+            onClick={() => save.submit({ cmd: "printer.update", id: printer.id, patch: { name: name.trim(), config } })}
           >
             {isPending("printer.update", printer.id) ? "Saving…" : "Save"}
           </button>
+          {save.error && (
+            <span role="alert" className="chip chip-message chip-bad">
+              {save.error}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -92,7 +99,7 @@ function RegisterPrinter() {
   const integrations = engine?.integrations ?? [];
   const [provider, setProvider] = useState("");
   const [name, setName] = useState("");
-  const [config, setConfig] = useState<Record<string, string>>({});
+  const [config, setConfig] = useState<AdapterConfig>({});
   const meta = integrations.find((i) => i.id === provider);
   const busy = isPending("printer.add");
   const printers = engine?.printers.length ?? 0;

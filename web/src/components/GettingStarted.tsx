@@ -1,4 +1,4 @@
-import { useStore } from "../store";
+import { savedChannels, useStore } from "../store";
 import { Progress } from "./Progress";
 import type { DialogKind } from "../store";
 
@@ -78,7 +78,7 @@ export function GettingStarted() {
       n: 4,
       title: "Set up alerts",
       why: "Get a snapshot on your phone when a defect holds.",
-      done: Object.keys(engine.settings.notifiers).length > 0,
+      done: Object.keys(savedChannels(engine)).length > 0,
       dialog: "settings",
       optional: true,
     },
