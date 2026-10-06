@@ -12,7 +12,7 @@ import { applyTheme, measureCover } from "./theme";
 import { openIn } from "./urls";
 import { extOf, FORMATS, sendPrint, type PrintDraft } from "./prints";
 import { withPreview, type ParsedToolpath } from "./toolpath";
-import type { Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, PrintFile, Review, ScorePoint, UpdateRelease } from "./types";
+import type { AdapterConfig, Camera, CameraSource, CatalogueEntry, EngineLink, EngineState, Layout, LayoutSection, Monitor, MonitorHistory, PluginEffect, PluginNode, PluginRecord, PrintFile, Review, ScorePoint, UpdateRelease } from "./types";
 
 const HISTORY_LIMIT = 240;
 const MAX_BACKGROUND_CHARS = 3 * 1024 * 1024;
@@ -61,6 +61,11 @@ function applyOptimistic(engine: EngineState, overlay: Record<string, Optimistic
     else settings = { ...settings, ...entry.patch } as EngineState["settings"];
   }
   return { ...engine, cameras, monitors, prints, settings };
+}
+
+export function savedChannels(engine: EngineState | null): Record<string, AdapterConfig> {
+  const withSecretsOnly = Object.fromEntries(Object.keys(engine?.secrets_set?.notifiers ?? {}).map((provider) => [provider, {}]));
+  return { ...withSecretsOnly, ...engine?.settings.notifiers };
 }
 
 function commandFor(entry: OptimisticEntry): Record<string, unknown> {
@@ -117,6 +122,7 @@ interface PgStore {
   printerTest: { target: string; ok: boolean; status?: string; error?: string } | null;
   testing: string | null;
   notifyTest: { provider: string; ok: boolean; error?: string } | null;
+  outcome: { req_id: string; error: string | null } | null;
   testingNotifier: string | null;
   reportResult: { ok: boolean; error?: string } | null;
   releases: UpdateRelease[];
@@ -177,9 +183,9 @@ interface PgStore {
   uploadPrint(draft: PrintDraft, thumbnailFrom: ParsedToolpath | null): void;
   fetchSnapshot(monitorId: string, id: string): void;
   clearCreatedToken(): void;
-  testPrinter(target: string, provider: string, config: Record<string, string>): void;
+  testPrinter(target: string, provider: string, config: AdapterConfig, id?: string): void;
   addPublishedCamera(name: string, path: string): void;
-  testNotifier(provider: string, config: Record<string, string>): void;
+  testNotifier(provider: string, config: AdapterConfig): void;
   signIn(pluginId: string): void;
   toast(kind: Toast["kind"], text: string): void;
 }
@@ -531,6 +537,7 @@ export const useStore = create<PgStore>((set, get) => {
           engine,
           history,
           optimistic,
+          outcome: issuedHere(event.req_id) ? { req_id: event.req_id, error: null } : s.outcome,
           detailId: present(s.detailId),
           statsMonitorId: present(s.statsMonitorId),
           reviewId: server.reviews.some((r) => r.id === s.reviewId && monitorIds.has(r.monitor_id)) ? s.reviewId : null,
@@ -666,6 +673,7 @@ export const useStore = create<PgStore>((set, get) => {
           discovering: failed === "discover" ? false : s.discovering,
           testing: failed === "printer.test" ? null : s.testing,
           testingNotifier: failed === "notify.test" ? null : s.testingNotifier,
+          outcome: event.req_id != null ? { req_id: event.req_id, error: event.message } : s.outcome,
           optimistic: event.req_id != null ? settle(s.optimistic, event.req_id) : s.optimistic,
         }));
         break;
@@ -700,6 +708,7 @@ export const useStore = create<PgStore>((set, get) => {
     printerTest: null,
     testing: null,
     notifyTest: null,
+    outcome: null,
     testingNotifier: null,
     reportResult: null,
     releases: [],
@@ -917,8 +926,8 @@ export const useStore = create<PgStore>((set, get) => {
       set({ createdToken: null });
     },
 
-    testPrinter(target, provider, config) {
-      const asked = get().send({ cmd: "printer.test", provider, config }) !== null;
+    testPrinter(target, provider, config, id) {
+      const asked = get().send({ cmd: "printer.test", provider, config, id }) !== null;
       set({ printerTest: null, testing: asked ? target : null });
     },
 
