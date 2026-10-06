@@ -187,7 +187,8 @@ export function Home() {
         <p className="reveal mx-auto mb-8 max-w-2xl text-[0.95rem] text-text-1 sm:text-lg" style={{ "--i": 2 } as React.CSSProperties}>
           PrintGuard watches your printer cameras with an on-device vision model, pauses the printer through
           OctoPrint, Klipper, Elegoo, Prusa or Bambu Lab when a defect holds, and pushes a snapshot to your phone. No
-          cloud and no subscription, and no frame leaves your network unless you choose to send it.
+          cloud and no subscription, and frames stay on your hardware. A defect snapshot goes to the alert channels you
+          set up, and nothing else leaves unless you send it for training.
         </p>
         <div className="reveal flex flex-wrap items-center justify-center gap-3" style={{ "--i": 3 } as React.CSSProperties}>
           {download && <a className="btn btn-primary" href={download.href}>Download for {download.label}</a>}

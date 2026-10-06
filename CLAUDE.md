@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 PrintGuard watches 3D-printer cameras with an on-device vision model, pauses the printer
 on a sustained defect, and pushes a snapshot alert. It runs as a self-hosted **hub**, either
 the Docker image or the macOS and Windows desktop app, and that is the only way to run it.
-Frames leave hardware the user owns only when they review a print and send its frames for
-training.
+Frames stay on the user's hardware. A defect snapshot goes to the alert channels and MQTT broker
+they set up, and nothing else leaves unless they review a print and send its frames for training.
 
 ## Commands
 
