@@ -963,3 +963,35 @@ async def test_a_stored_file_is_readable_only_by_whoever_runs_the_hub(tmp_path: 
 
     assert oct((tmp_path / "benchy.gcode").stat().st_mode)[-3:] == "600"
     assert oct((tmp_path / "frame.jpg").stat().st_mode)[-3:] == "600"
+
+
+@pytest.mark.parametrize(
+    ("camera", "named"),
+    [
+        ({"kind": "url", "url": "whep://admin:CAMPASS@camera.invalid/stream"}, "whep://camera.invalid/stream"),
+        ({"kind": "path", "path": "garage"}, "garage"),
+    ],
+)
+async def test_a_camera_pulled_through_the_hub_names_the_address_it_was_given(
+    monkeypatch: pytest.MonkeyPatch, camera: dict[str, str], named: str
+) -> None:
+    """The error named rtsp://localhost:8554/<camera id>, an address the hub made up, and never the user's."""
+
+    async def ensure_path(name: str, pulled: str, fingerprint: object) -> None:
+        return None
+
+    async def remove_path(name: str) -> None:
+        return None
+
+    monkeypatch.setattr("printguard.server.platform.OPEN_WAIT_S", 5.0)
+    platform = object.__new__(ServerPlatform)
+    platform.mediamtx = SimpleNamespace(
+        rtsp_url=lambda path: f"rtsp://127.0.0.1:9/{path}", ensure_path=ensure_path, remove_path=remove_path
+    )
+    platform._sources, platform._closing, platform._notices = {}, {}, []
+
+    with pytest.raises(RuntimeError, match="no frames from camera cam1") as raised:
+        await platform.open_camera("cam1", camera)
+
+    assert named in str(raised.value)
+    assert "127.0.0.1" not in str(raised.value) and "CAMPASS" not in str(raised.value)

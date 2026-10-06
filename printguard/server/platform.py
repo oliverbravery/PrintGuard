@@ -348,7 +348,9 @@ class AVSource:
     MediaMTX cannot pull itself reach viewers as HLS. A push that fails costs
     the live view alone: capture carries on feeding detection, the failure is
     reported once through ``report``, and the push is tried again every
-    RECONNECT_DELAY_S. ``finished`` is called from the reader's thread as it ends.
+    RECONNECT_DELAY_S. ``finished`` is called from the reader's thread as it ends,
+    and ``shown_as`` is the address errors name when the source is one the hub
+    made up, such as the MediaMTX path a pulled camera is read from.
 
     A container's declared rate is taken for a network stream or a device and
     measured for a byte stream, whose raw MJPEG demuxer answers 25 whatever the
@@ -370,8 +372,10 @@ class AVSource:
         open_options: tuple[dict[str, str], ...] | None = None,
         report: Callable[[str, bool], None] = lambda message, recovered: None,
         finished: Callable[[], None] = lambda: None,
+        shown_as: str | None = None,
     ) -> None:
         self._source = source
+        self._shown_as = shown_as if shown_as is not None else scrub_url(source) if isinstance(source, str) else None
         self._report = report
         self._finished = finished
         self._publish_url = publish_url
@@ -483,7 +487,7 @@ class AVSource:
         """Scrubs the source address out of an error PyAV raised, which quotes it in full."""
         if not isinstance(self._source, str):
             return message
-        return message.replace(self._source, scrub_url(self._source))
+        return message.replace(self._source, self._shown_as)
 
     def _decode(self, container: Any, stream: Any, push: H264Push | None) -> None:
         """Keeps the freshest frame until the source ends, transcoding if asked.
@@ -836,6 +840,7 @@ class ServerPlatform:
         container_format: str | None = None
         open_options: tuple[dict[str, str], ...] | None = None
         target: str | Callable[[], Any]
+        shown_as: str | None = None
         if source["kind"] == "device":
             await asyncio.to_thread(_authorize_macos_camera)
             container_format, target = _device_input(source["device_id"])
@@ -849,8 +854,10 @@ class ServerPlatform:
             else:
                 await self.mediamtx.ensure_path(camera_id, pulled, source.get("fingerprint"))
                 target = self.mediamtx.rtsp_url(camera_id)
+                shown_as = scrub_url(source["url"])
         elif source["kind"] == "path":
             target = self.mediamtx.rtsp_url(source["path"])
+            shown_as = source["path"]
         elif source["kind"] == "bambu":
             target = partial(open_bambu_jpeg_stream, source["host"], source["access_code"])
             publish_url = self.mediamtx.rtsp_url(camera_id)
@@ -872,6 +879,7 @@ class ServerPlatform:
             open_options,
             lambda message, recovered: self._notices.append(Notice(message, recovered, camera_id)),
             lambda: self._forget_closed(reader, av_source),
+            shown_as,
         )
         self._sources[camera_id] = av_source
         try:
