@@ -284,7 +284,8 @@ the MQTT integration set up in Home Assistant and no custom component.
 1. Open **Settings**, then the **Home Assistant** tab.
 2. Turn on **Publish to an MQTT broker** and enter the broker's host.
 3. Add a username and password if the broker wants them, and **Use TLS** if it serves it.
-4. Press **Save broker settings**. The devices appear under the MQTT integration.
+4. Press **Save broker settings**, which waits for a host and, if you change the host or port,
+   for the password typed again. The devices appear under the MQTT integration.
 
 Leave the port blank for `1883`, or `8883` with TLS. A port that isn't a whole number from 1 to
 65535 is refused. With TLS the broker's certificate has to be

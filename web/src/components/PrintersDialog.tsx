@@ -4,7 +4,7 @@ import { useSubmit } from "../submit";
 import type { AdapterConfig, AdapterMeta, Printer } from "../types";
 import { Dialog } from "./Dialog";
 import { DeviceChip } from "./MonitorTile";
-import { SchemaForm, withoutSecrets } from "./SchemaForm";
+import { retypeReason, SchemaForm, savedSecretTitles } from "./SchemaForm";
 import { TestRow } from "./TestRow";
 
 const NEW_PRINTER = "new";
@@ -42,11 +42,12 @@ function PrinterRow({ printer }: { printer: Printer }) {
   const [config, setConfig] = useState<AdapterConfig>(printer.config ?? {});
   const integrations = engine?.integrations ?? [];
   const meta = integrations.find((i) => i.id === printer.provider);
-  const save = useSubmit(() => setConfig((draft) => withoutSecrets(meta, draft)));
+  const save = useSubmit(() => setConfig(printer.config ?? {}));
 
   useEffect(() => setName(printer.name), [printer.id, printer.name]);
   useEffect(() => setConfig(printer.config ?? {}), [printer.id]);
 
+  const retype = meta ? retypeReason(config, printer.config ?? {}, savedSecretTitles(meta, printer.secrets_set ?? [])) : null;
   const dirty = name.trim() !== printer.name || JSON.stringify(config) !== JSON.stringify(printer.config ?? {});
 
   return (
@@ -74,15 +75,16 @@ function PrinterRow({ printer }: { printer: Printer }) {
       {open && meta && (
         <div className="px-3 pb-3 pt-1 border-t border-line-0 space-y-3">
           <input className="field" aria-label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <SchemaForm meta={meta} value={config} saved={printer.secrets_set} onChange={setConfig} />
+          <SchemaForm meta={meta} value={config} stored={printer.config ?? {}} saved={printer.secrets_set} onChange={setConfig} />
           <PrinterTest id={printer.id} provider={printer.provider} config={config} />
           <button
             className="btn btn-primary w-full !py-1.5"
-            disabled={!dirty || isPending("printer.update", printer.id)}
+            disabled={!dirty || retype !== null || isPending("printer.update", printer.id)}
             onClick={() => save.submit({ cmd: "printer.update", id: printer.id, patch: { name: name.trim(), config } })}
           >
             {isPending("printer.update", printer.id) ? "Saving…" : "Save"}
           </button>
+          {retype && <span className="block text-[0.7rem] text-text-2">{retype}</span>}
           {save.error && (
             <span role="alert" className="chip chip-message chip-bad">
               {save.error}

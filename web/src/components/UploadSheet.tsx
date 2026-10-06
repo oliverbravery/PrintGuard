@@ -50,6 +50,7 @@ function StagedPrintForm({
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [drawn, setDrawn] = useState<ParsedToolpath | null>();
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [name, setName] = useState(stem(file.name));
   const [drafts, setDrafts] = useState<Record<HeaterName, string>>({ nozzle: "", bed: "" });
   const printerIds = engine ? acceptedTags(engine, tags, ext) : [];
@@ -80,8 +81,14 @@ function StagedPrintForm({
   }
 
   const upload = () => {
-    uploadPrint({ file, name: name.trim(), printerIds, temperatures }, isText(file.name) && !inspection!.thumbnail ? drawn! : null);
-    onDone();
+    setError(null);
+    setUploading(true);
+    uploadPrint({ file, name: name.trim(), printerIds, temperatures }, isText(file.name) && !inspection!.thumbnail ? drawn! : null)
+      .then(onDone)
+      .catch((err: Error) => {
+        setError(err.message);
+        setUploading(false);
+      });
   };
 
   return (
@@ -124,8 +131,8 @@ function StagedPrintForm({
         <button className="btn" onClick={onDone}>
           Discard
         </button>
-        <button className="btn btn-primary" disabled={!valid} onClick={upload}>
-          {(inspection && drawn !== undefined) || error ? "Upload" : "Reading…"}
+        <button className="btn btn-primary" disabled={!valid || uploading} onClick={upload}>
+          {uploading ? "Uploading…" : (inspection && drawn !== undefined) || error ? "Upload" : "Reading…"}
         </button>
       </div>
     </>

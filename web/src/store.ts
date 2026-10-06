@@ -20,8 +20,11 @@ const BACKGROUND_IMAGE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+
 const DOWNLOAD_URL_LIFETIME_MS = 60_000;
 const MAX_NOTICE_CHARS = 200;
 const UPDATE_DEBOUNCE_MS = 250;
+const REMOVAL = /^(camera|monitor|print)\.remove$/;
 const RECONNECT_DELAY_MS = 1500;
 const HUB_SILENCE_LIMIT_MS = 10_000;
+const BOOT_DROPS_BEFORE_HINT = 3;
+const HUB_NOT_ANSWERING = "The hub is not answering. Check the address, and that a proxy forwards WebSockets and the Origin header";
 const updateTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
 type OptimisticKind = "camera" | "monitor" | "print" | "settings";
@@ -121,7 +124,7 @@ interface PgStore {
   discovering: boolean;
   printerTest: { target: string; ok: boolean; status?: string; error?: string } | null;
   testing: string | null;
-  notifyTest: { provider: string; ok: boolean; error?: string } | null;
+  notifyTest: { target: string; ok: boolean; error?: string } | null;
   outcome: { req_id: string; error: string | null } | null;
   testingNotifier: string | null;
   reportResult: { ok: boolean; error?: string } | null;
@@ -167,7 +170,7 @@ interface PgStore {
   updateCamera(id: string, patch: Record<string, unknown>): void;
   updateMonitor(id: string, patch: Record<string, unknown>): void;
   updatePrint(id: string, patch: Record<string, unknown>): void;
-  updateSettings(patch: Record<string, unknown>): void;
+  updateSettings(patch: Record<string, unknown>, scope?: string): void;
   flushUpdates(): void;
   discover(): void;
   openDialog(dialog: DialogKind, focusCameraId?: string | null): void;
@@ -180,12 +183,12 @@ interface PgStore {
   openPrint(id: string | null): void;
   stagePrints(files: File[]): void;
   unstage(id: number): void;
-  uploadPrint(draft: PrintDraft, thumbnailFrom: ParsedToolpath | null): void;
+  uploadPrint(draft: PrintDraft, thumbnailFrom: ParsedToolpath | null): Promise<void>;
   fetchSnapshot(monitorId: string, id: string): void;
   clearCreatedToken(): void;
   testPrinter(target: string, provider: string, config: AdapterConfig, id?: string): void;
   addPublishedCamera(name: string, path: string): void;
-  testNotifier(provider: string, config: AdapterConfig): void;
+  testNotifier(target: string, provider: string, config: AdapterConfig): void;
   signIn(pluginId: string): void;
   toast(kind: Toast["kind"], text: string): void;
 }
@@ -199,9 +202,8 @@ let uploadSeq = 0;
 let resumed = false;
 const toastedStartupWarnings = new Set<string>();
 
-function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: () => void): EngineLink {
+function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: (wasUp: boolean) => void): EngineLink {
   let socket: WebSocket;
-  let closed = false;
   const open = () => {
     const opening = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`);
     socket = opening;
@@ -210,9 +212,8 @@ function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: () 
     const drop = () => {
       clearTimeout(silence);
       opening.onclose = opening.onmessage = null;
-      if (closed) return;
       log("warn", "hub socket closed, reconnecting");
-      if (connected) onDown();
+      onDown(connected);
       setTimeout(open, RECONNECT_DELAY_MS);
     };
     const expectTick = () => {
@@ -243,14 +244,12 @@ function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: () 
       socket.send(JSON.stringify(cmd));
       return true;
     },
-    close: () => {
-      closed = true;
-      socket.close();
-    },
   };
 }
 
 export const useStore = create<PgStore>((set, get) => {
+  let droppedWhileBooting = 0;
+
   const clearPending = (reqId?: string) => {
     if (reqId == null) return;
     set((s) => {
@@ -272,6 +271,13 @@ export const useStore = create<PgStore>((set, get) => {
     if (get().reviewId === null && get().statsMonitorId === null) set({ snapshotCache: {} });
   };
 
+  let lastSnapshot: EngineState | null = null;
+
+  const withDeviceState = (engine: EngineState, printerId: string, deviceState: EngineState["printers"][number]["device_state"]): EngineState => ({
+    ...engine,
+    printers: engine.printers.map((p) => (p.id === printerId ? { ...p, device_state: deviceState } : p)),
+  });
+
   const flushKey = (key: string) => {
     delete updateTimers[key];
     const entry = get().optimistic[key];
@@ -283,6 +289,12 @@ export const useStore = create<PgStore>((set, get) => {
         ? { optimistic: { ...s.optimistic, [key]: { ...s.optimistic[key], unsent: {}, sent: { ...s.optimistic[key].sent, ...carried } } } }
         : s,
     );
+  };
+
+  const dropUpdate = (key: string) => {
+    clearTimeout(updateTimers[key]);
+    delete updateTimers[key];
+    set((s) => ({ optimistic: withoutKeys(s.optimistic, [key]) }));
   };
 
   const queueUpdate = (key: string, kind: OptimisticKind, id: string | undefined, patch: Record<string, unknown>) => {
@@ -522,6 +534,7 @@ export const useStore = create<PgStore>((set, get) => {
           location.reload();
           return;
         }
+        lastSnapshot = server;
         const optimistic = event.req_id == null ? get().optimistic : settle(get().optimistic, event.req_id);
         const acknowledged = Object.keys(get().optimistic).filter((key) => !(key in optimistic));
         const firstRun = get().phase !== "ready" && !readStored(INTRO_SEEN_KEY);
@@ -623,11 +636,8 @@ export const useStore = create<PgStore>((set, get) => {
       case "device": {
         clearPending(event.req_id);
         const { event: _kind, printer_id, req_id: _req, ...device_state } = event;
-        set((s) =>
-          s.engine
-            ? { engine: { ...s.engine, printers: s.engine.printers.map((p) => (p.id === printer_id ? { ...p, device_state } : p)) } }
-            : s,
-        );
+        if (lastSnapshot) lastSnapshot = withDeviceState(lastSnapshot, printer_id, device_state);
+        set((s) => (s.engine ? { engine: withDeviceState(s.engine, printer_id, device_state) } : s));
         break;
       }
       case "discovered":
@@ -637,7 +647,7 @@ export const useStore = create<PgStore>((set, get) => {
         if (issuedHere(event.req_id)) set((s) => ({ printerTest: { ...event, target: s.testing ?? "" }, testing: null }));
         break;
       case "notify_test":
-        if (issuedHere(event.req_id)) set({ notifyTest: event, testingNotifier: null });
+        if (issuedHere(event.req_id)) set((s) => ({ notifyTest: { ...event, target: s.testingNotifier ?? "" }, testingNotifier: null }));
         break;
       case "report_sent":
         if (issuedHere(event.req_id)) set({ reportResult: event });
@@ -669,12 +679,16 @@ export const useStore = create<PgStore>((set, get) => {
         }
         signInTabs.get(event.req_id)?.close();
         signInTabs.delete(event.req_id);
+        const optimistic = event.req_id != null ? settle(get().optimistic, event.req_id) : get().optimistic;
+        const engine = lastSnapshot ? applyOptimistic(lastSnapshot, optimistic) : get().engine;
+        if (engine) applyTheme(engine.settings?.theme ?? "system", engine.settings?.themes ?? [], engine.settings?.glass);
         set((s) => ({
           discovering: failed === "discover" ? false : s.discovering,
           testing: failed === "printer.test" ? null : s.testing,
           testingNotifier: failed === "notify.test" ? null : s.testingNotifier,
           outcome: event.req_id != null ? { req_id: event.req_id, error: event.message } : s.outcome,
-          optimistic: event.req_id != null ? settle(s.optimistic, event.req_id) : s.optimistic,
+          optimistic,
+          engine,
         }));
         break;
       }
@@ -696,9 +710,12 @@ export const useStore = create<PgStore>((set, get) => {
         set({ reconnecting: false });
         resendUnsaved();
       },
-      () => {
-        dropInFlight();
-        set({ bootMsg: "Reconnecting", reconnecting: true });
+      (wasUp) => {
+        if (wasUp) {
+          dropInFlight();
+          set({ reconnecting: true });
+        }
+        if (get().phase === "booting" && ++droppedWhileBooting >= BOOT_DROPS_BEFORE_HINT) set({ bootMsg: HUB_NOT_ANSWERING });
       },
     ),
     engine: null,
@@ -796,6 +813,8 @@ export const useStore = create<PgStore>((set, get) => {
       if (get().link?.send({ ...cmd, req_id })) {
         const key = typeof cmd.id === "string" ? `${cmdType}:${cmd.id}` : cmdType;
         set((s) => ({ pending: { ...s.pending, [key]: { req_id, cmd: cmdType } } }));
+        const removed = REMOVAL.exec(cmdType)?.[1];
+        if (removed && typeof cmd.id === "string") dropUpdate(`${removed}:${cmd.id}`);
         return req_id;
       }
       get().toast("error", "The hub is reconnecting, so that wasn't sent. Try again in a moment.");
@@ -819,8 +838,8 @@ export const useStore = create<PgStore>((set, get) => {
       queueUpdate(`print:${id}`, "print", id, patch);
     },
 
-    updateSettings(patch) {
-      queueUpdate("settings", "settings", undefined, patch);
+    updateSettings(patch, scope) {
+      queueUpdate(scope ? `settings:${scope}` : "settings", "settings", undefined, patch);
     },
 
     flushUpdates() {
@@ -909,11 +928,10 @@ export const useStore = create<PgStore>((set, get) => {
     uploadPrint(draft, thumbnailFrom) {
       const id = ++uploadSeq;
       set((s) => ({ uploads: [...s.uploads, { id, name: draft.name || draft.file.name, progress: 0 }] }));
-      (thumbnailFrom ? withPreview(draft.file, thumbnailFrom).catch(() => draft.file) : Promise.resolve(draft.file))
+      return (thumbnailFrom ? withPreview(draft.file, thumbnailFrom).catch(() => draft.file) : Promise.resolve(draft.file))
         .then((body) =>
           sendPrint(draft, body, (progress) => set((s) => ({ uploads: s.uploads.map((u) => (u.id === id ? { ...u, progress } : u)) }))),
         )
-        .catch((err: Error) => get().toast("error", `${draft.file.name}: ${err.message}`))
         .finally(() => set((s) => ({ uploads: s.uploads.filter((u) => u.id !== id) })));
     },
 
@@ -937,9 +955,9 @@ export const useStore = create<PgStore>((set, get) => {
       else stopPublishing(path);
     },
 
-    testNotifier(provider, config) {
+    testNotifier(target, provider, config) {
       const asked = get().send({ cmd: "notify.test", provider, config }) !== null;
-      set({ notifyTest: null, testingNotifier: asked ? provider : null });
+      set({ notifyTest: null, testingNotifier: asked ? target : null });
     },
 
     signIn(pluginId) {

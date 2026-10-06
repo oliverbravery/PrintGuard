@@ -24,7 +24,9 @@ from filling your phone.
    blank isn't saved, and the error names the field.
 4. A saved key, token, topic URL or webhook is never shown again. Its field is empty and reads
    "Saved. Leave blank to keep it", and a test alert uses the saved one. Type in it to replace
-   the saved one, or press **Clear** and save to remove it.
+   the saved one, or press **Clear** and save to remove it. Switching a channel off and on again
+   keeps what you typed until you save. Changing a channel's address needs its saved secrets typed
+   again.
 5. Turn on **Push notifications** on each monitor that should use it.
 
 Every enabled channel gets every notice, so there's no routing to set up. A monitor with

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { alertOutcome, GROUP_S, groupBuckets, HISTORY_BUCKET_MS, PERIODS, type Period } from "../history";
-import { statusText } from "../review";
+import { framesLabel, statusText } from "../review";
 import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Monitor, Snapshot } from "../types";
@@ -137,7 +137,7 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
             {prints.map((print) => (
               <li key={print.id} className="flex items-center gap-3">
                 <span className="mono min-w-0 flex-1 truncate text-[0.7rem] text-text-1">
-                  {new Date((print.ended ?? print.started) * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · {print.frames} frames
+                  {new Date((print.ended ?? print.started) * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · {framesLabel(print.frames)}
                 </span>
                 <span className="label">{statusText(print)}</span>
                 <button

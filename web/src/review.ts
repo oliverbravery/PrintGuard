@@ -8,6 +8,10 @@ const DAILY_LIMITS: Record<string, string> = {
   global_daily: "PrintGuard has had all the frames it can take today.",
 };
 
+export function framesLabel(count: number): string {
+  return `${count} ${count === 1 ? "frame" : "frames"}`;
+}
+
 export function clock(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
@@ -29,7 +33,7 @@ export function sending(review: ReviewSummary): boolean {
 }
 
 export function statusText(review: ReviewSummary): string {
-  if (review.status === "sent") return `sent ${review.sent} frames`;
+  if (review.status === "sent") return `sent ${framesLabel(review.sent)}`;
   if (sending(review)) return `sending ${review.sent} of ${review.chosen}`;
   if (review.status === "queued") return review.retry_at ? `queued, sends after ${clock(review.retry_at)}` : "queued";
   if (review.status === "running") return "printing";

@@ -433,5 +433,4 @@ export interface ScorePoint {
 
 export interface EngineLink {
   send(cmd: Record<string, unknown>): boolean;
-  close(): void;
 }

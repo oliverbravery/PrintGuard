@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { savedChannels, type SettingsTabId, useStore } from "../store";
 import { useSubmit } from "../submit";
 import { applyTheme, beginPreview, endPreview, GLASS_DEFAULT, PALETTES } from "../theme";
-import type { ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
+import type { AdapterConfig, AdapterMeta, ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
 import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
 import { PluginsTab } from "./PluginsTab";
 import { SettingsFooter } from "./SettingsFooter";
 import { SaveStatus } from "./SaveStatus";
-import { SchemaForm, withoutSecrets } from "./SchemaForm";
+import { addressMoved, retypeReason, SchemaForm, savedSecretTitles } from "./SchemaForm";
 import { SecretInput } from "./SecretInput";
 import { SchemePicker } from "./SchemePicker";
 import { TestRow } from "./TestRow";
@@ -48,12 +48,13 @@ export function SettingsDialog() {
     settingsTab,
   } = useStore();
   const [notifiers, setNotifiers] = useState(() => savedChannels(engine));
-  const saveChannels = useSubmit(() =>
-    setNotifiers((draft) =>
-      Object.fromEntries(Object.entries(draft).map(([id, config]) => [id, withoutSecrets(engine?.notifiers.find((n) => n.id === id), config)])),
-    ),
-  );
-  const saveBroker = useSubmit(() => setMqtt(({ password: _sent, ...draft }) => draft));
+  const parkedChannels = useRef<Record<string, AdapterConfig>>({});
+  const saveChannels = useSubmit(() => {
+    parkedChannels.current = {};
+    setNotifiers(savedChannels(engine));
+  });
+  const saveBroker = useSubmit(() => setMqtt(engine?.settings.mqtt ?? {}));
+  const createToken = useSubmit(() => setTokenName(""));
   const updateCheck = engine?.settings.update_check ?? true;
   const [mqtt, setMqtt] = useState<MqttConfig>(engine?.settings.mqtt ?? {});
   const setMqttField = (key: keyof MqttConfig, value: MqttConfig[keyof MqttConfig]) => setMqtt({ ...mqtt, [key]: value });
@@ -112,6 +113,15 @@ export function SettingsDialog() {
 
   const desktopApp = "pywebview" in window;
   const channels = (engine?.notifiers ?? []).filter((n) => !n.desktop_only || desktopApp);
+  const channelRetype = (meta: AdapterMeta) => {
+    const stored = engine?.settings.notifiers[meta.id];
+    return meta.id in notifiers && stored ? retypeReason(notifiers[meta.id], stored, savedSecretTitles(meta, engine?.secrets_set?.notifiers[meta.id] ?? [])) : null;
+  };
+  const savedPassword = engine?.secrets_set?.mqtt.includes("password") ?? false;
+  const brokerProblem =
+    mqtt.enabled && !mqtt.host?.trim()
+      ? "Enter the broker host."
+      : retypeReason(mqtt, engine?.settings.mqtt ?? {}, savedPassword ? { password: "Password" } : {});
 
   const tabs: { id: SettingsTabId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
@@ -199,6 +209,7 @@ export function SettingsDialog() {
             <span className="label block">Notification channels</span>
             {channels.map((meta) => {
               const enabled = meta.id in notifiers;
+              const target = JSON.stringify([meta.id, notifiers[meta.id]]);
               return (
                 <div key={meta.id} className="space-y-3">
                   <Toggle
@@ -206,8 +217,11 @@ export function SettingsDialog() {
                     on={enabled}
                     onChange={(on) => {
                       const next = { ...notifiers };
-                      if (on) next[meta.id] = next[meta.id] ?? {};
-                      else delete next[meta.id];
+                      if (on) next[meta.id] = parkedChannels.current[meta.id] ?? {};
+                      else {
+                        parkedChannels.current[meta.id] = next[meta.id];
+                        delete next[meta.id];
+                      }
                       setNotifiers(next);
                     }}
                   />
@@ -216,21 +230,23 @@ export function SettingsDialog() {
                       <SchemaForm
                         meta={meta}
                         value={notifiers[meta.id]}
+                        stored={engine?.settings.notifiers[meta.id]}
                         saved={engine?.secrets_set?.notifiers[meta.id]}
                         onChange={(config) => setNotifiers({ ...notifiers, [meta.id]: config })}
                       />
                       <TestRow
                         label="Send test alert"
                         busyLabel="Sending…"
-                        busy={testingNotifier === meta.id}
+                        busy={testingNotifier === target}
                         disabled={testingNotifier !== null}
-                        onTest={() => testNotifier(meta.id, notifiers[meta.id])}
+                        onTest={() => testNotifier(target, meta.id, notifiers[meta.id])}
                         result={
-                          notifyTest?.provider === meta.id
+                          notifyTest?.target === target
                             ? { ok: notifyTest.ok, message: notifyTest.ok ? "sent" : notifyTest.error || "failed" }
                             : null
                         }
                       />
+                      {channelRetype(meta) && <span className="block text-[0.7rem] text-text-2">{channelRetype(meta)}</span>}
                     </>
                   )}
                 </div>
@@ -241,7 +257,7 @@ export function SettingsDialog() {
             </span>
             <button
               className="btn btn-primary w-full"
-              disabled={isPending("settings.update")}
+              disabled={isPending("settings.update") || channels.some(channelRetype)}
               onClick={() => saveChannels.submit({ cmd: "settings.update", patch: { notifiers } })}
             >
               {isPending("settings.update") ? "Saving…" : "Save channels"}
@@ -304,7 +320,8 @@ export function SettingsDialog() {
                     name="password"
                     aria-label="Password"
                     placeholder="Password (optional)"
-                    saved={engine?.secrets_set?.mqtt.includes("password") ?? false}
+                    saved={savedPassword}
+                    retype={addressMoved(mqtt, engine?.settings.mqtt ?? {})}
                     value={mqtt.password}
                     onChange={(password) => setMqttField("password", password)}
                   />
@@ -338,11 +355,12 @@ export function SettingsDialog() {
             )}
             <button
               className="btn btn-primary w-full"
-              disabled={isPending("settings.update")}
+              disabled={isPending("settings.update") || brokerProblem !== null}
               onClick={() => saveBroker.submit({ cmd: "settings.update", patch: { mqtt } })}
             >
               {isPending("settings.update") ? "Saving…" : "Save broker settings"}
             </button>
+            {brokerProblem && <span className="block text-[0.7rem] text-text-2">{brokerProblem}</span>}
             {saveBroker.error && (
               <span role="alert" className="chip chip-message chip-bad">
                 {saveBroker.error}
@@ -361,7 +379,7 @@ export function SettingsDialog() {
               label="Automatically check for updates"
               on={updateCheck}
               onChange={(on) => {
-                updateSettings({ update_check: on });
+                updateSettings({ update_check: on }, "updates");
                 if (on && !engine?.update) send({ cmd: "update.check" });
               }}
             />
@@ -372,18 +390,16 @@ export function SettingsDialog() {
               <button className="btn" disabled={isPending("update.check")} onClick={() => send({ cmd: "update.check" })}>
                 {isPending("update.check") ? "Checking…" : "Check now"}
               </button>
-              {engine?.update?.available && (
-                <button className="btn btn-primary" onClick={() => openDialog("update")}>
-                  Update to v{engine.update.latest}
-                </button>
-              )}
+              <button className={`btn ${engine?.update?.available ? "btn-primary" : ""}`} onClick={() => openDialog("update")}>
+                {engine?.update?.available ? `Update to v${engine.update.latest}` : "Release notes"}
+              </button>
               <span className="text-[0.7rem] text-text-2">
                 {engine?.version && `v${engine.version}`}
                 {engine?.update && !engine.update.available && " · up to date"}
               </span>
             </div>
             <div className="flex justify-end">
-              <SaveStatus scope="settings" />
+              <SaveStatus scope="settings:updates" />
             </div>
           </TabPanel>
         )}
@@ -431,7 +447,7 @@ export function SettingsDialog() {
                     </div>
                     <button
                       className="btn btn-danger"
-                      disabled={isPending("token.remove")}
+                      disabled={isPending("token.remove", t.id)}
                       onClick={() => send({ cmd: "token.remove", id: t.id })}
                     >
                       Revoke
@@ -458,14 +474,16 @@ export function SettingsDialog() {
                 <button
                   className="btn btn-primary whitespace-nowrap"
                   disabled={!tokenName.trim() || isPending("token.create")}
-                  onClick={() => {
-                    send({ cmd: "token.create", name: tokenName.trim(), scope: tokenScope });
-                    setTokenName("");
-                  }}
+                  onClick={() => createToken.submit({ cmd: "token.create", name: tokenName.trim(), scope: tokenScope })}
                 >
                   {isPending("token.create") ? "…" : "Generate"}
                 </button>
               </div>
+              {createToken.error && (
+                <span role="alert" className="chip chip-message chip-bad">
+                  {createToken.error}
+                </span>
+              )}
             </div>
           </TabPanel>
         )}
@@ -479,7 +497,7 @@ export function SettingsDialog() {
               id="inference-runtime"
               className="field w-full"
               value={engine?.settings.inference_runtime ?? "auto"}
-              onChange={(event) => updateSettings({ inference_runtime: event.target.value })}
+              onChange={(event) => updateSettings({ inference_runtime: event.target.value }, "advanced")}
             >
               <option value="auto">Automatic</option>
               <option value="litert">LiteRT</option>
@@ -497,7 +515,7 @@ export function SettingsDialog() {
             <Toggle
               label="Ask me to review frames after a print"
               on={engine?.settings.feedback !== "off"}
-              onChange={(on) => updateSettings({ feedback: on ? "ask" : "off" })}
+              onChange={(on) => updateSettings({ feedback: on ? "ask" : "off" }, "advanced")}
             />
             <span className="block text-[0.7rem] leading-relaxed text-text-2">
               PrintGuard keeps a few frames from each print on this hub so you can label them and send them to help
@@ -513,7 +531,7 @@ export function SettingsDialog() {
               </div>
             )}
             <div className="flex justify-end">
-              <SaveStatus scope="settings" />
+              <SaveStatus scope="settings:advanced" />
             </div>
           </TabPanel>
         )}

@@ -2,10 +2,12 @@ import { useId, useRef, type InputHTMLAttributes } from "react";
 
 const KEPT = "Saved. Leave blank to keep it";
 const CLEARED = "Will be removed on Save";
+const RETYPE = "Type it again, the address changed";
 
 export function SecretInput({
   name,
   saved,
+  retype = false,
   value,
   onChange,
   placeholder,
@@ -14,12 +16,13 @@ export function SecretInput({
 }: {
   name: string;
   saved: boolean;
+  retype?: boolean;
   value: string | null | undefined;
   onChange: (next: string | null | undefined) => void;
 } & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type">) {
   const hintId = useId();
   const field = useRef<HTMLInputElement>(null);
-  const hint = !saved || value ? null : value === null ? CLEARED : KEPT;
+  const hint = !saved || value ? null : value === null ? CLEARED : retype ? RETYPE : KEPT;
   return (
     <div className="flex min-w-0 flex-1 basis-56 items-center gap-2">
       <input
