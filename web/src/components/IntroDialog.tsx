@@ -27,7 +27,7 @@ export function IntroDialog() {
           ))}
         </div>
         <footer className="hairline flex shrink-0 items-center gap-2 pt-4">
-          <Progress value={page + 1} total={INTRO.length} className="flex-1" />
+          <Progress label="Introduction progress" value={page + 1} total={INTRO.length} className="flex-1" />
           {page > 0 && (
             <button className="btn" onClick={() => setPage(page - 1)}>
               Back

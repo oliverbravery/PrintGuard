@@ -7,6 +7,8 @@ export const HEATERS = ["nozzle", "bed"] as const;
 export type HeaterName = (typeof HEATERS)[number];
 export const HEATER_MAX: Record<HeaterName, number> = { nozzle: 350, bed: 150 };
 
+const clampTarget = (name: HeaterName, target: number) => Math.min(HEATER_MAX[name], Math.max(0, target));
+
 export function activeJob(state: DeviceState | null | undefined): state is DeviceState {
   return state?.status === "printing" || state?.status === "paused";
 }
@@ -40,7 +42,7 @@ function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heate
     if (!busy) setDraft(String(Math.round(heater.target)));
   }, [heater.target, busy]);
   const commit = () => {
-    const target = Math.min(HEATER_MAX[name], Math.max(0, Number(draft)));
+    const target = clampTarget(name, Number(draft));
     if (draft.trim() === "" || Number.isNaN(target)) return setDraft(String(Math.round(heater.target)));
     setDraft(String(target));
     if (target !== Math.round(heater.target)) onCommit(target);
@@ -87,7 +89,7 @@ function PresetRow({ preset, onChange, onRemove }: { preset: PreheatPreset; onCh
   const [draft, setDraft] = useState(typed);
   useEffect(() => setDraft(typed()), [preset.name, preset.nozzle, preset.bed]);
   const commit = () => {
-    const next = { name: draft.name.trim(), nozzle: Number(draft.nozzle) || 0, bed: Number(draft.bed) || 0 };
+    const next = { name: draft.name.trim(), nozzle: clampTarget("nozzle", Number(draft.nozzle) || 0), bed: clampTarget("bed", Number(draft.bed) || 0) };
     if (!next.name) return setDraft(typed());
     if (next.name !== preset.name || next.nozzle !== preset.nozzle || next.bed !== preset.bed) onChange(next);
     else setDraft(typed());
@@ -197,6 +199,7 @@ export function PrinterControls({ printer }: { printer: Printer }) {
   const heating = isPending("printer.heat");
   const heat = (targets: Partial<Record<HeaterName, number>>) => send({ cmd: "printer.heat", id: printer.id, ...targets });
   const heaters = HEATERS.filter((name) => state?.[name]);
+  const permitted = { pause: state?.status !== "paused", resume: state?.status === "paused", cancel: activeJob(state) };
 
   return (
     <div className="space-y-4">
@@ -216,7 +219,7 @@ export function PrinterControls({ printer }: { printer: Printer }) {
           <button
             key={name}
             className={`btn ${name === "cancel" ? "btn-danger" : ""}`}
-            disabled={acting || (name === "pause" && state?.status === "paused")}
+            disabled={acting || !permitted[name]}
             onClick={() => {
               setAction(name);
               send({ cmd: "printer.action", id: printer.id, action: name });
@@ -233,7 +236,7 @@ export function PrinterControls({ printer }: { printer: Printer }) {
           ))}
         </div>
       )}
-      {control && state && <Presets presets={presets} busy={heating} onApply={(nozzle, bed) => heat({ nozzle, bed })} />}
+      {control && state && <Presets presets={presets} busy={heating} onApply={(nozzle, bed) => heat({ nozzle: clampTarget("nozzle", nozzle), bed: clampTarget("bed", bed) })} />}
     </div>
   );
 }

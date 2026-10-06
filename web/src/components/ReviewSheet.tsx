@@ -20,6 +20,7 @@ function verdict(frame: ReviewFrame, failure: boolean): string {
 function FrameCard({
   monitorId,
   frame,
+  position,
   failure,
   removed,
   onToggle,
@@ -27,6 +28,7 @@ function FrameCard({
 }: {
   monitorId: string;
   frame: ReviewFrame;
+  position: string;
   failure: boolean;
   removed: boolean;
   onToggle: () => void;
@@ -34,9 +36,10 @@ function FrameCard({
 }) {
   const url = useStore((s) => s.snapshotCache[frame.id]);
   const fetchSnapshot = useStore((s) => s.fetchSnapshot);
+  const reconnecting = useStore((s) => s.reconnecting);
   useEffect(() => {
-    fetchSnapshot(monitorId, frame.id);
-  }, [monitorId, frame.id]);
+    if (!reconnecting) fetchSnapshot(monitorId, frame.id);
+  }, [monitorId, frame.id, reconnecting]);
   const label = verdict(frame, failure);
   return (
     <div className={`panel relative overflow-hidden ${failure && !removed ? "!border-bad" : ""}`}>
@@ -44,7 +47,7 @@ function FrameCard({
         type="button"
         className={`block w-full text-left ${removed ? "opacity-40" : "cursor-pointer"}`}
         aria-pressed={failure}
-        aria-label={`Frame at ${clock(frame.ts)}, marked ${label}. Press to change`}
+        aria-label={`${position} at ${clock(frame.ts)}, marked ${label}. Press to change`}
         disabled={removed}
         onClick={onToggle}
       >
@@ -59,7 +62,7 @@ function FrameCard({
       <button
         type="button"
         className="btn absolute right-1 top-1 !bg-ink-1 !px-2 !py-0.5"
-        aria-label={`${removed ? "Send" : "Don't send"} the frame at ${clock(frame.ts)}`}
+        aria-label={`${removed ? "Send" : "Don't send"} ${position.toLowerCase()} at ${clock(frame.ts)}`}
         onClick={onRemove}
       >
         {removed ? "Undo" : "×"}
@@ -165,11 +168,12 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
                   : "Every frame is marked good. Press one to change it, or use the × to leave it out and Undo to put it back."}
               </p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {frames.map((frame) => (
+                {frames.map((frame, index) => (
                   <FrameCard
                     key={frame.id}
                     monitorId={monitor.id}
                     frame={frame}
+                    position={`Frame ${index + 1} of ${frames.length}`}
                     failure={showsFailure(frame)}
                     removed={removed.has(frame.id)}
                     onToggle={() => setRelabelled((current) => toggled(current, frame.id))}

@@ -81,6 +81,20 @@ test("a dropped hub shows in the header, frees its buttons and gets the unsaved 
   await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().optimistic).length)).toBe(0);
 });
 
+test("a warning raised while the hub started is toasted once per page load, not on every state or reconnect", async ({ page }) => {
+  const warnings = ["The GPU cannot run the model, using the CPU", "Dropped a camera the hub no longer accepts"];
+  const state = engine({ startup_warnings: warnings });
+  const { sockets } = await hub(page, undefined, state);
+  for (const warning of warnings) await expect(page.getByText(warning)).toHaveCount(1);
+
+  sockets[0].send(JSON.stringify({ event: "state", ...state }));
+  await sockets[0].close();
+  await expect.poll(() => sockets.length, { timeout: 8000 }).toBe(2);
+  sockets[1].send(JSON.stringify({ event: "state", ...state }));
+  await expect(page.getByText("reconnecting")).toBeHidden();
+  for (const warning of warnings) await expect(page.getByText(warning)).toHaveCount(1);
+});
+
 test("a dashboard left open through an update reloads onto the new version", async ({ page }) => {
   const { sockets } = await hub(page);
   sockets[0].send(JSON.stringify({ event: "state", ...engine({ version: "next" }) }));
@@ -94,6 +108,27 @@ test("a setting changed while another is still saving is sent on its own", async
   await expect.poll(updates).toEqual([{ update_check: false }]);
   await page.evaluate(() => (window as any).__pg.getState().updateSettings({ theme: "light" }));
   await expect.poll(updates).toEqual([{ update_check: false }, { theme: "light" }]);
+});
+
+test("a setting still saving holds its value when a later setting is acknowledged first", async ({ page }) => {
+  const { sockets, commands } = await hub(page);
+  const updates = () => commands.filter((c) => c.cmd === "settings.update");
+  const pendingFields = () => page.evaluate(() => Object.keys((window as any).__pg.getState().optimistic.settings?.patch ?? {}));
+  await page.evaluate(() => {
+    const state = (window as any).__pg.getState();
+    state.updateSettings({ inference_runtime: "onnx" });
+    state.flushUpdates();
+    state.updateSettings({ update_check: false });
+    state.flushUpdates();
+  });
+  await expect.poll(() => updates().length).toBe(2);
+
+  sockets[0].send(JSON.stringify({ event: "state", ...engine(), req_id: updates()[1].req_id }));
+  await expect.poll(pendingFields).toEqual(["inference_runtime"]);
+  expect(await page.evaluate(() => (window as any).__pg.getState().engine.settings.inference_runtime)).toBe("onnx");
+
+  sockets[0].send(JSON.stringify({ event: "state", ...engine(), req_id: updates()[0].req_id }));
+  await expect.poll(pendingFields).toEqual([]);
 });
 
 test("a hub that goes silent without closing is dropped and reached again", async ({ page }) => {
@@ -198,12 +233,25 @@ test("a review answered before its frames arrive still marks the alert frames, a
 
   await sheet.getByRole("button", { name: /^Don't send/ }).nth(1).click();
   await expect(sheet.getByRole("button", { name: "Send 2 frames" })).toBeVisible();
-  await sheet.getByRole("button", { name: /^Send the frame at/ }).click();
+  await sheet.getByRole("button", { name: /^Send frame \d of \d at/ }).click();
   await sheet.getByRole("button", { name: "Send 3 frames" }).click();
   expect(await sent(page, "review.send")).toMatchObject({ id: "r1", failures: ["a1"], removed: [] });
 
   await sheet.getByRole("button", { name: "Close print review" }).click();
   expect(await page.evaluate(() => (window as any).__pg.getState().snapshotCache)).toEqual({});
+});
+
+test("review frames whose pictures were lost to a reconnect are asked for again", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
+  await emit(page, { event: "review", ...review(), frames: [{ id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 }] });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "Yes" }).click();
+  const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "snapshot.get").length);
+  await expect.poll(asked).toBe(1);
+
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: true }));
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: false }));
+  await expect.poll(asked).toBe(2);
 });
 
 test("the history sheet says when it has not loaded, and breaks its line between prints", async ({ page }) => {
@@ -545,6 +593,38 @@ test("sounds held back by the autoplay policy are dropped, not played together l
   await expect.poll(() => page.evaluate(() => (window as any).__tones)).toBe(1);
 });
 
+test("a sound file asked for by a plugin that is only a worker is fetched and played", async ({ page }) => {
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__played = [];
+    win.Audio = class {
+      constructor(public src: string) {}
+      play() {
+        win.__played.push(this.src);
+        return Promise.resolve();
+      }
+    };
+  });
+  const plugin = {
+    id: "chimes",
+    manifest: {
+      id: "chimes", name: "Chimes", version: "1.0.0", description: "", author: "", homepage: "", permissions: ["sound"],
+      reasons: {}, surfaces: [], platforms: [], urls: [], secrets: {}, provides: {}, consumes: [], oauth: {}, events: [], tick_s: 0,
+    },
+    files: ["worker.js", "ding.mp3"], digests: {}, source: { kind: "zip" }, granted: ["sound"], config: {}, secrets_set: [],
+    verified: false, enabled: true, installed: 0, failure: null,
+  };
+  const state = engine({ plugins: [plugin], plugin_assets: { mp3: "audio/mpeg" }, plugin_event_permissions: {} });
+  await dashboard(page, { engine: state });
+  await emit(page, { event: "state", ...state });
+  const asked = await sent(page, "plugin.code");
+  expect(asked.id).toBe("chimes");
+
+  await emit(page, { event: "plugin_code", id: "chimes", sources: { "worker.js": "" }, assets: { "ding.mp3": "AAAA" }, req_id: asked.req_id });
+  await emit(page, { event: "plugin_effect", id: "chimes", effect: { kind: "sound", asset: "ding.mp3" } });
+  expect(await page.evaluate(() => (window as any).__played)).toEqual([expect.stringMatching(/^blob:/)]);
+});
+
 test("a camera floating in picture in picture keeps playing behind a dialog and in a hidden tab", async ({ page }) => {
   let starts = 0;
   await page.route(/\/hls\/c1\//, () => void starts++);
@@ -830,6 +910,17 @@ test("closing settings part way through a theme puts the saved theme back", asyn
   await expect(page.locator("html")).toHaveAttribute("data-glass", "");
 });
 
+test("a theme saved while the hub is away stays in the editor with what was typed", async ({ page }) => {
+  await dashboard(page, { dialog: "settings", settingsTab: "appearance" });
+  await page.getByRole("button", { name: "+ New" }).click();
+  await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
+  await page.evaluate(() => (window as any).__pg.setState({ link: { send: () => false, close() {} } }));
+  await page.getByRole("button", { name: "Save theme" }).click();
+
+  await expect(page.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Theme name" })).toHaveValue("Workshop");
+});
+
 test("a theme started from dark keeps dark text on its accent", async ({ page }) => {
   await dashboard(page);
   const themed = { ...engine().settings, theme: "mine", themes: [{ id: "mine", name: "Mine", base: "dark", colors: {} }] };
@@ -986,6 +1077,35 @@ test("a report attachment is picked from a button, and the picker is left empty 
   await expect(page.locator('input[type="file"]')).toHaveJSProperty("value", "");
 });
 
+test("the setup and introduction progress bars are named, and the file picker is not an unnamed tab stop", async ({ page }) => {
+  await dashboard(page, { engine: engine({ cameras: [], monitors: [] }) });
+  await expect(page.getByRole("progressbar", { name: "Setup progress" })).toBeVisible();
+
+  await page.evaluate(() => (window as any).__pg.setState({ dialog: "intro" }));
+  await expect(page.getByRole("progressbar", { name: "Introduction progress" })).toBeVisible();
+
+  await page.evaluate(() => (window as any).__pg.setState({ dialog: "prints" }));
+  await expect(page.getByRole("button", { name: "browse" })).toBeVisible();
+  await expect(page.locator("input[type=file]")).toBeHidden();
+});
+
+test("the glass sliders read out percentages, and two review frames from one minute are told apart", async ({ page }) => {
+  const settings = { ...engine().settings, glass: { opacity: 0.5, tone: 0.25 } };
+  await dashboard(page, { engine: engine({ settings, reviews: [review({ frames: 2 })] }), reviewId: "r1" });
+  await expect(page.getByRole("slider", { name: "Opacity", includeHidden: true }).first()).toHaveAttribute("aria-valuetext", "50%");
+  await expect(page.getByRole("slider", { name: "Tone", includeHidden: true }).first()).toHaveAttribute("aria-valuetext", "25%");
+
+  await emit(page, {
+    event: "review", ...review({ frames: 2 }),
+    frames: [{ id: "s1", ts: 60, score: 0.1, kind: "spaced", size: 1 }, { id: "s2", ts: 70, score: 0.1, kind: "spaced", size: 1 }],
+  });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "Yes" }).click();
+  await expect(sheet.getByRole("button", { name: /^Frame 1 of 2 at .*, marked Good/ })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: /^Frame 2 of 2 at .*, marked Good/ })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: /^Don't send frame 2 of 2 at / })).toBeVisible();
+});
+
 test("a slider is named by its label and reads its formatted value", async ({ page }) => {
   await dashboard(page, { detailId: "m1" });
   const threshold = page.getByRole("slider", { name: "Alert threshold", exact: true });
@@ -1006,6 +1126,17 @@ test("an alerting tile opens from its banner, and an offline camera shows no inf
   const banner = (await page.getByText("DEFECT DETECTED").boundingBox())!;
   await page.mouse.click(banner.x + banner.width / 2, banner.y + banner.height / 2);
   await expect(page.getByRole("dialog", { name: "Prusa" })).toBeVisible();
+});
+
+test("an offline camera shows no frame rate in the camera list and no risk in the history sheet", async ({ page }) => {
+  const offline = engine({ cameras: [camera({ online: false })] });
+  await dashboard(page, { engine: offline, history: { m1: [{ ts: 1, score: 0.9 }] } });
+  const card = page.getByRole("button", { name: /Edit camera Workshop/ });
+  await expect(card).not.toContainText("5.0");
+  await expect(card.getByText("none")).toHaveCount(2);
+
+  await page.evaluate(() => (window as any).__pg.getState().openStats("m1"));
+  await expect(page.getByRole("dialog", { name: "Prusa · history" }).getByRole("img", { name: "risk unknown" })).toBeVisible();
 });
 
 test("the saved chip shows only on the form that saved", async ({ page }) => {
@@ -1067,6 +1198,27 @@ test("a printer test result goes when the form it tested is edited, and a traili
   await page.getByRole("textbox", { name: "Address" }).fill("http://mk3");
   await expect(page.getByText("ok, idle")).toBeHidden();
   await expect(page.getByRole("textbox", { name: "Address" })).toHaveAttribute("autocapitalize", "none");
+});
+
+test("a connection or alert test that was never sent leaves its button free", async ({ page }) => {
+  const schema = { properties: { url: { title: "Address" } } };
+  const printer = { id: "p1", name: "MK4", provider: "octoprint", config: { url: "http://mk4" }, online: true, device_state: null };
+  const integrations = [{ id: "octoprint", label: "OctoPrint", docs_url: "", formats: [], heater_control: true, schema }];
+  await dashboard(page, { engine: engine({ printers: [printer], integrations }), dialog: "printers" });
+  await page.evaluate(() => (window as any).__pg.setState({ link: { send: () => false, close() {} } }));
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("button", { name: "Test connection" }).click();
+
+  await expect(page.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Test connection" })).toBeEnabled();
+  expect(await page.evaluate(() => (window as any).__pg.getState().testing)).toBeNull();
+  expect(
+    await page.evaluate(() => {
+      const store = (window as any).__pg.getState();
+      store.testNotifier("ntfy", {});
+      return (window as any).__pg.getState().testingNotifier;
+    }),
+  ).toBeNull();
 });
 
 test("a device scan that was never sent does not read as scanning, or as finished", async ({ page }) => {
@@ -1137,6 +1289,42 @@ test("a preset temperature can be cleared and retyped, and pause is off for a pa
   await nozzle.blur();
   await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
   expect((await sent(page, "settings.update")).patch.preheat).toEqual([{ name: "PLA", nozzle: 210, bed: 60 }]);
+});
+
+test("pause, resume and cancel are each enabled only when the printer's state allows them", async ({ page }) => {
+  const heater = { actual: 21, target: 0 };
+  const printer = (status: string) => ({
+    id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
+    device_state: { status, progress: 40, job: "benchy", remaining_s: 60, nozzle: heater, bed: heater },
+  });
+  const expected: Record<string, boolean[]> = { idle: [true, false, false], printing: [true, false, true], paused: [false, true, true] };
+  for (const [status, [pause, resume, cancel]] of Object.entries(expected)) {
+    await dashboard(page, { engine: engine({ printers: [printer(status)], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
+    const panel = page.getByRole("dialog", { name: "Prusa" });
+    await expect(panel.getByRole("button", { name: "pause" })).toBeEnabled({ enabled: pause });
+    await expect(panel.getByRole("button", { name: "resume" })).toBeEnabled({ enabled: resume });
+    await expect(panel.getByRole("button", { name: "cancel" })).toBeEnabled({ enabled: cancel });
+  }
+});
+
+test("a heater target typed or stored above the limit is never sent as it is", async ({ page }) => {
+  const heater = { actual: 21, target: 0 };
+  const printer = {
+    id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
+    device_state: { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: heater, bed: heater },
+  };
+  const settings = { ...engine().settings, preheat: [{ name: "PLA", nozzle: 400, bed: 200 }] };
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })], settings }), detailId: "m1" });
+  const panel = page.getByRole("dialog", { name: "Prusa" });
+  await panel.getByRole("button", { name: /^PLA/ }).click();
+  expect(await sent(page, "printer.heat")).toMatchObject({ nozzle: 350, bed: 150 });
+
+  await panel.getByRole("button", { name: "Edit" }).click();
+  const nozzle = panel.getByRole("spinbutton", { name: "PLA nozzle target" });
+  await nozzle.fill("999");
+  await nozzle.blur();
+  await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
+  expect((await sent(page, "settings.update")).patch.preheat).toEqual([{ name: "PLA", nozzle: 350, bed: 150 }]);
 });
 
 test("the header wraps instead of scrolling the page when a chip is added at its tightest widths", async ({ page }) => {

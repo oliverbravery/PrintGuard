@@ -249,7 +249,7 @@ async function openReview(page: Page): Promise<void> {
     { review: REVIEW, frames: REVIEW_FRAMES, pictures: FRAMES },
   );
   await page.getByRole("button", { name: "No, it failed" }).click();
-  await page.getByRole("button", { name: /^Frame at .* marked Good/ }).last().click();
+  await page.getByRole("button", { name: /^Frame \d+ of \d+ at .* marked Good/ }).last().click();
 }
 
 const SCENES: Scene[] = [

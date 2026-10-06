@@ -9,6 +9,8 @@ const SLIDERS: { key: keyof Glass; label: string; low: string; high: string }[] 
   { key: "tone", label: "Tone", low: "Black", high: "White" },
 ];
 
+const percent = (value: number) => `${Math.round(value * 100)}%`;
+
 export function GlassSliders() {
   const stored = useStore((s) => s.engine?.settings.glass);
   const glass = { ...GLASS_DEFAULT, ...stored };
@@ -26,7 +28,7 @@ export function GlassSliders() {
         <div key={slider.key}>
           <div className="flex items-baseline justify-between">
             <span className="label">{slider.label}</span>
-            <span className="mono text-[0.7rem] text-text-2">{Math.round(glass[slider.key] * 100)}%</span>
+            <span className="mono text-[0.7rem] text-text-2">{percent(glass[slider.key])}</span>
           </div>
           <input
             type="range"
@@ -36,6 +38,7 @@ export function GlassSliders() {
             step={0.01}
             value={glass[slider.key]}
             aria-label={slider.label}
+            aria-valuetext={percent(glass[slider.key])}
             onChange={(e) => slide(slider.key, Number(e.target.value))}
           />
           <div className="flex justify-between text-[0.65rem] text-text-2">

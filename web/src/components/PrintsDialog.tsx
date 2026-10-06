@@ -95,7 +95,7 @@ function DropZone() {
         type="file"
         accept={ACCEPT}
         multiple
-        className="sr-only"
+        hidden
         onChange={(e) => {
           take(e.target.files);
           e.target.value = "";
