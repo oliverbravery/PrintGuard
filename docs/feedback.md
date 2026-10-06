@@ -77,9 +77,10 @@ comes from, as any server does. It uses it only for the per-network limit below.
 |---|---|---|
 | A keyed hash of your IPv4 address, or of the /48 of your IPv6 address, with a count of today's frames and new hubs | Until 03:00 UTC the next day | The per-network daily limit |
 | Your hub ID with a count of today's frames, and the ID and size of each frame sent today | Until 03:00 UTC the next day | The per-hub daily limit, and counting a frame sent twice once |
+| Your hub ID, or the hash above, with a count of this minute's requests | A minute | Turning away a hub or network that sends too fast |
 
 The address itself is never stored, and the hash can't be turned back into one without the
-Worker's secret key. The Worker's request logs are switched off.
+Worker's secret key. The Worker keeps no logs or traces.
 
 ## Limits
 
@@ -96,13 +97,15 @@ says when there will be room.
 | Everyone | 1,000 frames a day | "PrintGuard has had all the frames it can take today." |
 | The inbox | 5 GB | "The inbox for training frames is full." The Worker counts the bucket again before saying so, at most once an hour, so pulling frames out reopens it within the hour |
 | One frame | 150 KB | Nothing. The hub shrinks the frame once and skips it if it's still too big |
+| Speed | 100 frames a minute for one hub, 10 new hubs a minute for one network | Nothing. The hub tries again a minute later |
 
 Daily limits reset at midnight UTC, and the review sheet shows that time in your own time zone.
 A print that is waiting has **Try now** and **Cancel sending** on its sheet. A frame the hub
 skips isn't counted as sent. A frame the inbox already holds is answered as sent without being
 written again, so it doesn't count twice and the copy keeps the labels of the first send. A print
-none of whose frames could be sent goes back to waiting for a review, and the Worker refuses a
-frame whose printer model holds a control character.
+none of whose frames could be sent goes back to waiting for a review. The hub drops control
+characters from the printer model you type, and the Worker refuses a frame with one in its labels
+or with a label written as an RFC 2047 encoded word, such as `=?utf-8?q?x?=`.
 
 The limit for everyone is shared, so a handful of busy networks can use it up for the day.
 Your frames wait on your hub until it resets.
