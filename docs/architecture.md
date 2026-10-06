@@ -199,11 +199,12 @@ Events, engine to UI:
 | Field | Holds |
 |---|---|
 | `host`, `version`, `update` | The deployment, the running version and the release status, which is `null` until a check has answered |
-| `cameras`, `printers`, `prints`, `tokens`, `plugins` | The public record of everything in each registry. A token's is its name, scope and hint, never its hash, and a plugin's leaves out its code and the values of its credentials |
+| `cameras`, `printers`, `prints`, `tokens`, `plugins` | The public record of everything in each registry. A token's is its name, scope and hint, never its hash, and a plugin's leaves out its code and the values of its credentials. A printer's `config` goes without its secret fields, which its `secrets_set` names where one is stored, and a camera's `source` without a Bambu access code. Every address in either is scrubbed of its login |
 | `monitors` | Each monitor's settings with `watching`, its latest `result` and, once it has alerted, its `alert` |
 | `reviews`, `feedback_hub` | A count of the frames kept from each print with its review status, and the public half of the hub's training inbox token |
 | `startup_warnings` | Strings for what start found wrong: a GPU skipped, a setting reset, a record dropped with its reason, one a past version accepted that this one refuses. They are kept until the hub restarts, since nobody is connected to hear the `warning` event, and the dashboard toasts each once per page load |
-| `settings` | Notifier configs, MQTT, theme, custom themes, glass, layout, inference runtime, catalogue URL, grace period, preheat presets, and whether to check for updates and ask for print reviews |
+| `settings` | Notifier configs without their secret fields, MQTT without its password, theme, custom themes, glass, layout, inference runtime, catalogue URL, grace period, preheat presets, and whether to check for updates and ask for print reviews |
+| `secrets_set` | The names of the stored secret fields of each notifier and of MQTT, as `{"notifiers": {provider: [...]}, "mqtt": [...]}`. A form reads it to say a field is saved |
 | `stats` | `inference_device`, `infer_ms` and `capacity_fps` from the scheduler |
 | `integrations`, `notifiers` | Adapter metadata the config forms are drawn from |
 | `plugin_permissions`, `plugin_events`, `plugin_event_permissions`, `plugin_oauth_callback`, `plugin_platforms`, `plugin_assets` | The plugin policy both sandboxes apply |
@@ -224,7 +225,22 @@ to be remuxed.
 The message of every `warning` and `error` loses each stored credential in `emit()`, before it
 is logged or broadcast, because it often quotes an exception a library raised. A value shorter
 than 8 characters is only removed where it stands alone, so a short login does not break up
-ordinary words.
+ordinary words. The `error` of a `printer_test` or `notify_test` is scrubbed the same way.
+
+No stored secret is in the snapshot, so no transport is sent one.
+[`engine/credentials.py`](../printguard/engine/credentials.py) makes each config public for
+`state_event()` and puts the stored secrets back when an edit arrives without them:
+
+| `printer.update`, `settings.update` receive | The engine |
+|---|---|
+| A secret field left out or blank | Keeps the stored value |
+| A secret field as `null` | Clears it |
+| An address as the snapshot shows it | Keeps the stored address with its login |
+| A changed `base_url`, `host`, `port` or `url` while a secret is being kept | Refuses with `send <field> again, since a stored secret is only kept for the address it was saved with` |
+| A printer with a different `provider` | Keeps no secret |
+
+`notify.test` fills a blank secret from the stored notifier under the same rules, and
+`printer.test` does once it is given the `id` of a registered printer of the same provider.
 
 ## Resources and monitors
 
@@ -601,8 +617,8 @@ engine the UI talks to, so they add no logic of their own and cannot drift from 
   route tagged with the scope it requires. The token is checked before any of the request body
   is read. Every write goes through `engine.request()`, and the history route does too. Other
   reads call the engine directly: the state, list and get routes use `state_event()` through
-  `public_state()`, which strips printer, notifier, MQTT and camera-source credentials and
-  leaves out each plugin's store and the API tokens, and the alert snapshot, camera frame,
+  `public_state()`, which leaves out each plugin's store and the API tokens, and the alert
+  snapshot, camera frame,
   classify and events routes use `monitor_snapshot()`, `snapshot()`, `classify()` and
   `recent_events()`. `recent_events()` is the newest 100 alert, warning and error events.
   `device` events are left out, since one printing printer sends enough of them to push an
@@ -787,6 +803,7 @@ printguard/
     feedback.py      uploads a reviewed print's frames to the training inbox
     watchdog.py      defect response: streaks, printer actions, notifications, health
     tokens.py        scoped API tokens
+    credentials.py   stored secrets: what the snapshot shows of them and how an edit keeps them
     updates.py       GitHub release check and changelog history
     reports.py       anonymous bug report and downloadable diagnostics bundle
     logs.py          the one logging setup and the in-memory tail

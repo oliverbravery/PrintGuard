@@ -179,7 +179,7 @@ request, this API included, until that name is in
 | `POST` | `/printers` | Register a printer. Refused with the field named if one the service requires is blank |
 | `PATCH` | `/printers/{id}` | Update a printer. `config` replaces the stored one, [keeping the secrets a read left out](#the-resource-model) |
 | `DELETE` | `/printers/{id}` | Remove a printer |
-| `POST` | `/printers/test` | `{"provider", "config"}`, reachability only. The config is used as sent, so a stored secret is not filled in |
+| `POST` | `/printers/test` | `{"provider", "config"}`, reachability only. The config is used as sent, so a stored secret is not filled in. Send the key or password with it |
 | `POST` | `/cameras` | Add a camera. Refused if its device or stream is already registered, however the address is written, or if the stream delivers no frame. [Cameras](cameras.md#stream-urls) has the errors |
 | `PATCH` | `/cameras/{id}` | Update a camera |
 | `DELETE` | `/cameras/{id}` | Remove a camera. Refused for one its printer or the deployment manages |
@@ -189,7 +189,7 @@ request, this API included, until that name is in
 | `PATCH` | `/prints/{id}` | Rename a print file or change the printers it is tagged for |
 | `DELETE` | `/prints/{id}` | Remove a print file |
 | `PATCH` | `/settings` | Update `notifiers`, `mqtt`, `inference_runtime` or `preheat`. Each one you send replaces the stored one, [keeping the secrets a read left out](#the-resource-model). No other setting can be changed here |
-| `POST` | `/notifiers/test` | `{"provider", "config"}`, sends a test alert. The config is used as sent, so a stored secret is not filled in |
+| `POST` | `/notifiers/test` | `{"provider", "config"}`, sends a test alert. A secret left out or blank is filled in from the saved channel, [for the address it was saved with](#the-resource-model) |
 
 </details>
 
@@ -335,7 +335,7 @@ Any other payload on a command topic is ignored, as is one for a monitor that do
 command the engine refuses shows as an error in the dashboard.
 
 Over REST the bridge is `mqtt` in `PATCH /settings`, an object of `enabled`, `host`, `port`,
-`username`, `password`, `tls`, `base_topic` and `discovery_prefix`.
+`username`, `password`, `tls`, `base_topic` and `discovery_prefix`. A read leaves `password` out.
 
 > [!WARNING]
 > Anyone who can publish to the broker can pause and cancel your prints, so treat broker access
@@ -356,26 +356,29 @@ are changed. Its `meta` holds the `slicer`, `time_s`, `filament_g`, `filament_mm
 `printer_model` and the first layer `nozzle` and `bed` temperatures read from the file, each
 `null` where the file did not say, and `thumbnail` is the media type of its preview or `null`.
 
-Credentials are redacted from every REST and MCP response. Only the dashboard's own WebSocket,
-behind your proxy, receives them.
+No stored credential leaves the hub. The dashboard, the REST API and the MCP server all read the
+engine's one snapshot, which holds none of them.
 
 | In a response | What you get |
 |---|---|
 | A printer or notifier config field its adapter marks secret, such as an API key, access code, bot token, ntfy topic URL or Discord webhook | Left out |
-| The MQTT password | An empty string |
+| The MQTT password | Left out |
+| `secrets_set` on a printer | The names of its secret fields that hold a saved value, such as `["api_key"]` |
+| `secrets_set` in `/state` | The same names for each alert channel and for the broker, as `{"notifiers": {"pushover": ["api_token", "user_key"]}, "mqtt": ["password"]}` |
 | An address in a config or a camera source, and the plugin catalogue URL | Without its `user:pass@`, which may hold a `/`, `?` or `#` (everything up to the last `@` counts as login, so an address with a later `@` is redacted more than it needs to be), with every query value replaced by `[redacted]`, as is any part of the path that is a UUID or 16 or more letters and digits, which is where UniFi Protect puts a stream's key |
 | The access code in a Bambu printer camera's source | Left out |
 | A notifier this version doesn't know | Left out |
 | What a plugin has stored, and the list of API tokens | Left out of `/state`, whatever the token's scope |
 
-A `PATCH` to a printer or to `/settings` takes a config back as you read it:
+A `PATCH` to a printer or to `/settings` takes a config back as you read it. The dashboard's
+forms save under the same rules:
 
 | You send | The hub |
 |---|---|
 | A secret field left out or blank | Keeps the stored value |
 | An address unchanged from how you read it | Keeps the stored address, credentials included |
 | A secret field as `null` | Clears it, which is how to remove the MQTT password |
-| A changed `base_url`, `host`, `port` or `url` without the secrets | Answers `400`, so a stored key only goes to the address it was saved with |
+| A changed `base_url`, `host`, `port` or `url` without the secrets | Answers `400` with `send api_key again, since a stored secret is only kept for the address it was saved with`, naming the fields to send. The ntfy topic URL and the Discord webhook are themselves the secret, so a new one replaces the old |
 | A printer with a different `provider` | Keeps no secret |
 | An address that isn't a valid URL | Answers `400`, since it could not be redacted afterwards |
 

@@ -195,7 +195,8 @@ Bambu and Elegoo tests do.
      close the one it is polled over.
    - set `slow_action_s` if the service answers an action only once the printer has carried
      it out. The engine gives a command to it that much longer, on every transport.
-   - describe the config form as a JSON Schema, where `secret: true` masks fields,
+   - describe the config form as a JSON Schema, where `secret: true` marks a credential, which
+     the engine keeps out of the state snapshot and the form shows as saved,
      `placeholder` hints at the expected value, `default` preselects an optional
      `enum`, so the form never offers an empty choice the adapter quietly fills in, and
      `required` names the fields the service can't be reached without. `Adapter.require()`

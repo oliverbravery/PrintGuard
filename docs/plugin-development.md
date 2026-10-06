@@ -515,7 +515,8 @@ permission, and a command in no permission is refused.
 | `tokens` | `token.create`, `token.remove` |
 | `alert:send` | `notify.send` |
 
-[Architecture](architecture.md#the-protocol) lists the protocol these belong to.
+[Architecture](architecture.md#the-protocol) lists the protocol these belong to, and how
+`printer.update`, `settings.update` and the two tests treat a stored secret your plugin can't read.
 
 Camera stills and risk history are asked for with a command and answered on an event.
 
