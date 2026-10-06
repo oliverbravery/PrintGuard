@@ -74,12 +74,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   a worker call saves only the keys it changed.
 - `/api/v1/state` and the MCP `get_state` tool no longer return what a plugin has stored or list the
   API tokens. `startup_warnings` lists what the hub found wrong or worked around at start.
-- The API and MCP server show the query values of a camera or printer address as `[redacted]`, so
-  `?action=stream` reads back as `?action=[redacted]`. A path segment of 16 or more letters and
-  digits, or a UUID, is redacted too.
+- The dashboard, API and MCP server show the query values of a camera or printer address as
+  `[redacted]`, so `?action=stream` reads back as `?action=[redacted]`. A path segment of 16 or
+  more letters and digits, or a UUID, is redacted too.
 - A bug report takes 10 MB of attachments in total, down from 20 MB.
 - A printer can't be registered with a required field left blank, and an alert channel can't be
   saved or tested with one.
+- Changing a printer's or the MQTT broker's address needs its key or password typed again.
 - A printer or notifier address with a stray square bracket is refused when you save it. A printer
   saved with a `[` in its password needs it written as `%5B`.
 - An MQTT port must be a whole number from 1 to 65535. Text such as "1883", decimals and anything
@@ -432,6 +433,9 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   2.5.0 carried.
 - A new API token's secret is only sent to the dashboard tab that created it, where every open
   tab used to receive it.
+- Saved keys, passwords and topic addresses are no longer sent to the dashboard, so they can't be
+  read back from it. The field reads "Saved. Leave blank to keep it". Typing replaces the saved
+  one and **Clear** removes it.
 - A plugin that gates the hub and then fails refuses requests, the dashboard included, where it used
   to leave the hub open. A flood of requests can no longer switch a healthy gate off. Start the hub
   with `PRINTGUARD_PLUGINS=off` to remove a failed one.
@@ -439,7 +443,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   the log or bug reports, including a password that contains `/`, `?` or `#`. An address with an `@`
   later in its path or query is redacted from the start of the address to the last `@`.
 - Bug reports scrub credentials containing quotes, backslashes or non-ASCII letters.
-- A private plugin catalogue's token is scrubbed from the API, bug reports and the log.
+- A private plugin catalogue's token is scrubbed from the dashboard, the API, bug reports and the
+  log.
 - A web page open in a browser on the same computer as the desktop app can no longer read your
   camera addresses and passwords, or run a command, through the video server's control port.
 - A dashboard plugin without the network permission can no longer send what it reads to another
