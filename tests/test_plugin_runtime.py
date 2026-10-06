@@ -674,3 +674,32 @@ async def test_a_worker_that_changes_its_store_still_has_it_saved(runtime: WasmP
         assert engine.plugins.get("slow").config == {"changed": True}
     finally:
         await engine.stop()
+
+
+async def test_a_second_answer_to_one_question_is_ignored_but_a_made_up_one_is_not(runtime: WasmPluginRuntime) -> None:
+    """Every open dashboard tab answers a call plugin.js serves, so all but the first arrive late."""
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    events: list[dict] = []
+    engine.add_sink(events.append)
+    try:
+        consumer = {
+            "id": "np-widget", "version": "1.0.0",
+            "permissions": ["link:consume"], "reasons": {"link:consume": "to draw it"},
+            "consumes": ["spotify:now-playing"],
+        }
+        await install_and_accept(engine, SERVER_MANIFEST, "plugin.on('state', () => {});")
+        await install_and_accept(engine, consumer, "plugin.on('answer', () => {});")
+        await engine.handle({"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "now-playing", "tag": "np"})
+        asked = next(e for e in events if e.get("event") == "call")
+        answer = {"cmd": "plugin.answer", "id": "spotify", "call_id": asked["call_id"], "channel": "now-playing", "body": {"track": "Blue"}}
+        await engine.handle({**answer, "req_id": 1})
+        await engine.handle({**answer, "req_id": 2})
+        await engine.handle({**answer, "call_id": "made-up", "req_id": 3})
+        await engine.handle({**answer, "id": "np-widget", "req_id": 4})
+    finally:
+        await engine.stop()
+
+    assert len([e for e in events if e.get("event") == "answer"]) == 1
+    errors = {e["req_id"] for e in events if e.get("event") == "error" and e.get("req_id") in (1, 2, 3, 4)}
+    assert errors == {3, 4}, "a late duplicate was reported, or a made-up answer was not"
