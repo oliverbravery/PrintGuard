@@ -5,6 +5,20 @@ import type { Permission, PluginManifest, PluginRecord } from "../types";
 import { phrase, reachesLocal } from "../urls";
 import { Dialog } from "./Dialog";
 
+const address = (url: string) => {
+  const { host, pathname } = new URL(url);
+  return `${host}${pathname}`;
+};
+
+export function SignInAddresses({ oauth }: { oauth: PluginManifest["oauth"] }) {
+  return (
+    <ul className="text-text-2">
+      <li>Sign in at {address(oauth.authorize_url)}</li>
+      <li>Tokens from {address(oauth.token_url)}</li>
+    </ul>
+  );
+}
+
 export function PermissionList({ plugin, permissions }: { plugin: { manifest: PluginManifest }; permissions: Permission[] }) {
   const asked = permissions.filter((p) => plugin.manifest.permissions.includes(p.id));
   if (asked.length === 0) return <span className="text-[0.7rem] text-text-2">Asks for nothing.</span>;
@@ -31,7 +45,12 @@ export function PermissionList({ plugin, permissions }: { plugin: { manifest: Pl
                     ))}
                 </ul>
               )}
-              {permission.id === "oauth" && <span className="block text-text-2">{plugin.manifest.oauth.label}</span>}
+              {permission.id === "oauth" && (
+                <>
+                  <span className="block text-text-2">{plugin.manifest.oauth.label}</span>
+                  <SignInAddresses oauth={plugin.manifest.oauth} />
+                </>
+              )}
               {permission.id === "link:provide" && (
                 <ul className="text-text-2">
                   {Object.entries(plugin.manifest.provides).map(([channel, what]) => (

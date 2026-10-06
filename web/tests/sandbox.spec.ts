@@ -383,6 +383,39 @@ test("a rejected Spotify token asks to reconnect rather than for something to pl
   await expect(panel.getByText("Reconnect Spotify in the Plugins tab in Settings.")).toBeVisible();
 });
 
+test("the consent dialog names where a plugin signs in and where it gets its tokens", async ({ page }) => {
+  await dashboardWithPlugin(page, PIP);
+  await page.evaluate(() => {
+    const win = window as any;
+    const engine = win.__pg.getState().engine;
+    const oauth = {
+      label: "Spotify",
+      authorize_url: "https://login.elsewhere.test/authorize",
+      token_url: "https://tokens.elsewhere.test/api/token",
+      register_url: "",
+      scopes: [],
+    };
+    win.__pg.setState({
+      engine: {
+        ...engine,
+        plugin_permissions: [...engine.plugin_permissions, { id: "oauth", label: "Sign in", description: "" }],
+        plugins: engine.plugins.map((plugin: any) => ({
+          ...plugin,
+          enabled: false,
+          granted: [],
+          manifest: { ...plugin.manifest, permissions: ["oauth"], oauth },
+        })),
+      },
+    });
+    win.__pg.getState().openSettings("plugins");
+  });
+  await page.getByRole("switch", { name: "Enable Picture in picture" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Enable Picture in picture" });
+  await expect(dialog.getByText("Sign in at login.elsewhere.test/authorize")).toBeVisible();
+  await expect(dialog.getByText("Tokens from tokens.elsewhere.test/api/token")).toBeVisible();
+});
+
 const LEAVES = {
   "plugin.js": (to: string) =>
     `plugin.render((ctx) => { if (ctx.state.monitors[0].alert) location.href = "${to}?state=" + encodeURIComponent(JSON.stringify(ctx.state)); return { type: "text", value: "drawn" }; });`,
