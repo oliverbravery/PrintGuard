@@ -116,13 +116,13 @@ out.
 | `notify` | Raise a message in the dashboard |
 | `alert:send` | Send through your own ntfy, Pushover, Telegram or Discord |
 | `net` | Reach the addresses its manifest lists |
-| `net:local` | Reach addresses on this machine and the network around it |
+| `net:local` | Reach addresses on this machine and the network around it, which covers private addresses, `localhost` and names ending `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost` |
 | `monitor:manage` | Add monitors and delete them |
 | `camera:control` | Retune any camera's brightness, crop, rotation and frame rate |
 | `camera:manage` | Register cameras and delete them, and scan for ones not yet registered |
 | `camera:frames` | Take a still of any camera and read the picture itself |
 | `history:read` | Read a monitor's score history and past alerts |
-| `printer:manage` | Connect, edit, test and delete printers, setting their credentials, and read which integrations exist |
+| `printer:manage` | Connect, edit, test and delete printers, setting their credentials, refresh their webcams, and read which integrations exist |
 | `settings` | Change alert channels, theme and the rest of Settings, send a test alert, and read which notifiers exist |
 | `tokens` | Mint and revoke API tokens |
 | `oauth` | Sign you in to a service and use the result |
@@ -130,7 +130,7 @@ out.
 | `link:consume` | Ask the plugins and channels it names, and hear them |
 | `background` | Put a picture behind the dashboard and make the panels see-through |
 | `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers |
-| `gate` | See and refuse every other request to the hub |
+| `gate` | See and refuse every other request to the hub. A yes is reused for 10 seconds for the same cookie, authorisation header, method, path and query |
 
 Every permission a manifest asks for carries a line saying why, in the plugin author's own
 words, and one without a reason will not install. That line sits beside PrintGuard's own
@@ -158,10 +158,10 @@ A plugin has up to three files, and each runs in a sandbox.
 |---|---|
 | `plugin.js` | A hidden iframe in the dashboard, with an opaque origin and `default-src 'none'` |
 | `panel.html` | A visible iframe with the same origin rules, where its own markup, styles and scripts are allowed |
+| `worker.js` | [QuickJS](https://github.com/quickjs-ng/quickjs) compiled to WebAssembly on the hub, under wasmtime |
 
 The dashboard lets a frame load only from the hub and removes one that loads anything a second
 time, so a plugin that sends its frame elsewhere is stopped with "sandbox navigated away".
-| `worker.js` | [QuickJS](https://github.com/quickjs-ng/quickjs) compiled to WebAssembly on the hub, under wasmtime |
 
 | Attack | What stops it |
 |---|---|

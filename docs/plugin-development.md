@@ -134,8 +134,9 @@ A plugin needs at least one of the three source files.
 | `events` | The events that wake it |
 | `tick_s` | How often its worker runs anyway, 5 to 86400 seconds. Under 5 switches the timer off |
 
-A permission without a reason, `urls` without `net`, `oauth` without the `oauth` permission, or
-`provides` and `consumes` without their link permission each refuse the install.
+A permission without a reason, `urls` without `net`, a [local address](#addresses) without
+`net:local`, `oauth` without the `oauth` permission, or `provides` and `consumes` without their
+link permission each refuse the install.
 
 ### Reasons
 
@@ -217,10 +218,12 @@ stands for any run of characters, `/` and the query string included.
 
 A URL with a `.` or `..` segment in its path matches no pattern, percent-encoded or not.
 
-A pattern on this machine or the network around it needs `net:local` as well as `net`. A
-wildcard host counts, since it covers both. So does an address in any spelling a browser takes,
-such as `127.1` or `2130706433`. PrintGuard resolves the name and checks the address
-it resolves to, so a public name pointing somewhere private is caught.
+A pattern on this machine or the network around it needs `net:local` as well as `net`. That is
+any address that is not a public one, `localhost`, or a name ending `.local`, `.lan`,
+`.home`, `.home.arpa`, `.internal` or `.localhost`. A wildcard host counts, since it covers
+both. So does an address in any spelling a browser takes, such as `127.1` or `2130706433`. When
+a request leaves, PrintGuard resolves the name and checks the address it resolves to, so a
+public name pointing somewhere private is caught.
 
 ## The three halves
 
@@ -808,6 +811,9 @@ uv run python plugins/pin.py
 Commit first, since a pin describes bytes already in history, and run it again after every
 change or the plugin stops verifying.
 
+An update that asks for more than the version someone accepted is switched off on their hub
+until they accept it again. [Updates](plugins.md#updates) lists what counts as more.
+
 An entry carries what the store shows and what a verified install has to match.
 
 ```json
@@ -827,7 +833,7 @@ An entry carries what the store shows and what a verified install has to match.
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/picture-in-picture",
-      "ref": "4ee94e695f798434a6524480f538abb20085676d",
+      "ref": "8130da16252383ed647ebd62356b06a0d1cca1bd",
       "digests": {
         "plugin.json": "c6675a27abbf6c09fdbfabaff7dd8283ae2124796cfadccc44cc26dee9887d39",
         "plugin.js": "9625952af0f6765e172104bea611cf27eb48fed6034cea4a154ca98ac6ccf233"
