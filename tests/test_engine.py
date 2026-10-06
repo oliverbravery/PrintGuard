@@ -3016,6 +3016,7 @@ async def test_plugin_installs_from_github_pinned_to_a_commit() -> None:
         f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/plugin.json": (200, MANIFEST),
         f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/plugin.js": (200, PLUGIN_JS),
         f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/worker.js": (404, ""),
+        f"https://raw.githubusercontent.com/someone/pack/{sha}/kit/panel.html": (404, ""),
     }
     async with running_engine(platform, camera_fps=[]) as (engine, _):
         await engine.handle(
