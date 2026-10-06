@@ -4254,3 +4254,26 @@ async def test_a_printer_that_cannot_be_read_is_logged_once_with_the_reason(monk
         "printer 'P' could not be read: connection refused"
     ]
 
+async def test_raising_a_cameras_detection_rate_brings_its_next_inference_forward() -> None:
+    platform = FakePlatform(infer_s=0.01)
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, events):
+        camera = engine.cameras.values()[0]
+        await engine.handle({"cmd": "camera.update", "id": camera.id, "patch": {"detect_fps": 0.1}})
+        await asyncio.sleep(0.4)
+        await engine.handle({"cmd": "camera.update", "id": camera.id, "patch": {"detect_fps": 30.0}})
+        inferred = camera.last_done
+        await asyncio.sleep(0.5)
+        assert camera.last_done > inferred, "the camera waited out the interval of the rate it was lowered to"
+
+
+async def test_a_camera_restart_during_a_runtime_switch_does_not_fail_the_switch() -> None:
+    platform = FakePlatform(infer_s=0.01)
+    platform.inference_blocked = True
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, _):
+        await asyncio.wait_for(platform.inference_started.wait(), timeout=1.0)
+        switch = asyncio.create_task(engine.request({"cmd": "settings.update", "patch": {"inference_runtime": "onnx"}}, timeout=2.0))
+        await asyncio.sleep(0.05)
+        await engine.restart_camera(engine.cameras.values()[0])
+        await switch
+        platform.inference_blocked = False
+    assert platform.inference_runtime == "onnx"

@@ -31,6 +31,11 @@ ResultSink = Callable[[Camera, Frame, dict[str, Any]], Awaitable[None]]
 ErrorSink = Callable[[str], None]
 
 
+def _interval(camera: Camera) -> float:
+    """Seconds between a camera's inferences at the rate it is allocated."""
+    return 1.0 / max(0.1, camera.target_fps or camera.effective_fps)
+
+
 class Scheduler:
     """Allocates inference slots across registered cameras."""
 
@@ -53,10 +58,13 @@ class Scheduler:
         self.infer_ms = 0.0
 
     async def reconfigure(self, configure: Callable[[], Awaitable[None]]) -> None:
-        """Drains active work and applies a new inference configuration."""
+        """Drains active work and applies a new inference configuration.
+
+        An inference cancelled while it drains, as a camera restart does, has
+        finished as far as the switch is concerned.
+        """
         async with self._dispatch_lock:
-            if self._jobs:
-                await asyncio.gather(*self._jobs)
+            await asyncio.gather(*self._jobs, return_exceptions=True)
             await configure()
             self.reset()
 
@@ -109,7 +117,9 @@ class Scheduler:
         pass that finds nothing due sleeps until the earliest idle camera's
         interval is up or any inference finishes, whichever comes first.
         Sleeping on the idle cameras alone would hold a fast camera that is
-        mid-inference to the pace of a slow one beside it.
+        mid-inference to the pace of a slow one beside it. A camera whose rate
+        was raised is due within its new interval, not the one it was
+        dispatched at.
 
         Returns:
             Seconds until another pass is worth making, which is always none.
@@ -119,12 +129,14 @@ class Scheduler:
             self.allocate()
             now = time.monotonic()
             idle = [c for c in self._registry.schedulable() if not c.inferring]
+            for camera in idle:
+                camera.next_due = min(camera.next_due, now + _interval(camera))
             due = [c for c in idle if now >= c.next_due]
             if due:
                 camera = min(due, key=lambda c: c.next_due)
                 await self._slots.acquire()
                 camera.inferring = True
-                camera.next_due = time.monotonic() + 1.0 / max(0.1, camera.target_fps or camera.effective_fps)
+                camera.next_due = time.monotonic() + _interval(camera)
                 task = asyncio.create_task(self._job(camera))
                 self._jobs.add(task)
                 task.add_done_callback(self._jobs.discard)
