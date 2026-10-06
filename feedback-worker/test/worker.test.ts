@@ -181,7 +181,10 @@ describe("the gate", () => {
 
   it("stops everyone at the global daily limit", async () => {
     const gate = env.GATE.getByName("global-limit");
-    for (let sent = 0; sent < UPLOADS_PER_DAY; sent += 1) expect(await gate.reserve(`hub-${sent}`, `network-${sent}`, `frame-${sent}`, 10, 0)).toEqual(NEW);
+    const taken = await Promise.all(
+      Array.from({ length: UPLOADS_PER_DAY }, (_, sent) => gate.reserve(`hub-${sent}`, `network-${sent}`, `frame-${sent}`, 10, 0)),
+    );
+    expect(taken).toEqual(taken.map(() => NEW));
     expect(await gate.reserve("late-hub", "late-network", "frame", 10, 0)).toMatchObject({ status: 429, code: "global_daily" });
   });
 
