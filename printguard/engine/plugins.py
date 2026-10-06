@@ -436,10 +436,11 @@ def same_sign_in(previous: dict[str, Any], current: dict[str, Any]) -> bool:
 def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     """Whether an update reaches further than the manifest that was accepted.
 
-    Permissions, addresses, the plugins it calls and where it signs in are what
-    the user agreed to, so a change to any of them is a fresh question. Anything
-    not written exactly as before counts as wider, since a narrower-looking
-    pattern can cover more.
+    Permissions, addresses, the plugins it calls, the channels it answers on,
+    where it signs in and the scopes it asks for there are what the user agreed
+    to, so a change to any of them is a fresh question. Anything not written
+    exactly as before counts as wider, since a narrower-looking pattern can
+    cover more.
 
     Args:
         previous: The manifest the grants were given against.
@@ -448,8 +449,10 @@ def widens(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     Returns:
         True when the new manifest asks for anything the old one did not.
     """
-    return not same_sign_in(previous, current) or any(
-        not set(current[field]) <= set(previous[field]) for field in ("permissions", "urls", "consumes")
+    return (
+        not same_sign_in(previous, current)
+        or not set(current["oauth"].get("scopes", [])) <= set(previous["oauth"].get("scopes", []))
+        or any(not set(current[field]) <= set(previous[field]) for field in ("permissions", "urls", "consumes", "provides"))
     )
 
 

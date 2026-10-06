@@ -429,3 +429,17 @@ async def test_a_background_that_is_not_a_picture_clears_it() -> None:
         assert await shown(picture) == picture
         for bad in ("data:image/svg+xml;base64,PHN2Zz4=", "data:text/html;base64,PGI+", "https://example.com/a.png", f"{picture}\"><script>", "undefined", None):
             assert await shown(bad) == ""
+
+
+def test_an_update_that_answers_on_a_new_channel_or_asks_for_a_new_scope_is_wider() -> None:
+    sign_in = {**SIGNS_IN["oauth"], "scopes": ["read"]}
+
+    def declared(**fields) -> dict:
+        asked = {"urls": SIGNS_IN["urls"], "oauth": sign_in, "provides": {"status": "what is playing"}, **fields}
+        return plugins.sanitise_manifest(manifest("net", "oauth", "link:provide", **asked))
+
+    accepted = declared()
+    assert not plugins.widens(accepted, declared())
+    assert not plugins.widens(accepted, declared(provides={}, oauth={**sign_in, "scopes": []}))
+    assert plugins.widens(accepted, declared(provides={"status": "what is playing", "queue": "what is next"}))
+    assert plugins.widens(accepted, declared(oauth={**sign_in, "scopes": ["read", "write"]}))

@@ -95,8 +95,9 @@ A repository install pins the commit it resolved to. **Update** re-resolves the 
 installed from, or the default branch if it had none, and re-checks the hashes.
 
 An update that asks for more stands the plugin down until you accept the wider list. More means
-a permission, an address, another plugin it calls or a different sign-in address. A different
-sign-in address also signs the plugin out.
+a permission, an address, another plugin it calls, a channel it answers other plugins on, a
+sign-in scope or a different sign-in address. A different sign-in address also signs the plugin
+out.
 
 | Installed over | Grants, stored data and credentials |
 |---|---|
