@@ -22,7 +22,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 ### Changed
 
 - The hub only answers to IP addresses, `localhost`, names with no dot, names ending `.local`,
-  `.lan`, `.home`, `.internal` or `.localhost`, and the addresses in `PRINTGUARD_ORIGINS`, which
+  `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost`, and the addresses in `PRINTGUARD_ORIGINS`, which
   stops a DNS rebinding page reaching it. If you open PrintGuard at any other name, such as a
   domain, a Tailscale `ts.net` name or `printguard.fritz.box`, add it to `PRINTGUARD_ORIGINS`
   with its `http://` or `https://` before updating. The API and MCP server are held to the same
@@ -79,6 +79,28 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - PrusaLink takes a **Username**, for a Raspberry Pi set up with one other than `maker`.
 - The consecutive detections slider goes up to 30, matching the API.
 - Empty values in the dashboard read "none".
+- Removing a camera, printer, monitor, print or API token that doesn't exist is an error, where it
+  used to answer as if it had worked. The REST API answers 400.
+- A monitor can't be bound to a camera or printer that isn't registered.
+- A monitor or camera setting sent with a value it doesn't take is refused, where it used to be
+  changed to a default. An unknown setting is refused too.
+- A REST edit that changes a printer's, notifier's or the MQTT broker's address has to send its key
+  or password again.
+- `/api/v1/state` and the MCP `get_state` tool no longer list the API tokens.
+- Once a token is issued, the MCP server refuses a connection without one. It used to answer with an
+  empty tool list.
+- The MCP server answers at `/mcp` as well as `/mcp/`.
+- `PRINTGUARD_ORIGINS` matches whatever the capitals or a `:443`, and the hub warns at start about
+  an entry with no `http://` or `https://`.
+- A stream address registers once however it's written. Spaces around it are dropped, and a capital
+  in its scheme or host no longer makes it a second camera or stops it opening.
+- A pause or cancel the printer never answers is reported as failed after 45 seconds, 135 on a
+  Centauri Carbon 2. It could take 4.5 minutes.
+- A plugin update that answers other plugins on a new channel or asks for a new sign-in scope waits
+  for you to accept it.
+- Recent events no longer hold a printer's progress updates, so an alert stays in them.
+- To run a MediaMTX of your own with the shipped `mediamtx.yml`, use 1.19.0 or newer.
+- Light theme accent and red are a shade darker so selected buttons meet AA contrast.
 
 ### Fixed
 
@@ -281,6 +303,57 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A dashboard left open through an update reloads itself onto the new version.
 - A setting changed while another is still saving no longer sends the first one again.
 - The introduction scrolls on a short screen, where it covered its own buttons.
+- A printer that starts printing wakes its camera straight away, where one unreachable printer
+  delayed every other by its timeout.
+- A status read that began before a pause no longer replaces the one read after it, which could
+  pause a paused print a second time.
+- A pause refused because the print is already paused or over is no longer announced as
+  "AUTOMATIC PAUSE FAILED".
+- Switching a monitor off while its printer is still answering a pause no longer brings the
+  "DEFECT DETECTED" banner back.
+- A stalled camera watched by several monitors is restarted once, not once per monitor.
+- Stopping the hub no longer lets an inference in flight start a pause after the printers are closed.
+- Test connection says when OctoPrint, Moonraker or PrusaLink rejects the key or password, where it
+  read offline. The log says why a printer went offline.
+- A Centauri Carbon shows the time left on a print, and a command a Carbon 2 refuses no longer
+  drops its connection.
+- A large 3mf sent to a Bambu printer is no longer cut off after five minutes.
+- Raising a camera's detection rate takes effect at once.
+- A printer's webcam you had already added by hand is no longer added a second time, and one that
+  can't be opened shows a warning on the dashboard.
+- One unreadable entry in `state.json` no longer stops the hub starting. It's left out and logged.
+- A wrong-shaped theme or layout resets only itself at start, not every appearance setting.
+- A `state.json` the hub isn't allowed to read ends with a line saying the data directory has the
+  wrong owner.
+- Editing an idle printer's connection no longer creates a print to review.
+- Prints sent for training at the same time register your hub once, so every frame goes under the
+  one hub ID.
+- Switching the print review off deletes a frame that was still being saved, and prints that kept
+  no frames are no longer offered for review.
+- A print whose frames could not be sent goes back to waiting for review, where it read
+  "Sent 0 frames".
+- A temperature correction on upload also moves `M109 R` and `M190 R` waits.
+- A 3mf that understates its unpacked size is refused without being unpacked.
+- A private plugin catalogue's token is scrubbed from the API, bug reports and the log, and so is a
+  UUID stream key in a camera path.
+- The REST API checks the token before it reads a request body.
+- A print whose file has gone from the data directory answers 404 without naming the path.
+- A streaming server that can't start no longer fills the log a bug report attaches.
+- A very thin image sent to `/classify` no longer uses hundreds of megabytes.
+- Toasts no longer run off the edge of a phone screen, and the header wraps on narrow tablets.
+- The Add monitor dialog stays open with what you typed if the add fails.
+- The "saved" chip only shows on the form that saved.
+- Alerts say what happened to the print, such as "print paused", and an alert-only monitor no
+  longer reads "(none)".
+- A connection test result clears when you edit the form it tested.
+- The print viewer's 32 MB limit holds behind a proxy that compresses the file.
+- A camera published from a browser resumes after its webcam is unplugged and the page reopened.
+- The dashboard retries a hub connection that never answers after 10 seconds.
+- Stream and printer addresses are no longer capitalised or corrected by an iPhone's keyboard.
+- Small touch targets are larger, focus rings no longer appear after a tap, and more controls are
+  named for screen readers.
+- Alert sounds from plugins play in Safari after your first tap or key press.
+- The guide and website say watchdog warnings come after the grace period.
 - The **Register printer** form keeps what you typed when the registration fails.
 - Camera labels no longer show part of a password that contains `@` or `/`.
 - The history chart leaves a gap between prints and says when it's still loading.
@@ -294,6 +367,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Security
 
+- The bundled MediaMTX is updated to 1.21.1, past the advisories against 1.18.2. The worst let a
+  request to the stream server exhaust its memory.
 - PyJWT is updated to 2.15.1 and DOMPurify to 3.4.16, past the advisories against the versions
   2.5.0 carried.
 
