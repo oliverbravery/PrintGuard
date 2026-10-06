@@ -1525,7 +1525,7 @@ test("a printer save the hub refuses says why beside the form and keeps what was
   const form = await editKeyedPrinter(page);
   await form.getByRole("textbox", { name: "Address" }).fill("http://mk3");
   await form.getByRole("button", { name: "Save", exact: true }).click();
-  const refusal = "send api_key again, since a stored secret is only kept for the address it was saved with";
+  const refusal = "send API key again, since a stored secret is only kept for the address it was saved with";
   await emit(page, { event: "error", message: refusal, req_id: (await sent(page, "printer.update")).req_id });
   await expect(form.getByRole("alert")).toHaveText(refusal);
   await expect(form.getByRole("textbox", { name: "Address" })).toHaveValue("http://mk3");

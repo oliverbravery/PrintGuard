@@ -140,10 +140,11 @@ export function ReportDialog() {
           <p className="mt-1.5 leading-relaxed">
             Your description, any files you attach, the address this dashboard is open at, your browser's
             user agent and window size, and a diagnostics bundle: the app version and platform, your
-            camera, printer, monitor and notification configuration with every credential removed, performance
-            stats, recent errors and warnings, and the app's recent logs, also scrubbed of credentials. No
-            camera frames are included unless you attach them yourself. Download the same bundle to read it
-            first, or to send it somewhere else yourself.
+            camera, printer and monitor configuration with every credential removed, the names of your alert
+            channels, performance stats, recent alerts, errors and warnings, and the app's recent logs, also
+            scrubbed of credentials. Camera and printer names and addresses are included. No camera frames
+            are included unless you attach them yourself. Download the same bundle to read it first, or to
+            send it somewhere else yourself.
           </p>
         </details>
         {reportResult && !reportResult.ok && (
