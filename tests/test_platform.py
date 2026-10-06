@@ -336,7 +336,6 @@ def test_a_provider_that_returns_non_finite_output_fails_the_benchmark() -> None
         _measure_concurrency(broken)
 
 
-
 @pytest.mark.parametrize(
     ("answer", "reached", "outcome"),
     [
