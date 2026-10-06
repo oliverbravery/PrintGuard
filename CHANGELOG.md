@@ -151,8 +151,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A plugin sign-in survives a restart straight after connecting.
 - Updating a plugin installed from a branch, as `owner/repo@branch`, follows that branch. Reinstall
   one installed on 2.5.0 to pick it up.
-- Home Assistant shows the hub as unavailable after it stops, and a broker that has gone quiet
-  no longer holds the hub's shutdown up.
+- Home Assistant shows the hub as unavailable after it stops.
 - The MQTT bridge recovers from a bad setting.
 - Two hubs on one MQTT broker no longer disconnect each other.
 - An unrecognised MQTT payload no longer disables a monitor.
@@ -277,31 +276,23 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - An edit made just before closing the tab is saved.
 - A dashboard left open through an update reloads itself onto the new version.
 - A setting changed while another is still saving no longer sends the first one again.
-- The introduction scrolls on a short screen, where it covered its own buttons.
+- The **How PrintGuard works** dialog scrolls on a short screen, where it covered its own buttons.
 - A printer that starts printing wakes its camera straight away, where one unreachable printer
   delayed every other by its timeout.
 - A status read that began before a pause no longer replaces the one read after it, which could
   pause a paused print a second time.
 - A pause refused because the print is already paused or over is no longer announced as
   "AUTOMATIC PAUSE FAILED".
-- Switching a monitor off while its printer is still answering a pause no longer brings the
-  "DEFECT DETECTED" banner back.
 - A stalled camera watched by several monitors is restarted once, not once per monitor.
 - Stopping the hub no longer lets an inference in flight start a pause after the printers are closed.
 - Test connection says when OctoPrint, Moonraker or PrusaLink rejects the key or password, where it
   read offline. The log says why a printer went offline.
-- A Centauri Carbon shows the time left on a print, and a command a Carbon 2 refuses no longer
-  drops its connection.
+- An original Centauri Carbon shows the time left on a print, and a command a Carbon 2 refuses no
+  longer drops its connection.
 - A large 3mf sent to a Bambu printer is no longer cut off after five minutes.
-- Raising a camera's detection rate takes effect at once.
 - A printer's webcam you had already added by hand is no longer added a second time, and one that
   can't be opened shows a warning on the dashboard.
 - One unreadable entry in `state.json` no longer stops the hub starting. It's left out and logged.
-- Editing an idle printer's connection no longer creates a print to review.
-- Prints sent for training at the same time register your hub once, so every frame goes under the
-  one hub ID.
-- Switching the print review off deletes a frame that was still being saved, and prints that kept
-  no frames are no longer offered for review.
 - A print whose frames could not be sent goes back to waiting for review, where it read
   "Sent 0 frames".
 - A temperature correction on upload also moves `M109 R` and `M190 R` waits.
