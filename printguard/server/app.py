@@ -280,9 +280,15 @@ def create_app() -> FastAPI:
     mediamtx_config = os.environ.get("MEDIAMTX_CONFIG", str(REPO_ROOT / "mediamtx.yml"))
     update_asset = os.environ.get("UPDATE_ASSET") or None
     listed_origins = [o.strip() for o in os.environ.get("PRINTGUARD_ORIGINS", "").split(",") if o.strip()]
-    allowed_origins = {normalised_origin(o) for o in listed_origins if urlsplit(o).hostname}
-    for unreadable in (o for o in listed_origins if not urlsplit(o).hostname):
-        logger.warning("PRINTGUARD_ORIGINS entry %s is ignored because it has no scheme. Write it as https://%s", unreadable, unreadable)
+    allowed_origins = set()
+    for entry in listed_origins:
+        try:
+            if not urlsplit(entry).hostname:
+                logger.warning("PRINTGUARD_ORIGINS entry %s is ignored because it has no scheme. Write it as https://%s", entry, entry)
+                continue
+            allowed_origins.add(normalised_origin(entry))
+        except ValueError as unreadable:
+            logger.warning("PRINTGUARD_ORIGINS entry %s is ignored because it is not an address: %s", entry, unreadable)
     internal_token = secrets.token_urlsafe(32)
     api_auth = ApiAuth(internal_token)
     api_app = build_api_app(api_auth)

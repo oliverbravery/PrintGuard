@@ -28,8 +28,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   `PRINTGUARD_ORIGINS` with its `http://` or `https://` before updating. The API and MCP server are
   held to the same rule. [Host and origin checking](https://github.com/oliverbravery/PrintGuard/blob/main/docs/deployment.md#host-and-origin-checking).
 - `PRINTGUARD_ORIGINS` matches whatever the capitals, a `:443` or a trailing dot, the hub warns at
-  start about an entry with no `http://` or `https://`, and an `Origin` header that can't be read is
-  refused. The engine and camera publish WebSockets refuse a connection with no `Origin` header.
+  start about an entry with no `http://` or `https://` or one it can't read and ignores it, and an
+  `Origin` header that can't be read is refused. The engine and camera publish WebSockets refuse a connection with no `Origin` header.
 - The hub won't start when `state.json` is there but can't be read, such as with the wrong owner on
   the data directory, and the log says so. It used to start as an empty hub.
 - Alert snapshots in the risk history survive a restart. They're kept 512 pixels on the short

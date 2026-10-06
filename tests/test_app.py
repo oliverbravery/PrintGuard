@@ -869,6 +869,20 @@ async def test_an_origin_entry_with_a_trailing_dot_still_names_the_hub(monkeypat
         assert upload.status_code == 400, "the origin was refused, where the file should have been"
 
 
+async def test_an_origin_entry_that_cannot_be_read_is_ignored_and_the_hub_still_starts(monkeypatch) -> None:
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", "https://hub.example.com:abc, http://[::1, https://ok.example.com")
+    told: list[str] = []
+    monkeypatch.setattr("printguard.server.app.logger.warning", lambda message, *args: told.append(message % args))
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/api/health", headers={"host": "ok.example.com"})).status_code == 200
+        assert (await client.get("/api/health", headers={"host": "hub.example.com"})).status_code == 403
+
+    ignored = [line for line in told if "is ignored" in line]
+    assert len(ignored) == 2 and "https://hub.example.com:abc" in ignored[0] and "http://[::1" in ignored[1]
+
+
 def test_the_hub_takes_a_websocket_message_big_enough_for_a_plugin_zip(monkeypatch) -> None:
     """A 12 MiB zip travels as base64 in one frame, which uvicorn's own 16 MiB limit already closes."""
     served: dict = {}
