@@ -958,7 +958,8 @@ class FakeCentauri:
             temp_nozzle_target=205.0,
             temp_bed=None,
             temp_bed_target=None,
-            raw={"_cc2": {"remaining_time_sec": 900}},
+            print_info=SimpleNamespace(total_ticks=3000.0, current_ticks=2100.0),
+            raw={},
         )
         self.camera_port = camera_port
         self.actions: list[str] = []
@@ -1044,7 +1045,7 @@ async def test_elegoo_centauri_carbon_2_reads_a_job_only_from_idle_and_printing(
 ) -> None:
     """The print status is what pycentauri maps each machine state to, 0 being both initialising and a missing one."""
     client = FakeCentauri(print_status)
-    client.state.raw = {"_cc2": {"machine_status": machine_status, "remaining_time_sec": None}}
+    client.state.raw = {"_cc2": {"machine_status": machine_status}}
     monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
     assert (await INTEGRATIONS["elegoo"].fetch_state(None, ELEGOO_CENTAURI_CONFIG)).status is expected
 
@@ -1662,3 +1663,112 @@ def test_a_relative_webcam_url_resolves_where_the_web_interface_is_served(
 ) -> None:
     """The service's own API port serves no webcam, so only a web server's or a proxy's port is kept."""
     assert webcam_url(base_url, stream, api_ports) == resolved
+
+
+async def test_elegoo_centauri_carbon_1_reports_the_time_left(monkeypatch) -> None:
+    """A Carbon 1 pushes the seconds a job takes and has run, and pycentauri hands a Carbon 2's on in the same fields."""
+    from pycentauri.models import Status
+
+    client = FakeCentauri()
+    payload = {"CurrentStatus": [1], "PrintInfo": {"Status": 13, "Filename": "boat.gcode", "Progress": 42, "CurrentTicks": 2100, "TotalTicks": 3000}}
+    client.state = Status.from_payload(payload)
+    monkeypatch.setattr(INTEGRATIONS["elegoo"], "_connect_centauri", _fake_centauri(client))
+    monkeypatch.setattr(client, "status", lambda: asyncio.sleep(0, client.state))
+    assert (await INTEGRATIONS["elegoo"].fetch_state(None, ELEGOO_CENTAURI_CONFIG)).remaining_s == 900
+    client.state = Status.from_payload({"CurrentStatus": [0], "PrintInfo": {"Status": 0, "CurrentTicks": 0, "TotalTicks": 0}})
+    assert (await INTEGRATIONS["elegoo"].fetch_state(None, ELEGOO_CENTAURI_CONFIG)).remaining_s is None, "no job has no time left"
+
+
+async def test_a_command_a_centauri_carbon_2_refuses_keeps_the_connection_and_one_it_never_answers_does_not() -> None:
+    from pycentauri.client import PrinterError, RequestTimeoutError
+
+    client = FakeCentauri()
+    failures: list[Exception] = [PrinterError("CC2 method 1021 returned error_code=1009"), RequestTimeoutError("CC2 method 1021 timed out after 90.0s")]
+
+    async def pause() -> Any:
+        raise failures.pop(0)
+
+    client.pause = pause
+    adapter = ElegooAdapter()
+    adapter._connections[adapter.connection_key(ELEGOO_CENTAURI_CONFIG)] = client
+    with pytest.raises(PrinterError, match="error_code=1009"):
+        await adapter.send(None, ELEGOO_CENTAURI_CONFIG, DeviceAction.PAUSE)
+    assert not client.closed, "a refusal says the connection works, and the poll shares it"
+    with pytest.raises(RequestTimeoutError):
+        await adapter.send(None, ELEGOO_CENTAURI_CONFIG, DeviceAction.PAUSE)
+    assert client.closed, "a connection that stopped answering is opened afresh"
+
+
+async def test_a_failed_centauri_call_leaves_a_connection_opened_since_alone() -> None:
+    failed, current = FakeCentauri(), FakeCentauri()
+    asked = asyncio.Event()
+    lost = asyncio.Event()
+
+    async def pause() -> Any:
+        asked.set()
+        await lost.wait()
+        raise RuntimeError("connection lost")
+
+    failed.pause = pause
+    adapter = ElegooAdapter()
+    key = adapter.connection_key(ELEGOO_CENTAURI_CONFIG)
+    adapter._connections[key] = failed
+    command = asyncio.create_task(adapter.send(None, ELEGOO_CENTAURI_CONFIG, DeviceAction.PAUSE))
+    await asked.wait()
+    adapter._connections[key] = current
+    lost.set()
+    with pytest.raises(RuntimeError, match="connection lost"):
+        await command
+    assert adapter._connections[key] is current and not current.closed
+
+
+@pytest.mark.parametrize(
+    ("provider", "config", "status", "reason"),
+    [
+        ("octoprint", {"base_url": "http://op", "api_key": "wrong"}, 403, "OctoPrint rejected the API key: HTTP 403"),
+        ("klipper", {"base_url": "http://kl"}, 401, "Moonraker rejected the API key: HTTP 401"),
+    ],
+)
+async def test_a_rejected_api_key_says_so_where_an_unreachable_printer_is_offline(provider: str, config: dict[str, Any], status: int, reason: str) -> None:
+    with pytest.raises(PermissionError, match=reason):
+        await INTEGRATIONS[provider].fetch_state(RecordingHttp(status=status, body={}), config)
+
+
+async def test_a_rejected_prusalink_password_says_so(monkeypatch) -> None:
+    from pyprusalink.types import InvalidAuth
+
+    async def refused(config: dict[str, Any]) -> Any:
+        raise InvalidAuth()
+
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", refused)
+    with pytest.raises(PermissionError, match="PrusaLink rejected the username or password"):
+        await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
+
+
+async def test_prusa_reads_the_ca_bundle_once_not_at_every_poll(monkeypatch) -> None:
+    import ssl
+
+    built: list[Any] = []
+    create = ssl.create_default_context
+    monkeypatch.setattr(ssl, "create_default_context", lambda *args, **kwargs: built.append(args) or create(*args, **kwargs))
+    for _ in range(2):
+        async with INTEGRATIONS["prusa"]._link(PRUSA_CONFIG):
+            pass
+    assert built == []
+
+
+async def test_a_bambu_upload_is_not_cut_off_by_a_deadline(monkeypatch) -> None:
+    from test_gcode import sliced_3mf
+
+    monkeypatch.setattr(bambu, "_UPLOAD_DEADLINE_S", 0.01, raising=False)
+    uploaded: list[str] = []
+
+    def slow_upload(config: dict[str, Any], filename: str, data: bytes) -> None:
+        time.sleep(0.1)
+        uploaded.append(filename)
+
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_upload", slow_upload)
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_publish", lambda config, payload: None)
+    monkeypatch.setattr(INTEGRATIONS["bambu"], "_product", lambda config: "Bambu Lab A1")
+    await INTEGRATIONS["bambu"].print_file(None, BAMBU_CONFIG, "big.3mf", sliced_3mf(plate=1))
+    assert uploaded == ["big.3mf"]

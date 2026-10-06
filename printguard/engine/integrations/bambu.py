@@ -57,7 +57,6 @@ _USERNAME = "bblp"
 _CONNECT_TIMEOUT_S = 5.0
 _REPLY_TIMEOUT_S = 5.0
 _DEADLINE_S = 12.0
-_UPLOAD_DEADLINE_S = 300.0
 _KEEPALIVE_S = 30
 _SILENCE_LIMIT_S = 60.0
 
@@ -308,11 +307,13 @@ class BambuAdapter(IntegrationAdapter):
         left on and the flow and vibration calibrations off, and the filament
         comes from the external spool, since a file says nothing about the AMS
         it was sliced against. The H2 series is handed the file as an FTP URL
-        and every other model as a path on the SD card.
+        and every other model as a path on the SD card. The upload has no
+        deadline of its own, since a large file to a slow printer takes as
+        long as it takes and each step of it times out on its socket.
         """
         plate, _ = plate_gcode(data)
         loop = asyncio.get_running_loop()
-        await asyncio.wait_for(loop.run_in_executor(None, self._upload, config, filename, data), _UPLOAD_DEADLINE_S)
+        await loop.run_in_executor(None, self._upload, config, filename, data)
         product = await asyncio.wait_for(loop.run_in_executor(None, self._product, config), _DEADLINE_S)
         payload = {
             "print": {

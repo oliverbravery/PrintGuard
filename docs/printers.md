@@ -39,7 +39,7 @@ channels.
 
 Open the printer registry, choose the service, fill in the form and press **Test connection**
 before saving. A printer with a starred field left blank is not saved, and the error names the
-field. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
+field. A key or password the service rejects fails the test with that as the reason. Then bind it to a monitor and choose whether a sustained defect alerts you, pauses the
 print or cancels it.
 
 Linked printers report job name, progress, temperatures and state on every monitor that uses

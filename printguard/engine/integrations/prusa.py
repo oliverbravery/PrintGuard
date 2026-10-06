@@ -25,6 +25,7 @@ from typing import Any, AsyncIterator
 import httpx
 from pyprusalink import PrusaLink
 from pyprusalink.client import DigestAuthWorkaround
+from pyprusalink.types import InvalidAuth
 
 from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 
@@ -32,6 +33,8 @@ _USERNAME = "maker"
 _TIMEOUT_S = 10.0
 _UPLOAD_TIMEOUT_S = 180.0
 _UPLOAD_HEADERS = {"Content-Type": "application/octet-stream", "Print-After-Upload": "?1", "Overwrite": "?1"}
+_TLS = httpx.create_ssl_context()
+"""One TLS context for every client. A client builds its own otherwise, which reads the CA bundle on the event loop at every poll."""
 
 _STATUS_MAP = {
     "PRINTING": DeviceStatus.PRINTING,
@@ -87,12 +90,17 @@ class PrusaAdapter(IntegrationAdapter):
     async def fetch_state(self, http: HttpFn, config: dict[str, Any]) -> DeviceState:
         """Reads the active job from /api/v1/job and the heaters from /api/v1/status.
 
-        No active job (HTTP 204) is idle; any failure to reach or authenticate
-        with the printer is offline, which keeps inference watching. The HTTP
-        function is unused - pyprusalink owns the digest-authenticated client.
+        No active job (HTTP 204) is idle; any failure to reach the printer is
+        offline, which keeps inference watching. The HTTP function is unused -
+        pyprusalink owns the digest-authenticated client.
+
+        Raises:
+            PermissionError: If PrusaLink rejects the username or password.
         """
         try:
             job, status = await self._read(config)
+        except InvalidAuth:
+            raise PermissionError("PrusaLink rejected the username or password") from None
         except Exception:
             return DeviceState(DeviceStatus.OFFLINE)
         printer = status.get("printer") or {}
@@ -134,7 +142,7 @@ class PrusaAdapter(IntegrationAdapter):
                 refuses the listing or the file.
         """
         auth = DigestAuthWorkaround(username=_username(config), password=str(config.get("password", "")))
-        async with httpx.AsyncClient(base_url=str(config["base_url"]).rstrip("/"), auth=auth, timeout=_UPLOAD_TIMEOUT_S) as client:
+        async with httpx.AsyncClient(base_url=str(config["base_url"]).rstrip("/"), auth=auth, timeout=_UPLOAD_TIMEOUT_S, verify=_TLS) as client:
             listing = await client.get("/api/v1/storage", timeout=_TIMEOUT_S)
             if listing.status_code >= 400:
                 raise RuntimeError(f"PrusaLink refused to list its storage: HTTP {listing.status_code}")
@@ -168,5 +176,5 @@ class PrusaAdapter(IntegrationAdapter):
 
     @asynccontextmanager
     async def _link(self, config: dict[str, Any]) -> AsyncIterator[Any]:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
+        async with httpx.AsyncClient(timeout=_TIMEOUT_S, verify=_TLS) as client:
             yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _username(config), str(config.get("password", "")))

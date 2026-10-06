@@ -58,10 +58,15 @@ class OctoPrintAdapter(IntegrationAdapter):
         The job endpoint answers whatever the printer is doing, while the
         printer endpoint answers 409 until it is connected, so the heaters are
         simply absent from a disconnected printer's state.
+
+        Raises:
+            PermissionError: If OctoPrint rejects the API key.
         """
         base = config["base_url"].rstrip("/")
         headers = self._headers(config)
         status, body = await http("GET", f"{base}/api/job", headers=headers)
+        if status in (401, 403):
+            raise PermissionError(f"OctoPrint rejected the API key: HTTP {status}")
         if status != 200 or not isinstance(body, dict):
             return DeviceState(DeviceStatus.OFFLINE)
         text = str(body.get("state", "")).lower()

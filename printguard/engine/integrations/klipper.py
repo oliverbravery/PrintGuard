@@ -64,9 +64,14 @@ class KlipperAdapter(IntegrationAdapter):
 
         Klipper keeps no estimate of its own, so the time left is projected
         from how long the print has run against how far through the file it is.
+
+        Raises:
+            PermissionError: If Moonraker rejects the API key, or wants one.
         """
         url = f"{config['base_url'].rstrip('/')}/printer/objects/query?print_stats&virtual_sdcard&extruder&heater_bed"
         status, body = await http("GET", url, headers=self._headers(config))
+        if status in (401, 403):
+            raise PermissionError(f"Moonraker rejected the API key: HTTP {status}")
         if status != 200 or not isinstance(body, dict):
             return DeviceState(DeviceStatus.OFFLINE)
         objects = (body.get("result") or {}).get("status") or {}

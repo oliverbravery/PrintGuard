@@ -21,6 +21,7 @@ from typing import Any, AsyncIterator
 
 import pycentauri
 from pycentauri.cc2 import CONTROL_TIMEOUT_S
+from pycentauri.client import PrinterError
 
 from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 from .klipper import KlipperAdapter
@@ -98,7 +99,9 @@ class ElegooAdapter(IntegrationAdapter):
 
         A Centauri Carbon 2 that is starting up, moving filament, levelling or
         calibrating outside a job says nothing about one, so those read as
-        unknown and the last answer stands.
+        unknown and the last answer stands. The time left is the job's total
+        seconds less the seconds it has run, which pycentauri fills in for
+        both Centauri Carbons.
 
         Raises:
             RuntimeError: If a Centauri printer has reported nothing since the
@@ -109,12 +112,12 @@ class ElegooAdapter(IntegrationAdapter):
         async with self._centauri(config) as printer:
             status = await self._fresh_status(self.connection_key(config), printer)
         cc2 = status.raw.get("_cc2") or {}
-        remaining = cc2.get("remaining_time_sec")
+        job = status.print_info
         return DeviceState(
             self._status(status.print_status, cc2.get("machine_status")),
             float(status.progress or 0.0),
             status.filename or None,
-            remaining_s=int(remaining) if remaining is not None else None,
+            remaining_s=int(job.total_ticks - (job.current_ticks or 0)) if job and job.total_ticks else None,
             nozzle=Heater.reported(status.temp_nozzle, status.temp_nozzle_target),
             bed=Heater.reported(status.temp_bed, status.temp_bed_target),
         )
@@ -177,31 +180,48 @@ class ElegooAdapter(IntegrationAdapter):
             else list(self._connections.keys() | self._connection_locks.keys())
         )
         for key in keys:
-            async with self._connection_locks.setdefault(key, asyncio.Lock()):
-                printer = self._connections.pop(key, None)
-                self._polled.pop(key, None)
-                if printer is None:
-                    continue
-                mainboard_id = printer.mainboard_id
-                if mainboard_id:
-                    self._mainboard_ids[key[0]] = mainboard_id
-                await printer.close()
+            await self._drop(key)
         if config is None:
             self._connection_locks.clear()
+
+    async def _drop(self, key: tuple[str, str], only: Any = None) -> None:
+        """Closes a printer's connection.
+
+        Args:
+            key: The connection's key.
+            only: The connection the caller was using. One opened since then
+                is someone else's and is left alone.
+        """
+        async with self._connection_locks.setdefault(key, asyncio.Lock()):
+            if only is not None and self._connections.get(key) is not only:
+                return
+            printer = self._connections.pop(key, None)
+            self._polled.pop(key, None)
+            if printer is None:
+                return
+            mainboard_id = printer.mainboard_id
+            if mainboard_id:
+                self._mainboard_ids[key[0]] = mainboard_id
+            await printer.close()
 
     @asynccontextmanager
     async def _centauri(self, config: dict[str, Any]) -> AsyncIterator[Any]:
         """Yields the printer's connection and closes it when a call on it fails.
 
         A target pycentauri refuses before sending anything is a ValueError,
-        which leaves the connection as it was.
+        and a command a Centauri Carbon 2 answers with an error code is a bare
+        PrinterError. Both say the connection works, and the poll shares it,
+        so it is left as it was. pycentauri raises a subclass for a command
+        that timed out.
         """
+        printer = await self._connect_centauri(config)
         try:
-            yield await self._connect_centauri(config)
+            yield printer
         except ValueError:
             raise
-        except Exception:
-            await self.close(config)
+        except Exception as exc:
+            if type(exc) is not PrinterError:
+                await self._drop(self.connection_key(config), printer)
             raise
 
     async def _connect_centauri(self, config: dict[str, Any]) -> Any:
