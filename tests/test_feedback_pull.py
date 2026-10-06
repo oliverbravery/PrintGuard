@@ -102,3 +102,11 @@ def test_the_clean_copy_carries_nothing_the_uploader_chose(pull: types.ModuleTyp
     assert not any(marker in clean for marker in (b"COMMENT-MARKER", b"EXIF-MAKE-MARKER", b"ICC-MARKER", b"XMP-MARKER"))
     assert "comment" not in Image.open(io.BytesIO(clean)).info
 
+
+
+def test_an_object_that_is_not_a_frame_key_is_discarded_and_does_not_stop_the_pull(pull: types.ModuleType, tmp_path: Path) -> None:
+    bucket = Bucket({"stray.jpg": (jpeg(), labels()), key(1): (jpeg(), labels())})
+
+    assert pull.pull(bucket, tmp_path) == (1, 1)
+
+    assert bucket.objects == {}

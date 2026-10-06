@@ -96,10 +96,10 @@ def pull(client: Any, out: Path) -> tuple[int, int]:
         for key in list(inbox(client)):
             stored = client.get_object(Bucket=BUCKET, Key=key)
             clean = sanitised(stored["Body"].read())
-            hub, print_id, name = key.split("/")
-            if clean is None:
+            if clean is None or key.count("/") != 2:
                 discarded += 1
             else:
+                hub, print_id, name = key.split("/")
                 target = out / hub / print_id / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(clean)
