@@ -1844,14 +1844,23 @@ class Engine:
             raise LookupError(f"no plugin {message['id']}")
         self.emit({"event": "plugin_page", "id": plugin.id, "page": plugin.page, "req_id": message.get("req_id")})
 
+    def _running_plugin(self, plugin_id: str) -> Plugin | None:
+        """The plugin with this id, if it is enabled and the hub has a runtime to run it.
+
+        Every command a plugin sends for itself goes through this, so a hub
+        started with plugins off answers none of them, whatever is installed.
+        """
+        plugin = self.plugins.get(plugin_id)
+        return plugin if plugin and plugin.enabled and self.platform.plugin_runtime is not None else None
+
     def _networked(self, plugin_id: str) -> Plugin:
         """The plugin a network request belongs to, if it is running and holds the grant.
 
         Raises:
-            PermissionError: If it is not installed, not enabled or lacks ``net``.
+            PermissionError: If it is not installed, not running or lacks ``net``.
         """
-        plugin = self.plugins.get(plugin_id)
-        if not plugin or not plugin.enabled or not plugin.may("net"):
+        plugin = self._running_plugin(plugin_id)
+        if not plugin or not plugin.may("net"):
             raise PermissionError("plugin may not reach the network")
         return plugin
 
@@ -1963,8 +1972,8 @@ class Engine:
             PermissionError: If it is not installed, not running, or offers
                 nothing by that name.
         """
-        plugin = self.plugins.get(plugin_id)
-        if plugin is None or not plugin.enabled or not plugin.may("link:provide"):
+        plugin = self._running_plugin(plugin_id)
+        if plugin is None or not plugin.may("link:provide"):
             raise PermissionError(f"no plugin {plugin_id!r} is answering other plugins")
         if channel not in plugin.manifest["provides"]:
             raise PermissionError(f"{plugin_id} does not offer {channel!r}")
@@ -1976,7 +1985,7 @@ class Engine:
         Both ends declared it. The caller named the plugin and channel, and the
         answering plugin offers that channel.
         """
-        caller = self.plugins.get(message["id"])
+        caller = self._running_plugin(message["id"])
         to, channel = str(message.get("to", "")), str(message.get("channel", ""))
         if not caller or not caller.may("link:consume") or f"{to}:{channel}" not in caller.manifest["consumes"]:
             raise PermissionError(f"plugin {message['id']} did not declare {to}:{channel}")
@@ -2104,7 +2113,7 @@ class Engine:
                 or asks for something no dashboard performs.
             ValueError: If the effect is larger than one has any business being.
         """
-        plugin = self.plugins.get(str(message.get("id", "")))
+        plugin = self._running_plugin(str(message.get("id", "")))
         effect = message.get("effect") if isinstance(message.get("effect"), dict) else {}
         needed = plugins.UI_EFFECTS.get(str(effect.get("kind", "")))
         if plugin is None or needed is None or not plugin.may(needed):

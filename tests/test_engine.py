@@ -1112,6 +1112,7 @@ async def test_a_command_that_changes_nothing_stored_saves_nothing_and_answers_o
 
 async def test_plugins_read_as_disabled_while_the_hub_runs_none() -> None:
     platform = FakePlatform()
+    platform.plugin_runtime = None
     engine = Engine(platform)
     await engine.start()
     await install_demo(engine)
@@ -1119,6 +1120,30 @@ async def test_plugins_read_as_disabled_while_the_hub_runs_none() -> None:
     assert not engine.state_event()["plugins"][0]["enabled"], "the dashboard would keep running a plugin the hub has switched off"
     platform.plugin_runtime = object()
     assert engine.state_event()["plugins"][0]["enabled"]
+
+
+async def test_a_plugin_the_hub_runs_none_of_is_answered_on_nothing_it_asks_for() -> None:
+    platform = FakePlatform()
+    platform.responses["https://hooks.example.com/x"] = (200, {"ok": 1})
+    engine = Engine(platform)
+    await engine.start()
+    manifest = {**MANIFEST, "permissions": ["net", "notify", "link:provide"], "reasons": dict.fromkeys(["net", "notify", "link:provide"], "to test"), "provides": {"feed": "a feed"}}
+    await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(manifest)})
+    await engine.handle({"cmd": "plugin.update", "id": "demo", "patch": {"granted": manifest["permissions"], "enabled": True}})
+    platform.plugin_runtime = None
+    platform.http_calls.clear()
+
+    for command in (
+        {"cmd": "plugin.http", "id": "demo", "url": "https://hooks.example.com/x"},
+        {"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "t", "url": "wss://hooks.example.com/x"},
+        {"cmd": "plugin.effect", "id": "demo", "effect": {"kind": "notify", "text": "hi"}},
+        {"cmd": "plugin.publish", "id": "demo", "channel": "feed", "body": {}},
+    ):
+        with pytest.raises(RuntimeError, match="may not|not answering|is answering"):
+            await engine.request(command)
+
+    assert not platform.http_calls and not platform.sockets, "an installed plugin still reached the network with plugins off"
+    await engine.stop()
 
 
 async def test_zip_install_keeps_its_page_and_serves_it_on_request() -> None:

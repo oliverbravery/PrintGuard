@@ -98,6 +98,22 @@ class FakeFileStore:
         self.blobs.pop(key, None)
 
 
+class FakePluginRuntime:
+    """A plugin runtime that runs nothing, so an engine counts as running plugins."""
+
+    def attach(self, request: Any, failed: Any) -> None:
+        pass
+
+    def on_event(self, event: dict[str, Any]) -> None:
+        pass
+
+    async def reload(self, running: Any, failed_gates: Any) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+
 class FakePlatform:
     """In-memory platform with deterministic latency and HTTP."""
 
@@ -107,9 +123,8 @@ class FakePlatform:
     version = "2.1.0"
     update_repo = "o/r"
     update_asset: str | None = None
-    plugin_runtime = None
-
     def __init__(self, infer_s: float = 0.05, failing: bool = False) -> None:
+        self.plugin_runtime: Any = FakePluginRuntime()
         self.infer_s = infer_s
         self.failing = failing
         self.device_status = "Printing"
