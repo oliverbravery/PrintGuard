@@ -939,11 +939,19 @@ class Engine:
 
         A Windows camera registered before 2.6.0 has the name it shows as its
         device id where the hub now lists its device path, so a source whose
-        label is registered is that same camera.
+        label is registered is that same camera. A stream the hub publishes
+        for one of its own cameras is not offered, since registering it would
+        read the first camera's stream as a second camera.
         """
         sources = await self.platform.discover_cameras()
         registered = self._registered_addresses()
-        fresh = [s for s in sources if _address(s) not in registered and s.get("label") not in registered]
+        fresh = [
+            s
+            for s in sources
+            if _address(s) not in registered
+            and s.get("label") not in registered
+            and not (s["kind"] == "path" and s["path"] in self.cameras.items)
+        ]
         self.emit({"event": "discovered", "sources": fresh, "req_id": message.get("req_id")})
 
     def _registered_addresses(self) -> set[Any]:

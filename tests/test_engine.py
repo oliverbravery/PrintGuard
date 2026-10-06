@@ -2224,6 +2224,25 @@ async def test_discovery_hides_registered_devices() -> None:
         assert next(e for e in events if e.get("req_id") == 2 and e["event"] == "discovered")["sources"] == []
 
 
+async def test_discovery_does_not_offer_the_hubs_own_camera_streams(monkeypatch) -> None:
+    async def webcam(http, config):
+        return [{"key": "webcam", "name": "cam", "source": {"kind": "url", "url": "http://op/stream"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", webcam)
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        await _register_printer(engine)
+        await asyncio.sleep(0.1)
+        own = [camera.id for camera in engine.cameras.values()]
+        assert len(own) == 2 and any(camera_id.endswith("-webcam") for camera_id in own)
+        platform.devices = [{"kind": "path", "path": camera_id, "label": camera_id} for camera_id in own]
+        platform.devices.append({"kind": "path", "path": "someone-elses", "label": "someone-elses"})
+        await engine.handle({"cmd": "discover", "req_id": 2})
+        listed = next(e for e in events if e.get("req_id") == 2 and e["event"] == "discovered")["sources"]
+
+    assert [source["path"] for source in listed] == ["someone-elses"]
+
+
 async def test_discovery_hides_a_device_registered_under_the_name_it_shows() -> None:
     """A Windows camera added before 2.6.0 is stored by its name, and is now listed by its device path."""
     platform = FakePlatform()
