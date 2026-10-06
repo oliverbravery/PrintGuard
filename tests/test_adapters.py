@@ -1307,6 +1307,13 @@ async def _prusa_answering(status_line: str, headers: str = "") -> tuple[asyncio
     return server, {"base_url": f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}", "password": "pw"}
 
 
+async def test_prusa_behind_a_redirect_names_where_it_went() -> None:
+    server, config = await _prusa_answering("301 Moved Permanently", "Location: https://printer.local/\r\n")
+    async with server:
+        with pytest.raises(RuntimeError, match=r"redirects to https://printer\.local"):
+            await INTEGRATIONS["prusa"].fetch_state(None, config)
+
+
 async def test_prusa_answering_with_an_error_names_the_status() -> None:
     server, config = await _prusa_answering("502 Bad Gateway")
     async with server:

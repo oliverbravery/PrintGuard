@@ -55,6 +55,9 @@ def _username(config: dict[str, Any]) -> str:
 
 
 def _failure(response: httpx.Response) -> str:
+    if response.is_redirect:
+        source, target = (f"{url.scheme}://{url.netloc.decode()}" for url in (response.url, response.url.join(response.headers["location"])))
+        return f"{source} redirects to {target}. Use the address it redirects to"
     return f"PrusaLink answered HTTP {response.status_code}"
 
 
