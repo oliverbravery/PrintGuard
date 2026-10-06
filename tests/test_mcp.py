@@ -155,3 +155,30 @@ async def test_a_session_is_not_opened_without_a_bearer_once_tokens_exist() -> N
             assert held.status_code == 200 and "PrintGuard" in held.text
     finally:
         await engine.stop()
+
+
+async def test_a_tool_call_carrying_nan_is_refused_and_registers_nothing() -> None:
+    engine = Engine(FakePlatform())
+    await engine.start()
+    auth = ApiAuth(internal_token="INT")
+    api_app = build_api_app(auth)
+    api_app.state.engine = engine
+    app = build_mcp_app(api_app, lambda: engine, auth, "INT")
+    headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+    handshake = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}},
+    }
+    call = b'{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "add_printer", "arguments": {"name": "P", "provider": "octoprint", "config": {"note": NaN}}}}'
+    try:
+        async with app.lifespan(app), httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+            session = (await client.post("/", json=handshake, headers=headers)).headers["mcp-session-id"]
+            headers["mcp-session-id"] = session
+            await client.post("/", json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=headers)
+            answer = await client.post("/", content=call, headers=headers)
+        assert "isError" in answer.text and "true" in answer.text.split("isError")[1][:8], answer.text
+        assert not list(engine.printers.items)
+    finally:
+        await engine.stop()

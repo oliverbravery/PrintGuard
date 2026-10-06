@@ -1,10 +1,71 @@
-"""Backpressure-aware buffering for engine transport events."""
+"""Backpressure-aware buffering and strict JSON coding for engine transport events."""
 
 from __future__ import annotations
 
 import asyncio
+import json
+import math
 from collections import deque
-from typing import Any
+from typing import Any, NoReturn
+
+
+def refuse_non_finite_constant(constant: str) -> NoReturn:
+    """Stops a JSON parse at NaN, Infinity or -Infinity, which are not JSON.
+
+    Args:
+        constant: The bare word the parser met.
+
+    Raises:
+        ValueError: Always.
+    """
+    raise ValueError(f"{constant} is not allowed, send a finite number")
+
+
+def parse_json(text: str) -> Any:
+    """Reads JSON the way a browser would, refusing the NaN and Infinity Python also accepts.
+
+    Args:
+        text: The JSON document.
+
+    Raises:
+        ValueError: If it is not JSON or holds a non-finite number.
+    """
+    return json.loads(text, parse_constant=refuse_non_finite_constant)
+
+
+def require_finite(value: Any) -> Any:
+    """Checks that no number inside a parsed body is NaN or infinite.
+
+    Args:
+        value: Parsed JSON of any shape.
+
+    Returns:
+        The same value.
+
+    Raises:
+        ValueError: If a number anywhere inside it is not finite.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("send a finite number, not NaN or Infinity")
+    if isinstance(value, dict):
+        for item in value.values():
+            require_finite(item)
+    elif isinstance(value, list):
+        for item in value:
+            require_finite(item)
+    return value
+
+
+def encode_event(event: dict[str, Any]) -> str:
+    """Writes an event as the JSON a dashboard can parse.
+
+    Args:
+        event: The event to send.
+
+    Raises:
+        ValueError: If it holds NaN or Infinity, which a browser's parser rejects.
+    """
+    return json.dumps(event, allow_nan=False)
 
 
 class ConflatedEventQueue:

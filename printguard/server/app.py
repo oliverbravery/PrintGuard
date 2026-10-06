@@ -35,7 +35,7 @@ from ..engine import logs, oauth
 from ..engine.engine import Engine
 from ..engine.urls import DEFAULT_PORTS, LOCAL_HOSTNAMES, LOCAL_SUFFIXES
 from .api import ApiAuth, build_api_app
-from .events import ConflatedEventQueue
+from .events import ConflatedEventQueue, encode_event, parse_json
 from .mcp import build_mcp_app
 from .mediamtx import EmbeddedMediaMTX
 from .mqtt import MqttBridge
@@ -115,7 +115,7 @@ def parse_command(text: str | None) -> dict[str, Any] | None:
         The command, or None when the frame is not a JSON object.
     """
     try:
-        command = json.loads(text or "")
+        command = parse_json(text or "")
     except ValueError:
         return None
     return command if isinstance(command, dict) else None
@@ -445,7 +445,7 @@ def create_app() -> FastAPI:
 
         async def pump() -> None:
             while True:
-                await websocket.send_text(json.dumps(await queue.get()))
+                await websocket.send_text(encode_event(await queue.get()))
 
         async def receive() -> None:
             slots = asyncio.Semaphore(SOCKET_COMMANDS_IN_FLIGHT)

@@ -15,7 +15,7 @@ import pytest
 
 from printguard.server import app as app_module
 from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app, host_trusted
-from printguard.server.events import ConflatedEventQueue
+from printguard.server.events import ConflatedEventQueue, parse_json
 
 
 class AsyncContent(httpx.AsyncByteStream):
@@ -805,3 +805,31 @@ async def test_a_print_whose_file_is_gone_is_a_404_that_names_no_path(tmp_path) 
                 assert gone.status_code == 404 and str(tmp_path) not in gone.text, path
     finally:
         await engine.stop()
+
+
+async def test_the_engine_socket_refuses_a_command_carrying_nan_and_never_sends_one() -> None:
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+
+    engine = Engine(FakePlatform())
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    try:
+        async with Tab(app) as tab:
+            tab.send(text='{"cmd": "settings.update", "patch": {"mqtt": {"keepalive": NaN}}}')
+            await tab.until("error")
+        assert "keepalive" not in (engine.settings.get("mqtt") or {})
+        for message in tab._sent:
+            parse_json(message.get("text") or "{}")
+    finally:
+        await engine.stop()
+
+
+def test_an_event_holding_nan_cannot_be_written_to_a_dashboard() -> None:
+    from printguard.server.events import encode_event
+
+    assert encode_event({"event": "state", "n": 1.5}) == '{"event": "state", "n": 1.5}'
+    with pytest.raises(ValueError):
+        encode_event({"event": "state", "settings": {"mqtt": {"keepalive": float("nan")}}})

@@ -471,7 +471,7 @@ async def test_a_number_that_is_not_finite_is_refused_at_the_boundary(literal: b
         assert not [r for r in platform.http_requests if r["method"] == "POST"], "a heater was sent a target that is not a number"
         assert engine.monitors[monitor_id]["threshold"] == 0.75 and engine.cameras.get(camera_id).crop is None
         preset = await client.patch("/settings", content=b'{"preheat": [{"name": "x", "nozzle": %s, "bed": 60}]}' % literal, headers=raw)
-        assert preset.status_code == 400 and "nozzle temperature must be a finite number" in preset.text
+        assert preset.status_code == 422
 
 
 QUERY_CAMERA = "http://192.168.1.50/videostream.cgi?user=admin&pwd=QUERYPASS"
@@ -775,3 +775,35 @@ async def test_recent_events_leave_out_a_printers_progress() -> None:
         engine.emit({"event": "warning", "message": "camera 'cam' is offline"})
         events = (await client.get("/events", headers={"Authorization": f"Bearer {tokens['read']}"})).json()
         assert [event["event"] for event in events] == ["warning"]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("PATCH", "/settings", b'{"mqtt": {"host": "broker", "keepalive": NaN}}'),
+        ("PATCH", "/settings", b'{"mqtt": {"nested": {"deeper": [1, Infinity]}}}'),
+        ("PATCH", "/settings", b'{"notifiers": {"telegram": {"bot_token": "t", "chat_id": -Infinity}}}'),
+        ("PATCH", "/settings", b'{"preheat": [{"name": "PLA", "nozzle": NaN}]}'),
+        ("POST", "/printers", b'{"name": "P", "provider": "octoprint", "config": {"note": NaN}}'),
+        ("POST", "/printers/test", b'{"provider": "octoprint", "config": {"note": NaN}}'),
+        ("POST", "/notifiers/test", b'{"provider": "ntfy", "config": {"note": Infinity}}'),
+    ],
+)
+async def test_a_body_carrying_nan_or_infinity_is_refused_wherever_it_sits(method: str, path: str, body: bytes) -> None:
+    async with api(("manage",)) as (client, engine, platform, _monitor, _printer, _camera, tokens):
+        response = await client.request(method, path, content=body, headers={"Content-Type": "application/json", "Authorization": f"Bearer {tokens['manage']}"})
+
+        assert response.status_code == 422
+        json.dumps(engine.state_event(), allow_nan=False)
+        assert "NaN" not in json.dumps(platform.state)
+
+
+async def test_a_printer_config_patched_with_nan_leaves_the_stored_one_alone() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor, printer_id, _camera, tokens):
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {tokens['manage']}"}
+        response = await client.patch(
+            f"/printers/{printer_id}", content=b'{"config": {"base_url": "http://op", "api_key": "k", "note": NaN}}', headers=headers
+        )
+
+        assert response.status_code == 422
+        assert "note" not in engine.printers.get(printer_id).config
