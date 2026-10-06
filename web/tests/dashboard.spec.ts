@@ -110,6 +110,27 @@ test("a setting changed while another is still saving is sent on its own", async
   await expect.poll(updates).toEqual([{ update_check: false }, { theme: "light" }]);
 });
 
+test("a setting still saving holds its value when a later setting is acknowledged first", async ({ page }) => {
+  const { sockets, commands } = await hub(page);
+  const updates = () => commands.filter((c) => c.cmd === "settings.update");
+  const pendingFields = () => page.evaluate(() => Object.keys((window as any).__pg.getState().optimistic.settings?.patch ?? {}));
+  await page.evaluate(() => {
+    const state = (window as any).__pg.getState();
+    state.updateSettings({ inference_runtime: "onnx" });
+    state.flushUpdates();
+    state.updateSettings({ update_check: false });
+    state.flushUpdates();
+  });
+  await expect.poll(() => updates().length).toBe(2);
+
+  sockets[0].send(JSON.stringify({ event: "state", ...engine(), req_id: updates()[1].req_id }));
+  await expect.poll(pendingFields).toEqual(["inference_runtime"]);
+  expect(await page.evaluate(() => (window as any).__pg.getState().engine.settings.inference_runtime)).toBe("onnx");
+
+  sockets[0].send(JSON.stringify({ event: "state", ...engine(), req_id: updates()[0].req_id }));
+  await expect.poll(pendingFields).toEqual([]);
+});
+
 test("a hub that goes silent without closing is dropped and reached again", async ({ page }) => {
   await page.clock.install();
   const { sockets } = await hub(page);

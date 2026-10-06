@@ -31,7 +31,22 @@ interface OptimisticEntry {
   id?: string;
   patch: Record<string, unknown>;
   unsent: Record<string, unknown>;
-  reqId: string | null;
+  sent: Record<string, string>;
+}
+
+function withoutKeys<T>(record: Record<string, T>, keys: string[]): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
+}
+
+function settle(overlay: Record<string, OptimisticEntry>, reqId: string): Record<string, OptimisticEntry> {
+  const settled: Record<string, OptimisticEntry> = {};
+  for (const [key, entry] of Object.entries(overlay)) {
+    const answered = Object.keys(entry.sent).filter((field) => entry.sent[field] === reqId);
+    if (!answered.length) settled[key] = entry;
+    else if (Object.keys(entry.patch).some((field) => !answered.includes(field)))
+      settled[key] = { ...entry, patch: withoutKeys(entry.patch, answered), sent: withoutKeys(entry.sent, answered) };
+  }
+  return settled;
 }
 
 function applyOptimistic(engine: EngineState, overlay: Record<string, OptimisticEntry>): EngineState {
@@ -256,7 +271,12 @@ export const useStore = create<PgStore>((set, get) => {
     const entry = get().optimistic[key];
     if (!entry) return;
     const reqId = sendSilent(commandFor({ ...entry, patch: entry.unsent }));
-    set((s) => (s.optimistic[key] ? { optimistic: { ...s.optimistic, [key]: { ...s.optimistic[key], unsent: {}, reqId } } } : s));
+    const carried = Object.fromEntries(Object.keys(entry.unsent).map((field) => [field, reqId]));
+    set((s) =>
+      s.optimistic[key]
+        ? { optimistic: { ...s.optimistic, [key]: { ...s.optimistic[key], unsent: {}, sent: { ...s.optimistic[key].sent, ...carried } } } }
+        : s,
+    );
   };
 
   const queueUpdate = (key: string, kind: OptimisticKind, id: string | undefined, patch: Record<string, unknown>) => {
@@ -267,7 +287,7 @@ export const useStore = create<PgStore>((set, get) => {
         id,
         patch: { ...(prev?.patch ?? {}), ...patch },
         unsent: { ...(prev?.unsent ?? {}), ...patch },
-        reqId: null,
+        sent: withoutKeys(prev?.sent ?? {}, Object.keys(patch)),
       };
       const optimistic = { ...s.optimistic, [key]: entry };
       const { [key]: _resaving, ...savedAt } = s.savedAt;
@@ -305,7 +325,7 @@ export const useStore = create<PgStore>((set, get) => {
       testing: null,
       testingNotifier: null,
       reportResult: "report.send" in s.pending ? { ok: false, error: "the connection to the hub dropped" } : s.reportResult,
-      optimistic: Object.fromEntries(Object.entries(s.optimistic).map(([key, entry]) => [key, { ...entry, unsent: entry.patch, reqId: null }])),
+      optimistic: Object.fromEntries(Object.entries(s.optimistic).map(([key, entry]) => [key, { ...entry, unsent: entry.patch, sent: {} }])),
     }));
   };
 
@@ -496,8 +516,8 @@ export const useStore = create<PgStore>((set, get) => {
           location.reload();
           return;
         }
-        const acknowledged = event.req_id == null ? [] : Object.keys(get().optimistic).filter((key) => get().optimistic[key].reqId === event.req_id);
-        const optimistic = Object.fromEntries(Object.entries(get().optimistic).filter(([key]) => !acknowledged.includes(key)));
+        const optimistic = event.req_id == null ? get().optimistic : settle(get().optimistic, event.req_id);
+        const acknowledged = Object.keys(get().optimistic).filter((key) => !(key in optimistic));
         const firstRun = get().phase !== "ready" && !readStored(INTRO_SEEN_KEY);
         const engine = Object.keys(optimistic).length ? applyOptimistic(server, optimistic) : server;
         let history = get().history;
@@ -646,10 +666,7 @@ export const useStore = create<PgStore>((set, get) => {
           discovering: failed === "discover" ? false : s.discovering,
           testing: failed === "printer.test" ? null : s.testing,
           testingNotifier: failed === "notify.test" ? null : s.testingNotifier,
-          optimistic:
-            event.req_id != null
-              ? Object.fromEntries(Object.entries(s.optimistic).filter(([, e]) => e.reqId !== event.req_id))
-              : s.optimistic,
+          optimistic: event.req_id != null ? settle(s.optimistic, event.req_id) : s.optimistic,
         }));
         break;
       }
