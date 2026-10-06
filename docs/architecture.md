@@ -37,8 +37,6 @@ flowchart LR
         surface["REST API · MCP · MQTT bridge"]
     end
 
-    transports <-- "JSON commands / events" --> engine
-
     subgraph engine["printguard/engine"]
         registry["registries<br/>cameras · printers · prints · tokens · plugins"]
         monitors["monitors (camera + printer)"]
@@ -51,6 +49,7 @@ flowchart LR
         plugins["plugins (sourcing + permissions)"]
     end
 
+    transports <-- "JSON commands / events" --> engine
     engine -- "Platform protocol" --> server["server/platform.py<br/>LiteRT / ONNX Runtime · PyAV · httpx · QuickJS"]
 
     server --- mediamtx["MediaMTX<br/>RTSP / RTMP / WHEP / HLS"]
@@ -67,16 +66,16 @@ flowchart LR
 | `/api/ws` | The engine socket the dashboard speaks the protocol over |
 | `/api/publish/{path}` | A second WebSocket taking a browser's camera recording, which [`server/publish.py`](../printguard/server/publish.py) remuxes into MediaMTX over RTSP |
 | `/hls/{path}` | A proxy to MediaMTX's HLS, served as fMP4 segments (`hlsVariant: fmp4`, not the low-latency variant), which also wakes a sleeping camera source for the viewer. A request from another origin is refused and MediaMTX's CORS headers are dropped, so neither a page on another site nor a plugin page can pull a feed |
-| `/api/health` | `{ok, version}`, used by the image's health check |
+| `/api/health` | `{ok, version}`, never cached, used by the image's health check |
 | `/api/prints`, `/api/prints/inspect`, `/api/prints/{id}/gcode`, `/api/prints/{id}/thumbnail` | The dashboard's print library upload, pre-upload inspection, gcode viewer and previews |
 | `/plugins/{id}/{path}` | A plugin's own routes, answered from its sandbox |
 | `/oauth/callback` | Where a provider sends the user back after a plugin's sign-in |
-| `/api/v1`, `/mcp` | The REST API and the MCP server |
+| `/api/v1`, `/mcp` | The REST API and the MCP server, which answers at `/mcp/` too |
 | `/` | The built dashboard from `STATIC_DIR` |
 
 Every request is refused unless its host is an address, a local name or one listed in
-`PRINTGUARD_ORIGINS`. Both WebSockets and the two print `POST` routes also check the request's
-`Origin` against that host. See
+`PRINTGUARD_ORIGINS`. Both WebSockets, the two print `POST` routes and `/hls` also check the
+request's `Origin` against that host. See
 [host and origin checking](deployment.md#host-and-origin-checking).
 
 ## The platform contract
@@ -98,20 +97,24 @@ for the hub:
 | `take_notices()` | What the hub has worked around since the last call, as `Notice` records: an accelerator passed over for the CPU, and a camera whose live view cannot publish or has come back. The hub meets these on its own threads, so the engine collects them on its ticker and raises each as a `warning` |
 | `infer(rgb)` | `vision.preprocess`, the selected LiteRT or ONNX Runtime model, then `vision.classify` |
 | `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list |
-| `open_camera(id, source)` | A `FrameSource`. MediaMTX pulls every URL that is not plain HTTP, so RTSP, RTMP and WHEP, and PyAV reads HTTP MJPEG and capture devices directly. A `path` source reads a stream already on MediaMTX, and a `bambu` source the A1 and P1 chamber camera |
+| `open_camera(id, source)` | A `FrameSource`, once it has given a frame, which it gets `OPEN_WAIT_S` for, 25 s. MediaMTX pulls every URL that is not plain HTTP, so RTSP, RTMP and WHEP, and PyAV reads HTTP MJPEG and capture devices directly. A `path` source reads a stream already on MediaMTX, and a `bambu` source the A1 and P1 chamber camera |
 | `release_camera(id, source)` | Closes the source and removes its MediaMTX pull path. A reader that is stuck inside a device read cannot be stopped, so `open_camera` refuses to start another for that camera while it lasts |
 | `http(...)` | httpx. A redirect that would replay the request under another method, such as a POST answered with 301 or 302, raises. So does a body over `max_bytes`, which a plugin's request, a plugin install, the catalogue and the update check pass, counted as it is decompressed, and an answer to one of those in any encoding but gzip |
-| `open_socket(url, arrived)` | A `websockets` client connection held for a plugin, which refuses a redirect |
+| `open_socket(url, arrived)` | A `Socket`, a `websockets` client connection held for a plugin, which refuses a redirect |
 | `encode_jpeg(rgb)` / `decode_jpeg(data)` | PyAV |
-| `load_state()` / `save_state(state)` | `data/state.json`, written atomically and readable only by its owner |
+| `load_state()` / `save_state(state)` | `data/state.json`, written atomically and readable only by its owner. A file that will not parse is kept as `state.json.corrupt` and the hub starts empty |
 
-Three smaller protocols hang off it:
+Four smaller protocols hang off it:
 
 | Protocol | Members | On the hub |
 |---|---|---|
 | `FrameSource` | `fps`, `online`, `standby`, `grab()`, `set_monitoring(active)`, `close()` | A PyAV reader thread per camera |
 | `FileStore` | `store(key, chunks)`, `read(key)`, `remove(key)` | Print files, their previews and the frames kept from each print, on disk under `data/prints/` |
 | `PluginRuntime` | `attach()`, `on_event()`, `reload()`, `serve()`, `authorise()`, `gate_paths()`, `close()` | QuickJS in WebAssembly, under wasmtime |
+| `Socket`, in [`engine/sockets.py`](../printguard/engine/sockets.py) | `send(text)`, `close()` | One `websockets` connection and the task reading it |
+
+`Notice` is what `take_notices()` returns: a message, whether it is a recovery and the camera
+it concerns.
 
 A `Frame` is the RGB array, a `seq` that identifies it and its capture time.
 
@@ -156,20 +159,24 @@ Commands, UI to engine. The table is the engine's `_handlers` map:
 Every command may carry a `req_id`, echoed on the responding event so the UI can resolve
 pending requests. A command that succeeds ends with a `state` event carrying that `req_id`,
 or with its own event for the four that only read, and one that fails ends with an `error`,
-an unknown command included. An id nothing matches fails a remove as it does an update, and a
-monitor or camera patch is refused for a setting it doesn't have or a value its setting doesn't
-take, where a number out of range is clamped. An error that carries no text of its own, as a
-timeout does, is reported by its type.
+an unknown command included. An id nothing matches fails a remove as it does an update, apart
+from `plugin.remove`, and a monitor or camera patch is refused for a setting it doesn't have or
+a value its setting doesn't take, where a number out of range is clamped. An error that carries
+no text of its own, as a timeout does, is reported by its type.
+
+`printer.test`, `notify.test` and `report.send` succeed as commands whatever they find, and
+carry the outcome as `ok` in their own event. `review.send` and `review.retry` only start the
+upload, so their `review_sent` follows the closing `state` under the same `req_id`.
 
 Events, engine to UI:
 
 | Event | Carries |
 |---|---|
-| `state` | Full snapshot, on connect, after every command that can change it and on a 1 s ticker. `history.get`, `snapshot.get`, `review.get` and `camera.snapshot` only read, so they save nothing and answer with their own event alone. The commands in `UNSAVED_COMMANDS`, such as `discover`, `printer.test`, `notify.test`, `update.check`, `report.bundle` and a plugin's requests, change nothing that is stored, so they save nothing either and their closing `state` goes only to the transport that sent them. The fields are listed below |
-| `result` | One monitor's score, sampled at up to 5 Hz per monitor |
-| `alert` | A sustained defect, with the action taken |
-| `warning` | Watchdog conditions and their recovery, an MQTT broker the bridge cannot reach, once when the outage starts and once when it ends, what the platform reports through `take_notices()`, and a printer whose cameras could not be listed or opened |
-| `device` | A printer's status, progress, job, time left and heaters |
+| `state` | Full snapshot, on connect, after every command that can change it, after an update check or a plugin's sign-in, and on a 1 s ticker. `history.get`, `snapshot.get`, `review.get` and `camera.snapshot` only read, so they save nothing and answer with their own event alone. The commands in `UNSAVED_COMMANDS`, such as `discover`, `printer.test`, `notify.test`, `update.check`, `report.bundle` and a plugin's requests, change nothing that is stored, so they save nothing either and their closing `state` goes only to the transport that sent them. The fields are listed below |
+| `result` | One monitor's score, with the verdict at its threshold, the margin and the inference time, sampled at up to 5 Hz per monitor |
+| `alert` | A sustained defect, with its score and the action taken: `none`, `pause`, `cancel` or `failed` |
+| `warning` | Watchdog conditions and their recovery, an MQTT broker the bridge cannot reach, once when the outage starts or its cause changes and once when it ends, what the platform reports through `take_notices()`, and a printer whose cameras could not be listed or opened. `recovered` says which way it goes |
+| `device` | A printer's status, progress, job, time left and heaters, when a read finds them changed and after a command sent to the printer |
 | `print_started` | A file from the library has been sent to a printer and started |
 | `discovered`, `printer_test`, `notify_test` | Command responses |
 | `history`, `snapshot`, `review` | Risk history buckets, a kept frame's JPEG, and the frames kept from one print, each delivered only to the transport that asked |
@@ -188,9 +195,9 @@ Events, engine to UI:
 
 | Field | Holds |
 |---|---|
-| `host`, `version`, `update` | The deployment, the running version and the release status |
-| `cameras`, `printers`, `prints`, `tokens`, `plugins` | The public record of everything in each registry |
-| `monitors` | Each monitor with `watching` and its latest `result` |
+| `host`, `version`, `update` | The deployment, the running version and the release status, which is `null` until a check has answered |
+| `cameras`, `printers`, `prints`, `tokens`, `plugins` | The public record of everything in each registry. A token's is its name, scope and hint, never its hash, and a plugin's leaves out its code and the values of its credentials |
+| `monitors` | Each monitor's settings with `watching`, its latest `result` and, once it has alerted, its `alert` |
 | `reviews`, `feedback_hub` | A count of the frames kept from each print with its review status, and the public half of the hub's training inbox token |
 | `settings` | Notifier configs, MQTT, theme, custom themes, glass, layout, inference runtime, catalogue URL, grace period, preheat presets, and whether to check for updates and ask for print reviews |
 | `stats` | `inference_device`, `infer_ms` and `capacity_fps` from the scheduler |
@@ -206,7 +213,8 @@ registering a stream does not hold a pause behind it. A command that waits on no
 before the next one starts, which covers every auto-saved update. A tab with 16 commands
 running is not read from until one finishes. A frame that is not a JSON
 object is answered with an `error` event. Both sockets refuse a handshake that names no
-`Origin`, and the publish socket closes on a text frame.
+`Origin`, and the publish socket closes on a text frame, or once 32 MB of recording is waiting
+to be remuxed.
 
 The message of every `warning` and `error` loses each stored credential in `emit()`, before it
 is logged or broadcast, because it often quotes an exception a library raised. A value shorter
@@ -222,6 +230,7 @@ defect-response policy.
 
 | Monitor field | Default | Clamped to |
 |---|---|---|
+| `enabled` | on | |
 | `threshold` | 0.75 | 0.05 to 0.95 |
 | `consecutive` | 3 | 1 to 30 |
 | `cooldown_s` | 60 | 0 to 600 |
@@ -235,8 +244,10 @@ A printer integration that exposes a webcam registers it automatically as a came
 that printer through `Camera.printer_id`, covering the OctoPrint and Moonraker stream URLs, the
 Elegoo Centauri chamber camera, and the Bambu chamber camera, over RTSP on the X1 and H2
 series or the proprietary port 6000 protocol on the A1 and P1. The adapter's optional
-`cameras()` declares them, and the engine reconciles them on printer add and update, and on
-demand through `printer.cameras.refresh` to pick up a camera attached later. One printer is
+`cameras()` declares them, and the engine reconciles them in the background after a printer is
+added or updated, so neither command waits on a camera opening, and on demand through
+`printer.cameras.refresh` to pick up a camera attached later. A printer moved to another
+service loses the cameras the old one exposed. One printer is
 reconciled by one caller at a time, and a camera whose source changed with the printer's
 connection details is attached again at the new address with its name and tuning kept. A
 stream already registered by hand stays the one camera on it. A
@@ -320,8 +331,8 @@ measured, since the raw MJPEG demuxer it is read through declares 25 for every s
 Hub camera capture is demand-driven. A source stays active while an enabled monitor is
 watching or while an HLS viewer is requesting it. MediaMTX pulls RTSP, RTMP and WHEP sources
 on demand, and PrintGuard wakes its own MJPEG, Bambu and device-camera publisher for
-viewers. A positively idle printer lets the source sleep, while an unknown or unreachable
-printer keeps it active.
+viewers. A positively idle printer lets the source sleep, and one that cannot be reached keeps
+whatever it last reported, as the table under [failing safely](#failing-safely) sets out.
 
 A pull path is added through MediaMTX's API and lives in its memory. When the supervisor
 restarts a MediaMTX that exited, the hub adds every path again once the new one answers, so a
@@ -352,8 +363,8 @@ sequenceDiagram
         I-->>W: ok, or "failed" after retries
         W-->>W: emit alert event (action included)
         W->>N: snapshot + outcome to every configured channel, if notify is on
-        W->>I: re-read the printer, so a paused print stands the monitor down
-        W->>E: note_alert (snapshot into history)
+        W->>E: note_alert (alert into history, frame kept for the review)
+        W->>I: re-read a printer that took the action, so its monitor stands down
     else score below threshold
         W-->>W: streak and alert reset
     end
@@ -382,9 +393,10 @@ lost on restart. The frame that fired each alert is kept on disk by [print revie
 An alert starts the monitor's `cooldown_s`, and no second response fires inside it or while
 the first is still in flight. The cooldown ends once the printer reports the print over, so it
 never carries into the next one, and a pause keeps it. Push notifications have their own 30 s
-floor per monitor and outcome. A printer action is tried 3 times, 1 s apart, then reported as
-failed in the alert, the UI error feed and the push notification, and tried again after
-`ACT_FAILED_COOLDOWN_S` at the latest. A streak is dropped when its monitor stands down or is
+floor per monitor and outcome. A printer action is tried 3 times, 1 s apart and inside
+`ACT_DEADLINE_S` in all, then reported as failed in the alert, the UI error feed and the push
+notification, and tried again after `ACT_FAILED_COOLDOWN_S` at the latest. A printer that
+refuses the command but reads as already paused, or as finished, counts as having taken it. A streak is dropped when its monitor stands down or is
 bound to another camera. The notification channels are sent to together with `NOTIFY_TIMEOUT_S`
 each, 30 s, so one that never answers cannot hold the response open.
 
@@ -400,8 +412,8 @@ monitor watches, scaled to 512px and stored in the `files` store, with their rec
 persisted state so they survive a restart. With `settings.feedback` set to `off` it keeps only
 the alert frames, and switching it off dismisses every `ready` and `queued` print and deletes
 the other frames already held. A print runs from a monitor's first frame until its printer
-positively reports idle or error, or the monitor is disabled or removed, so a pause stays
-inside it. A print whose monitor has a defect response in flight stays open until that
+positively reports idle or error, or the monitor is disabled, so a pause stays inside it.
+Removing a monitor deletes its prints and their frames. A print whose monitor has a defect response in flight stays open until that
 response has kept its alert frame, so a cancelled printer read idle while the notifiers are
 still answering can't close the print without it. A monitor with no printer closes its print
 after a day, which the ticker checks so it holds with the review off too. A monitor whose
@@ -448,6 +460,7 @@ A monitor's watching state gates inference
 
 | Linked printer reports | Watched? | Why |
 |---|---|---|
+| Anything, with the monitor disabled | No | It was switched off |
 | No printer linked | Yes | Nothing to gate on |
 | No state yet | Yes | Cannot tell, so watch |
 | `printing` | Yes | The job needs eyes |
@@ -538,6 +551,30 @@ The timings are constants at the top of [`engine/watchdog.py`](../printguard/eng
 
 A camera with no source at all is retried by the engine's ticker every 10 s.
 
+The engine's own are at the top of [`engine/engine.py`](../printguard/engine/engine.py), and
+the scheduler's at the top of [`engine/scheduler.py`](../printguard/engine/scheduler.py):
+
+| Constant | Value | Governs |
+|---|---|---|
+| `STATE_TICK_S` | 1 s | The ticker that broadcasts `state`, settles finished prints, sends queued reviews and collects platform notices |
+| `REATTACH_EVERY_TICKS` | 10 | The ticks between tries at a camera with no source |
+| `RESULT_EVENT_INTERVAL_S` | 0.2 s | The gap between `result` events for one monitor |
+| `REQUEST_TIMEOUT_S` | 15 s | How long `engine.request()` waits, with the adapter's `slow_action_s` on top for a printer action or heater target |
+| `RECENT_EVENTS_MAX` | 100 | The alert, warning and error events `recent_events()` keeps |
+| `UPDATE_CHECK_INTERVAL_S`, `UPDATE_RETRY_S` | 86400 s, 900 s | The gap between update checks, and after one that failed |
+| `RUNTIME_DRAIN_TIMEOUT_S` | 10 s | How long a runtime switch waits for the inferences in flight |
+| `NOTIFY_TIMEOUT_S` | 30 s | What each notification channel gets to answer |
+| `LOOP_RETRY_S`, `FAILURE_REPORT_EVERY_S` | 1 s, 30 s | The wait after a background pass that raised, and how often a repeating fault is reported |
+| `FEEDBACK_RETRY_S` | 21600 s | When a refused review upload is tried again, where the refusal named no time |
+| `LATENCY_SMOOTHING` | 0.25 | The weight of the newest inference in the latency estimate |
+| `IDLE_POLL_S` | 0.25 s | The longest the dispatcher sleeps with nothing due |
+| `STALE_RETRY_S` | 0.1 s | The wait before a camera that gave no new frame, or whose inference failed, is tried again |
+| `ERROR_THROTTLE_S` | 30 s | The gap between `error` events for failed inferences |
+
+The limits on a plugin's requests, sockets and calls are under
+[limits](plugin-development.md#limits), and the review's are in the table under
+[print reviews](#print-reviews).
+
 ## The programmatic surface
 
 The MCP server, REST API and Home Assistant MQTT bridge are thin transports over the same
@@ -547,18 +584,25 @@ engine the UI talks to, so they add no logic of their own and cannot drift from 
   request and response by correlating a `req_id`, and `engine.snapshot()` encodes a camera's
   freshest frame as JPEG.
 - [`server/api.py`](../printguard/server/api.py) is a FastAPI sub-app at `/api/v1`, each
-  route tagged with the scope it requires. Every write goes through `engine.request()`. The history route does too. Other reads
-  call the engine directly: the state, list and get routes use `state_event()` with printer,
-  notifier, MQTT and camera-source credentials stripped and each plugin's store left out, and the alert snapshot, camera frame,
+  route tagged with the scope it requires. The token is checked before any of the request body
+  is read. Every write goes through `engine.request()`, and the history route does too. Other
+  reads call the engine directly: the state, list and get routes use `state_event()` through
+  `public_state()`, which strips printer, notifier, MQTT and camera-source credentials and
+  leaves out each plugin's store and the API tokens, and the alert snapshot, camera frame,
   classify and events routes use `monitor_snapshot()`, `snapshot()`, `classify()` and
   `recent_events()`. `recent_events()` is the newest 100 alert, warning and error events.
   `device` events are left out, since one printing printer sends enough of them to push an
-  alert out in minutes.
+  alert out in minutes. A print file is streamed into the `files` store by
+  [`server/prints.py`](../printguard/server/prints.py) before `print.add` registers it, and
+  downloaded from there.
 - [`server/mcp.py`](../printguard/server/mcp.py) derives its tools from that app with
-  `FastMCP.from_fastapi`, leaving out the camera frame, the alert snapshot,
-  classify, and the print file download and upload, which carry a binary body. It adds three tools of its own,
-  `get_camera_frame` and `get_monitor_snapshot` returning native image content and `classify_frame` taking a base64
-  image, and enforces the route scope tags so a caller only sees the tools its token may use.
+  `FastMCP.from_fastapi`, leaving out the camera frame, the alert snapshot, classify, and the
+  print file download and upload, which carry a binary body. The derived tools call the REST
+  app in process under a token minted at boot. It adds three tools of its own,
+  `get_camera_frame` and `get_monitor_snapshot` returning native image content and
+  `classify_frame` taking a base64 image, and enforces the route scope tags so a caller only
+  sees the tools its token may use. Once tokens exist, a request with no valid bearer is
+  answered `401` before a session opens.
 - [`server/mqtt.py`](../printguard/server/mqtt.py) bridges the engine to Home Assistant. It
   subscribes to engine events as a transport sink, reconciles one MQTT device per monitor
   through Home Assistant discovery, and routes inbound commands, the Enabled switch and the
@@ -586,7 +630,8 @@ flowchart LR
     engine["engine (state, commands)"] -- "permitted state" --> panel & page & worker
     panel["plugin.js<br/>plugin-sandbox.html<br/>opaque-origin iframe"] -- "node tree + effects" --> ui["UI draws it"]
     page["panel.html<br/>plugin-panel.html<br/>opaque-origin iframe"] -- "its own markup + effects" --> ui
-    worker["worker.js<br/>QuickJS in wasm<br/>no fs, no sockets, fuel-capped"] -- "effects" --> engine
+    worker["worker.js<br/>QuickJS in wasm<br/>no fs, no sockets, fuel-capped"] -- "effects" --> runtime["hub runtime checks them"]
+    runtime -- "checked effects" --> engine
     ui -- "checked effects" --> engine
 ```
 
@@ -619,7 +664,7 @@ starts a duplicate sandbox.
 The hub mounts `/plugins/<id>/` onto a plugin's route handler. A plugin holding the `gate`
 permission is asked about every other HTTP request except `/api/health` and its own routes,
 and about both WebSocket handshakes. An allowed HTTP answer is cached for 10 s per credential,
-method and path. A refusal is never cached.
+method, path and query. A refusal is never cached.
 
 `PRINTGUARD_PLUGINS=off` starts with every plugin off, and the state snapshot reports each as
 disabled so the dashboard stops its half too. [Plugins](plugins.md) covers installing
@@ -634,9 +679,16 @@ changelog history the update dialog browses, each release with the `files_url` i
 relative links resolve against. The engine also checks at boot and every 24
 hours after it while `settings.update_check` is on, and 15 minutes after a check that failed. With it off, `update.releases` serves an
 empty history until `update.check` is sent. The `state` snapshot carries only the status,
-meaning version, latest and whether an update is available, because every release's notes
-together dwarf the rest of the snapshot and the history is wanted only while that dialog is
-open.
+because every release's notes together dwarf the rest of the snapshot and the history is wanted
+only while that dialog is open.
+
+| `update` field | Holds |
+|---|---|
+| `current`, `latest` | The running version and the newest published one |
+| `available` | Whether `latest` is newer |
+| `download` | The desktop app's installer for `latest`, or `null` where the deployment updates outside the app |
+| `checked_at` | When the check answered |
+| `releases_url` | The repository's releases page |
 
 `report.send` is the anonymous bug report
 ([`engine/reports.py`](../printguard/engine/reports.py)). It is one user-initiated POST of a
@@ -652,7 +704,8 @@ read the diagnostics or take them somewhere else.
 
 One setup ([`engine/logs.py`](../printguard/engine/logs.py)) serves the container and the
 desktop app. Entry points call it once and records flow to stdout for `docker logs`, to a rotating file where
-no console exists, since the desktop app sets `LOG_FILE` in its data directory, and into a
+no console exists, since the desktop app sets [`LOG_FILE`](deployment.md#environment-variables)
+to `printguard.log` in its data directory, kept to 2 MB with two backups, and into a
 bounded in-memory tail of 400 lines. The desktop app's window is a separate process, and its
 records come back over a queue to be written by the same handlers. The formatter on all three
 runs every line, traceback included, through the scrubber events use, so a stored credential
@@ -680,7 +733,6 @@ for development and packaging.
 |---|---|---|
 | `MODEL_DIR` | The model, its metadata and prototypes | `models/` |
 | `STATIC_DIR` | The built dashboard the hub serves | `web/dist` |
-| `LOG_FILE` | A rotating log file, 2 MB with two backups | None, and `printguard.log` in the desktop app's data directory |
 | `MEDIAMTX_BINARY` | The MediaMTX binary the hub supervises, 1.19.0 or newer. The hub starts it with a random login for its control API, which `mediamtx.yml` grants to nobody. Unset, the hub expects one already running | Unset |
 | `MEDIAMTX_CONFIG` | The config that binary starts with. The hub adds its API login as the second entry of `authInternalUsers`, so a config of your own has to declare exactly one user there, as `mediamtx.yml` does. A second one would be overwritten | `mediamtx.yml` |
 | `MEDIAMTX_API`, `MEDIAMTX_RTSP`, `MEDIAMTX_HLS` | Where MediaMTX's control API, RTSP and HLS listeners are. If a MediaMTX you run yourself wants a login for its API, put it in the URL as `http://user:pass@host:9997` | `http://localhost:9997`, `rtsp://localhost:8554`, `http://localhost:8888` |
@@ -693,6 +745,7 @@ for development and packaging.
 | `PRINTGUARD_URL` | The running hub the launch tests drive. Unset, Playwright starts the Vite dev server | Unset |
 | `PRINTGUARD_CAMERA_HOST` | The host the hub under test reaches the launch tests' fake camera on | `127.0.0.1` |
 | `PRINTGUARD_CDP`, `PRINTGUARD_LOG` | The desktop window's DevTools endpoint and the app's log file, for the launch tests | Unset |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | The R2 token `feedback-worker/pull.py` empties the training inbox with | Unset, and the script needs all three |
 
 ## Repository layout
 
@@ -706,7 +759,7 @@ printguard/
     appearance.py    the shape of the theme, custom themes, glass and layout the dashboard saves
     cameras.py       camera settings: defaults, clamps and WebRTC URL detection
     monitors.py      monitor config: a camera + printer pairing and its thresholds
-    printers.py      registered-printer (integration connection) validation
+    printers.py      registered-printer (integration connection) validation, heater targets and preheat presets
     prints.py        print library records: formats, names and which printers a file may go to
     gcode.py         what a sliced file says about itself: estimates, printer model, preview
     scheduler.py     fair allocation of inference across cameras
@@ -731,7 +784,7 @@ printguard/
     platform.py      the hub's Platform: capture, MediaMTX, httpx, the state file and the file store
     inference.py     LiteRT and ONNX Runtime selection and the worker benchmark
     events.py        the per-socket queue that conflates state and result events
-    publish.py       pushes browser recordings and MJPEG sources into MediaMTX over RTSP
+    publish.py       pushes browser recordings, MJPEG sources, capture devices and the Bambu chamber camera into MediaMTX over RTSP
     api.py           REST API (/api/v1) over the engine protocol, scoped by token
     mcp.py           MCP server for agents, derived from the REST API
     prints.py        print library uploads and downloads, shared by the dashboard and the REST API
@@ -743,7 +796,7 @@ printguard/
     desktop.py       macOS and Windows tray app around the hub
 web/                 React + Tailwind UI (presentation only)
   src/               the dashboard: the store, the engine socket and the components
-  public/            plugin-sandbox.html and plugin-panel.html, the opaque-origin frames a plugin runs in
+  public/            plugin-sandbox.html and plugin-panel.html, the opaque-origin frames a plugin runs in, the guide's pictures and the touch icon
   site/              the landing page published to GitHub Pages
   launch/            Playwright run from camera to alert against a running build
   tests/             Playwright tests of the browser plugin sandbox, the dashboard and README rendering
@@ -755,9 +808,13 @@ models/              TFLite and ONNX encoders, normalisation metadata, class pro
 tests/               engine simulation, adapter contracts, the hub and the plugin sandbox (pytest)
 packaging/           the desktop app build: PyInstaller spec and its entry script, build script, macOS entitlements and the Windows app config
 templates/           the Unraid container template
+ca_profile.xml       the maintainer profile Unraid's Community Applications reads
 docs/                these pages and their screenshots
+.github/workflows/   CI, the release and the issue lifecycle
 Dockerfile           the image, with MediaMTX and the built dashboard inside
+docker-compose.yaml  the compose file the README installs with
 mediamtx.yml         the config the bundled MediaMTX starts with
+pyproject.toml       the package, its dependencies and the one place the version lives
 ```
 
 ## The website
