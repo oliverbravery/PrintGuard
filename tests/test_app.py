@@ -833,3 +833,14 @@ def test_an_event_holding_nan_cannot_be_written_to_a_dashboard() -> None:
     assert encode_event({"event": "state", "n": 1.5}) == '{"event": "state", "n": 1.5}'
     with pytest.raises(ValueError):
         encode_event({"event": "state", "settings": {"mqtt": {"keepalive": float("nan")}}})
+
+
+@pytest.mark.parametrize("origin", ["http://test:abc", "http://test:99999", "http://[::1"])
+async def test_an_origin_that_cannot_be_read_is_refused_not_answered_with_a_crash(monkeypatch, origin: str) -> None:
+    async with named_hub(monkeypatch) as (app, client, _told):
+        headers = {"host": "test", "origin": origin}
+        assert (await client.post("/api/prints?filename=a.stl", content=b"solid", headers=headers)).status_code == 403
+        assert (await client.post("/api/prints/inspect?ext=gcode", content=b"G28", headers=headers)).status_code == 403
+        assert (await client.get("/hls/camera-one/index.m3u8", headers=headers)).status_code == 403
+        assert await handshake_answer(app, "/api/ws", headers) == "websocket.close"
+        assert await handshake_answer(app, "/api/publish/cam", headers) == "websocket.close"

@@ -70,6 +70,9 @@ def normalised_origin(origin: str) -> str:
     Returns:
         Its scheme and host in lower case, with the port left off when it is
         the scheme's own.
+
+    Raises:
+        ValueError: If the origin has a port that is not a number or a malformed address.
     """
     parts = urlsplit(origin.strip())
     host = parts.hostname or ""
@@ -99,8 +102,11 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str], *, required: b
     origin = connection.headers.get("origin")
     if not origin:
         return not required
-    if normalised_origin(origin) in allowed:
-        return True
+    try:
+        if normalised_origin(origin) in allowed:
+            return True
+    except ValueError:
+        return False
     host = connection.headers.get("x-forwarded-host") or connection.headers.get("host")
     return bool(host) and urlsplit(origin).netloc == host.split(",")[0].strip()
 
