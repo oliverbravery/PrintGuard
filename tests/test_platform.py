@@ -879,3 +879,42 @@ async def test_a_released_camera_is_forgotten_once_its_reader_has_stopped(monkey
 
     assert platform._closing == {}
     assert reader() is None
+
+
+def test_a_closed_device_leaves_no_frame_pointing_into_its_buffers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """V4L2's raw formats decode into buffers the close unmaps, so the kept frame is copied out, then dropped at the close."""
+    writable: list[int] = []
+    online_at_close: list[bool] = []
+    ended, constructed = threading.Event(), threading.Event()
+
+    class Frame:
+        def make_writable(self) -> None:
+            writable.append(1)
+
+    class Device:
+        streams = SimpleNamespace(video=[SimpleNamespace(average_rate=30, guessed_rate=30, codec_context=object())])
+
+        def decode(self, stream: object) -> object:
+            yield Frame()
+            constructed.wait()
+            raise RuntimeError("device unplugged")
+
+        def close(self) -> None:
+            online_at_close.append(source.online)
+            ended.set()
+
+    monkeypatch.setattr(av, "open", lambda *args, **kwargs: Device())
+    monkeypatch.setattr("printguard.server.platform.RECONNECT_DELAY_S", 5.0)
+    source = AVSource("/dev/video0", None, "v4l2", ({},))
+    constructed.set()
+    try:
+        assert ended.wait(5.0)
+        deadline = time.monotonic() + 5
+        while source._latest is not None and time.monotonic() < deadline:
+            time.sleep(0.01)
+    finally:
+        source.close()
+
+    assert writable == [1]
+    assert online_at_close == [False]
+    assert source._latest is None and source._latest_rgb is None

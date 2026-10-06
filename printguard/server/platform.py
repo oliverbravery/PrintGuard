@@ -467,13 +467,14 @@ class AVSource:
                 self.last_error = self._without_credentials(str(exc))
                 logger.debug("camera source read failed: %s", self.last_error)
             finally:
+                self.online = False
                 if container is not None:
                     container.close()
                 if push is not None:
                     push.close()
                 if pipe is not None:
                     pipe.close()
-            self.online = False
+                self._latest = self._latest_rgb = None
             if not self._stop and self._demanded():
                 time.sleep(RECONNECT_DELAY_S)
         self._finished()
@@ -499,6 +500,9 @@ class AVSource:
                 for frame in container.decode(stream):
                     if self._stop or not self._demanded():
                         return
+                    if self._container_format is not None:
+                        # a device's raw frames point into buffers the close unmaps
+                        frame.make_writable()
                     self._seq += 1
                     self._latest = (frame, float(self._seq), time.time())
                     self.online = True
