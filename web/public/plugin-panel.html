@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'sha256-ZBWILvg2tUrfhEo3d9VPLpDkhOszzvaEn0oPT/7ecCo=' 'strict-dynamic' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'sha256-3x4w8X+zlR+RTReAXrpSBsnDuJUpOuix5Cdh4tsMrto=' 'strict-dynamic' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>PrintGuard plugin panel</title>
     <style>
@@ -18,7 +18,7 @@
       (function () {
         "use strict";
 
-        const closed = ["fetch", "fetchLater", "XMLHttpRequest", "WebSocket", "WebSocketStream", "WebTransport", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches"];
+        const closed = ["fetch", "fetchLater", "XMLHttpRequest", "WebSocket", "WebSocketStream", "WebTransport", "EventSource", "Worker", "SharedWorker", "indexedDB", "caches", "AudioContext", "webkitAudioContext", "speechSynthesis"];
         for (const name of [...closed, ...Object.getOwnPropertyNames(window).filter((name) => name.includes("RTC"))]) {
           try {
             delete window[name];
@@ -94,6 +94,13 @@
         };
         window.pg = pg;
 
+        function silenceMedia() {
+          const policy = document.createElement("meta");
+          policy.httpEquiv = "Content-Security-Policy";
+          policy.content = "media-src 'none'";
+          document.head.appendChild(policy);
+        }
+
         function paint(html) {
           const range = document.createRange();
           range.selectNodeContents(document.body);
@@ -130,6 +137,7 @@
               store = data.store || {};
               pg.state = data.state || {};
               applyTheme(data.theme);
+              if (!data.sound) silenceMedia();
               for (const [name, blob] of Object.entries(data.assets || {})) assets.set(name, URL.createObjectURL(blob));
               paint(String(data.html || ""));
               reportHeight();
@@ -179,6 +187,10 @@
       message port PrintGuard hands over once. A page that replaced this one
       would hold no port, and the dashboard removes the frame the moment it
       loads anything a second time.
+
+      Audio and video from blobs play only for a plugin granted `sound`. A policy
+      can only be tightened once it is set, so the page starts open and the script
+      closes it as it starts.
 
       Assets arrive as blobs rather than as base64 or a URL: a blob made here
       belongs to this origin, so the plugin can point an <img> or a <video> at

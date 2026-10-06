@@ -52,8 +52,8 @@ async function runInFrame(
 const runInSandbox = (page: import("@playwright/test").Page, code: string, state: unknown = {}, pause = 0) =>
   runInFrame(page, "plugin-sandbox.html", [{ id: 1, t: "init", code, store: {} }, { id: 2, t: "state", state }], "result", pause);
 
-const runInPanel = (page: import("@playwright/test").Page, html: string) =>
-  runInFrame(page, "plugin-panel.html", [{ t: "init", html, assets: {}, state: {}, theme: {}, store: {} }], "effects");
+const runInPanel = (page: import("@playwright/test").Page, html: string, sound = false) =>
+  runInFrame(page, "plugin-panel.html", [{ t: "init", html, assets: {}, state: {}, theme: {}, store: {}, sound }], "effects");
 
 test("a plugin runs in an opaque origin with no way out", async ({ page }) => {
   await page.goto("/");
@@ -200,6 +200,36 @@ test("a panel's script runs inside an element", async ({ page }) => {
   const result = await runInPanel(page, `<div><p>drawn</p><script>pg.log("nested")</script></div><script>pg.log("after")</script>`);
 
   expect(result.effects.map((effect: any) => effect.text)).toEqual(["nested", "after"]);
+});
+
+const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+
+const SOUND_PROBE = `<script>
+  const refused = [];
+  document.addEventListener("securitypolicyviolation", (event) => refused.push(event.violatedDirective));
+  const audio = document.createElement("audio");
+  audio.src = "${SILENT_WAV}";
+  document.body.appendChild(audio);
+  audio.load();
+  setTimeout(() => pg.log(JSON.stringify({
+    context: typeof AudioContext + typeof webkitAudioContext,
+    speech: typeof speechSynthesis,
+    refused: refused.map((directive) => directive.split("-")[0]),
+  })), 500);
+</script>`;
+
+test("a panel without the sound permission can make no sound", async ({ page }) => {
+  await page.goto("/");
+  const said = JSON.parse((await runInPanel(page, SOUND_PROBE)).effects[0].text);
+
+  expect(said).toEqual({ context: "undefinedundefined", speech: "undefined", refused: ["media"] });
+});
+
+test("a panel granted sound may play the audio it shipped, and still has no audio context", async ({ page }) => {
+  await page.goto("/");
+  const said = JSON.parse((await runInPanel(page, SOUND_PROBE, true)).effects[0].text);
+
+  expect(said).toEqual({ context: "undefinedundefined", speech: "undefined", refused: [] });
 });
 
 const PIP = `

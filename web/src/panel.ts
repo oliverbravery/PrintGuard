@@ -47,7 +47,7 @@ export class PluginPanelHost {
     this.port = sandbox.port;
     this.frame.className = "block h-24 w-full border-0 bg-transparent transition-[height] duration-150";
     container.appendChild(this.frame);
-    this.port.postMessage({ t: "init", html, assets, state, theme: themeTokens(), store: record.config });
+    this.port.postMessage({ t: "init", html, assets, state, theme: themeTokens(), store: record.config, sound: record.granted.includes("sound") });
   }
 
   private receive = (data: any) => {
