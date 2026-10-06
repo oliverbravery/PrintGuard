@@ -581,7 +581,8 @@ async def test_the_schema_is_served_without_a_token() -> None:
     """It describes the API and holds nothing of the hub's, so a client can read it before it has a token."""
     async with api(("read",)) as (client, _engine, _platform, _monitor_id, _printer_id, _camera_id, _tokens):
         assert (await client.get("/openapi.json")).status_code == 200
-        assert (await client.get("/docs")).status_code == 200
+        assert (await client.get("/docs")).status_code == 404
+        assert (await client.get("/redoc")).status_code == 404
         assert (await client.get("/state")).status_code == 401
 
 

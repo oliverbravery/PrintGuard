@@ -31,8 +31,9 @@ export const INTRO: GuideSection[] = [
     body: (
       <>
         A vision model running on your own hardware scores every frame from your printer camera. When
-        a defect holds it pauses or cancels the print and sends you a snapshot. No frame leaves your
-        network unless you choose to send it.
+        a defect holds it pauses or cancels the print and sends you a snapshot. Frames stay on your
+        hardware. A defect snapshot goes to the alert channels you set up, and nothing else leaves
+        unless you send it for training.
       </>
     ),
   },
@@ -112,7 +113,8 @@ export const GUIDE: GuideSection[] = [
       <>
         PrintGuard watches your printer cameras with an on-device vision model, pauses or cancels the
         print when a defect holds, and pushes a snapshot to your phone. There's no cloud and no subscription,
-        and your frames stay on hardware you own unless you choose to send them.
+        and your frames stay on your hardware. A defect snapshot goes to the alert channels you set up,
+        and nothing else leaves unless you send it for training.
       </>
     ),
   },
@@ -273,9 +275,10 @@ export const GUIDE: GuideSection[] = [
     title: "Your frames stay yours",
     body: (
       <>
-        Inference runs entirely on your own hardware. PrintGuard keeps a few frames from each print
+        Inference runs entirely on your own hardware, and a defect snapshot goes only to the alert
+        channels you set up. PrintGuard keeps a few frames from each print
         on your hub, and after a print you can label them and send them to me to train the detection
-        model. Nothing is sent unless you press Send, and you can switch the prompt off in Settings,
+        model. Training frames are only sent when you press Send, and you can switch the prompt off in Settings,
         under Advanced.
       </>
     ),

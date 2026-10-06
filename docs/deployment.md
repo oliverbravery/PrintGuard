@@ -177,10 +177,10 @@ is called DNS rebinding.
       PRINTGUARD_ORIGINS: "https://hub.example.com"   # comma-separate several
 ```
 
-Each entry needs its scheme. Capitals, a `:443` or `:80` and a trailing dot on the name make no
+Each entry needs its scheme, which is `http` or `https`. Capitals, a `:443` or `:80` and a trailing dot on the name make no
 difference, and the hub logs a warning at start for an entry it can't read.
 
-Every request for a name that isn't covered gets a `403` that says which line to add, and the
+Every request for a name that isn't covered, or that sends no `Host` header, gets a `403` that says which line to add, and the
 hub logs the same line once for each of the first 32 names. A WebSocket is closed with no text,
 so look in the log. That includes the REST API, the MCP server and `/api/health`, so point an
 uptime check at the hub's address or list the name it uses.
@@ -189,12 +189,15 @@ The check reads both `Host` and `X-Forwarded-Host`, so it works whether your pro
 host or forwards it. Tailscale, Cloudflare and oauth2-proxy all do one or the other.
 
 The hub also rejects any WebSocket, print upload or camera stream request a browser sends from an
-`Origin` that is not the address the request was for or one listed in `PRINTGUARD_ORIGINS`. An upload or stream
+`Origin` that is not the address the request was for, with the same scheme and port, or one listed in
+`PRINTGUARD_ORIGINS`. Behind a proxy that ends TLS, send `X-Forwarded-Proto` so the scheme matches. An upload or stream
 request with no `Origin`, which is what a script sends, is let through. A WebSocket with none is refused,
 since every browser sends one and only the dashboard opens them. An `Origin` that isn't a valid
 address is refused too, with a `403` or by closing the WebSocket. An auth proxy checks the session cookie,
 and the browser attaches that cookie to sockets opened by other sites too, so this is what stops
 a signed-in user's other tabs from driving the engine.
+
+The dashboard and its files carry `X-Frame-Options: SAMEORIGIN` and a `frame-ancestors 'self'` policy, so no other site can frame the hub and click through it.
 
 ## Plugins
 

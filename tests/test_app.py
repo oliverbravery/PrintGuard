@@ -7,6 +7,7 @@ import json
 import threading
 import time
 from contextlib import asynccontextmanager
+from importlib.metadata import version as package_version
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -38,6 +39,36 @@ async def test_web_static_files_revalidate_html_and_cache_hashed_assets(tmp_path
     assert asset.headers["cache-control"] == ASSET_CACHE_CONTROL
     assert unchanged.status_code == 304 and unchanged.headers["cache-control"] == REVALIDATE_CACHE_CONTROL
     assert "etag" in html.headers and "etag" in asset.headers
+
+
+async def test_the_dashboard_and_its_files_cannot_be_framed_by_another_site(tmp_path, monkeypatch) -> None:
+    """The dashboard frames its own sandbox pages, so the hub's own origin stays allowed."""
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<html></html>")
+    (tmp_path / "plugin-sandbox.html").write_text("<html></html>")
+    (tmp_path / "assets" / "index-abc123.js").write_text("export {}")
+    monkeypatch.setenv("STATIC_DIR", str(tmp_path))
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        for path in ("/", "/assets/index-abc123.js", "/plugin-sandbox.html"):
+            response = await client.get(path)
+            assert response.headers["x-frame-options"] == "SAMEORIGIN", path
+            assert response.headers["content-security-policy"] == "frame-ancestors 'self'", path
+
+
+async def test_the_hub_serves_no_interactive_api_pages_and_no_root_schema(monkeypatch) -> None:
+    """The pages load Swagger UI and ReDoc from a CDN on the hub's own origin, and the root schema lists internal routes."""
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        for path in ("/docs", "/redoc", "/openapi.json", "/api/v1/docs", "/api/v1/redoc"):
+            assert (await client.get(path)).status_code == 404, path
+        schema = await client.get("/api/v1/openapi.json")
+
+    assert schema.status_code == 200 and schema.json()["info"]["version"] == package_version("printguard")
 
 
 async def test_health_reports_ready_version_without_caching() -> None:
@@ -281,6 +312,24 @@ async def test_a_rebinding_page_is_refused_whatever_it_asks_for(monkeypatch) -> 
 
     assert len(told) == 2, "one line a name, however many requests it sends"
     assert "PRINTGUARD_ORIGINS=http://evil.example:8000" in told[0]
+
+
+async def test_a_request_naming_no_host_is_refused(monkeypatch) -> None:
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        return {"type": "http.request"}
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    scope = {"type": "http", "method": "GET", "scheme": "http", "path": "/api/health", "raw_path": b"/api/health", "root_path": "", "query_string": b"", "headers": []}
+    async with named_hub(monkeypatch) as (app, _client, told):
+        await app(scope, receive, send)
+        assert sent[0]["status"] == 403
+        assert await handshake_answer(app, "/api/ws", {"origin": "http://test"}) == "websocket.close"
+
+    assert told == ["PrintGuard refused a request that names no host."]
 
 
 async def test_a_proxied_hub_answers_to_the_name_in_printguard_origins(monkeypatch) -> None:
@@ -883,6 +932,28 @@ def test_an_event_holding_nan_cannot_be_written_to_a_dashboard() -> None:
         encode_event({"event": "state", "settings": {"mqtt": {"keepalive": float("nan")}}})
 
 
+@pytest.mark.parametrize(
+    ("host", "origin", "extra", "answered"),
+    [
+        ("192.168.1.20:80", "http://192.168.1.20", {}, 400),
+        ("192.168.1.20", "http://192.168.1.20:80", {}, 400),
+        ("tower:8000", "http://tower:8000", {}, 400),
+        ("tower:8000", "file://tower:8000", {}, 403),
+        ("tower:8000", "chrome-extension://tower:8000", {}, 403),
+        ("tower:8000", "https://tower:8000", {}, 403),
+        ("tower", "https://tower", {"x-forwarded-proto": "https"}, 400),
+        ("tower", "http://tower", {"x-forwarded-proto": "https"}, 403),
+    ],
+)
+async def test_an_origin_is_the_hubs_own_only_with_the_scheme_and_port_it_was_asked_on(
+    monkeypatch, host: str, origin: str, extra: dict[str, str], answered: int
+) -> None:
+    """A 400 is the empty upload the origin let through."""
+    async with named_hub(monkeypatch) as (_app, client, _told):
+        headers = {"host": host, "origin": origin, **extra}
+        assert (await client.post("/api/prints?filename=a.stl", content=b"solid", headers=headers)).status_code == answered
+
+
 @pytest.mark.parametrize("origin", ["http://test:abc", "http://test:99999", "http://[::1"])
 async def test_an_origin_that_cannot_be_read_is_refused_not_answered_with_a_crash(monkeypatch, origin: str) -> None:
     async with named_hub(monkeypatch) as (app, client, _told):
@@ -912,6 +983,19 @@ async def test_an_origin_entry_with_a_trailing_dot_still_names_the_hub(monkeypat
         assert (await client.get("/api/health", headers={"host": "hub.example.com."})).status_code == 200
         upload = await client.post("/api/prints?filename=a.stl", content=b"solid", headers={"host": "printguard:8000", "origin": "https://hub.example.com"})
         assert upload.status_code == 400, "the origin was refused, where the file should have been"
+
+
+async def test_an_origin_entry_with_another_scheme_is_ignored_and_names_no_host(monkeypatch) -> None:
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", "ftp://ftp.example.io, https://ok.example.com")
+    told: list[str] = []
+    monkeypatch.setattr("printguard.server.app.logger.warning", lambda message, *args: told.append(message % args))
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/api/health", headers={"host": "ok.example.com"})).status_code == 200
+        assert (await client.get("/api/health", headers={"host": "ftp.example.io"})).status_code == 403
+
+    assert any("ftp://ftp.example.io is ignored" in line for line in told)
 
 
 async def test_an_origin_entry_that_cannot_be_read_is_ignored_and_the_hub_still_starts(monkeypatch) -> None:

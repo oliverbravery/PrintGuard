@@ -254,6 +254,8 @@ Neither frame has `fetch`, `WebSocket` or `RTCPeerConnection`, and a frame made 
 no script of its own. [What a browser still allows](plugins.md#what-a-browser-still-allows)
 lists what is left.
 
+The hub only lets its own pages put the dashboard and these two frames in a frame, so another site can't frame them.
+
 ### plugin.js
 
 `plugin.render` returns a tree of [nodes](#nodes). PrintGuard draws them with its own

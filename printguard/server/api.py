@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+from importlib.metadata import version as package_version
 from typing import Annotated, Any, Awaitable, Callable, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
@@ -199,7 +200,7 @@ FRAME_BODY = {
 
 class _ReadModel(BaseModel):
     """Base for the read-surface response models, documenting each field for
-    `/api/v1/docs` yet passes any unlisted field straight through and tolerates
+    `/api/v1/openapi.json` yet passes any unlisted field straight through and tolerates
     absent ones, so a response still mirrors the resource's `.public()` exactly."""
 
     model_config = ConfigDict(extra="allow")
@@ -285,7 +286,9 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
     """Builds the /api/v1 sub-application, with the engine attached at startup."""
     api = FastAPI(
         title="PrintGuard API",
-        version="1",
+        version=package_version("printguard"),
+        docs_url=None,
+        redoc_url=None,
         summary="Monitor and control 3D printers through PrintGuard.",
     )
     api.router.route_class = ScopedRoute
