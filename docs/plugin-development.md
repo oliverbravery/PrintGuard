@@ -67,8 +67,8 @@ push.
 
 ## The manifest
 
-`plugin.json` says what the plugin is and everything it asks for. Only `id` and `version` are
-required, and a key PrintGuard does not recognise is dropped.
+`plugin.json` is a JSON object saying what the plugin is and everything it asks for. Only `id`
+and `version` are required, and a key PrintGuard does not recognise is dropped.
 
 ```
 my-plugin/
@@ -127,15 +127,15 @@ A plugin needs at least one of the three source files.
 | `platforms` | Where it runs. Leaving it out means everywhere |
 | `assets` | Files it ships beside its code |
 | `urls` | The only addresses it may reach. Needs `net` |
-| `secrets` | Up to 8 credentials the user fills in, each a short name against a line saying what it is |
+| `secrets` | Up to 8 credentials the user fills in, each a name of 1 to 40 lowercase letters, digits, underscores or hyphens against a line saying what it is, cut at 200 characters |
 | `oauth` | A sign-in PrintGuard runs for it. Needs `oauth` |
-| `provides` | Up to 8 channels it answers other plugins on. Needs `link:provide` |
+| `provides` | Up to 8 channels it answers other plugins on, each a name of 2 to 40 lowercase letters, digits or hyphens, starting and ending with a letter or digit, against a line saying what it answers. Needs `link:provide` |
 | `consumes` | Up to 16 `plugin-id:channel` names it calls. Needs `link:consume` |
 | `events` | The events that wake it |
 | `tick_s` | How often its worker runs anyway, 5 to 86400 seconds. Under 5 switches the timer off |
 
-A permission without a reason, `urls` without `net`, a [local address](#addresses) without
-`net:local`, `oauth` without the `oauth` permission, or `provides` and `consumes` without their
+A permission without a reason, `urls` without `net`, a [local address](#addresses) (a wildcard
+over a local suffix included) without `net:local`, `oauth` without the `oauth` permission, or `provides` and `consumes` without their
 link permission each refuse the install.
 
 ### Reasons
@@ -147,15 +147,17 @@ what your plugin does with it, not what the permission is.
 
 `icon`, `media` and a `README.md` are how a plugin presents itself. The icon sits beside its
 name, the media images open the plugin's page as a gallery, and the README renders under them
-the way GitHub renders it, relative image paths included. For a repository install these files
-are read from the repository at the pinned commit. A zip carries them inside it. Either way
-they add nothing to what runs, which is why an SVG is allowed here and not in `assets`.
+the way GitHub renders it. For a repository install these files are read from the repository
+at the pinned commit. A zip carries them inside it. Either way they add nothing to what runs,
+which is why an SVG is allowed here and not in `assets`.
 
 The README is shown as Markdown and little else. Headings, paragraphs, lists, links, images,
 code, tables and blockquotes are kept, with `align` on a table cell or paragraph and `width` and
 `height` on an image. Any other HTML is dropped and its text kept, so forms, `<details>`, video,
-inline SVG, `style`, `class` and task-list checkboxes do not render. Relative links and images
-resolve against the README's own folder.
+inline SVG, `style`, `class` and task-list checkboxes do not render. In a repository install,
+relative links and images resolve against the README's own folder at the pinned commit. A zip's
+README has no address to resolve against, so its relative links go nowhere and only an image
+the manifest lists in `media` shows, in the gallery.
 
 ### Surfaces
 
@@ -221,14 +223,15 @@ A URL with a `.` or `..` segment in its path matches no pattern, percent-encoded
 A pattern on this machine or the network around it needs `net:local` as well as `net`. That is
 any address that is not a public one, `localhost`, or a name ending `.local`, `.lan`,
 `.home`, `.home.arpa`, `.internal` or `.localhost`. A wildcard host counts, since it covers
-both. So does an address in any spelling a browser takes, such as `127.1` or `2130706433`. When
-a request leaves, PrintGuard resolves the name and checks the address it resolves to, so a
-public name pointing somewhere private is caught.
+both, and so does a wildcard over one of those suffixes, such as `*.local`. An address in any
+spelling a browser takes counts too, such as `127.1` or `2130706433`. When a request leaves,
+PrintGuard resolves the name and checks the address it resolves to, so a public name pointing
+somewhere private is caught.
 
 ## The three halves
 
 Each source file is one half of a plugin, and all three share one store. A `panel.html` reads
-the store as it was when the panel opened, so it doesn't see what the other two write after
+the store as it was when the panel was drawn, so it doesn't see what the other two write after
 that.
 
 | | `plugin.js` | `panel.html` | `worker.js` |
@@ -240,12 +243,12 @@ that.
 | `render`, `action` | Yes | No | No |
 | `on`, `serve` | Yes | `on` only | Yes |
 | `route`, `gate` | No | No | Yes |
-| Keeps top-level values | Until the dashboard reloads | Until the dashboard reloads | Never, each call gets a fresh VM |
+| Keeps top-level values | Until the dashboard reloads | Until the dashboard reloads, or the panel is redrawn, as toggling Customise does | Never, each call gets a fresh VM |
 
 `plugin.js` and `worker.js` each run inside a function with `plugin` in scope. `import` is a
-syntax error and there's no network. The `plugin.js` iframe does have a `document`, but the
-frame is hidden and its policy allows no styles or images, so nothing put there is shown. The
-opaque origin refuses storage. The worker has no DOM at all.
+syntax error and there's no network. Treat `plugin.js` as having no DOM. Its iframe does have a
+`document`, but the frame is hidden and its policy allows no styles or images, so nothing put
+there is shown. The opaque origin refuses storage. The worker has no DOM at all.
 
 Neither frame has `fetch`, `WebSocket` or `RTCPeerConnection`, and a frame made inside one runs
 no script of its own. [What a browser still allows](plugins.md#what-a-browser-still-allows)
@@ -256,8 +259,8 @@ lists what is left.
 `plugin.render` returns a tree of [nodes](#nodes). PrintGuard draws them with its own
 components, so a plugin matches the dashboard and inherits the user's theme.
 
-`render` runs on every state change and after every action, so keep it a plain function of the
-`ctx` it is handed. On the `monitor` and `settings` surfaces it is called once more per
+`render` runs on every state change and after every action and every event it hooks, so keep it
+a plain function of the `ctx` it is handed. On the `monitor` and `settings` surfaces it is called once more per
 monitor, with `ctx.target` naming which and `ctx.surface` naming where. It runs whether or not
 there is a panel, and returning `null` draws nothing.
 
@@ -304,20 +307,23 @@ the `panel` surface.
 </script>
 ```
 
-It runs in an opaque origin with `connect-src 'none'`, so `pg` is the only way out.
+It runs in an opaque origin with `connect-src 'none'`, so `pg` is the only way out. The
+`<video>` needs the `sound` permission, since a panel without it can play no audio or video, a
+muted loop included.
 
-Scripts go in `<script>` elements. An inline handler such as `onclick="..."` is refused, so use
-`addEventListener`. The frame cannot leave the page either: a link or a `location` change to
-another address stops the plugin with "sandbox navigated away".
+A `<script>` runs wherever it sits in the markup. An inline handler such as `onclick="..."` is
+refused, so use `addEventListener`. The frame cannot leave the page either: a link or a
+`location` change to another address stops the plugin with "sandbox navigated away".
 
 | On `pg` | |
 |---|---|
 | `pg.on("ready", fn)` | Called with the state once the panel is drawn |
 | `pg.on("state", fn)` | Called with the state on every change |
 | `pg.state` | The last state, for reading outside a handler |
+| `pg.secrets` | The names of the secrets the plugin holds, as a list. Never their values |
 | `pg.store` | Your own data. It saves when you assign the whole object, so `pg.store = { ...pg.store, on: true }` |
 | `pg.theme` | The dashboard's colours and fonts, by custom property name |
-| `pg.asset(name)` | A URL for a file you shipped, good inside your panel only |
+| `pg.asset(name)` | A URL for a file you shipped, good inside your panel only. Audio and video from it play only with `sound` |
 
 The dashboard's colours and fonts are also set as the custom properties it uses itself, so
 `var(--color-accent)` is the accent the user picked. The background is transparent and the
@@ -340,16 +346,22 @@ plugin.on("alert", (event, ctx) => {
 plugin.on("tick", (event, ctx) => ctx.log(`${ctx.store.alerts || 0} alerts so far`));
 ```
 
-That needs `alert` in `events` and a `tick_s`.
+That needs `alert` in `events`, a `tick_s` and `state:read`, since an `alert` event only reaches a
+plugin that holds it.
 
 A worker still busy with the last event is skipped, so a slow plugin drops events instead of
 falling behind. One that fails or runs past its limits is disabled and reported, and so is one
 whose answer is not the store and effects PrintGuard asked for, such as a worker that has
 redefined `toJSON` on a built-in prototype.
 
-A worker has `plugin` and the JavaScript built-ins in scope and nothing else. There is no
-`console` or `print`, so log with `ctx.log`. A call ends when your handler returns, so a promise
-or an `import()` never resolves.
+A worker has `plugin`, the JavaScript built-ins and QuickJS's own `atob`, `btoa`, `performance`,
+`navigator` and `queueMicrotask` in scope. There is no `console` or `print`, so log with
+`ctx.log`, and no timers or `fetch`. A call ends when your handler returns, so a promise or a
+`queueMicrotask` callback never runs and an `import()` never resolves.
+
+A worker saves only the keys it added, changed or deleted, over whatever is stored by the time
+it returns. Two writers touching different keys don't undo each other, and on the same key the
+last write wins.
 
 ## The ctx API
 
@@ -421,7 +433,7 @@ manifest's `events` names it. `tick` is the exception. It is the worker's own ti
 | `warning` | A watchdog condition, and its recovery | `monitor_id`, `message`, `recovered` | `state:read` |
 | `device` | A printer's status changed | `printer_id`, `status`, `progress`, `job`, `remaining_s`, `nozzle`, `bed` | `state:read` |
 | `error` | Anything that failed | `message` | `state:read` |
-| `state` | The full snapshot, once a second | Everything your permissions allow | `state:read` |
+| `state` | The full snapshot, once a second. `plugin.js` and `panel.html` also hear the one a command ends with | Everything your permissions allow | `state:read` |
 | `tick` | Your worker's own timer | Nothing | A `tick_s` |
 
 An event with a permission in the last column is dropped for a plugin that does not hold it.
@@ -443,8 +455,9 @@ plugin.on("result", (event, ctx) => {
 });
 ```
 
-That needs `printer:control` and `notify`, and it acts on a single frame. A monitor waits for a
-streak, so this will be twitchier. Count consecutive hits in `ctx.store` to match it.
+That needs `result` in `events`, `state:read`, `printer:control` and `notify`, and it acts on a
+single frame. A monitor waits for a streak, so this will be twitchier. Count consecutive hits in
+`ctx.store` to match it.
 
 ## Nodes
 
@@ -540,13 +553,17 @@ service finally answers on.
 
 A body over 256 KB fails the request, whether it is JSON, text or `binary`. The size is counted
 after decompression and before base64. PrintGuard asks for gzip or nothing, and an answer in any
-other encoding fails the same way. Nothing is cut short, so no `http` event arrives and the
-dashboard shows an error naming the host.
+other encoding fails the same way. Nothing is cut short, so no `http` event arrives. The error names the host and shows in the
+dashboard that sent the request, so one from a worker goes to the log and not the dashboard.
 
 ### Sockets
 
 `ctx.socket` opens a WebSocket under a tag and `socket` events carry it, with `state` saying
-`open`, `message` or `closed`. PrintGuard drops it when the plugin is disabled, reinstalled or removed, is stopped for failing, or loses `net` or `net:local`. A socket still connecting at that moment is closed as soon as it opens. The manifest needs `socket` in `events` and a `ws` or `wss` pattern in `urls`.
+`open`, `message` or `closed`. PrintGuard drops it when the plugin is disabled, reinstalled or removed, when its worker fails or
+its route answers badly, or when it loses `net` or `net:local`. A `plugin.js` or `panel.html` that
+stops in the dashboard tells the hub nothing, so its sockets stay open until one of those. A socket
+still connecting at that moment is closed as soon as it opens. The manifest needs `socket` in
+`events` and a `ws` or `wss` pattern in `urls`.
 
 A redirect is not followed here either. The socket fails to open, so declare the address the
 service finally answers on.
@@ -568,7 +585,8 @@ A worker has no screen and no speakers of its own, so its `ctx.notify`, `ctx.sou
 `ctx.background` are carried out by whichever dashboards are open. Nothing happens while none
 are.
 
-`ctx.sound` takes a list of tones or the name of an audio asset.
+`ctx.sound` takes a list of tones or the name of an audio asset, and a worker can name one as
+well as a `plugin.js` can.
 
 ```js
 plugin.on("alert", (event, ctx) => {
@@ -629,8 +647,9 @@ them the redirect URI to give the provider and links `register_url`.
 
 `authorize_url` and `token_url` are each one `https` address with no wildcards. An
 `authorize_url` may carry a query of its own, which is kept. A `token_url`
-on this machine or the network around it needs `net:local`. An update that changes either one
-signs its users out and has to be accepted again.
+on this machine or the network around it needs `net:local`. The consent dialog lists both
+addresses, and an update that changes either one signs its users out and has to be accepted
+again.
 
 ## Talking to other plugins
 
@@ -669,7 +688,8 @@ plugin.on("tick", (event, ctx) => ctx.publish({ channel: "now-playing", body: { 
 ```
 
 Both sides show up in the consent dialog. A disabled plugin answers nobody, and a call nobody
-answers expires after 30 seconds.
+answers expires after 30 seconds. A call takes the first answer, so a second one to the same
+call, such as another open dashboard sends, is ignored.
 
 ## Routes and gate
 
@@ -696,14 +716,17 @@ plugin.route((request, ctx) => ({
 |---|---|
 | `status` | 200 unless you say otherwise |
 | `type` | The content type, `text/plain` unless you say otherwise |
-| `body` | A string |
-| `headers` | `set-cookie`, `location` and `cache-control`. Anything else is dropped |
+| `body` | A string. It counts towards the 512 KB a worker may answer with, so a larger page disables the plugin |
+| `headers` | An object of strings, of which `set-cookie`, `location` and `cache-control` are kept and anything else is dropped |
+
+A `status` that is not a whole number from 100 to 599, or `headers` that are not an object of
+strings, stops the plugin. The request gets a 502 and the plugin is disabled and reported.
 
 Every response goes out under a content security policy with `sandbox allow-forms allow-scripts`
 and `frame-ancestors 'none'`. The page gets an opaque origin, so it cannot act as the dashboard or
 be framed by it. The same policy keeps the page to what its own response carries.
 
-| A page | |
+| A page a route serves | |
 |---|---|
 | Scripts and styles | Inline only. A `<script src>` or a stylesheet link is refused, your own routes included |
 | Images, audio, video and fonts | `data:` addresses, and `blob:` for all but fonts |
@@ -723,15 +746,16 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | What it sees | The same request shape a route gets, with no body. WebSocket handshakes are asked about too, as a `GET` |
 | Under load | A request that waits more than 5 seconds for the gate to be free is refused on its own. The gate is not disabled for it |
 | What stays open | `/api/health` and the gating plugin's own pages, so uptime checks keep working and it can serve its own sign-in page |
-| Caching | An approval is cached for 10 seconds per cookie, authorization header, method, path and query string. A refusal is never cached, so signing in takes effect at once |
+| Caching | An approval is cached for 10 seconds per cookie, authorisation header, method, path and query string. A refusal is never cached, so signing in takes effect at once |
 
 ## Limits
 
 | What | Limit |
 |---|---|
 | Source file | 256 KB each |
+| Zip | 12 MB. The dashboard refuses a larger file before sending it. A compression other than stored or deflate is refused |
 | Asset | 4 MB each, 12 MB across a plugin. An install is refused at the file that passes either |
-| README in a zip | 64 KB |
+| README in a zip | 64 KB. A larger one is left out, and so is an image over 4 MB, and the plugin installs without it |
 | Media | 8 images |
 | Secrets | 8, each value 4 KB |
 | OAuth scopes | 20 |
@@ -742,7 +766,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | Effects | 32 per call. The rest are dropped |
 | `plugin.js` call | 4 seconds, then the plugin is stopped |
 | Worker call | 96 MB of memory and 400 million units of wasmtime fuel, then the plugin is disabled. A call that waits more than 5 seconds to start is dropped |
-| Worker output | 512 KB per call, the store and effects together, then the plugin is disabled. So is one whose output is not an object carrying a list of effects |
+| Worker output | 512 KB per call, the store, the effects and a route's response body together, then the plugin is disabled. So is one whose output is not an object carrying a list of effects |
 | Node tree | 400 nodes |
 | Node text | `label` 80 characters, `action` 60, `placeholder` 60 |
 | `select` options | 60 |

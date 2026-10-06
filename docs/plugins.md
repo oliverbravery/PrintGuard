@@ -40,7 +40,7 @@ Four plugins are in the catalogue, and their source is in [`plugins/`](../plugin
 |---|---|---|
 | [Picture in picture](../plugins/picture-in-picture) | Puts a button on every monitor that floats its camera above your other windows | `state:read`, `camera:view` |
 | [Alert sounds](../plugins/alert-sounds) | Sounds a horn, a bell or an alarm when a defect is caught, on the monitors you pick | `state:read`, `sound` |
-| [Progress reports](../plugins/progress-reports) | Sends how far a print has got and how many defects it has seen, as often as you ask | `state:read`, `alert:send` |
+| [Progress reports](../plugins/progress-reports) | Sends how far a print has got and how many defects it has seen, as often as you ask while the monitor is watching | `state:read`, `alert:send` |
 | [Spotify](../plugins/spotify) | Puts the current cover behind the dashboard, with the track and the transport in a panel | `net`, `oauth`, `background` |
 
 ## Installing a plugin
@@ -55,6 +55,9 @@ The Plugins tab in Settings lists what you have installed and what the catalogue
 | A GitHub repository | Paste `owner/repo`, or `owner/repo/path@branch` for one inside a larger repo. A full `https://github.com/owner/repo` URL works too, and so does `@tag` or `@sha` in place of a branch |
 | A file | Import a `.zip` of the plugin's folder |
 
+An install or update from a repository fails with GitHub's status if a plugin file can't be read,
+and only a 404 means the plugin has no such file.
+
 ![The Spotify plugin's page in the store, with its screenshot, its README and the permissions it will ask for](assets/plugin-page.png)
 
 Every installed plugin has the same page, opened from its card. A README is shown as Markdown
@@ -65,9 +68,10 @@ refused if the plugin names other platforms.
 
 ## Verified and third party
 
-Verified means the manifest and every file hash to what the catalogue pins at a commit. These
-are the ones I have reviewed. Anything else is third party, so read it first. Both run under
-the same restrictions.
+Verified means the manifest and every file hash to what the catalogue pins at a commit. With
+the default catalogue these are the ones I have reviewed, and a hub whose `catalogue_url`
+points elsewhere checks against that file instead. Anything else is third party, so read it
+first. Both run under the same restrictions.
 
 When you enable one, PrintGuard reads its code and shows in the same dialog where the code and
 the manifest disagree.
@@ -86,8 +90,9 @@ a bad plugin, and the check that stops anything is the one at the sandbox edge.
 A plugin arrives switched off. **Enable** lists what it asks for, what each permission allows
 and the author's reason for it. It is all or nothing. Disabling keeps what you accepted.
 
-The list names the addresses a network permission covers and the other plugins it calls, so
-you see its whole reach before it runs.
+The list names the addresses a network permission covers, where a sign-in happens and where its
+tokens come from, and the other plugins it calls, so you see its whole reach before it runs. An
+update that asks for more brings up the same dialog.
 
 ## Updates
 
@@ -110,15 +115,15 @@ out.
 |---|---|
 | `state:read` | Read monitor names, scores and alerts, and camera and printer status, and hear each score, alert, warning, printer update and error as it happens |
 | `camera:view` | Put a live feed in its own panel |
-| `sound` | Sound a short alert through the speakers |
+| `sound` | Sound a short alert through the speakers, and play audio or video in its own panel |
 | `monitor:control` | Enable, disable and retune any monitor |
 | `printer:control` | Pause, resume and cancel prints |
 | `notify` | Raise a message in the dashboard |
-| `alert:send` | Send through your own ntfy, Pushover, Telegram or Discord |
+| `alert:send` | Send through whichever of your ntfy, Pushover, Telegram, Discord and desktop notification channels are set up |
 | `net` | Reach the addresses its manifest lists |
-| `net:local` | Reach addresses on this machine and the network around it, which covers private addresses, `localhost` and names ending `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost` |
+| `net:local` | Reach addresses on this machine and the network around it, which covers private addresses, `localhost`, names ending `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost`, and a wildcard over one of those such as `*.local` |
 | `monitor:manage` | Add monitors and delete them |
-| `camera:control` | Retune any camera's brightness, crop, rotation and frame rate |
+| `camera:control` | Rename any camera and change its brightness, contrast, sharpness, crop, rotation and frame rate |
 | `camera:manage` | Register cameras and delete them, and scan for ones not yet registered |
 | `camera:frames` | Take a still of any camera and read the picture itself |
 | `history:read` | Read a monitor's score history and past alerts |
@@ -128,13 +133,16 @@ out.
 | `oauth` | Sign you in to a service and use the result |
 | `link:provide` | Answer other plugins on the channels it offers |
 | `link:consume` | Ask the plugins and channels it names, and hear them |
-| `background` | Put a picture behind the dashboard and make the panels see-through |
+| `background` | Put a picture behind the dashboard, which the Glass theme shows through its see-through panels |
 | `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers |
 | `gate` | See and refuse every other request to the hub. A yes is reused for 10 seconds for the same cookie, authorisation header, method, path and query |
 
 Every permission a manifest asks for carries a line saying why, in the plugin author's own
 words, and one without a reason will not install. That line sits beside PrintGuard's own
 description of the permission when you are asked to accept it.
+
+A plugin can start a scan (`camera:manage`), a printer test (`printer:manage`) or a test alert
+(`settings`), but none of their answers reaches a plugin, so it never sees the result.
 
 Storing its own data needs no permission. The store is capped at 16 KB and saved with your
 PrintGuard state.
@@ -165,7 +173,7 @@ time, so a plugin that sends its frame elsewhere is stopped with "sandbox naviga
 
 | Attack | What stops it |
 |---|---|
-| Take your credentials somewhere | Neither sandbox has sockets. The browser files' policy is `connect-src 'none'`, WebRTC is removed from their frames, and the hub file has no WASI network and no filesystem. The only request out is one through PrintGuard, to addresses the plugin declared. A redirect is never followed, by a request or by a WebSocket. [What a browser still allows](#what-a-browser-still-allows) is below |
+| Take your credentials somewhere | Neither sandbox has sockets. The browser files' policy is `connect-src 'none'`, WebRTC is removed from their frames, and the hub file has no WASI network and no filesystem. The only request out is one through PrintGuard, to addresses the plugin declared, apart from the three permissions listed under the table. A redirect is never followed, by a request or by a WebSocket. [What a browser still allows](#what-a-browser-still-allows) is below |
 | Read your credentials at all | State is cut down to the fields a permission names. Printer configuration, notifier settings, MQTT credentials and API tokens are in no permission. The exceptions are `routes` and `gate`, which see the cookie and authorisation headers of the requests they answer |
 | Read your camera frames | A camera in a plugin's panel is a placeholder PrintGuard fills with its own player, and the video never enters the sandbox. Reading the picture itself is `camera:frames`, which is its own thing to agree to, and a plugin's own pages are refused the live stream |
 | Hang or exhaust the hub | The worker runs each call against a memory cap and a CPU budget, and a call that waits more than 5 seconds to start is dropped. A plugin that fails, or answers with anything but its data and a list of effects, is disabled and reported |
@@ -173,6 +181,11 @@ time, so a plugin that sends its frame elsewhere is stopped with "sandbox naviga
 | Do something it was not granted | Every command maps to a permission, checked at the sandbox edge before it goes anywhere |
 | Pretend to be PrintGuard | A `plugin.js` has no styling and no markup of its own, and PrintGuard draws what it describes with its own components. A `panel.html` does draw itself, inside a panel carrying the plugin's name. A plugin's own pages are served into a sandboxed origin that is not the dashboard's |
 | Change after review | The manifest and every source file are pinned by SHA-256 at a commit |
+
+`settings`, `printer:manage` and `camera:manage` let a plugin name an address that PrintGuard then
+contacts, by testing an alert channel, adding a printer or a camera, or repointing the catalogue.
+They are the exception to the declared addresses, so each is highlighted when you are asked to
+accept it.
 
 ### What a browser still allows
 
