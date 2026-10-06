@@ -189,7 +189,8 @@ def _run_webview(
     environment switch for this, since pywebview sets the browser arguments itself.
 
     Windows without the WebView2 runtime would draw the window with Internet Explorer's
-    engine, which cannot run the dashboard, so the dashboard opens in the browser there.
+    engine, which cannot run the dashboard, so the dashboard opens in the browser there,
+    once it answers when the hub is still starting.
     """
     root = logging.getLogger()
     root.addHandler(logging.handlers.QueueHandler(log_records))
@@ -197,7 +198,7 @@ def _run_webview(
     try:
         if sys.platform == "darwin":
             _enable_wkwebview_media()
-        if sys.platform == "win32" and "url" in contents:
+        if sys.platform == "win32" and ("url" in contents or awaiting):
             from webview.platforms import winforms
 
             if not winforms.is_chromium:
@@ -206,7 +207,9 @@ def _run_webview(
                     "install it from %s for the app window",
                     WEBVIEW2_DOWNLOAD,
                 )
-                webbrowser.open(contents["url"])
+                if awaiting:
+                    _wait_until_answering(awaiting, threading.Event())
+                webbrowser.open(contents.get("url") or _webview_url(awaiting))
                 return
         webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
         webview.settings["ALLOW_DOWNLOADS"] = True
@@ -227,17 +230,31 @@ def _starting_page() -> str:
     return STARTING_PAGE.substitute(log=html.escape(os.environ["LOG_FILE"]))
 
 
-def _open_when_serving(window: webview.Window, port: int) -> None:
-    """Swaps the starting page for the dashboard once the hub answers, giving up when the window closes."""
-    closed = threading.Event()
-    window.events.closed += closed.set
-    while not closed.wait(1.0):
+def _wait_until_answering(port: int, abandoned: threading.Event) -> bool:
+    """Waits for the hub to answer on a port.
+
+    Args:
+        port: The port the hub serves on.
+        abandoned: Set to stop waiting.
+
+    Returns:
+        True once the hub answers, False if the wait was abandoned first.
+    """
+    while not abandoned.wait(1.0):
         try:
             httpx.get(f"http://localhost:{port}/api/health", trust_env=False)
         except httpx.HTTPError:
             continue
+        return True
+    return False
+
+
+def _open_when_serving(window: webview.Window, port: int) -> None:
+    """Swaps the starting page for the dashboard once the hub answers, giving up when the window closes."""
+    closed = threading.Event()
+    window.events.closed += closed.set
+    if _wait_until_answering(port, closed):
         window.load_url(_webview_url(port))
-        return
 
 
 def _failure_page() -> str:
