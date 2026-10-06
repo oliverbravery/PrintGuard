@@ -41,11 +41,10 @@ def printer_model(typed: Any) -> str:
 
     Returns:
         The text with whitespace collapsed, control characters removed and no more
-        than ``PRINTER_MODEL_MAX`` UTF-16 units, which is how the Worker counts.
+        than ``PRINTER_MODEL_MAX`` characters.
     """
     collapsed = " ".join(str(typed or "").split())
-    printable = "".join(char for char in collapsed if unicodedata.category(char) != "Cc")
-    return printable.encode("utf-16-le", "surrogatepass")[: PRINTER_MODEL_MAX * 2].decode("utf-16-le", "ignore")
+    return "".join(char for char in collapsed if unicodedata.category(char) != "Cc")[:PRINTER_MODEL_MAX]
 
 
 async def _call(http: HttpFn, method: str, path: str, **request: Any) -> Any:

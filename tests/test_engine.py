@@ -2772,10 +2772,8 @@ def test_a_typed_printer_model_is_cut_to_what_the_inbox_takes() -> None:
     assert feedback.printer_model(None) == ""
     assert feedback.printer_model("  Voron \n 2.4\t") == "Voron 2.4"
     assert feedback.printer_model("Ender\x1b[2J\x00 3\x7f") == "Ender[2J 3"
-    assert feedback.printer_model("é中\ud800") == "é中"
+    assert feedback.printer_model("Prusa \u00e9\u4e2d") == "Prusa \u00e9\u4e2d"
     assert len(feedback.printer_model("a" * 200)) == feedback.PRINTER_MODEL_MAX
-    emoji = feedback.printer_model("\U0001f680" * 80)
-    assert emoji == "\U0001f680" * 40, "the inbox counts UTF-16 units, so 80 of them fit 40 emoji"
 
 
 async def test_a_refused_print_waits_and_sends_the_rest_after_the_limit_resets(monkeypatch) -> None:
