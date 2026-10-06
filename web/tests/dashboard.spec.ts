@@ -220,6 +220,19 @@ test("a review answered before its frames arrive still marks the alert frames, a
   expect(await page.evaluate(() => (window as any).__pg.getState().snapshotCache)).toEqual({});
 });
 
+test("review frames whose pictures were lost to a reconnect are asked for again", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
+  await emit(page, { event: "review", ...review(), frames: [{ id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 }] });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "Yes" }).click();
+  const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "snapshot.get").length);
+  await expect.poll(asked).toBe(1);
+
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: true }));
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: false }));
+  await expect.poll(asked).toBe(2);
+});
+
 test("the history sheet says when it has not loaded, and breaks its line between prints", async ({ page }) => {
   await dashboard(page, { statsMonitorId: "m1" });
   const sheet = page.getByRole("dialog", { name: "Prusa · history" });

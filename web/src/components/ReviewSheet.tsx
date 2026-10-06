@@ -34,9 +34,10 @@ function FrameCard({
 }) {
   const url = useStore((s) => s.snapshotCache[frame.id]);
   const fetchSnapshot = useStore((s) => s.fetchSnapshot);
+  const reconnecting = useStore((s) => s.reconnecting);
   useEffect(() => {
-    fetchSnapshot(monitorId, frame.id);
-  }, [monitorId, frame.id]);
+    if (!reconnecting) fetchSnapshot(monitorId, frame.id);
+  }, [monitorId, frame.id, reconnecting]);
   const label = verdict(frame, failure);
   return (
     <div className={`panel relative overflow-hidden ${failure && !removed ? "!border-bad" : ""}`}>
