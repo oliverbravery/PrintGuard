@@ -9,9 +9,12 @@ import hashlib
 import io
 import json
 import logging
+import struct
 import threading
 import time
+import tracemalloc
 import zipfile
+import zlib
 from urllib.parse import parse_qs, urlparse
 from contextlib import asynccontextmanager
 
@@ -4044,13 +4047,40 @@ def test_a_zip_declaring_more_than_a_plugin_may_ship_is_refused_before_it_is_unp
         for name in names:
             archive.writestr(name, bytes(plugins.MAX_ASSET_BYTES))
     unpacked: list[int] = []
-    read = zipfile.ZipFile.read
-    monkeypatch.setattr(zipfile.ZipFile, "read", lambda archive, name: unpacked.append(len(data := read(archive, name))) or data)
+    read = zipfile.ZipExtFile.read
+    monkeypatch.setattr(zipfile.ZipExtFile, "read", lambda member, size=-1: unpacked.append(len(data := read(member, size))) or data)
 
     with pytest.raises(ValueError, match="a3.txt takes the plugin past"):
         plugins.unpack(buffer.getvalue())
 
     assert sum(unpacked) <= plugins.MAX_ASSETS_BYTES + 2 * plugins.MAX_SOURCE_BYTES, "assets were unpacked past the total before it was checked"
+
+
+def test_a_zip_over_the_most_a_plugin_may_be_is_refused_before_it_is_opened() -> None:
+    with pytest.raises(ValueError, match="over 12 MB"):
+        plugins.unpack(bytes(plugins.MAX_ZIP_BYTES + 1))
+
+
+def test_a_manifest_that_understates_its_size_is_not_inflated_whole() -> None:
+    manifest = json.dumps(MANIFEST).encode()
+    padded = manifest + b" " * (64 * 1024 * 1024)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        archive.writestr("plugin.json", padded)
+    raw = bytearray(buffer.getvalue())
+    crc = zlib.crc32(manifest)
+    struct.pack_into("<I", raw, 14, crc)
+    struct.pack_into("<I", raw, 22, len(manifest))
+    struct.pack_into("<I", raw, raw.rfind(b"PK\x01\x02") + 16, crc)
+    struct.pack_into("<I", raw, raw.rfind(b"PK\x01\x02") + 24, len(manifest))
+    tracemalloc.start()
+    try:
+        plugins.unpack(bytes(raw))
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+    assert peak < 4 * 1024 * 1024, f"{peak // 1024 // 1024} MB was inflated for a manifest that declared {len(manifest)} bytes"
 
 
 def test_a_zip_keeps_no_more_page_files_than_a_plugin_may_ship() -> None:
