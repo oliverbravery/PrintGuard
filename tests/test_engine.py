@@ -4167,6 +4167,47 @@ async def test_a_poll_begun_before_a_pause_does_not_undo_the_read_made_after_it(
     assert [alert["action"] for alert in _of(events, "alert")] == ["pause"], "the paused print was paused again"
 
 
+async def test_a_poll_begun_before_a_manual_pause_does_not_undo_it(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    platform = FakePlatform(infer_s=0.02)
+    answer = platform.http
+    hold = False
+    held = asyncio.Event()
+    release = asyncio.Event()
+
+    async def http(method: str, url: str, **request: Any) -> tuple[int, Any]:
+        nonlocal hold
+        if method == "POST" and "/api/job" in url:
+            platform.device_status = "Paused"
+        answered = await answer(method, url, **request)
+        if hold and method == "GET" and url.endswith("/api/job"):
+            hold = False
+            held.set()
+            await release.wait()
+        return answered
+
+    monkeypatch.setattr(platform, "http", http)
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
+        printer_id = await _register_printer(engine)
+        patch = {"printer_id": printer_id, "on_defect": "pause", "consecutive": 1, "cooldown_s": 0}
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": patch})
+        await engine.watchdog.poll_devices()
+        printer = engine.printers.get(printer_id)
+        hold = True
+        poll = asyncio.create_task(engine.watchdog.poll_devices())
+        await asyncio.wait_for(held.wait(), 1.0)
+        await engine.handle({"cmd": "printer.action", "id": printer_id, "action": "pause"})
+        platform.failing = True
+        release.set()
+        await poll
+        after_the_old_answer = printer.reported_status
+        await asyncio.sleep(0.3)
+
+    assert after_the_old_answer == "paused", "an answer from before a manual pause replaced the read after it"
+    assert not _of(events, "alert"), "a print paused by hand was alerted on and sent a second pause"
+
+
 async def test_a_monitor_switched_off_while_its_printer_answers_shows_no_alert() -> None:
     platform = FakePlatform(infer_s=0.02)
     platform.action_delay_s = 0.3

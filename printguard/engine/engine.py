@@ -23,7 +23,7 @@ import numpy as np
 from . import appearance, feedback, gcode, logs, oauth, plugins, reports, updates, urls, vision
 from .cameras import CAMERA_DEFAULTS, declared_camera_id, same_stream, sanitise_camera, tidy_stream_url
 from .history import MonitorHistory
-from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, IntegrationAdapter, integrations_meta
+from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
 from .monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor, stored_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
 from .platform import Frame, Platform, as_chunks
@@ -1163,7 +1163,7 @@ class Engine:
         if not adapter:
             raise RuntimeError("no printer service linked")
         await adapter.send(self.platform.http, printer.config, DeviceAction(message["action"]))
-        await self._refresh_device(printer, adapter)
+        await self.watchdog.refresh(printer, after_command=True)
 
     async def _cmd_printer_heat(self, message: dict[str, Any]) -> None:
         """Sets a printer's nozzle and bed targets, then re-reads its state.
@@ -1182,26 +1182,7 @@ class Engine:
         adapter = INTEGRATIONS[printer.provider]
         for heater, target in targets.items():
             await adapter.heat(self.platform.http, printer.config, heater, target)
-        await self._refresh_device(printer, adapter)
-
-    async def _refresh_device(self, printer: Printer, adapter: IntegrationAdapter) -> None:
-        """Re-reads a printer's state after a command changed it, announces it and re-gates its monitors.
-
-        The command has already gone through, so a read that fails is left to
-        the next poll and never fails the command. So is one answered from
-        connection details the printer was edited away from meanwhile.
-        """
-        asked = (printer.provider, printer.config)
-        try:
-            state = await adapter.fetch_state(self.platform.http, printer.config)
-        except Exception as exc:
-            logger.warning("printer '%s' took a command but could not be read back: %s", printer.name, logs.describe(exc))
-            return
-        if (printer.provider, printer.config) != asked:
-            return
-        printer.observe(state.public())
-        self.emit({"event": "device", "printer_id": printer.id, **printer.device_state})
-        self.watchdog.follow_printers()
+        await self.watchdog.refresh(printer, after_command=True)
 
     async def _cmd_printer_test(self, message: dict[str, Any]) -> None:
         """Reads a printer's state from connection details that need not be registered.
@@ -1331,7 +1312,7 @@ class Engine:
         finally:
             self._starting.discard(printer.id)
         logger.info("print '%s' started on printer '%s'", record.name, printer.name)
-        await self._refresh_device(printer, adapter)
+        await self.watchdog.refresh(printer, after_command=True)
         self.emit({"event": "print_started", "id": record.id, "printer_id": printer.id, "req_id": message.get("req_id")})
 
     async def _cmd_monitor_add(self, message: dict[str, Any]) -> None:

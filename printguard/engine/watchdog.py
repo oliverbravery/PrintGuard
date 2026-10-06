@@ -119,22 +119,28 @@ class Watchdog:
         Returns:
             Seconds until the next poll.
         """
-        await asyncio.gather(*(self._refresh(printer) for printer in self._engine.printers.values()))
+        await asyncio.gather(*(self.refresh(printer) for printer in self._engine.printers.values()))
         return DEVICE_POLL_S
 
-    async def _refresh(self, printer: "Printer") -> None:
+    async def refresh(self, printer: "Printer", after_command: bool = False) -> None:
         """Reads a printer and re-gates its monitors when its state changed.
 
         A change in the status it last reported is saved, so a hub restarted
         while the printer is switched off still knows it was idle.
+
+        Args:
+            printer: The printer to read.
+            after_command: Whether this is the read that follows a command sent
+                to it, which a failure leaves to the next poll instead of
+                taking the printer offline.
         """
         reported = printer.reported_status
-        if await self._read(printer):
+        if await self._read(printer, after_command):
             self.follow_printers()
         if printer.reported_status != reported:
             self._engine.save()
 
-    async def _read(self, printer: "Printer") -> bool:
+    async def _read(self, printer: "Printer", after_command: bool = False) -> bool:
         """Reads a printer's state, taking a service that cannot be reached as offline.
 
         A printer removed by the time its turn comes is not read, since
@@ -144,7 +150,9 @@ class Watchdog:
         an address it no longer has, and one that lands after the answer to a
         read begun later, such as a poll still in flight when the re-read that
         follows a pause has already answered. A read that fails is logged when
-        it takes the printer offline, not on every poll after that.
+        it takes the printer offline, not on every poll after that. One that
+        follows a command that already went through is never taken as the
+        printer being offline.
 
         Returns:
             Whether the state changed.
@@ -158,6 +166,9 @@ class Watchdog:
         try:
             snapshot = (await adapter.fetch_state(self._engine.platform.http, printer.config)).public()
         except Exception as exc:
+            if after_command:
+                logger.warning("printer '%s' took a command but could not be read back: %s", printer.name, logs.describe(exc))
+                return False
             failure = exc
             snapshot = DeviceState(DeviceStatus.OFFLINE).public()
         if (
@@ -495,7 +506,7 @@ class Watchdog:
             finally:
                 printer = self._engine.printers.get(monitor["printer_id"])
                 if action not in ("none", "failed") and printer:
-                    await self._refresh(printer)
+                    await self.refresh(printer)
         finally:
             self.responding.discard(mid)
             if self._engine.settle_reviews():
@@ -532,7 +543,7 @@ class Watchdog:
                         return wanted
                     except Exception as exc:
                         last_error = exc
-                    await self._refresh(printer)
+                    await self.refresh(printer)
                     if printer.online and printer.device_state["status"] in stopped:
                         return wanted
                     await asyncio.sleep(ACT_RETRY_S)
