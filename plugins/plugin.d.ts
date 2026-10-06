@@ -282,7 +282,7 @@ declare global {
       event: K,
       handler: (event: K extends keyof PluginEvents ? PluginEvents[K] : PluginState) => void,
     ): void;
-    /** A URL for a file you shipped, good inside this panel and nowhere else. Point an `img` or a `video` at it. */
+    /** A URL for a file you shipped, good inside this panel and nowhere else. Point an `img` at it. Audio and video play only if the plugin was granted `sound`. */
     asset(name: string): string;
   }
 
