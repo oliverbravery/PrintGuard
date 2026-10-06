@@ -300,6 +300,26 @@ def _authorize_macos_camera() -> None:
     )
 
 
+def _decodable_video_stream(container: Any) -> Any:
+    """Picks a container's first video stream, refusing one nothing can decode.
+
+    Args:
+        container: An opened PyAV input container.
+
+    Returns:
+        The stream.
+
+    Raises:
+        RuntimeError: If FFmpeg can demux the stream but has no decoder for it,
+            as for an SVG. PyAV then has no codec context, and decoding through
+            that ends the process.
+    """
+    stream = container.streams.video[0]
+    if stream.codec_context is None:
+        raise RuntimeError("no decoder for this stream")
+    return stream
+
+
 class AVSource:
     """Continuously decodes a stream, keeping only the freshest frame.
 
@@ -415,7 +435,7 @@ class AVSource:
             pipe: Any = None
             try:
                 container, pipe = self._open()
-                stream = container.streams.video[0]
+                stream = _decodable_video_stream(container)
                 declared = float(stream.average_rate or 0)
                 if isinstance(self._source, str) and not self.fps and 0 < declared <= 240:
                     self.fps = min(60.0, declared)
@@ -929,7 +949,7 @@ class ServerPlatform:
         """Decodes supplied image bytes to an RGB frame with PyAV."""
         def decode() -> np.ndarray:
             with av.open(io.BytesIO(data)) as container:
-                return next(container.decode(video=0)).reformat(format="rgb24", threads=1).to_ndarray()
+                return next(container.decode(_decodable_video_stream(container))).reformat(format="rgb24", threads=1).to_ndarray()
 
         try:
             return await asyncio.to_thread(decode)

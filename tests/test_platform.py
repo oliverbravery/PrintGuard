@@ -9,6 +9,7 @@ import json
 import logging
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -704,3 +705,42 @@ def test_a_state_file_the_hub_may_not_read_says_whose_it_has_to_be(tmp_path, mon
     holder = SimpleNamespace(_state_path=tmp_path / "state.json")
     with pytest.raises(RuntimeError, match="state.json could not be read .*belong to the user the hub runs as"):
         ServerPlatform.load_state(holder)
+
+
+SVG_STREAM = b'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="blue"/></svg>'
+
+
+def _run_in_child(code: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+
+
+def test_an_image_ffmpeg_can_demux_but_not_decode_does_not_end_the_hub() -> None:
+    """A 110-byte SVG has a demuxer and no decoder, and decoding it ended the process with SIGBUS."""
+    child = _run_in_child(
+        "import asyncio\n"
+        "from types import SimpleNamespace\n"
+        "from printguard.server.platform import ServerPlatform\n"
+        f"print(asyncio.run(ServerPlatform.decode_jpeg(SimpleNamespace(), {SVG_STREAM!r})))\n"
+    )
+
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.strip() == "None"
+
+
+def test_a_camera_whose_stream_has_no_decoder_goes_offline_with_the_reason(tmp_path: Path) -> None:
+    """A saved camera whose address starts serving an SVG ended the hub at every start."""
+    stream = tmp_path / "webcam.svg"
+    stream.write_bytes(SVG_STREAM)
+    child = _run_in_child(
+        "import time\n"
+        "from printguard.server.platform import AVSource\n"
+        f"source = AVSource({str(stream)!r})\n"
+        "deadline = time.monotonic() + 15\n"
+        "while source.last_error is None and time.monotonic() < deadline:\n"
+        "    time.sleep(0.05)\n"
+        "source.close()\n"
+        "print(source.online, source.last_error)\n"
+    )
+
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.strip() == "False no decoder for this stream"
