@@ -92,6 +92,7 @@ for the hub:
 | `version` | The installed package version |
 | `update_repo`, `update_asset` | The GitHub repository whose releases are checked, and the installer the desktop app updates with |
 | `plugin_runtime` | A `PluginRuntime`, or `None` with `PRINTGUARD_PLUGINS=off` |
+| `secrets` | Credentials the deployment holds outside the engine's state, such as the login in `MEDIAMTX_API`, which the engine scrubs from every message and report |
 | `files` | A `FileStore` |
 | `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count |
 | `take_notices()` | What the hub has worked around since the last call, as `Notice` records: an accelerator passed over for the CPU, and a camera whose live view cannot publish or has come back. The hub meets these on its own threads, so the engine collects them on its ticker and raises each as a `warning`, and reads the ones from loading the model once at start into `startup_warnings` |
@@ -181,8 +182,8 @@ Events, engine to UI:
 | `warning` | Watchdog conditions and their recovery, an MQTT broker the bridge cannot reach, once when the outage starts or its cause changes and once when it ends, what the platform reports through `take_notices()`, a printer whose cameras could not be listed or opened, and an alert whose frame could not be encoded, which went without a picture. `recovered` says which way it goes |
 | `device` | A printer's status, progress, job, time left and heaters, when a read finds them changed and after a command sent to the printer |
 | `print_started` | A file from the library has been sent to a printer and started |
-| `discovered`, `printer_test`, `notify_test` | Command responses |
-| `history`, `snapshot`, `review` | Risk history buckets, a kept frame's JPEG, and the frames kept from one print, each delivered only to the transport that asked |
+| `discovered` | A command response |
+| `printer_test`, `notify_test`, `history`, `snapshot`, `review` | A connection test's outcome, risk history buckets, a kept frame's JPEG, and the frames kept from one print, each delivered only to the transport that asked |
 | `review_sent` | How far a reviewed print's upload got, with the refusal code and retry time when it is queued |
 | `frame` | A camera's current picture as a JPEG, the answer to `camera.snapshot`. A camera on standby or offline has none, and the command fails |
 | `releases` | The changelog history the update dialog browses |
@@ -225,7 +226,7 @@ to be remuxed.
 The message of every `warning` and `error` loses each stored credential in `emit()`, before it
 is logged or broadcast, because it often quotes an exception a library raised. A value shorter
 than 8 characters is only removed where it stands alone, so a short login does not break up
-ordinary words. The `error` of a `printer_test` or `notify_test` is scrubbed the same way.
+ordinary words. The `error` of a `printer_test` or `notify_test` is scrubbed the same way, and also of the secrets the test was typed, which are not stored. A deployment's own credentials, such as the login in an external MediaMTX's `MEDIAMTX_API`, come from `Platform.secrets`.
 
 No stored secret is in the snapshot, so no transport is sent one.
 [`engine/credentials.py`](../printguard/engine/credentials.py) makes each config public for
@@ -236,8 +237,9 @@ No stored secret is in the snapshot, so no transport is sent one.
 | A secret field left out or blank | Keeps the stored value |
 | A secret field as `null` | Clears it |
 | An address as the snapshot shows it | Keeps the stored address with its login |
-| A changed `base_url`, `host`, `port` or `url` while a secret is being kept | Refuses with `send <field> again, since a stored secret is only kept for the address it was saved with` |
-| A printer with a different `provider` | Keeps no secret |
+| A changed `base_url`, `host`, `port` or `url` while a secret is being kept | Refuses with `send <field label> again, since a stored secret is only kept for the address it was saved with` |
+| A printer with a different `provider` | Keeps nothing of the old config, so the patch carries the new one whole. A config field the provider does not declare is dropped |
+| An address holding `[redacted]` | Refuses with `the address has a hidden part, type it in full` |
 
 `notify.test` fills a blank secret from the stored notifier under the same rules, and
 `printer.test` does once it is given the `id` of a registered printer of the same provider.
@@ -731,7 +733,10 @@ a diagnostics bundle and the engine and UI log tails, with every credential reda
 through `platform.http`. There is no SDK and no
 automatic telemetry, and nothing is sent unless the user submits a report. `report.bundle` packs
 those same scrubbed files into a zip the UI downloads instead, for a user who would rather
-read the diagnostics or take them somewhere else.
+read the diagnostics or take them somewhere else. The diagnostics hold the camera, printer and
+monitor configuration, the names of the alert channels, whether a broker and a custom catalogue
+are set, the settings that change how the hub behaves, and a printer's state without the name of
+the file it is printing. They leave out the broker's address and login, the theme and the layout.
 
 ## Logging
 
@@ -769,7 +774,7 @@ for development and packaging.
 | `STATIC_DIR` | The built dashboard the hub serves | `web/dist` |
 | `MEDIAMTX_BINARY` | The MediaMTX binary the hub supervises, 1.19.0 or newer. The hub starts it with a random login for its control API, which `mediamtx.yml` grants to nobody. Unset, the hub expects one already running | Unset |
 | `MEDIAMTX_CONFIG` | The config that binary starts with. The hub adds its API login as the second entry of `authInternalUsers`, so a config of your own has to declare exactly one user there, as `mediamtx.yml` does. A second one would be overwritten | `mediamtx.yml` |
-| `MEDIAMTX_API`, `MEDIAMTX_RTSP`, `MEDIAMTX_HLS` | Where MediaMTX's control API, RTSP and HLS listeners are. If a MediaMTX you run yourself wants a login for its API, put it in the URL as `http://user:pass@host:9997` | `http://localhost:9997`, `rtsp://localhost:8554`, `http://localhost:8888` |
+| `MEDIAMTX_API`, `MEDIAMTX_RTSP`, `MEDIAMTX_HLS` | Where MediaMTX's control API, RTSP and HLS listeners are. If a MediaMTX you run yourself wants a login for its API, put it in the URL as `http://user:pass@host:9997`, and a login in `MEDIAMTX_RTSP` is scrubbed the same way | `http://localhost:9997`, `rtsp://localhost:8554`, `http://localhost:8888` |
 | `UPDATE_ASSET` | The release asset this deployment updates with. Setting it marks the hub as the desktop app | Unset, and the platform's installer in the desktop app |
 | `PRINTGUARD_VARIANT` | The image variant suffix reported in `host`, set from the image build arg | Empty |
 | `APP_ICON` | The icon on native notifications, set by the Windows desktop app | Unset |

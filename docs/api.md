@@ -365,7 +365,8 @@ engine's one snapshot, which holds none of them.
 | The MQTT password | Left out |
 | `secrets_set` on a printer | The names of its secret fields that hold a saved value, such as `["api_key"]` |
 | `secrets_set` in `/state` | The same names for each alert channel and for the broker, as `{"notifiers": {"pushover": ["api_token", "user_key"]}, "mqtt": ["password"]}` |
-| An address in a config or a camera source, and the plugin catalogue URL | Without its `user:pass@`, which may hold a `/`, `?` or `#` (everything up to the last `@` counts as login, so an address with a later `@` is redacted more than it needs to be), with every query value replaced by `[redacted]`, as is any part of the path that is a UUID or 16 or more letters and digits, which is where UniFi Protect puts a stream's key |
+| An address in a config or a camera source | Without its `user:pass@`, which may hold a `/`, `?` or `#` (everything up to the last `@` counts as login, so an address with a later `@` is redacted more than it needs to be), with every query value replaced by `[redacted]`, as is any part of the path that is a UUID or 16 or more letters and digits, which is where UniFi Protect puts a stream's key |
+| A custom plugin catalogue URL | Without its login, with every query value replaced and its whole path shown as `[redacted]`. The default catalogue is shown as it is |
 | The access code in a Bambu printer camera's source | Left out |
 | A notifier this version doesn't know | Left out |
 | What a plugin has stored, and the list of API tokens | Left out of `/state`, whatever the token's scope |
@@ -378,8 +379,9 @@ forms save under the same rules:
 | A secret field left out or blank | Keeps the stored value |
 | An address unchanged from how you read it | Keeps the stored address, credentials included |
 | A secret field as `null` | Clears it, which is how to remove the MQTT password |
-| A changed `base_url`, `host`, `port` or `url` without the secrets | Answers `400` with `send api_key again, since a stored secret is only kept for the address it was saved with`, naming the fields to send. The ntfy topic URL and the Discord webhook are themselves the secret, so a new one replaces the old |
-| A printer with a different `provider` | Keeps no secret |
+| A changed `base_url`, `host`, `port` or `url` without the secrets | Answers `400` with `send API key again, since a stored secret is only kept for the address it was saved with`, naming the fields as the dashboard labels them. The ntfy topic URL and the Discord webhook are themselves the secret, so a new one replaces the old |
+| A printer with a different `provider` | Keeps nothing of the old config, so send the new one whole. A config field the provider does not declare is dropped |
+| An address holding `[redacted]` | Answers `400` with `the address has a hidden part, type it in full` |
 | An address that isn't a valid URL | Answers `400`, since it could not be redacted afterwards |
 
 Every integration is normalised to one shape, so a printer reads and controls the same way
