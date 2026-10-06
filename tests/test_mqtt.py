@@ -5,6 +5,7 @@ bridge's aiomqtt session is a thin wrapper around."""
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -373,6 +374,37 @@ async def test_a_bridge_stops_when_the_broker_has_already_gone(monkeypatch: pyte
     try:
         await asyncio.wait_for(bridge.stop(), 2)
     finally:
+        await engine.stop()
+
+
+async def test_a_command_that_times_out_says_what_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Sends(FakeBroker):
+        async def __anext__(self) -> Any:
+            if getattr(self, "sent", False):
+                await asyncio.Event().wait()
+            self.sent = True
+            await asyncio.sleep(0.2)
+            return SimpleNamespace(topic=f"printguard/monitor/{monitor_id}/enabled/set", payload=b"ON")
+
+    broker = Sends()
+    monkeypatch.setattr(mqtt.aiomqtt, "Client", broker.client)
+    engine = Engine(FakePlatform())
+    await engine.start()
+    await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 10.0}})
+    await engine.handle({"cmd": "monitor.add", "monitor": {"name": "m", "camera_id": next(iter(engine.cameras.items))}})
+    monitor_id = next(iter(engine.monitors))
+
+    async def timed_out(command: dict[str, Any], **_: Any) -> list[dict[str, Any]]:
+        raise TimeoutError
+
+    monkeypatch.setattr(engine, "request", timed_out)
+    bridge = mqtt.MqttBridge(engine, lambda: {"enabled": True, "host": "broker"})
+    bridge.start()
+    try:
+        await _until(lambda: any(e["event"] == "error" for e in engine.recent_events()))
+        assert [e["message"] for e in engine.recent_events() if e["event"] == "error"] == ["Home Assistant command failed: TimeoutError"]
+    finally:
+        await bridge.stop()
         await engine.stop()
 
 

@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import aiomqtt
 
+from ..engine import logs
 from ..engine.integrations import HEATERS
 from .events import ConflatedEventQueue
 
@@ -412,7 +413,7 @@ class MqttBridge:
             try:
                 await self._engine.request(command)
             except Exception as exc:
-                self._engine.emit({"event": "error", "message": f"Home Assistant command failed: {exc}"})
+                self._engine.emit({"event": "error", "message": f"Home Assistant command failed: {logs.describe(exc)}"})
 
     async def _handle(self, client: aiomqtt.Client, event: dict[str, Any], base: str, prefix: str) -> None:
         kind = event.get("event")
