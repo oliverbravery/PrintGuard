@@ -741,6 +741,24 @@ test("a sliced file the browser cannot draw is uploaded as it is", async ({ page
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
+test("an upload the hub refuses stays in the sheet with what was typed, and closes it once accepted", async ({ page }) => {
+  await stagePrint(page);
+  const route = /\/api\/prints\?/;
+  await page.route(route, (request) => request.fulfill({ status: 413, json: { detail: "the library is full" } }));
+  const name = page.getByRole("textbox", { name: "Name" });
+  await name.fill("Calibration cube");
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+
+  await expect(page.getByRole("alert")).toHaveText("the library is full");
+  await expect(name).toHaveValue("Calibration cube");
+  await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeEnabled();
+
+  await page.unroute(route);
+  await page.route(route, (request) => request.fulfill({ json: {} }));
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  await expect(name).toBeHidden();
+});
+
 test("a preview that fails to draw on upload leaves nothing behind, and the file is read once", async ({ page }) => {
   await page.addInitScript(() => {
     const getContext = HTMLCanvasElement.prototype.getContext;
