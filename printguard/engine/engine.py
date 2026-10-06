@@ -163,6 +163,7 @@ class Engine:
         self._requester: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = contextvars.ContextVar("requester", default=None)
         self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
         self.startup_warnings: list[str] = []
+        self.dropped_ids: set[str] = set()
         self._tasks: list[asyncio.Task[None]] = []
         self._finishing: set[asyncio.Task[None]] = set()
         self._attach_tasks: dict[str, asyncio.Task[None]] = {}
@@ -264,7 +265,10 @@ class Engine:
                     restore(record)
                 except (AttributeError, KeyError, TypeError, ValueError) as exc:
                     label = record.get("name") or record.get("id") if isinstance(record, dict) else None
-                    self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}")
+                    if isinstance(record, dict) and record.get("id"):
+                        self.dropped_ids.add(str(record["id"]))
+                    kept = " (its file was kept in the data directory)" if kind in ("prints", "reviews") else ""
+                    self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}{kept}")
         await self.reconcile_declared_cameras()
         self.cameras.sync_in_use(self.monitors, self.printers)
         self.settle_reviews()

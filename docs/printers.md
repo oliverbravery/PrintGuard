@@ -177,9 +177,10 @@ failed print.
 A file is sent under its library name, with each run of anything outside plain letters, digits,
 dots, dashes and underscores turned into one `_` and the name before the extension cut to 60
 characters. Rename it first if the printer's own file list matters to you. PrusaLink replaces a
-file of the same name already on the printer. A file can be up to 512 MB, and a 3mf whose gcode
-unpacks to more than that is refused. So is an empty file, and a 3mf with a member compressed
-with anything but stored or deflate. A file whose gcode is over 32 MB isn't drawn in the browser, since parsing it takes
+file of the same name already on the printer. A file can be up to 512 MB, and a 3mf whose files
+unpack to more than that between them is refused. So is an empty file, a damaged 3mf, a 3mf with a member compressed
+with anything but stored or deflate, and a file whose comments give a print time of over a year or
+an amount of filament or a temperature no slicer would write. A file whose gcode is over 32 MB isn't drawn in the browser, since parsing it takes
 about nine times its size in memory, so it has no 3D view and no drawn preview. It uploads and
 prints as usual, and the hub still reads its print time, filament and temperatures. A smaller
 file the browser can't draw, such as on a device with no WebGL, uploads without a drawn preview
@@ -194,7 +195,8 @@ gcode is refused at upload. A Bambu printer keeps reporting a cancelled or faile
 the next one starts, which PrintGuard shows as idle, so clear the bed before you press **Print**.
 
 Files live in the data directory under `prints/`, so they survive a restart and travel with the
-`/data` volume.
+`/data` volume. When the hub starts it deletes the files there that no print names and that carry a name
+it generated, and keeps the files of a print it could not read, saying so in the startup warning.
 
 ## Temperatures and preheat
 

@@ -4318,6 +4318,18 @@ async def test_print_add_rewrites_temperatures_and_drops_a_file_it_cannot() -> N
         assert "bin00001.bgcode" not in platform.files.blobs, "a file that cannot take its temperatures is not kept"
 
 
+async def test_a_print_with_an_absurd_estimate_is_refused_and_leaves_the_state_saveable() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        crafted = b"; estimated printing time (normal mode) = " + b"9" * 4300 + b"d\nG28\nM104 S210\n"
+        await platform.files.store("abcd1234.gcode", _chunks(crafted))
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "evil.gcode", "req_id": 3})
+        assert any(e["event"] == "error" and e.get("req_id") == 3 and "a number in this file" in e["message"] for e in events)
+        assert not engine.prints.values() and not set(platform.files.blobs), "the refused print left its file behind"
+        json.dumps(engine.state_event(), allow_nan=False)
+        json.dumps(platform.state if platform.state else {}, allow_nan=False)
+
+
 async def test_a_failed_print_add_cannot_remove_another_prints_files() -> None:
     from test_gcode import PRUSA
 
@@ -4999,6 +5011,14 @@ async def test_a_wrong_shaped_record_is_dropped_at_start_and_the_rest_load(caplo
         await restarted.stop()
     assert caplog.text.count("could not be read and was dropped") == 8
     assert len(restarted.startup_warnings) == 8
+
+
+async def test_a_print_record_dropped_at_start_says_its_file_is_kept() -> None:
+    platform = FakePlatform()
+    platform.state = {"prints": [{"id": "abcd1234", "filename": "benchy.gcode"}], "reviews": [{"id": "a1b2c3"}]}
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        assert engine.dropped_ids == {"abcd1234", "a1b2c3"}
+        assert all("its file was kept in the data directory" in warning for warning in engine.startup_warnings) and len(engine.startup_warnings) == 2
 
 
 async def test_a_monitor_stored_with_no_printer_is_kept_with_its_printer_cleared() -> None:
