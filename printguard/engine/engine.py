@@ -1705,11 +1705,11 @@ class Engine:
 
     async def _cmd_notify_send(self, message: dict[str, Any]) -> None:
         """Sends a caller's own message through the configured channels."""
-        title = str(message.get("title") or "PrintGuard").strip()[:80]
+        title = str(message.get("title") or "PrintGuard").strip()[:80].strip()
         body = str(message.get("text", "")).strip()[:400]
         if not body:
             raise ValueError("a notification needs something to say")
-        await self.send_alerts(title, body, None)
+        await self.send_alerts(title, body, None, urgent=False)
 
     async def _cmd_plugin_install(self, message: dict[str, Any]) -> None:
         """Fetches, verifies and registers a plugin, or reinstalls one in place.

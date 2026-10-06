@@ -218,6 +218,34 @@ async def test_a_test_alert_makes_the_request_a_defect_alert_does() -> None:
     assert next(e for e in events if e.get("event") == "notify_test")["ok"]
 
 
+async def test_a_plugins_notice_goes_out_quietly_and_a_test_alert_does_not() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _events):
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}, "pushover": {"api_token": "a", "user_key": "u"}}}})
+        platform.http_requests.clear()
+        await engine.handle({"cmd": "notify.send", "title": "Progress", "text": "Benchy is 50% done"})
+        quiet = list(platform.http_requests)
+        platform.http_requests.clear()
+        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {"url": "http://ntfy/topic"}, "req_id": 1})
+        (test,) = platform.http_requests
+    ntfy = next(request for request in quiet if request["url"] == "http://ntfy/topic")
+    pushover = next(request for request in quiet if "pushover" in request["url"])
+    assert "Priority" not in ntfy["headers"] and "Tags" not in ntfy["headers"]
+    assert b"priority=0" in pushover["data"] or b'name="priority"\r\n\r\n0' in pushover["data"]
+    assert test["headers"]["Priority"] == "urgent", "the test alert no longer tests the urgent path"
+
+
+async def test_a_long_notice_title_is_cut_without_ending_in_a_space() -> None:
+    platform = FakePlatform()
+    title = "x" * 79 + " tail"
+    async with running_engine(platform, camera_fps=[]) as (engine, _events):
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        platform.http_requests.clear()
+        await engine.handle({"cmd": "notify.send", "title": title, "text": "x"})
+    sent = next(request for request in platform.http_requests if request["url"] == "http://ntfy/topic")["headers"]["Title"]
+    assert sent == title[:79], "a trailing space reaches the header, which h11 refuses"
+
+
 async def test_a_printer_and_a_notifier_never_follow_a_redirect() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[]) as (engine, _events):
