@@ -289,6 +289,7 @@ async function dashboardWithPlugin(
   surfaces = PLUGIN.manifest.surfaces,
   assets: Record<string, string> = {},
   file = "plugin.js",
+  secretsSet: string[] = [],
 ) {
   await page.addInitScript(() => {
     class Offline extends EventTarget {
@@ -301,7 +302,7 @@ async function dashboardWithPlugin(
   await page.goto("/");
   await page.waitForFunction(() => Boolean((window as any).__pg.getState().link));
   await page.evaluate(
-    ({ plugin, permissions, code, granted, surfaces, monitor, assets, file }) => {
+    ({ plugin, permissions, code, granted, surfaces, monitor, assets, file, secretsSet }) => {
       const win = window as any;
       const sent: any[] = [];
       win.__sent = sent;
@@ -320,9 +321,9 @@ async function dashboardWithPlugin(
           printers: [], prints: [], reviews: [], monitors: [monitor], tokens: [], integrations: [], notifiers: [],
           settings: { notifiers: {}, update_check: true, theme: "dark", themes: [], layout: {} },
           stats: { inference_device: "CPU", infer_ms: 1, capacity_fps: 1 },
-          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result"] }, granted, files: [file] }],
+          plugins: [{ ...plugin, manifest: { ...plugin.manifest, surfaces, events: ["result", "http"] }, granted, files: [file], secrets_set: secretsSet }],
           plugin_permissions: permissions,
-          plugin_events: { state: [], result: ["monitor_id", "prediction"] },
+          plugin_events: { state: [], result: ["monitor_id", "prediction"], http: ["tag", "status", "body"] },
           plugin_assets: { png: "image/png", txt: "text/plain", mp3: "audio/mpeg" },
         },
       });
@@ -330,7 +331,7 @@ async function dashboardWithPlugin(
       const request = sent.find((c) => c.cmd === "plugin.code");
       win.__pgEvent({ event: "plugin_code", id: "pip", sources: { [file]: code }, assets, req_id: request?.req_id });
     },
-    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets, file },
+    { plugin: PLUGIN, permissions: PERMISSIONS, code, granted, surfaces, monitor: MONITOR, assets, file, secretsSet },
   );
   if (file === "panel.html") await expect(page.locator("iframe[title='Picture in picture panel']")).toBeAttached();
   else await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().pluginTrees).length)).toBeGreaterThan(0);
@@ -340,6 +341,46 @@ test("a panel.html draws itself in a frame of its own", async ({ page }) => {
   await dashboardWithPlugin(page, "<p>drawn by the panel</p>", ["state:read"], ["panel"], {}, "panel.html");
 
   await expect(page.frameLocator("iframe[title='Picture in picture panel']").getByText("drawn by the panel")).toBeVisible();
+});
+
+const SPOTIFY_PANEL = readFileSync(new URL("../../plugins/spotify/panel.html", import.meta.url), "utf8");
+
+const holdSecrets = (page: import("@playwright/test").Page, secretsSet: string[]) =>
+  page.evaluate((secretsSet) => {
+    const win = window as any;
+    const engine = win.__pg.getState().engine;
+    win.__pgEvent({ event: "state", ...engine, plugins: engine.plugins.map((plugin: any) => ({ ...plugin, secrets_set: secretsSet })) });
+  }, secretsSet);
+
+const spotifyRequests = (page: import("@playwright/test").Page) =>
+  page.evaluate(() => (window as any).__sent.filter((cmd: any) => cmd.cmd === "plugin.http").length);
+
+const spotifyPanel = async (page: import("@playwright/test").Page, secretsSet: string[]) => {
+  await dashboardWithPlugin(page, SPOTIFY_PANEL, ["net", "oauth", "background"], ["panel"], {}, "panel.html", secretsSet);
+  return page.frameLocator("iframe[title='Picture in picture panel']");
+};
+
+test("the Spotify panel asks Spotify nothing until it is signed in, and stops when it is disconnected", async ({ page }) => {
+  const panel = await spotifyPanel(page, ["oauth_client_id"]);
+  await expect(panel.getByText("Not connected")).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(await spotifyRequests(page)).toBe(0);
+
+  await holdSecrets(page, ["oauth_client_id", "oauth"]);
+  await expect.poll(() => spotifyRequests(page)).toBeGreaterThan(0);
+
+  await holdSecrets(page, ["oauth_client_id"]);
+  await expect(panel.getByText("Connect Spotify in the Plugins tab in Settings.")).toBeVisible();
+  const asked = await spotifyRequests(page);
+  await page.waitForTimeout(1000);
+  expect(await spotifyRequests(page)).toBe(asked);
+});
+
+test("a rejected Spotify token asks to reconnect rather than for something to play", async ({ page }) => {
+  const panel = await spotifyPanel(page, ["oauth_client_id", "oauth"]);
+  await page.evaluate(() => (window as any).__pgEvent({ event: "http", id: "pip", tag: "player", status: 401, body: null }));
+
+  await expect(panel.getByText("Reconnect Spotify in the Plugins tab in Settings.")).toBeVisible();
 });
 
 const LEAVES = {

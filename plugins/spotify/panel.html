@@ -104,11 +104,13 @@
   // Whether the transport buttons do anything. Spotify answers 403 on a free
   // account whatever scopes were granted, so the panel says so once it knows
   // rather than leaving three buttons that quietly fail.
+  const signedIn = () => pg.secrets.includes("oauth");
+
   const setControls = () => {
     el("toggle").textContent = state.playing ? "❚❚" : "▶";
     el("toggle").title = state.playing ? "Pause" : "Play";
     el("note").textContent = state.premium ? "" : PREMIUM_NOTE;
-    for (const id of ["prev", "toggle", "next"]) el(id).disabled = !state.premium;
+    for (const id of ["prev", "toggle", "next"]) el(id).disabled = !state.premium || !signedIn();
   };
 
   const poll = () => pg.http({ url: PLAYER, headers: { Authorization: "Bearer {{secret.oauth}}" }, tag: "player" });
@@ -144,10 +146,10 @@
     setControls();
   };
 
-  const idle = (message) => {
+  const idle = (message, title = "Nothing playing") => {
     state.cover = "";
     el("cover").removeAttribute("src");
-    el("title").textContent = "Nothing playing";
+    el("title").textContent = title;
     el("artist").textContent = message;
     setControls();
     pg.background("");
@@ -168,9 +170,26 @@
     }
   });
 
-  pg.on("ready", () => {
+  // Until a client id is saved and Connect is finished every request would be
+  // refused, so the panel only polls while PrintGuard holds a token for it.
+  let polling = null;
+
+  const sync = () => {
     setControls();
-    poll();
-    setInterval(poll, POLL_MS);
+    if (signedIn() && polling === null) {
+      poll();
+      polling = setInterval(poll, POLL_MS);
+    } else if (!signedIn() && polling !== null) {
+      clearInterval(polling);
+      polling = null;
+      idle("Connect Spotify in the Plugins tab in Settings.", "Not connected");
+    }
+  };
+
+  // Watching the sign-in on a timer, since pg.on("state") would need the
+  // state:read permission that nothing else here has a use for.
+  pg.on("ready", () => {
+    sync();
+    setInterval(sync, 1000);
   });
 </script>

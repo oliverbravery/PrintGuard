@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'sha256-3x4w8X+zlR+RTReAXrpSBsnDuJUpOuix5Cdh4tsMrto=' 'strict-dynamic' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'sha256-EyaOxOOPXp1N3GLJbxOgQmrEwSkZamkPIseKxXxOeS4=' 'strict-dynamic' 'unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>PrintGuard plugin panel</title>
     <style>
@@ -45,6 +45,7 @@
         const pg = {
           state: {},
           theme: {},
+          secrets: [],
           get store() {
             return store;
           },
@@ -136,6 +137,7 @@
             if (data.t === "init") {
               store = data.store || {};
               pg.state = data.state || {};
+              pg.secrets = data.secrets || [];
               applyTheme(data.theme);
               if (!data.sound) silenceMedia();
               for (const [name, blob] of Object.entries(data.assets || {})) assets.set(name, URL.createObjectURL(blob));
@@ -144,7 +146,7 @@
               listeners.get("ready")?.(pg.state);
             } else if (data.t === "state") {
               pg.state = data.state || {};
-              if (data.store) store = data.store;
+              pg.secrets = data.secrets || [];
               applyTheme(data.theme);
               listeners.get("state")?.(pg.state);
             } else if (data.t === "event") {

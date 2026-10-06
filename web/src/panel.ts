@@ -47,7 +47,7 @@ export class PluginPanelHost {
     this.port = sandbox.port;
     this.frame.className = "block h-24 w-full border-0 bg-transparent transition-[height] duration-150";
     container.appendChild(this.frame);
-    this.port.postMessage({ t: "init", html, assets, state, theme: themeTokens(), store: record.config, sound: record.granted.includes("sound") });
+    this.port.postMessage({ t: "init", html, assets, state, theme: themeTokens(), store: record.config, secrets: record.secrets_set, sound: record.granted.includes("sound") });
   }
 
   private receive = (data: any) => {
@@ -62,8 +62,8 @@ export class PluginPanelHost {
     }
   };
 
-  update(state: Record<string, unknown>, store?: Record<string, unknown>): void {
-    this.port.postMessage({ t: "state", state, store, theme: themeTokens() });
+  update(state: Record<string, unknown>, secrets: string[]): void {
+    this.port.postMessage({ t: "state", state, secrets, theme: themeTokens() });
   }
 
   event(event: Record<string, unknown>): void {
