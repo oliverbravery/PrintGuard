@@ -6059,6 +6059,16 @@ async def test_a_print_whose_file_is_gone_is_not_started_and_names_no_path() -> 
     assert [event["message"] for event in _of(events, "error")] == ["print 'abcd1234' has lost its file"]
 
 
+async def test_typing_the_default_broker_port_is_not_a_changed_address() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await _seed_secrets(engine)
+        await engine.handle({"cmd": "settings.update", "patch": {"mqtt": {"host": "broker", "port": 1883, "password": ""}}})
+
+        assert not _of(events, "error")
+        assert engine.settings["mqtt"] == {"host": "broker", "port": 1883, "password": "mqtt-PASS-77b1e0"}
+
+
 async def test_a_kept_secret_is_refused_for_an_address_that_changed() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[]) as (engine, events):
