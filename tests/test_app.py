@@ -887,3 +887,41 @@ def test_the_desktop_app_serves_the_same_websocket_limit(monkeypatch) -> None:
     desktop._Server(8000)
 
     assert configs[0]["ws_max_size"] == app_module.WEBSOCKET_MAX_BYTES
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"status": "abc"},
+        {"status": "201"},
+        {"status": True},
+        {"status": 99},
+        {"status": 600},
+        {"status": 200.5},
+        {"status": None},
+        {"headers": "set-cookie: a=1"},
+        {"headers": ["set-cookie"]},
+        {"headers": {"set-cookie": 1}},
+    ],
+)
+async def test_a_plugin_route_answering_with_a_bad_status_or_headers_is_that_plugin_failing(answer: dict) -> None:
+    failed: list[tuple[str, str]] = []
+    app = app_with(StubRuntime(answer={"body": "x", **answer}))
+    app.state.engine.plugin_failed = lambda plugin_id, reason: failed.append((plugin_id, reason))
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/plugins/accounts/login")
+
+    assert response.status_code == 502 and "accounts" in response.text
+    assert [plugin_id for plugin_id, _ in failed] == ["accounts"] and failed[0][1]
+
+
+async def test_a_plugin_route_answering_without_a_status_or_headers_is_served() -> None:
+    failed: list[str] = []
+    app = app_with(StubRuntime(answer={"body": "x", "headers": None}))
+    app.state.engine.plugin_failed = lambda plugin_id, reason: failed.append(plugin_id)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/plugins/accounts/login")
+
+    assert response.status_code == 200 and not failed

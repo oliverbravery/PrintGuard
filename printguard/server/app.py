@@ -249,6 +249,24 @@ def plugin_request(connection: HTTPConnection, method: str, body: str | None = N
     }
 
 
+def plugin_answer_fault(answer: dict[str, Any]) -> str | None:
+    """Finds what is wrong with the status or headers a plugin's route answered with.
+
+    Args:
+        answer: What the plugin's route handler returned.
+
+    Returns:
+        A reason the plugin could not have meant it, or None when both are usable.
+    """
+    status = answer.get("status", 200)
+    if type(status) is not int or not 100 <= status <= 599:
+        return "its route answered with a status that is not a whole number from 100 to 599"
+    headers = answer.get("headers")
+    if headers is not None and not (isinstance(headers, dict) and all(isinstance(value, str) for value in headers.values())):
+        return "its route answered with headers that are not an object of text"
+    return None
+
+
 def create_app() -> FastAPI:
     """Builds the application with the engine attached to its lifespan."""
     logs.setup_from_env()
@@ -374,10 +392,13 @@ def create_app() -> FastAPI:
         answer = await runtime.serve(plugin_id, plugin_request(request, request.method, text))
         if answer is None:
             raise HTTPException(404, f"plugin {plugin_id!r} serves no routes")
-        headers = {k: str(v) for k, v in (answer.get("headers") or {}).items() if k.lower() in PLUGIN_RESPONSE_HEADERS}
+        if fault := plugin_answer_fault(answer):
+            app.state.engine.plugin_failed(plugin_id, fault)
+            raise HTTPException(502, f"plugin {plugin_id!r} stopped: {fault}")
+        headers = {k: v for k, v in (answer.get("headers") or {}).items() if k.lower() in PLUGIN_RESPONSE_HEADERS}
         return Response(
             str(answer.get("body", "")),
-            status_code=int(answer.get("status", 200)),
+            status_code=answer.get("status", 200),
             media_type=str(answer.get("type", "text/plain")),
             headers={**headers, "Content-Security-Policy": PLUGIN_PAGE_CSP, "X-Content-Type-Options": "nosniff"},
         )
