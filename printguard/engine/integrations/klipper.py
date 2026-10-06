@@ -67,13 +67,14 @@ class KlipperAdapter(IntegrationAdapter):
 
         Raises:
             PermissionError: If Moonraker rejects the API key, or wants one.
+            RuntimeError: If it answers with anything but the objects.
         """
         url = f"{config['base_url'].rstrip('/')}/printer/objects/query?print_stats&virtual_sdcard&extruder&heater_bed"
         status, body = await http("GET", url, headers=self._headers(config))
         if status in (401, 403):
             raise PermissionError(f"Moonraker rejected the API key: HTTP {status}")
         if status != 200 or not isinstance(body, dict):
-            return DeviceState(DeviceStatus.OFFLINE)
+            raise RuntimeError(f"Moonraker did not answer like its API: HTTP {status}")
         objects = (body.get("result") or {}).get("status") or {}
         stats = objects.get("print_stats") or {}
         matched = _STATUS_MAP.get(str(stats.get("state", "")).lower(), DeviceStatus.UNKNOWN)

@@ -54,6 +54,10 @@ def _username(config: dict[str, Any]) -> str:
     return str(config.get("username") or "").strip() or _USERNAME
 
 
+def _failure(response: httpx.Response) -> str:
+    return f"PrusaLink answered HTTP {response.status_code}"
+
+
 class PrusaAdapter(IntegrationAdapter):
     """Talks to a Prusa printer's local PrusaLink API via pyprusalink."""
 
@@ -96,19 +100,18 @@ class PrusaAdapter(IntegrationAdapter):
         """Reads the active job from /api/v1/job and the heaters from /api/v1/status.
 
         With no active job (HTTP 204) the printer's own state is the answer,
-        idle when it says none; any failure to reach the printer is offline,
-        which keeps inference watching. The HTTP function is unused -
-        pyprusalink owns the digest-authenticated client.
+        idle when it says none. The HTTP function is unused - pyprusalink owns
+        the digest-authenticated client.
 
         Raises:
             PermissionError: If PrusaLink rejects the username or password.
+            RuntimeError: If it answers with an error or a redirect.
+            httpx.HTTPError: If the printer cannot be reached.
         """
         try:
             job, status = await self._read(config)
         except InvalidAuth:
             raise PermissionError("PrusaLink rejected the username or password") from None
-        except Exception:
-            return DeviceState(DeviceStatus.OFFLINE)
         printer = status.get("printer") or {}
         heaters = {
             "nozzle": Heater.reported(printer.get("temp_nozzle"), printer.get("target_nozzle")),
@@ -184,4 +187,7 @@ class PrusaAdapter(IntegrationAdapter):
     @asynccontextmanager
     async def _link(self, config: dict[str, Any]) -> AsyncIterator[Any]:
         async with httpx.AsyncClient(timeout=_TIMEOUT_S, verify=_TLS) as client:
-            yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _username(config), str(config.get("password", "")))
+            try:
+                yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _username(config), str(config.get("password", "")))
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(_failure(exc.response)) from None

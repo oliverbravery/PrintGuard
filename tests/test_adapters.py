@@ -313,9 +313,9 @@ async def test_octoprint_heater_targets() -> None:
         await INTEGRATIONS["octoprint"].heat(RecordingHttp(status=409), {"base_url": "http://op"}, "nozzle", 200.0)
 
 
-async def test_octoprint_unreachable_is_offline() -> None:
-    state = await INTEGRATIONS["octoprint"].fetch_state(RecordingHttp(status=502, body="bad gateway"), {"base_url": "http://op"})
-    assert state.status is DeviceStatus.OFFLINE
+async def test_octoprint_that_answers_badly_says_why() -> None:
+    with pytest.raises(RuntimeError, match="HTTP 502"):
+        await INTEGRATIONS["octoprint"].fetch_state(RecordingHttp(status=502, body="bad gateway"), {"base_url": "http://op"})
 
 
 async def test_octoprint_exposes_webcam_stream() -> None:
@@ -410,8 +410,8 @@ async def test_klipper_actions_and_auth() -> None:
     assert http.last["url"] == "http://kl/printer/print/cancel"
     assert http.last["headers"] == {"X-Api-Key": "kk"}
 
-    state = await INTEGRATIONS["klipper"].fetch_state(RecordingHttp(status=500, body={}), {"base_url": "http://kl"})
-    assert state.status is DeviceStatus.OFFLINE
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        await INTEGRATIONS["klipper"].fetch_state(RecordingHttp(status=500, body={}), {"base_url": "http://kl"})
 
     with pytest.raises(RuntimeError, match="pause"):
         await INTEGRATIONS["klipper"].send(RecordingHttp(status=400), {"base_url": "http://kl"}, DeviceAction.PAUSE)
@@ -1287,13 +1287,31 @@ async def test_prusa_no_active_job_is_idle(monkeypatch) -> None:
     assert state.public()["bed"] == {"actual": 59.6, "target": 60.0}, "an idle printer still reports its heaters"
 
 
-async def test_prusa_unreachable_is_offline(monkeypatch) -> None:
+async def test_prusa_unreachable_says_why(monkeypatch) -> None:
     async def boom(config: dict[str, Any]) -> Any:
         raise ConnectionError("no route to printer")
 
     monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", boom)
-    state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
-    assert state.status is DeviceStatus.OFFLINE, "an unreachable or unauthorised printer keeps inference watching"
+    with pytest.raises(ConnectionError, match="no route to printer"):
+        await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
+
+
+async def _prusa_answering(status_line: str, headers: str = "") -> tuple[asyncio.Server, dict[str, str]]:
+    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(f"HTTP/1.1 {status_line}\r\nContent-Length: 0\r\nConnection: close\r\n{headers}\r\n".encode())
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(answer, "127.0.0.1", 0)
+    return server, {"base_url": f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}", "password": "pw"}
+
+
+async def test_prusa_answering_with_an_error_names_the_status() -> None:
+    server, config = await _prusa_answering("502 Bad Gateway")
+    async with server:
+        with pytest.raises(RuntimeError, match="HTTP 502"):
+            await INTEGRATIONS["prusa"].fetch_state(None, config)
 
 
 @pytest.mark.parametrize(
