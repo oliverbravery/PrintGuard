@@ -10,6 +10,7 @@ configured notifiers so the user hears about them away from the dashboard.
 from __future__ import annotations
 
 import asyncio
+import functools
 import itertools
 import logging
 import time
@@ -91,8 +92,9 @@ class Watchdog:
         self._online_since: dict[str, float] = {}
         self._coverage: dict[str, deque[bool]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
+        self._polls: dict[str, asyncio.Task[None]] = {}
 
-    def _schedule(self, what: str, coroutine: Coroutine[Any, Any, None]) -> None:
+    def _schedule(self, what: str, coroutine: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         task = asyncio.create_task(coroutine)
         self._tasks.add(task)
 
@@ -102,6 +104,7 @@ class Watchdog:
                 self._engine.report_failure(what, done.exception())
 
         task.add_done_callback(finished)
+        return task
 
     async def close(self) -> None:
         """Cancels pending printer actions and notifications."""
@@ -114,13 +117,29 @@ class Watchdog:
         """Refreshes every registered printer's state.
 
         They are read together and each is followed as soon as it answers, so
-        one that does not answer holds up nobody else's state or camera.
+        one that does not answer holds up nobody else's state or camera. A
+        printer whose last read is still in flight is not read again, and the
+        pass waits no longer than DEVICE_POLL_S for it, so a printer that takes
+        long to fail does not stretch how often the others are read.
 
         Returns:
             Seconds until the next poll.
         """
-        await asyncio.gather(*(self.refresh(printer) for printer in self._engine.printers.values()))
-        return DEVICE_POLL_S
+        began = time.monotonic()
+        started = []
+        for printer in self._engine.printers.values():
+            if printer.id not in self._polls:
+                task = self._schedule("printer polling", self.refresh(printer))
+                self._polls[printer.id] = task
+                task.add_done_callback(functools.partial(self._poll_finished, printer.id))
+                started.append(task)
+        if started:
+            await asyncio.wait(started, timeout=DEVICE_POLL_S)
+        return max(0.0, DEVICE_POLL_S - (time.monotonic() - began))
+
+    def _poll_finished(self, printer_id: str, task: asyncio.Task[None]) -> None:
+        if self._polls.get(printer_id) is task:
+            del self._polls[printer_id]
 
     async def refresh(self, printer: "Printer", after_command: bool = False) -> None:
         """Reads a printer and re-gates its monitors when its state changed.

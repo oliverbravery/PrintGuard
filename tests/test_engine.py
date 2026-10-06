@@ -1464,6 +1464,30 @@ async def test_a_printer_that_does_not_answer_holds_up_nobody_elses_poll(monkeyp
     assert read_meanwhile == "paused", "a printer waited on one that was not answering"
 
 
+async def test_a_printer_that_does_not_answer_does_not_stretch_the_poll_of_the_others(monkeypatch) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.1)
+    platform = FakePlatform()
+    answer = platform.http
+    live_reads = 0
+
+    async def http(method: str, url: str, **request: Any) -> tuple[int, Any]:
+        nonlocal live_reads
+        if "dead.lan" in url and url.endswith("/api/job"):
+            await asyncio.sleep(1.5)
+            raise OSError("timed out")
+        if "live.lan" in url and url.endswith("/api/job"):
+            live_reads += 1
+        return await answer(method, url, **request)
+
+    monkeypatch.setattr(platform, "http", http)
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await _add_printers(engine, "live.lan", "dead.lan")
+        live_reads = 0
+        await asyncio.sleep(1.0)
+
+    assert live_reads >= 5, f"a printer that never answered held every other printer's poll back: {live_reads} reads in 1 s"
+
+
 async def test_a_printer_removed_while_it_answers_a_poll_is_not_reported(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
     platform = FakePlatform()
