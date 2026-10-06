@@ -844,3 +844,23 @@ async def test_an_origin_that_cannot_be_read_is_refused_not_answered_with_a_cras
         assert (await client.get("/hls/camera-one/index.m3u8", headers=headers)).status_code == 403
         assert await handshake_answer(app, "/api/ws", headers) == "websocket.close"
         assert await handshake_answer(app, "/api/publish/cam", headers) == "websocket.close"
+
+
+@pytest.mark.parametrize("host", ["localhost.", "localhost.:8000", "printguard.local.", "192.168.1.20.:8000", "hub.example.com."])
+def test_a_host_written_with_a_trailing_dot_is_the_same_host(host: str) -> None:
+    assert host_trusted(host, {"hub.example.com"})
+
+
+def test_a_trailing_dot_does_not_make_a_public_name_trusted() -> None:
+    assert not host_trusted("evil.example.", {"hub.example.com"})
+
+
+async def test_an_origin_entry_with_a_trailing_dot_still_names_the_hub(monkeypatch) -> None:
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", "https://hub.example.com.")
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/api/health", headers={"host": "hub.example.com"})).status_code == 200
+        assert (await client.get("/api/health", headers={"host": "hub.example.com."})).status_code == 200
+        upload = await client.post("/api/prints?filename=a.stl", content=b"solid", headers={"host": "printguard:8000", "origin": "https://hub.example.com"})
+        assert upload.status_code == 400, "the origin was refused, where the file should have been"

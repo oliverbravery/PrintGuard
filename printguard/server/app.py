@@ -69,13 +69,13 @@ def normalised_origin(origin: str) -> str:
 
     Returns:
         Its scheme and host in lower case, with the port left off when it is
-        the scheme's own.
+        the scheme's own and a trailing dot on the host dropped.
 
     Raises:
         ValueError: If the origin has a port that is not a number or a malformed address.
     """
     parts = urlsplit(origin.strip())
-    host = parts.hostname or ""
+    host = (parts.hostname or "").removesuffix(".")
     port = "" if parts.port in (None, DEFAULT_PORTS.get(parts.scheme)) else f":{parts.port}"
     return f"{parts.scheme}://{f'[{host}]' if ':' in host else host}{port}"
 
@@ -143,7 +143,7 @@ def host_trusted(host: str, named: set[str]) -> bool:
         True when the hub answers to that host.
     """
     try:
-        name = (urlsplit(f"//{host}").hostname or "").lower()
+        name = (urlsplit(f"//{host}").hostname or "").lower().removesuffix(".")
     except ValueError:
         return False
     try:
