@@ -4,8 +4,8 @@ Bambu Lab printers expose no local HTTP control surface: state and control
 travel over MQTT/TLS on port 8883, authenticated with the LAN access code.
 
 The user must enable LAN Only Mode and then Developer Mode on the printer
-(Settings > Network) - Developer Mode is what opens the MQTT channel on
-current firmware. The access code is shown on that screen; the serial
+(Settings > Network) - Developer Mode is what lets a command through on
+current firmware, while the printer reports its state without it. The access code is shown on that screen; the serial
 number is under Settings > Device.
 
 A sliced 3mf reaches the printer over FTPS on port 990, implicit TLS with the
@@ -231,8 +231,8 @@ class BambuAdapter(IntegrationAdapter):
     docs_url = "https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md"
     setup_url = "https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode"
     setup_hint = (
-        "On the printer, enable LAN Only Mode then Developer Mode (Settings > Network) to open the MQTT "
-        "channel. The access code is shown there; the serial number is under Settings > Device."
+        "On the printer, enable LAN Only Mode then Developer Mode (Settings > Network) so it takes "
+        "a pause. The access code is shown there; the serial number is under Settings > Device."
     )
     experimental = False
     formats = ("3mf",)
