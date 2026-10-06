@@ -1443,3 +1443,188 @@ test("a stored file is drawn from what arrives, and one over the limit is cut of
   await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible();
   expect(await page.evaluate(() => (window as any).__cancelledAt)).toBeLessThan(36);
 });
+
+const KEPT_HINT = "Saved. Leave blank to keep it";
+const keyedSchema = {
+  properties: { url: { title: "Address" }, api_key: { title: "API key", secret: true } },
+  required: ["url", "api_key"],
+};
+const keyedPrinter = (over = {}) => ({
+  id: "p1", name: "MK4", provider: "octoprint", config: { url: "http://mk4" }, secrets_set: ["api_key"], online: true, device_state: null, ...over,
+});
+const keyedIntegrations = [{ id: "octoprint", label: "OctoPrint", docs_url: "", formats: [], heater_control: true, schema: keyedSchema }];
+const lastSent = (page: Page, cmd: string) => page.evaluate((cmd) => (window as any).__sent.findLast((c: any) => c.cmd === cmd), cmd);
+
+async function editKeyedPrinter(page: Page) {
+  await dashboard(page, { engine: engine({ printers: [keyedPrinter()], integrations: keyedIntegrations }), dialog: "printers" });
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  return page.locator(".panel .panel");
+}
+
+test("a printer's saved key is never shown, is kept by a save that leaves it blank and does not hold up Save or Test", async ({ page }) => {
+  const form = await editKeyedPrinter(page);
+  const key = form.getByLabel(/^API key/);
+  await expect(key).toHaveValue("");
+  await expect(key).toHaveAttribute("placeholder", KEPT_HINT);
+  await expect(key).toHaveAccessibleDescription(KEPT_HINT);
+
+  await form.getByRole("button", { name: "Test connection" }).click();
+  expect(await sent(page, "printer.test")).toMatchObject({ id: "p1", provider: "octoprint", config: { url: "http://mk4" } });
+  expect((await sent(page, "printer.test")).config).not.toHaveProperty("api_key");
+
+  await form.getByRole("textbox", { name: "Name" }).fill("MK4S");
+  await form.getByRole("button", { name: "Save", exact: true }).click();
+  const saved = await sent(page, "printer.update");
+  expect(saved.patch).toEqual({ name: "MK4S", config: { url: "http://mk4" } });
+});
+
+test("a key typed over a saved one is sent, then forgotten by the form once the hub has it", async ({ page }) => {
+  const form = await editKeyedPrinter(page);
+  const key = form.getByLabel(/^API key/);
+  await key.fill("fresh");
+  await expect(form.getByRole("button", { name: "Remove the stored API key" })).toBeHidden();
+  await form.getByRole("button", { name: "Save", exact: true }).click();
+  const saved = await sent(page, "printer.update");
+  expect(saved.patch.config).toEqual({ url: "http://mk4", api_key: "fresh" });
+
+  await emit(page, { event: "state", ...engine({ printers: [keyedPrinter()], integrations: keyedIntegrations }), req_id: saved.req_id });
+  await expect(key).toHaveValue("");
+  await expect(key).toHaveAttribute("placeholder", KEPT_HINT);
+  await expect(form.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+
+  await key.fill("typo");
+  await key.fill("");
+  await expect(form.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+});
+
+test("clearing a saved key from the keyboard sends null and hands focus back to the field", async ({ page, browserName }) => {
+  const form = await editKeyedPrinter(page);
+  const key = form.getByLabel(/^API key/);
+  const clear = form.getByRole("button", { name: "Remove the stored API key" });
+  await key.focus();
+  await page.keyboard.press(browserName === "webkit" ? "Alt+Tab" : "Tab");
+  await expect(clear).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(clear).toBeHidden();
+  await expect(key).toBeFocused();
+  await expect(key).toHaveAccessibleDescription("Will be removed on Save");
+
+  await form.getByRole("button", { name: "Save", exact: true }).click();
+  expect((await sent(page, "printer.update")).patch.config).toEqual({ url: "http://mk4", api_key: null });
+});
+
+test("the clear control is a full touch target on a phone", async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 375, height: 812 } });
+  const page = await context.newPage();
+  const form = await editKeyedPrinter(page);
+  const box = await form.getByRole("button", { name: "Remove the stored API key" }).boundingBox();
+  expect(box!.height).toBeGreaterThanOrEqual(40);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await context.close();
+});
+
+test("a printer save the hub refuses says why beside the form and keeps what was typed", async ({ page }) => {
+  const form = await editKeyedPrinter(page);
+  await form.getByRole("textbox", { name: "Address" }).fill("http://mk3");
+  await form.getByRole("button", { name: "Save", exact: true }).click();
+  const refusal = "send api_key again, since a stored secret is only kept for the address it was saved with";
+  await emit(page, { event: "error", message: refusal, req_id: (await sent(page, "printer.update")).req_id });
+  await expect(form.getByRole("alert")).toHaveText(refusal);
+  await expect(form.getByRole("textbox", { name: "Address" })).toHaveValue("http://mk3");
+
+  await form.getByLabel(/^API key/).fill("again");
+  await form.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(form.getByRole("alert")).toBeHidden();
+  expect((await lastSent(page, "printer.update")).patch.config).toEqual({ url: "http://mk3", api_key: "again" });
+});
+
+const ntfy = {
+  id: "ntfy", label: "ntfy", docs_url: "",
+  schema: { properties: { url: { title: "Topic address", secret: true }, priority: { title: "Priority" } }, required: ["url"] },
+};
+const withSavedChannel = (over = {}) =>
+  engine({ notifiers: [ntfy], settings: { ...engine().settings, notifiers: { ntfy: { priority: "high" } } }, secrets_set: { notifiers: { ntfy: ["url"] }, mqtt: [] }, ...over });
+
+test("the alerts step reads as done from a channel's saved secret alone", async ({ page }) => {
+  const bare = { cameras: [], monitors: [], notifiers: [ntfy] };
+  await dashboard(page, { engine: engine({ ...bare, secrets_set: { notifiers: { ntfy: ["url"] }, mqtt: [] } }) });
+  await expect(page.getByRole("button", { name: "Open Connect a printer", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Set up alerts", exact: true })).toBeHidden();
+
+  await emit(page, { event: "state", ...engine(bare) });
+  await expect(page.getByRole("button", { name: "Open Set up alerts", exact: true })).toBeVisible();
+});
+
+test("a channel's saved secret is kept by a save or a test that leaves it blank, replaced when typed and removed by Clear", async ({ page }) => {
+  await dashboard(page, { engine: withSavedChannel(), dialog: "settings" });
+  const address = page.getByLabel(/^Topic address/);
+  await expect(address).toHaveValue("");
+  await expect(address).toHaveAccessibleDescription(KEPT_HINT);
+
+  await page.getByRole("button", { name: "Send test alert" }).click();
+  expect(await sent(page, "notify.test")).toMatchObject({ provider: "ntfy", config: { priority: "high" } });
+  await emit(page, { event: "notify_test", provider: "ntfy", ok: true, req_id: (await sent(page, "notify.test")).req_id });
+
+  await page.getByRole("textbox", { name: "Priority" }).fill("low");
+  await page.getByRole("button", { name: "Save channels" }).click();
+  expect((await lastSent(page, "settings.update")).patch).toEqual({ notifiers: { ntfy: { priority: "low" } } });
+  await emit(page, { event: "state", ...withSavedChannel(), req_id: (await lastSent(page, "settings.update")).req_id });
+
+  await address.fill("https://ntfy.sh/new");
+  await page.getByRole("button", { name: "Save channels" }).click();
+  expect((await lastSent(page, "settings.update")).patch.notifiers.ntfy).toEqual({ priority: "low", url: "https://ntfy.sh/new" });
+  await emit(page, { event: "state", ...withSavedChannel(), req_id: (await lastSent(page, "settings.update")).req_id });
+  await expect(address).toHaveValue("");
+
+  await page.getByRole("button", { name: "Remove the stored Topic address" }).click();
+  await page.getByRole("button", { name: "Save channels" }).click();
+  expect((await lastSent(page, "settings.update")).patch.notifiers.ntfy).toEqual({ priority: "low", url: null });
+});
+
+test("the broker password is kept by an unrelated broker edit, replaced when typed and removed by Clear", async ({ page }) => {
+  const broker = { enabled: true, host: "broker.lan", port: 1883, username: "pg" };
+  const state = engine({ settings: { ...engine().settings, mqtt: broker }, secrets_set: { notifiers: {}, mqtt: ["password"] } });
+  await dashboard(page, { engine: state, dialog: "settings", settingsTab: "mqtt" });
+  await page.getByRole("tab", { name: "Home Assistant" }).click();
+  const password = page.getByLabel("Password", { exact: true });
+  await expect(password).toHaveValue("");
+  await expect(password).toHaveAttribute("placeholder", KEPT_HINT);
+  await expect(password).toHaveAccessibleDescription(KEPT_HINT);
+
+  await page.getByText("Use TLS").click();
+  await page.getByRole("button", { name: "Save broker settings" }).click();
+  expect((await lastSent(page, "settings.update")).patch).toEqual({ mqtt: { ...broker, tls: true } });
+  await emit(page, { event: "state", ...state, req_id: (await lastSent(page, "settings.update")).req_id });
+
+  await password.fill("hunter2");
+  await page.getByRole("button", { name: "Save broker settings" }).click();
+  expect((await lastSent(page, "settings.update")).patch.mqtt.password).toBe("hunter2");
+  await emit(page, { event: "state", ...state, req_id: (await lastSent(page, "settings.update")).req_id });
+  await expect(password).toHaveValue("");
+
+  await page.getByRole("button", { name: "Remove the stored password" }).click();
+  await page.getByRole("button", { name: "Save broker settings" }).click();
+  expect((await lastSent(page, "settings.update")).patch.mqtt.password).toBeNull();
+});
+
+test("an auto-saved setting sends only itself, never the channels, the broker or the saved secret names", async ({ page }) => {
+  const state = withSavedChannel({ settings: { ...engine().settings, notifiers: { ntfy: {} }, mqtt: { enabled: true, host: "broker.lan" } }, secrets_set: { notifiers: { ntfy: ["url"] }, mqtt: ["password"] } });
+  await dashboard(page, { engine: state });
+  await page.evaluate(() => {
+    const store = (window as any).__pg.getState();
+    store.updateSettings({ fault_grace_s: 300 });
+    store.flushUpdates();
+  });
+  expect(await sent(page, "settings.update")).toMatchObject({ patch: { fault_grace_s: 300 } });
+  expect(Object.keys((await sent(page, "settings.update")).patch)).toEqual(["fault_grace_s"]);
+  const shown = await page.evaluate(() => (window as any).__pg.getState().engine);
+  expect(shown.secrets_set).toEqual({ notifiers: { ntfy: ["url"] }, mqtt: ["password"] });
+  expect(shown.settings.mqtt).toEqual({ enabled: true, host: "broker.lan" });
+});
+
+test("a camera with no access code and a scrubbed address still lists", async ({ page }) => {
+  const cameras = [camera({ source: { kind: "bambu", host: "192.168.1.9" }, printer_id: "p1" }), camera({ id: "c2", name: "Shed", source: { kind: "rtsp", url: "rtsp://shed/live" } })];
+  await dashboard(page, { engine: engine({ cameras }), dialog: "cameras" });
+  await expect(page.getByText("bambu://192.168.1.9").first()).toBeVisible();
+  await expect(page.getByText("rtsp://shed/live").first()).toBeVisible();
+});
