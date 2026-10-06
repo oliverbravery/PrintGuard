@@ -9,6 +9,7 @@ printguard.engine.integrations.INTEGRATIONS.
 
 from __future__ import annotations
 
+import math
 from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -16,6 +17,7 @@ from typing import Any, Container
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from ..adapters import Adapter, HttpFn
+from ..bounds import clamp
 
 HEATERS = ("nozzle", "bed")
 """The heaters every service is read and controlled through, by PrintGuard's names."""
@@ -52,6 +54,10 @@ class Heater:
     actual: float
     target: float
 
+    def __post_init__(self) -> None:
+        if not (math.isfinite(self.actual) and math.isfinite(self.target)):
+            raise ValueError("a heater's temperatures must be finite numbers")
+
     @classmethod
     def reported(cls, actual: Any, target: Any) -> Heater | None:
         """Builds a heater from a service's reading and target.
@@ -63,6 +69,9 @@ class Heater:
 
         Returns:
             The heater, or None when there is no reading.
+
+        Raises:
+            ValueError: If a temperature is NaN or infinite.
         """
         if actual is None:
             return None
@@ -93,6 +102,9 @@ class DeviceState:
     remaining_s: int | None = None
     nozzle: Heater | None = None
     bed: Heater | None = None
+
+    def __post_init__(self) -> None:
+        self.progress = clamp("progress", self.progress, 0.0, 100.0)
 
     def public(self) -> dict[str, Any]:
         """Serialises the state for the event protocol."""

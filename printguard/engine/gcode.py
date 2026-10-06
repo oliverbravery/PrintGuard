@@ -452,7 +452,7 @@ def _number(value: str | bytes | float) -> float:
         ValueError: If it is too large to be one, which would not survive the
             JSON a browser reads the library from.
     """
-    return clamp("a number in this file", value, 0.0, sys.float_info.max)
+    return clamp("a number in this file", float(value), 0.0, sys.float_info.max)
 
 
 def _seconds(value: str) -> int | None:

@@ -47,7 +47,7 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
 
 def _target(heater: str, value: Any, strict: bool = False) -> float:
     degrees = clamp(f"{heater} temperature", value, 0.0, HEATER_MAX[heater])
-    if strict and (isinstance(value, (bool, str)) or degrees != value):
+    if strict and degrees != value:
         raise ValueError(f"{heater} temperature must be a number from 0 to {HEATER_MAX[heater]:g}")
     return degrees
 
@@ -65,7 +65,7 @@ def sanitise_targets(fields: dict[str, Any], strict: bool = False) -> dict[str, 
 
     Raises:
         ValueError: If a target is not a finite number, or strict and it is
-            text, a boolean or out of range.
+            out of range.
     """
     return {heater: _target(heater, fields[heater], strict) for heater in HEATERS if fields.get(heater) is not None}
 
@@ -80,10 +80,13 @@ def sanitise_presets(raw: Any) -> list[dict[str, Any]]:
         The presets that carry a name, capped at ``PRESETS_MAX``.
 
     Raises:
-        ValueError: If a preset's target is not a finite number.
+        ValueError: If the presets are not a list of presets, or a target is
+            not a finite number.
     """
+    if not isinstance(raw, list) or not all(isinstance(preset, dict) for preset in raw):
+        raise ValueError("preheat is a list of presets, each with a name and a nozzle and bed target")
     presets = []
-    for preset in raw if isinstance(raw, list) else []:
+    for preset in raw:
         name = " ".join(str(preset.get("name") or "").split())[:PRESET_NAME_MAX]
         if name:
             presets.append({"name": name, **{heater: _target(heater, preset.get(heater) or 0) for heater in HEATERS}})
