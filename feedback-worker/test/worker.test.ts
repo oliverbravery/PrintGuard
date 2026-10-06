@@ -1,6 +1,6 @@
 import { createScheduledController, runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import worker, { expiresSoon, networkOf, reminders } from "../src";
 import type { Reservation } from "../src/gate";
 import {
@@ -47,7 +47,7 @@ const frameRequest = (token: string, address: string, frame: string, body: Uint8
       "CF-Connecting-IP": address,
       "Content-Type": "image/jpeg",
       "Content-Length": String(body.byteLength),
-      "X-Frame": JSON.stringify(details(frame, changes)),
+      "X-Frame": JSON.stringify(details(frame, changes)).replace(/[\u0080-\uffff]/g, (unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`),
     },
     body,
   });
@@ -340,6 +340,52 @@ describe("the gate", () => {
   });
 });
 
+describe("an inbox that has been pulled", () => {
+  const forgetLastRecount = () => runInDurableObject(env.GATE.getByName("gate"), (_gate, state) => state.storage.kv.delete("recount_began_at"));
+  const believeFull = () => env.GATE.getByName("gate").recount(STORED_BYTES_MAX);
+  const bytesInBucket = async () => (await env.FRAMES.list()).objects.reduce((bytes, object) => bytes + object.size, 0);
+
+  afterEach(async () => {
+    const gate = env.GATE.getByName("gate");
+    await gate.beginRecount(0);
+    await gate.recount(await bytesInBucket());
+  });
+
+  it("takes frames again once a recount finds the room, without waiting for the night", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    await forgetLastRecount();
+    await believeFull();
+    const listing = countingCalls(env.FRAMES, "list");
+
+    const response = await worker.fetch(frameRequest(token, "203.0.113.30", frameId(9000)), { ...env, FRAMES: listing.bucket });
+
+    expect(response.status).toBe(201);
+    expect(listing.calls.length).toBeGreaterThan(0);
+    expect((await gateState()).stored).toBe(await bytesInBucket());
+  });
+
+  it("recounts at most once an hour, so a full inbox does not list the bucket on every frame", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    await forgetLastRecount();
+    await believeFull();
+    const fullBucket = new Proxy(env.FRAMES, {
+      get(target, property) {
+        const value = Reflect.get(target, property);
+        if (property !== "list") return typeof value === "function" ? value.bind(target) : value;
+        return async () => ({ objects: [{ size: STORED_BYTES_MAX, uploaded: new Date() }], truncated: false });
+      },
+    });
+    const listing = countingCalls(fullBucket, "list");
+    const full = { ...env, FRAMES: listing.bucket };
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const refused = await worker.fetch(frameRequest(token, "203.0.113.31", frameId(9100 + attempt)), full);
+      expect([refused.status, await code(refused)]).toEqual([507, "storage_full"]);
+    }
+    expect(listing.calls).toHaveLength(1);
+  });
+});
+
 describe("the daily recount", () => {
   it("resets the stored total to what is really in the bucket", async () => {
     const token = await issueToken(env.TOKEN_SECRET);
@@ -357,12 +403,12 @@ describe("the daily recount", () => {
   it("keeps the bytes that arrive while the bucket is being listed", async () => {
     const gate = env.GATE.getByName("recount-race");
     await gate.reserve("hub", "network", "before", 300);
-    await gate.beginRecount();
+    await gate.beginRecount(0);
     await gate.reserve("hub", "network", "during", 50);
     await gate.recount(300);
     expect(await gate.storedBytes()).toBe(350);
 
-    await gate.beginRecount();
+    await gate.beginRecount(0);
     await gate.recount(350);
     expect(await gate.storedBytes()).toBe(350);
   });

@@ -13,6 +13,7 @@ export type Reservation = { bytes: number; uploads: number };
 
 const STORED_BYTES = "stored_bytes";
 const BYTES_SINCE_RECOUNT_BEGAN = "bytes_since_recount_began";
+const RECOUNT_BEGAN_AT = "recount_began_at";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -63,8 +64,11 @@ export class Gate extends DurableObject<Env> {
     this.add("stored", frame, 1);
   }
 
-  beginRecount(): void {
+  beginRecount(minimumGapMs: number): boolean {
+    if (Date.now() - (this.ctx.storage.kv.get<number>(RECOUNT_BEGAN_AT) ?? 0) < minimumGapMs) return false;
+    this.ctx.storage.kv.put(RECOUNT_BEGAN_AT, Date.now());
     this.ctx.storage.kv.put(BYTES_SINCE_RECOUNT_BEGAN, 0);
+    return true;
   }
 
   recount(listedBytes: number): void {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Gate, type Refusal } from "./gate";
-import { DAY_MS, EXPIRY_DAYS, EXPIRY_WARN_DAYS, FRAME_BYTES_MAX, STORED_BYTES_MAX, STORED_BYTES_WARN } from "./limits";
+import { DAY_MS, EXPIRY_DAYS, EXPIRY_WARN_DAYS, FRAME_BYTES_MAX, RECOUNT_GAP_MS, STORED_BYTES_MAX, STORED_BYTES_WARN } from "./limits";
 import { hubOf, issueToken, keyed } from "./token";
 
 export { Gate };
@@ -74,7 +74,10 @@ async function storeFrame(request: Request, env: Env): Promise<Response> {
   const { print, frame, ...labels } = details.data;
   const key = `${hub}/${print}/${frame}.jpg`;
   if (await env.FRAMES.head(key)) return Response.json({}, { status: 201 });
-  const reserved = await gate.reserve(hub, network, key, jpeg.byteLength);
+  let reserved = await gate.reserve(hub, network, key, jpeg.byteLength);
+  if ("code" in reserved && reserved.code === "storage_full" && (await recountBucket(env, RECOUNT_GAP_MS))) {
+    reserved = await gate.reserve(hub, network, key, jpeg.byteLength);
+  }
   if ("code" in reserved) return refuse(reserved);
   try {
     await env.FRAMES.put(key, jpeg, {
@@ -99,11 +102,11 @@ export function reminders(inbox: { bytes: number; expiring: number }): string[] 
 export const expiresSoon = (uploaded: Date, now: number) =>
   uploaded.getTime() <= now - (EXPIRY_DAYS - EXPIRY_WARN_DAYS) * DAY_MS;
 
-async function recountAndRemind(env: Env): Promise<void> {
+async function recountBucket(env: Env, minimumGapMs: number): Promise<{ bytes: number; expiring: number } | null> {
   const gate = env.GATE.getByName("gate");
+  if (!(await gate.beginRecount(minimumGapMs))) return null;
   const now = Date.now();
   const inbox = { bytes: 0, expiring: 0 };
-  await gate.beginRecount();
   let cursor: string | undefined;
   do {
     const page = await env.FRAMES.list({ cursor });
@@ -114,7 +117,12 @@ async function recountAndRemind(env: Env): Promise<void> {
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
   await gate.recount(inbox.bytes);
-  const lines = reminders(inbox);
+  return inbox;
+}
+
+async function recountAndRemind(env: Env): Promise<void> {
+  const inbox = await recountBucket(env, 0);
+  const lines = reminders(inbox!);
   if (lines.length === 0) return;
   await env.EMAIL.send({
     to: env.REMINDER_TO,
