@@ -8,12 +8,14 @@ the hub only when a person has reviewed a print and pressed Send.
 from __future__ import annotations
 
 import json
+import unicodedata
 from typing import Any
 
 from .adapters import HttpFn
 
 ENDPOINT = "https://printguard-feedback.oliverbravery.uk"
 FRAME_BYTES_MAX = 150 * 1024
+PRINTER_MODEL_MAX = 80
 TIMEOUT_S = 20.0
 
 
@@ -29,6 +31,21 @@ class Refused(Exception):
         super().__init__(code)
         self.code = code
         self.retry_at = retry_at
+
+
+def printer_model(typed: Any) -> str:
+    """Cleans the printer model a reviewer typed into what the Worker accepts.
+
+    Args:
+        typed: The text as typed, or None.
+
+    Returns:
+        The text with whitespace collapsed, control characters removed and no more
+        than ``PRINTER_MODEL_MAX`` UTF-16 units, which is how the Worker counts.
+    """
+    collapsed = " ".join(str(typed or "").split())
+    printable = "".join(char for char in collapsed if unicodedata.category(char) != "Cc")
+    return printable.encode("utf-16-le", "surrogatepass")[: PRINTER_MODEL_MAX * 2].decode("utf-16-le", "ignore")
 
 
 async def _call(http: HttpFn, method: str, path: str, **request: Any) -> Any:

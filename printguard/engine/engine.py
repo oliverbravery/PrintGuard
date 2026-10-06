@@ -1507,7 +1507,7 @@ class Engine:
             message["id"],
             failures=set(message.get("failures") or []),
             removed=set(message.get("removed") or []),
-            printer=sanitise_name(message.get("printer"), ""),
+            printer=feedback.printer_model(message.get("printer")),
         )
         self._start_send(review, message.get("req_id"))
 
