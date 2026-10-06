@@ -964,10 +964,10 @@ test("a theme started from dark keeps dark text on its accent", async ({ page })
   expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--color-on-accent"))).toBe("#0b0c0a");
 });
 
-test("glass keeps status colours readable over a bright picture, blurs behind a sheet and forgets a picture that fails to load", async ({ page }) => {
+test("glass keeps status colours readable and distinct over a bright picture, blurs behind a sheet and forgets a picture that fails to load", async ({ page }) => {
   await dashboard(page, { detailId: "m1" });
   await emit(page, { event: "state", ...engine({ settings: { ...engine().settings, theme: "glass" } }) });
-  const lowestRatio = await page.evaluate(async () => {
+  const { lowestRatio, colours } = await page.evaluate(async () => {
     const loaded = performance.getEntriesByType("resource").find((entry) => entry.name.includes("/src/theme.ts"))!.name;
     const { measureCover } = await import(/* @vite-ignore */ loaded);
     const picture = document.createElement("canvas");
@@ -980,15 +980,21 @@ test("glass keeps status colours readable over a bright picture, blurs behind a 
     const [tone, , , tint] = document.documentElement.style.getPropertyValue("--glass-surface").match(/[\d.]+/g)!.map(Number);
     const surface = linear(tint * (tone / 255) + (1 - tint));
     const probe = document.body.appendChild(document.createElement("span"));
-    return Math.min(
-      ...["accent", "ok", "warn", "bad"].map((token) => {
-        probe.style.color = `var(--color-${token})`;
-        const status = luminance(getComputedStyle(probe).color.match(/[\d.]+/g)!.slice(0, 3).map((channel) => Number(channel) / 255));
+    const colours = ["accent", "ok", "warn", "bad"].map((token) => {
+      probe.style.color = `var(--color-${token})`;
+      return getComputedStyle(probe).color;
+    });
+    const lowestRatio = Math.min(
+      ...colours.map((colour) => {
+        const status = luminance(colour.match(/[\d.]+/g)!.slice(0, 3).map((channel) => Number(channel) / 255));
         return (Math.max(status, surface) + 0.05) / (Math.min(status, surface) + 0.05);
       }),
     );
+    return { lowestRatio, colours };
   });
   expect(lowestRatio).toBeGreaterThanOrEqual(4.5);
+  expect(new Set(colours).size).toBe(4);
+  expect(colours).not.toContain("rgb(255, 255, 255)");
   await expect(page.getByRole("dialog", { name: "Prusa" }).locator("aside")).not.toHaveCSS("backdrop-filter", "none");
 
   const tint = await page.evaluate(async () => {

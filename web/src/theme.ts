@@ -67,9 +67,11 @@ export const GLASS = "glass";
 export const GLASS_DEFAULT: Glass = { opacity: 0, tone: 0 };
 const PREFERRED_MUTED = 0.85;
 const AA = 4.5;
+const STATUS_SHARE_TOWARDS_INK = 0.5;
 const BACKDROP_CELLS = 8;
 const SATURATION_HEADROOM = 0.05;
 const MEDIA = "(prefers-color-scheme: dark)";
+const STATUS_TOKENS = ["accent", "ok", "warn", "bad"] as const;
 
 interface Resolved {
   base: ThemeBase;
@@ -101,12 +103,20 @@ function mutedRatio(level: number, ink: number, alpha: number): number {
   return contrast(grey(ink * alpha + level * (1 - alpha)), grey(level));
 }
 
-function boundary(ink: number, alpha: number): number {
+function statusRatio(level: number, ink: number): number {
+  const palette = PALETTES[ink ? "dark" : "light"];
+  const surface = grey(level);
+  return Math.min(
+    ...STATUS_TOKENS.map((token) => contrast(luminance(channels(palette[token]).map((channel) => channel + (ink - channel) * STATUS_SHARE_TOWARDS_INK)), surface)),
+  );
+}
+
+function boundary(ink: number, ratioAt: (level: number) => number): number {
   let low = 0;
   let high = 1;
   for (let step = 0; step < 24; step += 1) {
     const mid = (low + high) / 2;
-    if ((mutedRatio(mid, ink, alpha) >= AA) === (ink < 0.5)) high = mid;
+    if ((ratioAt(mid) >= AA) === (ink < 0.5)) high = mid;
     else low = mid;
   }
   return ink < 0.5 ? high : low;
@@ -145,14 +155,13 @@ function legibleStatus(hex: string, level: number, ink: number): string {
   return `rgb(${towardsInk(low).map((channel) => settle(channel * 255)).join(" ")})`;
 }
 
-const STATUS_TOKENS = ["accent", "ok", "warn", "bad"] as const;
-
-const LIGHTEST_UNDER_WHITE_INK = boundary(1, 1);
-const DARKEST_UNDER_BLACK_INK = boundary(0, 1);
+const DARKEST_UNDER_BLACK_INK = boundary(0, (level) => mutedRatio(level, 0, 1));
+const LIGHTEST_UNDER_STATUS_COLOURS = boundary(1, (level) => statusRatio(level, 1));
+const DARKEST_UNDER_STATUS_COLOURS = boundary(0, (level) => statusRatio(level, 0));
 
 let cover: { lo: number; hi: number } | null = null;
 
-export function litGlass(tone: number): boolean {
+function litGlass(tone: number): boolean {
   return tone >= DARKEST_UNDER_BLACK_INK;
 }
 
@@ -167,11 +176,11 @@ function behindTheGlass(tone: number): { lo: number; hi: number } {
 function readableAt(tint: number, tone: number): boolean {
   const { lo, hi } = behindTheGlass(tone);
   return litGlass(tone)
-    ? tint * tone + (1 - tint) * lo >= DARKEST_UNDER_BLACK_INK
-    : tint * tone + (1 - tint) * hi <= LIGHTEST_UNDER_WHITE_INK;
+    ? tint * tone + (1 - tint) * lo >= DARKEST_UNDER_STATUS_COLOURS
+    : tint * tone + (1 - tint) * hi <= LIGHTEST_UNDER_STATUS_COLOURS;
 }
 
-export function clearestTint(tone: number): number {
+function clearestTint(tone: number): number {
   if (readableAt(0, tone)) return 0;
   let low = 0;
   let high = 1;
@@ -183,15 +192,16 @@ export function clearestTint(tone: number): number {
   return high;
 }
 
-export function glassMaterial({ opacity, tone }: Glass): { lit: boolean; vars: Record<string, string> } {
+function glassMaterial({ opacity, tone: chosenTone }: Glass): { lit: boolean; vars: Record<string, string> } {
+  const level = Math.round(chosenTone * 255);
+  const tone = level / 255;
   const lit = litGlass(tone);
   const floor = clearestTint(tone);
-  const settled = floor + opacity * (1 - floor);
+  const settled = Math.ceil((floor + opacity * (1 - floor)) * 1000) / 1000;
   const { lo, hi } = behindTheGlass(tone);
   const ink = lit ? 0 : 1;
   const hardest = settled * tone + (1 - settled) * (lit ? lo : hi);
-  const alpha = mutedAlpha(hardest, ink);
-  const level = Math.round(tone * 255);
+  const alpha = Math.ceil(mutedAlpha(hardest, ink) * 1000) / 1000;
   const inked = lit ? "0 0 0" : "255 255 255";
   const palette = PALETTES[lit ? "light" : "dark"];
   return {
@@ -231,7 +241,7 @@ export async function measureCover(src: string | null): Promise<void> {
   applyTheme(current.themeId, current.themes, current.glass);
 }
 
-export function resolveTheme(themeId: string, themes: CustomTheme[], glass: Glass = GLASS_DEFAULT): Resolved {
+function resolveTheme(themeId: string, themes: CustomTheme[], glass: Glass = GLASS_DEFAULT): Resolved {
   const custom = themes.find((t) => t.id === themeId);
   if (custom) return { base: custom.base, colors: { ...PALETTES[custom.base], ...custom.colors } };
   if (themeId === "light" || themeId === "dark") return { base: themeId, colors: null };
