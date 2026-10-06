@@ -106,7 +106,7 @@ GPU, then an NPU, then the CPU. What is available depends on the platform:
 | Older Windows, desktop app | DirectML | Runs on the GPU through its DirectX 12 driver, with no provider install, and reads `microsoft gpu`. Stays on the CPU without a driver |
 | Linux `amd64`, standard image | OpenVINO | Intel CPU path out of the box, and the GPU needs `latest-intel` and `/dev/dri` |
 | Linux `amd64`, `latest-nvidia` | TensorRT RTX | Needs the NVIDIA Container Toolkit on the host |
-| Linux `arm64`, standard image | Optimised CPU | Raspberry Pi 4/5 and similar |
+| Linux `arm64`, standard image | ONNX Runtime's own CPU provider | No accelerator. Raspberry Pi 4/5 and similar |
 
 If no accelerator is usable, PrintGuard keeps working on the CPU. On an `amd64` image that is
 OpenVINO's CPU path, which the `latest-nvidia` image carries too, and elsewhere it is ONNX
@@ -114,7 +114,8 @@ Runtime's own CPU provider. That covers an accelerator that is offered but can't
 the model, such as a GPU out of memory or a driver the provider rejects. The dashboard and the
 log name the device and the reason in a warning that it `cannot run the model, so detection is
 not using it`, and **compute** names the device used instead. It applies with the runtime pinned
-to ONNX too.
+to ONNX too. On **Automatic** the CPU path still has to beat LiteRT in the benchmark, so
+**compute** may read `litert cpu` instead.
 
 ## Intel GPU
 
@@ -124,6 +125,7 @@ Use the Intel image and pass the render device:
 docker run -d --name printguard --restart unless-stopped \
   --device /dev/dri \
   -p 8000:8000 -p 8554:8554 \
+  --add-host host.docker.internal:host-gateway \
   -v printguard:/data \
   ghcr.io/oliverbravery/printguard:latest-intel
 ```
@@ -165,6 +167,7 @@ on the host:
 docker run -d --name printguard --restart unless-stopped \
   --gpus all \
   -p 8000:8000 -p 8554:8554 \
+  --add-host host.docker.internal:host-gateway \
   -v printguard:/data \
   ghcr.io/oliverbravery/printguard:latest-nvidia
 ```
@@ -188,7 +191,7 @@ PrintGuard logs which provider is unavailable and keeps running on the CPU.
 
 The **compute** readout names the hardware the model is running on, as the provider's vendor and
 the kind of device. It sits in the header on a wide window, in the **More** sheet on a phone
-and as **Active compute** in the Advanced tab in Settings.
+and, in capitals, as **Active compute** in the Advanced tab in Settings.
 
 | Readout | Means |
 |---|---|
@@ -196,7 +199,7 @@ and as **Active compute** in the Advanced tab in Settings.
 | `intel cpu` | OpenVINO on the processor, whoever made it |
 | `litert cpu` | LiteRT on the processor |
 | `apple core ml` | Core ML on a Mac, which shares the model between the CPU, GPU and Neural Engine itself |
-| `onnx cpu` | ONNX Runtime's own CPU provider, where no other provider offered a device |
+| `onnx cpu` | ONNX Runtime's own CPU provider, where no other provider offered a device or none of the offered ones could run the model |
 
 A Windows ML or TensorRT device is named the same way as OpenVINO's, by its provider's vendor.
 The Advanced tab in Settings offers:
