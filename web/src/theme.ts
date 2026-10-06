@@ -52,13 +52,13 @@ export const PALETTES: Record<ThemeBase, Palette> = {
     ink0: "#0b0c0a", ink1: "#11130e", ink2: "#181b13", ink3: "#20241a",
     line0: "#262b20", line1: "#39402f",
     text0: "#eceee6", text1: "#a8af9c", text2: "#7e866d",
-    accent: "#ff4d00", ok: "#8ac926", warn: "#ffb000", bad: "#ff3b30",
+    accent: "#ff4d00", ok: "#8ac926", warn: "#ffb000", bad: "#ff3f34",
   },
   light: {
     ink0: "#e7e8e0", ink1: "#f2f3ec", ink2: "#fbfcf6", ink3: "#dfe1d6",
     line0: "#d3d5c8", line1: "#c2c5b4",
     text0: "#1b1d16", text1: "#4a4f40", text2: "#646959",
-    accent: "#bc3809", ok: "#487212", warn: "#8d5d00", bad: "#c42920",
+    accent: "#b53608", ok: "#487212", warn: "#8d5d00", bad: "#bd271f",
   },
 };
 
@@ -272,8 +272,11 @@ export function applyTheme(themeId: string, themes: CustomTheme[], given?: Parti
     if (colors) root.style.setProperty(t.cssVar, colors[t.key]);
     else root.style.removeProperty(t.cssVar);
   }
-  if (colors) root.style.setProperty("--color-on-accent", readableOn(colors.accent));
-  else root.style.removeProperty("--color-on-accent");
+  const inks = { "--color-on-accent": colors && readableOn(colors.accent), "--color-on-bad": colors && readableOn(colors.bad) };
+  for (const [name, ink] of Object.entries(inks)) {
+    if (ink) root.style.setProperty(name, ink);
+    else root.style.removeProperty(name);
+  }
   for (const [name, value] of Object.entries(material)) {
     if (glassy) root.style.setProperty(name, value);
     else root.style.removeProperty(name);
@@ -282,7 +285,7 @@ export function applyTheme(themeId: string, themes: CustomTheme[], given?: Parti
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg);
   if (previewing) return;
   const vars = colors
-    ? { ...Object.fromEntries(TOKENS.map((t) => [t.cssVar, colors[t.key]])), "--color-on-accent": readableOn(colors.accent) }
+    ? { ...Object.fromEntries(TOKENS.map((t) => [t.cssVar, colors[t.key]])), ...inks }
     : glassy
       ? material
       : null;

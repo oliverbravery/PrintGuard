@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { PALETTES, TOKEN_GROUPS } from "../theme";
 import type { CustomTheme, ThemeBase, ThemeTokenKey } from "../types";
 
-function ColorField({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (hex: string) => void }) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
   const commit = (raw: string) => {
@@ -16,9 +16,9 @@ function ColorField({ value, onChange }: { value: string; onChange: (hex: string
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="h-7 w-8 cursor-pointer rounded border border-line-1 bg-transparent p-0"
-        aria-label="Colour"
+        aria-label={`${label} colour`}
       />
-      <input className="field mono" aria-label="Hex colour" style={{ width: "5.5rem" }} value={text} spellCheck={false} onChange={(e) => commit(e.target.value)} />
+      <input className="field mono" aria-label={`${label} hex`} style={{ width: "5.5rem" }} value={text} spellCheck={false} onChange={(e) => commit(e.target.value)} />
     </div>
   );
 }
@@ -62,7 +62,7 @@ export function ThemeEditor({
           {group.tokens.map((token) => (
             <div key={token.key} className="flex items-center justify-between gap-3">
               <span className="text-xs text-text-1">{token.label}</span>
-              <ColorField value={value.colors[token.key]} onChange={(hex) => setColor(token.key, hex)} />
+              <ColorField label={token.label} value={value.colors[token.key]} onChange={(hex) => setColor(token.key, hex)} />
             </div>
           ))}
         </div>

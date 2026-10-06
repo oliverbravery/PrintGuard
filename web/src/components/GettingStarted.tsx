@@ -115,7 +115,7 @@ export function GettingStarted() {
           ))}
         </ol>
         <button
-          className="mt-5 text-xs text-text-2 underline transition-colors hover:text-accent"
+          className="tap-target mt-5 text-xs text-text-2 underline transition-colors hover:text-accent"
           onClick={() => openDialog("intro")}
         >
           New here? How PrintGuard works

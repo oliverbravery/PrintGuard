@@ -33,19 +33,18 @@ function Toasts() {
   const prevLen = useRef(0);
   const modal = useTopModal();
 
-  // Promote the toast layer into the top layer so defect alerts stay visible above an open
-  // <dialog>; re-show on each new toast to re-stack above a dialog opened after it.
   useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof el.showPopover !== "function") return;
+    const topLayer = ref.current;
+    if (!topLayer || typeof topLayer.showPopover !== "function") return;
     const grew = toasts.length > prevLen.current;
     prevLen.current = toasts.length;
+    const restackAboveDialogs = () => {
+      if (topLayer.matches(":popover-open")) topLayer.hidePopover();
+      topLayer.showPopover();
+    };
     if (toasts.length === 0) {
-      if (el.matches(":popover-open")) el.hidePopover();
-    } else if (grew || !el.matches(":popover-open")) {
-      if (el.matches(":popover-open")) el.hidePopover();
-      el.showPopover();
-    }
+      if (topLayer.matches(":popover-open")) topLayer.hidePopover();
+    } else if (grew || !topLayer.matches(":popover-open")) restackAboveDialogs();
   }, [toasts.length, modal]);
 
   const layer = (
@@ -53,7 +52,7 @@ function Toasts() {
       ref={ref}
       popover="manual"
       aria-label="Notifications"
-      className="fixed inset-auto right-4 bottom-4 z-50 m-0 w-fit max-w-sm space-y-2 border-0 bg-transparent p-0 max-sm:left-4 max-sm:bottom-[calc(5rem+env(safe-area-inset-bottom))]"
+      className="fixed inset-auto right-4 bottom-4 z-50 m-0 w-fit max-w-sm space-y-2 border-0 bg-transparent p-0 text-text-0 max-sm:left-4 max-sm:max-w-[calc(100vw-2rem)] max-sm:bottom-[calc(5rem+env(safe-area-inset-bottom))]"
     >
       {toasts.map((toast) => (
         <div

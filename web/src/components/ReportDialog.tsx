@@ -126,7 +126,7 @@ export function ReportDialog() {
               {attachment.name}
               <button
                 type="button"
-                className="cursor-pointer hover:text-bad"
+                className="tap-target cursor-pointer hover:text-bad"
                 aria-label={`Remove ${attachment.name}`}
                 onClick={() => setAttachments((current) => current.filter((_, i) => i !== index))}
               >

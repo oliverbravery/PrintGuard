@@ -15,8 +15,9 @@
   --color-accent: #ff4d00;
   --color-ok: #8ac926;
   --color-warn: #ffb000;
-  --color-bad: #ff3b30;
+  --color-bad: #ff3f34;
   --color-on-accent: #0b0c0a;
+  --color-on-bad: #0b0c0a;
   --font-display: "Saira Condensed", "Arial Narrow", sans-serif;
   --font-body: "Saira", system-ui, sans-serif;
   --font-mono: "Chivo Mono", ui-monospace, monospace;
@@ -35,11 +36,12 @@
   --color-text-0: #1b1d16;
   --color-text-1: #4a4f40;
   --color-text-2: #646959;
-  --color-accent: #bc3809;
+  --color-accent: #b53608;
   --color-ok: #487212;
   --color-warn: #8d5d00;
-  --color-bad: #c42920;
+  --color-bad: #bd271f;
   --color-on-accent: #f3f4ed;
+  --color-on-bad: #f3f4ed;
 }
 
 html {
@@ -73,6 +75,10 @@ body {
 }
 
 :where(a, button, [role="button"], [role="switch"], [role="tab"], input, select, textarea, [tabindex]):focus:not(:focus-visible) {
+  outline: none;
+}
+
+:root[data-input="pointer"] :where(a, button, [role="button"], [role="switch"], [role="tab"]):focus-visible {
   outline: none;
 }
 
@@ -150,7 +156,7 @@ body {
 }
 
 :root[data-glass] dialog.modal::backdrop {
-  background: var(--painted-scrim);
+  background: var(--painted-scrim, rgb(0 0 0 / 0.3));
 }
 
 :root[data-glass] .panel,
@@ -271,7 +277,7 @@ body {
 }
 
 .btn-primary:hover {
-  background: color-mix(in srgb, var(--color-accent) 88%, white);
+  background: color-mix(in srgb, var(--color-accent) 88%, var(--color-text-0));
   color: var(--color-on-accent);
 }
 
@@ -355,7 +361,7 @@ body {
 }
 
 .nav-item[data-primary]:hover .nav-icon {
-  background: color-mix(in srgb, var(--color-accent) 88%, white);
+  background: color-mix(in srgb, var(--color-accent) 88%, var(--color-text-0));
 }
 
 @media (width < 40rem) {
@@ -963,15 +969,21 @@ video {
   }
 
   button.chip,
-  .toggle {
+  .toggle,
+  .tap-target {
     position: relative;
   }
 
   button.chip::before,
-  .toggle::before {
+  .toggle::before,
+  button.tap-target::before {
     content: "";
     position: absolute;
     inset: -0.6rem -0.25rem;
+  }
+
+  button.tap-target::before {
+    inset: -0.8rem;
   }
 }
 

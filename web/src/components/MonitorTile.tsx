@@ -92,7 +92,7 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
       </Feed>
       {alerting && (
         <div className="pointer-events-none absolute inset-x-0 top-[calc(50%-14px)] z-[4] flex justify-center">
-          <span className="display bg-bad text-on-accent text-xs font-bold tracking-[0.3em] px-4 py-1.5">
+          <span className="display bg-bad text-on-bad text-xs font-bold tracking-[0.3em] px-4 py-1.5">
             DEFECT DETECTED
           </span>
         </div>

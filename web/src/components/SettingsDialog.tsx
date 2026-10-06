@@ -228,7 +228,7 @@ export function SettingsDialog() {
               );
             })}
             <span className="text-[0.7rem] text-text-2 block">
-              Defect alerts (with snapshots) go to every enabled channel for printers with notifications on.
+              Defect alerts (with snapshots) go to every enabled channel for monitors with push notifications on.
             </span>
             <button
               className="btn btn-primary w-full"
@@ -258,6 +258,10 @@ export function SettingsDialog() {
                 <div className="flex gap-2">
                   <input
                     className="field flex-1"
+                    aria-label="Broker host"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     placeholder="Broker host (e.g. 192.168.1.10)"
                     value={mqtt.host ?? ""}
                     onChange={(e) => setMqttField("host", e.target.value)}
@@ -266,6 +270,7 @@ export function SettingsDialog() {
                     className="field shrink-0"
                     style={{ width: "5rem" }}
                     type="number"
+                    aria-label="Broker port"
                     placeholder={mqtt.tls ? "8883" : "1883"}
                     value={mqtt.port ?? ""}
                     onChange={(e) => setMqttField("port", e.target.value ? Number(e.target.value) : undefined)}
@@ -274,6 +279,9 @@ export function SettingsDialog() {
                 <div className="flex gap-2">
                   <input
                     className="field flex-1"
+                    aria-label="Username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     placeholder="Username (optional)"
                     value={mqtt.username ?? ""}
                     onChange={(e) => setMqttField("username", e.target.value)}
@@ -281,6 +289,7 @@ export function SettingsDialog() {
                   <input
                     className="field flex-1"
                     type="password"
+                    aria-label="Password"
                     placeholder="Password (optional)"
                     value={mqtt.password ?? ""}
                     onChange={(e) => setMqttField("password", e.target.value)}
@@ -289,12 +298,18 @@ export function SettingsDialog() {
                 <div className="flex gap-2">
                   <input
                     className="field flex-1"
+                    aria-label="Base topic"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     placeholder="Base topic (printguard)"
                     value={mqtt.base_topic ?? ""}
                     onChange={(e) => setMqttField("base_topic", e.target.value)}
                   />
                   <input
                     className="field flex-1"
+                    aria-label="Discovery prefix"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     placeholder="Discovery prefix (homeassistant)"
                     value={mqtt.discovery_prefix ?? ""}
                     onChange={(e) => setMqttField("discovery_prefix", e.target.value)}
@@ -349,7 +364,7 @@ export function SettingsDialog() {
               </span>
             </div>
             <div className="flex justify-end">
-              <SaveStatus />
+              <SaveStatus scope="settings" />
             </div>
           </TabPanel>
         )}
@@ -365,13 +380,15 @@ export function SettingsDialog() {
 
             {createdToken && (
               <div className="relative rounded border border-accent/40 bg-accent/5 p-3 pr-8 space-y-2">
-                <button
-                  className="absolute top-2 right-2 text-text-2 hover:text-accent text-lg leading-none cursor-pointer"
-                  onClick={clearCreatedToken}
-                  aria-label="Dismiss"
-                >
-                  ×
-                </button>
+                <span className="absolute top-2 right-2">
+                  <button
+                    className="tap-target text-text-2 hover:text-accent text-lg leading-none cursor-pointer"
+                    onClick={clearCreatedToken}
+                    aria-label="Dismiss"
+                  >
+                    ×
+                  </button>
+                </span>
                 <span className="text-[0.7rem] text-text-1 block">
                   Copy <span className="text-accent">{createdToken.name}</span> now, it is shown once and cannot be retrieved later.
                 </span>
@@ -408,12 +425,13 @@ export function SettingsDialog() {
             <div className="space-y-2">
               <input
                 className="field"
+                aria-label="Token name"
                 placeholder="Token name"
                 value={tokenName}
                 onChange={(e) => setTokenName(e.target.value)}
               />
               <div className="flex gap-2">
-                <select className="field" value={tokenScope} onChange={(e) => setTokenScope(e.target.value as ApiToken["scope"])}>
+                <select className="field" aria-label="Token scope" value={tokenScope} onChange={(e) => setTokenScope(e.target.value as ApiToken["scope"])}>
                   <option value="read">read</option>
                   <option value="control">control</option>
                   <option value="manage">manage</option>
@@ -476,7 +494,7 @@ export function SettingsDialog() {
               </div>
             )}
             <div className="flex justify-end">
-              <SaveStatus />
+              <SaveStatus scope="settings" />
             </div>
           </TabPanel>
         )}

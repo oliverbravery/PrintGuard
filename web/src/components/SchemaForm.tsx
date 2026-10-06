@@ -38,6 +38,9 @@ export function SchemaForm({
               placeholder={prop.placeholder}
               value={value[key] ?? ""}
               autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               onChange={(e) => onChange({ ...value, [key]: e.target.value })}
             />
           )}

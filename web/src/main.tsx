@@ -1,5 +1,6 @@
 import { Component, StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { markLastInput } from "./a11y";
 import { App } from "./App";
 import { captureErrors } from "./log";
 import "./styles.css";
@@ -27,6 +28,7 @@ class RenderFailure extends Component<{ children: ReactNode }, { failed: boolean
 }
 
 captureErrors();
+markLastInput();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RenderFailure>
