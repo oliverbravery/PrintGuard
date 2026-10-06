@@ -557,8 +557,9 @@ async def test_a_reader_that_cannot_be_stopped_is_not_joined_by_another(monkeypa
                 await platform.open_camera("cam1", camera)
         assert opened == [1]
     finally:
-        release.set()
-    assert platform._closing["cam1"].stopped(5.0)
+        stuck = platform._closing["cam1"]
+    release.set()
+    assert stuck.stopped(5.0)
     release.clear()
     with pytest.raises(RuntimeError, match="no frames from camera cam1"):
         await platform.open_camera("cam1", camera)
@@ -855,3 +856,26 @@ async def test_a_reader_that_cannot_be_stopped_is_remembered_when_the_wait_for_i
     finally:
         release.set()
 
+
+async def test_a_released_camera_is_forgotten_once_its_reader_has_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every released camera's source, with its last frames, was kept for the life of the process."""
+    monkeypatch.setattr("printguard.server.platform.open_bambu_jpeg_stream", lambda host, access_code: _MjpegPipe())
+    monkeypatch.setattr("printguard.server.platform.MEASURE_WARMUP_S", 0.1)
+    monkeypatch.setattr("printguard.server.platform.FPS_SAMPLE_S", 0.3)
+    platform = object.__new__(ServerPlatform)
+    platform.mediamtx = SimpleNamespace(rtsp_url=lambda path: f"rtsp://127.0.0.1:9/{path}")
+    platform._sources, platform._closing, platform._notices = {}, {}, []
+    camera = {"kind": "bambu", "host": "printer", "access_code": "code"}
+
+    opened = await platform.open_camera("cam1", camera)
+    assert await opened.grab() is not None
+    reader = weakref.ref(opened)
+    await platform.release_camera("cam1", camera)
+    del opened
+    deadline = time.monotonic() + 5
+    while platform._closing and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
+    gc.collect()
+
+    assert platform._closing == {}
+    assert reader() is None

@@ -348,7 +348,7 @@ class AVSource:
     MediaMTX cannot pull itself reach viewers as HLS. A push that fails costs
     the live view alone: capture carries on feeding detection, the failure is
     reported once through ``report``, and the push is tried again every
-    RECONNECT_DELAY_S.
+    RECONNECT_DELAY_S. ``finished`` is called from the reader's thread as it ends.
 
     A container's declared rate is taken for a network stream or a device and
     measured for a byte stream, whose raw MJPEG demuxer answers 25 whatever the
@@ -369,9 +369,11 @@ class AVSource:
         container_format: str | None = None,
         open_options: tuple[dict[str, str], ...] | None = None,
         report: Callable[[str, bool], None] = lambda message, recovered: None,
+        finished: Callable[[], None] = lambda: None,
     ) -> None:
         self._source = source
         self._report = report
+        self._finished = finished
         self._publish_url = publish_url
         self._container_format = container_format
         self._open_options = open_options or DEVICE_OPEN_OPTIONS
@@ -474,6 +476,7 @@ class AVSource:
             self.online = False
             if not self._stop and self._demanded():
                 time.sleep(RECONNECT_DELAY_S)
+        self._finished()
 
     def _without_credentials(self, message: str) -> str:
         """Scrubs the source address out of an error PyAV raised, which quotes it in full."""
@@ -853,6 +856,7 @@ class ServerPlatform:
             container_format,
             open_options,
             lambda message, recovered: self._notices.append(Notice(message, recovered, camera_id)),
+            lambda: self._forget_closed(reader, av_source),
         )
         self._sources[camera_id] = av_source
         try:
@@ -881,6 +885,11 @@ class ServerPlatform:
             await asyncio.sleep(0.1)
         source.view()
 
+    def _forget_closed(self, reader: str, source: AVSource) -> None:
+        """Drops a released source once its reader has ended, along with its last frames."""
+        if self._closing.get(reader) is source:
+            del self._closing[reader]
+
     async def release_camera(self, camera_id: str, source: dict[str, Any]) -> None:
         """Closes the source and removes any MediaMTX pull path.
 
@@ -890,8 +899,8 @@ class ServerPlatform:
         """
         av_source = self._sources.pop(camera_id, None)
         if av_source:
-            av_source.close()
             self._closing[source.get("device_id", camera_id)] = av_source
+            av_source.close()
         if source["kind"] == "url":
             try:
                 await self.mediamtx.remove_path(camera_id)
