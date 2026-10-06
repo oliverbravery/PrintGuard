@@ -46,7 +46,8 @@ A saved key, password or access code is never shown again. Its field is empty an
 "Saved. Leave blank to keep it". Type in it to replace the saved one, or press **Clear** and
 save to remove it. **Test connection** on a saved printer uses the saved one while the field is
 blank. Changing the printer's address needs the key or password typed again, since a saved one
-is only kept for the address it was saved with.
+is only kept for the address it was saved with, and the whole address typed, since the one shown
+leaves out any login or key it carries. Save stays off until both are done.
 
 Then bind
 it to a monitor and choose whether a sustained defect alerts you, pauses the print or cancels it.
