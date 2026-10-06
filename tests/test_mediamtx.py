@@ -77,6 +77,41 @@ async def test_control_api_calls_carry_the_login() -> None:
     assert [request.headers["authorization"] for request in requests] == [expected] * 3
 
 
+async def test_an_existing_path_is_patched() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.startswith("/v3/config/paths/add/"):
+            return httpx.Response(400, json={"error": "path already exists"})
+        return httpx.Response(200)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        await MediaMTX("http://mediamtx", "rtsp://mediamtx", client).ensure_path("camera", "rtsp://camera/live")
+
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("POST", "/v3/config/paths/add/camera"),
+        ("PATCH", "/v3/config/paths/patch/camera"),
+    ]
+
+
+async def test_an_address_mediamtx_refuses_is_reported_without_its_credentials() -> None:
+    requests: list[httpx.Request] = []
+    source = "rtsp://admin:hunter22@camera/live"
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(400, json={"error": f"invalid source {source}: only rtsp is supported"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(ValueError, match="PrintGuard can't use that address") as refused:
+            await MediaMTX("http://mediamtx", "rtsp://mediamtx", client).ensure_path("camera", source)
+
+    assert "only rtsp is supported" in str(refused.value)
+    assert "hunter22" not in str(refused.value)
+    assert [request.method for request in requests] == ["POST"]
+
+
 async def test_pull_paths_are_added_again_to_a_server_that_restarted() -> None:
     """A path added through the API is gone when MediaMTX restarts, and a sleeping camera never asks for it again."""
     requests: list[httpx.Request] = []
@@ -203,3 +238,15 @@ async def test_the_bundled_server_is_handed_the_api_login_in_its_environment(tmp
         "MTX_AUTHINTERNALUSERS_1_PASS": "secret",
         "MTX_AUTHINTERNALUSERS_1_PERMISSIONS_0_ACTION": "api",
     }
+
+
+async def test_stop_wins_against_a_server_that_is_still_launching(tmp_path) -> None:
+    stand_in = tmp_path / "mediamtx.py"
+    stand_in.write_text("import time\ntime.sleep(600)\n")
+    server = EmbeddedMediaMTX(sys.executable, str(stand_in), "http://127.0.0.1:9", ("printguard", "secret"), _nothing)
+    server._supervisor = asyncio.ensure_future(server._run())
+    await asyncio.sleep(0)
+
+    await asyncio.wait_for(server.stop(), 8)
+
+    assert server._process is None or server._process.returncode is not None

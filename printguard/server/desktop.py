@@ -189,7 +189,8 @@ def _run_webview(
     environment switch for this, since pywebview sets the browser arguments itself.
 
     Windows without the WebView2 runtime would draw the window with Internet Explorer's
-    engine, which cannot run the dashboard, so the dashboard opens in the browser there.
+    engine, which cannot run the dashboard, so the dashboard opens in the browser there,
+    once it answers when the hub is still starting.
     """
     root = logging.getLogger()
     root.addHandler(logging.handlers.QueueHandler(log_records))
@@ -197,7 +198,7 @@ def _run_webview(
     try:
         if sys.platform == "darwin":
             _enable_wkwebview_media()
-        if sys.platform == "win32" and "url" in contents:
+        if sys.platform == "win32" and ("url" in contents or awaiting):
             from webview.platforms import winforms
 
             if not winforms.is_chromium:
@@ -206,7 +207,9 @@ def _run_webview(
                     "install it from %s for the app window",
                     WEBVIEW2_DOWNLOAD,
                 )
-                webbrowser.open(contents["url"])
+                if awaiting:
+                    _wait_until_answering(awaiting, threading.Event())
+                webbrowser.open(contents.get("url") or _webview_url(awaiting))
                 return
         webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
         webview.settings["ALLOW_DOWNLOADS"] = True
@@ -227,17 +230,31 @@ def _starting_page() -> str:
     return STARTING_PAGE.substitute(log=html.escape(os.environ["LOG_FILE"]))
 
 
-def _open_when_serving(window: webview.Window, port: int) -> None:
-    """Swaps the starting page for the dashboard once the hub answers, giving up when the window closes."""
-    closed = threading.Event()
-    window.events.closed += closed.set
-    while not closed.wait(1.0):
+def _wait_until_answering(port: int, abandoned: threading.Event) -> bool:
+    """Waits for the hub to answer on a port.
+
+    Args:
+        port: The port the hub serves on.
+        abandoned: Set to stop waiting.
+
+    Returns:
+        True once the hub answers, False if the wait was abandoned first.
+    """
+    while not abandoned.wait(1.0):
         try:
             httpx.get(f"http://localhost:{port}/api/health", trust_env=False)
         except httpx.HTTPError:
             continue
+        return True
+    return False
+
+
+def _open_when_serving(window: webview.Window, port: int) -> None:
+    """Swaps the starting page for the dashboard once the hub answers, giving up when the window closes."""
+    closed = threading.Event()
+    window.events.closed += closed.set
+    if _wait_until_answering(port, closed):
         window.load_url(_webview_url(port))
-        return
 
 
 def _failure_page() -> str:
@@ -298,6 +315,20 @@ def _listening_socket(port: int) -> socket.socket:
     return listener
 
 
+def _health(port: int) -> Any:
+    """What localhost answers on a port's health route, or None if nothing sensible does."""
+    try:
+        return httpx.get(f"http://localhost:{port}/api/health", trust_env=False).json()
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def _hub_running(port: int) -> bool:
+    """Whether a PrintGuard hub, of any version, already serves a port."""
+    health = _health(port)
+    return isinstance(health, dict) and health.get("ok") is True and "version" in health
+
+
 class _Server:
     """Runs the hub's uvicorn server on a background daemon thread."""
 
@@ -323,11 +354,7 @@ class _Server:
         A program listening on the port over IPv6 does not stop the hub binding it over
         IPv4, and localhost resolves to IPv6 first, so the window would show that program.
         """
-        try:
-            health = httpx.get(f"http://localhost:{self._port}/api/health", trust_env=False).json()
-        except (httpx.HTTPError, ValueError):
-            return False
-        return health == {"ok": True, "version": metadata.version("printguard")}
+        return _health(self._port) == {"ok": True, "version": metadata.version("printguard")}
 
     def start(self) -> bool | None:
         """Starts serving and waits for startup to complete.
@@ -497,7 +524,8 @@ def main() -> None:
     """Console entry point that serves the hub behind a tray icon on the main thread.
 
     The window runs in a child process; closing it leaves the tray and the hub
-    server running so the printer stays watched, and the tray's Quit exits.
+    server running so the printer stays watched, and the tray's Quit exits. Opened while
+    another copy is already running, it shows that copy's dashboard in the browser and exits.
     """
     _configure_environment()
     _set_windows_app_id()
@@ -506,6 +534,10 @@ def main() -> None:
     if _autostart_enabled():
         _set_autostart(True)
     port = int(os.environ.get("PORT", "8000"))
+    if _hub_running(port):
+        logger.info("PrintGuard is already running on :%d, so its dashboard is opening in the browser", port)
+        webbrowser.open(_webview_url(port))
+        return
     server = _Server(port)
     started = server.start()
     if started is None:
