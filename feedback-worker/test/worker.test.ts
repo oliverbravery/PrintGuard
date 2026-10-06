@@ -400,6 +400,26 @@ describe("the daily recount", () => {
     expect(inBucket).toBe(before - JPEG.byteLength);
   });
 
+  it("clears yesterday's counts before it lists the bucket, so a run cut short still did that", async () => {
+    const gate = env.GATE.getByName("gate");
+    await runInDurableObject(gate, (_gate, state) =>
+      state.storage.sql.exec("INSERT INTO counts (day, scope, key, n) VALUES ('2000-01-01', 'hub', 'old-hub', 5)").toArray(),
+    );
+    const cutShort = new Proxy(env.FRAMES, {
+      get(target, property) {
+        const value = Reflect.get(target, property);
+        if (property !== "list") return typeof value === "function" ? value.bind(target) : value;
+        return async () => {
+          throw new Error("cut off");
+        };
+      },
+    });
+
+    await expect(worker.scheduled(createScheduledController(), { ...env, FRAMES: cutShort })).rejects.toThrow("cut off");
+
+    expect((await gateState()).rows.filter(({ key }) => key === "old-hub")).toEqual([]);
+  });
+
   it("keeps the bytes that arrive while the bucket is being listed", async () => {
     const gate = env.GATE.getByName("recount-race");
     await gate.reserve("hub", "network", "before", 300);

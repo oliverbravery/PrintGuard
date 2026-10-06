@@ -68,12 +68,12 @@ export class Gate extends DurableObject<Env> {
     if (Date.now() - (this.ctx.storage.kv.get<number>(RECOUNT_BEGAN_AT) ?? 0) < minimumGapMs) return false;
     this.ctx.storage.kv.put(RECOUNT_BEGAN_AT, Date.now());
     this.ctx.storage.kv.put(BYTES_SINCE_RECOUNT_BEGAN, 0);
+    this.ctx.storage.sql.exec("DELETE FROM counts WHERE day < ?", today());
     return true;
   }
 
   recount(listedBytes: number): void {
     this.ctx.storage.kv.put(STORED_BYTES, listedBytes + this.bytesSinceRecountBegan());
-    this.ctx.storage.sql.exec("DELETE FROM counts WHERE day < ?", today());
   }
 
   storedBytes(): number {
