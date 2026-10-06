@@ -19,7 +19,7 @@ export interface PanelHandlers {
   onFailure(id: string, reason: string): void;
 }
 
-export function themeTokens(): Record<string, string> {
+function themeTokens(): Record<string, string> {
   const computed = getComputedStyle(document.body);
   return {
     ...Object.fromEntries(THEME_TOKENS.map((token) => [token, computed.getPropertyValue(token).trim()])),

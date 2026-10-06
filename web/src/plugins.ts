@@ -232,7 +232,7 @@ const CONTAINERS = ["row", "col"];
 const LEAVES = ["text", "chip", "camera", "image", "float", "button", "select", "input", "toggle"];
 const MAX_NODES = 400;
 
-export function normalise(raw: unknown, budget = { left: MAX_NODES }): PluginNode | null {
+function normalise(raw: unknown, budget = { left: MAX_NODES }): PluginNode | null {
   if (!raw || typeof raw !== "object" || budget.left-- <= 0) return null;
   const node = raw as Record<string, unknown>;
   const type = String(node.type ?? "");
