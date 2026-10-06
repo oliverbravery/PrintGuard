@@ -28,7 +28,8 @@ import numpy as np
 import websockets
 from av.video.reformatter import VideoReformatter
 from ..engine import logs, vision
-from ..engine.platform import Frame, Notice
+from ..engine.adapters import redirect_message
+from ..engine.platform import Frame, Notice, Redirects
 from ..engine.reports import scrub_url, url_secrets
 from .bambu_camera import open_bambu_jpeg_stream
 from .inference import Inference
@@ -927,7 +928,7 @@ class ServerPlatform:
         data: bytes | None = None,
         binary: bool = False,
         timeout: float = 10.0,
-        follow_redirects: bool = True,
+        redirects: Redirects = "follow",
         max_bytes: int | None = None,
     ) -> tuple[int, Any]:
         """Performs an HTTP request with httpx, base64 encoding a binary reply.
@@ -936,17 +937,20 @@ class ServerPlatform:
         arrives, since httpx inflates a whole chunk before anyone can count it.
 
         Raises:
-            RuntimeError: If a redirect made httpx replay the request under
-                another method, as it does a POST answered with 301 or 302,
-                so the request itself was never delivered, or if the body
+            RuntimeError: If ``redirects`` is ``"refuse"`` and the server
+                redirects, or a followed redirect made httpx replay the request
+                under another method, as it does a POST answered with 301 or
+                302, so the request itself was never delivered, or if the body
                 passes ``max_bytes`` or is neither gzip nor plain.
         """
         if max_bytes is not None:
             headers = httpx.Headers(headers)
             headers["Accept-Encoding"] = "gzip"
         async with self._client.stream(
-            method, url, headers=headers, json=json, content=data, timeout=timeout, follow_redirects=follow_redirects
+            method, url, headers=headers, json=json, content=data, timeout=timeout, follow_redirects=redirects == "follow"
         ) as resp:
+            if redirects == "refuse" and resp.is_redirect:
+                raise RuntimeError(redirect_message(resp))
             hops = [*resp.history, resp]
             for hop, landed in zip(hops, hops[1:]):
                 if hop.status_code != 303 and landed.request.method != hop.request.method:

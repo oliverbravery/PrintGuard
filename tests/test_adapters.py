@@ -7,6 +7,7 @@ import asyncio
 import json as jsonlib
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from email.header import decode_header, make_header
 from pathlib import Path
 from types import SimpleNamespace
@@ -261,6 +262,31 @@ async def test_native_delivers_text_without_snapshot(monkeypatch) -> None:
     monkeypatch.setattr(NOTIFIERS["native"], "_deliver", deliver)
     await NOTIFIERS["native"].send(None, {}, "T", "B", None)
     assert sent == [None], "no snapshot means no attachment"
+
+
+@pytest.mark.parametrize("scheduled", [True, False])
+async def test_native_reports_a_notification_the_system_would_not_schedule(monkeypatch, scheduled: bool) -> None:
+    import logging
+    import sys
+
+    class FakeNotifier:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def request_authorisation(self) -> bool:
+            return True
+
+        async def send(self, **kwargs: Any) -> None:
+            if not scheduled:
+                logging.getLogger("desktop_notifier.backends.macos").warning("Error when scheduling notification: code=1")
+
+    library = SimpleNamespace(Attachment=lambda path: path, DesktopNotifier=FakeNotifier, Icon=lambda path: path)
+    monkeypatch.setitem(sys.modules, "desktop_notifier", library)
+    if scheduled:
+        await NOTIFIERS["native"].send(None, {}, "T", "B", None)
+    else:
+        with pytest.raises(RuntimeError, match="Error when scheduling notification: code=1"):
+            await NOTIFIERS["native"].send(None, {}, "T", "B", None)
 
 
 def test_native_runs_in_the_desktop_app_only() -> None:
@@ -730,6 +756,30 @@ async def test_bambu_dropped_connection_is_offline_until_a_full_report(bambu_pri
     await adapter.close()
 
 
+async def test_bambu_never_waits_for_the_pool_inference_runs_on(bambu_printers) -> None:
+    release = threading.Event()
+    busy = ThreadPoolExecutor(max_workers=1)
+    asyncio.get_running_loop().set_default_executor(busy)
+    stuck = asyncio.get_running_loop().run_in_executor(None, release.wait)
+    adapter = BambuAdapter()
+    try:
+        state = await asyncio.wait_for(adapter.fetch_state(None, BAMBU_CONFIG), 2.0)
+        assert state.status is DeviceStatus.PRINTING
+    finally:
+        release.set()
+        await stuck
+        await adapter.close()
+        busy.shutdown()
+
+
+async def test_bambu_that_never_reports_says_to_check_the_serial(bambu_printers, monkeypatch) -> None:
+    monkeypatch.setattr(FakeBambuPrinter, "full_report", None)
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="check the serial number"):
+        await adapter.fetch_state(None, BAMBU_CONFIG)
+    await adapter.close()
+
+
 async def test_bambu_refused_connection_raises(bambu_printers, monkeypatch) -> None:
     monkeypatch.setattr(FakeBambuPrinter, "answer", "Not authorized")
     adapter = BambuAdapter()
@@ -1191,6 +1241,30 @@ async def test_elegoo_centauri_reuses_one_connection(monkeypatch) -> None:
     assert client.closed
 
 
+async def test_a_cancelled_centauri_connect_closes_what_it_went_on_to_open(monkeypatch) -> None:
+    adapter = ElegooAdapter()
+    client = FakeCentauri()
+    opened = asyncio.Event()
+
+    async def connect_auto(host: str, **kwargs: Any) -> FakeCentauri:
+        await asyncio.sleep(0.05)
+        opened.set()
+        return client
+
+    async def discover_mainboard_id(host: str) -> None:
+        return None
+
+    monkeypatch.setattr(adapter, "_discover_mainboard_id", discover_mainboard_id)
+    monkeypatch.setattr("pycentauri.connect_auto", connect_auto)
+    asked = asyncio.create_task(adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG))
+    await asyncio.sleep(0.01)
+    asked.cancel()
+    await opened.wait()
+    await asyncio.sleep(0.01)
+    await asyncio.gather(*adapter._abandoned)
+    assert client.closed and not adapter._connections
+
+
 async def test_elegoo_centauri_reconnects_after_failure(monkeypatch) -> None:
     adapter = ElegooAdapter()
 
@@ -1322,6 +1396,29 @@ async def test_prusa_behind_a_redirect_names_where_it_went() -> None:
             await INTEGRATIONS["prusa"].fetch_state(None, config)
 
 
+async def test_prusa_upload_behind_a_redirect_names_where_it_went() -> None:
+    server, config = await _prusa_answering("301 Moved Permanently", "Location: https://printer.local/\r\n")
+    async with server:
+        with pytest.raises(RuntimeError, match=r"redirects to https://printer\.local"):
+            await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G28")
+
+
+@pytest.mark.parametrize(("answer", "said"), [("404 Not Found", "PrusaLink did not answer like its API: HTTP 404"), ("200 OK", "PrusaLink did not answer like its API$")])
+async def test_prusa_that_answers_like_something_else_says_so(answer: str, said: str) -> None:
+    server, config = await _prusa_answering(answer)
+    async with server:
+        with pytest.raises(RuntimeError, match=said):
+            await INTEGRATIONS["prusa"].fetch_state(None, config)
+
+
+async def test_prusa_refusing_a_pause_says_the_printer_is_in_the_way(monkeypatch) -> None:
+    server, config = await _prusa_answering("409 Conflict")
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_job", _prusa_job({"id": 7, "state": "PAUSED"}))
+    async with server:
+        with pytest.raises(RuntimeError, match="HTTP 409"):
+            await INTEGRATIONS["prusa"].send(None, config, DeviceAction.PAUSE)
+
+
 async def test_prusa_answering_with_an_error_names_the_status() -> None:
     server, config = await _prusa_answering("502 Bad Gateway")
     async with server:
@@ -1332,7 +1429,10 @@ async def test_prusa_answering_with_an_error_names_the_status() -> None:
 @pytest.mark.parametrize(
     ("job", "printer_state", "expected"),
     [
-        ({"id": 1, "state": "ATTENTION"}, "ATTENTION", DeviceStatus.PAUSED),
+        ({"id": 1, "state": "ATTENTION"}, "ATTENTION", DeviceStatus.UNKNOWN),
+        ({"id": 1, "state": "PAUSED"}, "ATTENTION", DeviceStatus.UNKNOWN),
+        ({"id": 1, "state": "PAUSED"}, "PAUSED", DeviceStatus.PAUSED),
+        ({"id": 1, "state": "PRINTING"}, "ATTENTION", DeviceStatus.PRINTING),
         ({"id": 1, "state": "BUSY"}, "BUSY", DeviceStatus.UNKNOWN),
         ({"id": 1, "state": "READY"}, "READY", DeviceStatus.IDLE),
         (None, "IDLE", DeviceStatus.IDLE),
@@ -1340,7 +1440,7 @@ async def test_prusa_answering_with_an_error_names_the_status() -> None:
         (None, "FINISHED", DeviceStatus.IDLE),
         (None, "ERROR", DeviceStatus.ERROR),
         (None, "BUSY", DeviceStatus.UNKNOWN),
-        (None, "ATTENTION", DeviceStatus.PAUSED),
+        (None, "ATTENTION", DeviceStatus.UNKNOWN),
         (None, "PRINTING", DeviceStatus.PRINTING),
         (None, "PAUSED", DeviceStatus.PAUSED),
     ],

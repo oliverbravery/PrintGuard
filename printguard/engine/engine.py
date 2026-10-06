@@ -56,6 +56,7 @@ RESULT_EVENT_INTERVAL_S = 0.2
 REATTACH_EVERY_TICKS = 10
 REQUEST_TIMEOUT_S = 15.0
 CAMERA_OPEN_WAIT_S = 25.0
+CAMERA_SETTLE_S = 10.0
 CAMERAS_OPENED_IN_TURN = 4
 RUNTIME_LOAD_ALLOWANCE_S = 60.0
 RECENT_EVENTS_MAX = 100
@@ -274,6 +275,7 @@ class Engine:
                     self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}{kept}")
         await self.reconcile_declared_cameras()
         self.cameras.sync_in_use(self.monitors, self.printers)
+        self.watchdog.reconcile_cameras_once_read(self.printers.items)
         self.settle_reviews()
         runtime = self.platform.plugin_runtime
         if runtime is not None:
@@ -380,6 +382,10 @@ class Engine:
         if level is not None:
             logger.log(level, "%s %s", event["event"], {k: v for k, v in event.items() if k not in ("event", "req_id")})
         self._broadcast(event)
+
+    async def service_http(self, method: str, url: str, **request: Any) -> tuple[int, Any]:
+        """Makes a printer's or a notifier's request, which fails on a redirect and never follows one."""
+        return await self.platform.http(method, url, redirects="refuse", **request)
 
     def _scrubbed(self, text: str, typed: set[str] | frozenset[str] = frozenset()) -> str:
         """Removes every stored secret from a message, and the ``typed`` credentials a test was sent that are not stored."""
@@ -1146,17 +1152,21 @@ class Engine:
         add/update: the user triggers it from the camera registry to pick up a
         camera attached to a printer's service after it was registered.
         """
-        await asyncio.gather(*(self.reconcile_printer_cameras(printer) for printer in self.printers.values()))
+        await asyncio.gather(*(self.reconcile_printer_cameras(printer, keep_working=True) for printer in self.printers.values()))
 
-    async def reconcile_printer_cameras(self, printer: Printer) -> None:
+    async def reconcile_printer_cameras(self, printer: Printer, keep_working: bool = False) -> None:
         """Registers any cameras a printer's service exposes that are not known yet.
 
-        Runs when a printer is added or updated, and on demand via
-        printer.cameras.refresh. A deterministic id keyed by the adapter's camera
+        Runs when a printer is added or updated, on demand via
+        printer.cameras.refresh, and once for each printer after its first
+        read at boot. A deterministic id keyed by the adapter's camera
         key makes this idempotent; cameras the service stops exposing are left in
-        place and go only when the printer does. A camera whose address changed
-        with the printer's connection details is attached again at the new one,
-        keeping its name and tuning. One printer is reconciled by one caller at
+        place and go only when the printer does. A camera whose address differs
+        from what the service now says is attached again at the new one,
+        keeping its name and tuning, unless ``keep_working`` is set and it is
+        delivering frames, resting because nothing watches it, or does within
+        CAMERA_SETTLE_S, since the address PrintGuard works out can be wrong
+        where the one it holds works. One printer is reconciled by one caller at
         a time, so a camera is never opened twice, and a camera whose printer
         went while it was opening is closed again. A stream already registered
         by hand stays the one camera on it. A printer removed or edited to
@@ -1176,7 +1186,7 @@ class Engine:
             if not adapter or not unchanged():
                 return
             try:
-                exposed = await adapter.cameras(self.platform.http, printer.config)
+                exposed = await adapter.cameras(self.service_http, printer.config)
             except Exception as exc:
                 self.emit({"event": "warning", "message": f"Could not list the cameras of printer '{printer.name}': {logs.describe(exc)}"})
                 return
@@ -1188,7 +1198,7 @@ class Engine:
                 source = dict(descriptor["source"])
                 camera = self.cameras.get(camera_id)
                 if camera:
-                    if camera.source != source:
+                    if camera.source != source and not (keep_working and await self._is_working(camera)):
                         await self._move_camera(camera, source)
                         changed = True
                     continue
@@ -1213,6 +1223,15 @@ class Engine:
                 changed = True
             if changed:
                 self._sync()
+
+    async def _is_working(self, camera: Camera) -> bool:
+        """Whether a camera delivers frames or rests as nothing watches it, waiting up to CAMERA_SETTLE_S for one still opening."""
+        deadline = time.monotonic() + CAMERA_SETTLE_S
+        while not (camera.online or camera.standby):
+            if time.monotonic() > deadline:
+                return False
+            await asyncio.sleep(0.2)
+        return True
 
     def _schedule_reconcile(self, printer: Printer) -> None:
         task = asyncio.create_task(self.reconcile_printer_cameras(printer))
@@ -1294,7 +1313,7 @@ class Engine:
         adapter = INTEGRATIONS.get(printer.provider)
         if not adapter:
             raise RuntimeError("no printer service linked")
-        await adapter.send(self.platform.http, printer.config, DeviceAction(message["action"]))
+        await adapter.send(self.service_http, printer.config, DeviceAction(message["action"]))
         await self.watchdog.refresh(printer, after_command=True)
 
     async def _cmd_printer_heat(self, message: dict[str, Any]) -> None:
@@ -1313,7 +1332,7 @@ class Engine:
             raise ValueError("a heat command names a nozzle or bed target")
         adapter = INTEGRATIONS[printer.provider]
         for heater, target in targets.items():
-            await adapter.heat(self.platform.http, printer.config, heater, target)
+            await adapter.heat(self.service_http, printer.config, heater, target)
         await self.watchdog.refresh(printer, after_command=True)
 
     async def _cmd_printer_test(self, message: dict[str, Any]) -> None:
@@ -1334,7 +1353,7 @@ class Engine:
             if stored and stored.provider == adapter.id:
                 config = credentials.keep_stored(config, stored.config, adapter.secret_fields())
             adapter.require(config)
-            state = await adapter.fetch_state(self.platform.http, config)
+            state = await adapter.fetch_state(self.service_http, config)
             ok = state.status.value not in ("offline", "unknown")
             self._reply({"event": "printer_test", "ok": ok, "status": state.status.value, "req_id": message.get("req_id")})
         except Exception as exc:
@@ -1445,14 +1464,14 @@ class Engine:
             raise RuntimeError(f"{printer.name} is already being sent a file, so {record.name} was not sent")
         self._starting.add(printer.id)
         try:
-            state = await adapter.fetch_state(self.platform.http, printer.config)
+            state = await adapter.fetch_state(self.service_http, printer.config)
             if state.status is not DeviceStatus.IDLE:
                 raise RuntimeError(f"{printer.name} is {state.status.value}, so {record.name} was not sent")
             try:
                 data = await self.platform.files.read(record.file_key)
             except FileNotFoundError:
                 raise RuntimeError(f"print {record.id!r} has lost its file") from None
-            await adapter.print_file(self.platform.http, printer.config, printer_filename(record.name, record.ext), data)
+            await adapter.print_file(self.service_http, printer.config, printer_filename(record.name, record.ext), data)
         except asyncio.CancelledError:
             self.emit({"event": "error", "message": f"Sending {record.name} to {printer.name} was interrupted, so check whether it started", "req_id": message.get("req_id")})
             raise
@@ -1574,7 +1593,7 @@ class Engine:
             config = credentials.keep_stored(message.get("config", {}), self.settings["notifiers"].get(adapter.id, {}), adapter.secret_fields())
             adapter.require(config)
             picture = await self.platform.encode_jpeg(np.zeros(TEST_PICTURE_SHAPE, np.uint8))
-            await adapter.send(self.platform.http, config, "PrintGuard test", "Notifications are working.", picture)
+            await adapter.send(self.service_http, config, "PrintGuard test", "Notifications are working.", picture)
             self._reply({"event": "notify_test", "provider": adapter.id, "ok": True, "req_id": message.get("req_id")})
         except Exception as exc:
             self._reply({"event": "notify_test", "provider": adapter.id, "ok": False, "error": self._scrubbed(logs.describe(exc), typed), "req_id": message.get("req_id")})
@@ -1715,21 +1734,21 @@ class Engine:
         async def deliver(notifier_id: str, config: dict[str, Any]) -> None:
             try:
                 async with asyncio.timeout(NOTIFY_TIMEOUT_S):
-                    await NOTIFIERS[notifier_id].send(self.platform.http, config, title, body, image, urgent=urgent)
+                    await NOTIFIERS[notifier_id].send(self.service_http, config, title, body, image, urgent=urgent)
             except Exception as exc:
                 logger.debug("notifier %s delivery traceback", notifier_id, exc_info=True)
-                self.emit({"event": "error", "message": f"{NOTIFIERS[notifier_id].label} notification failed: {logs.describe(exc)}"})
+                self.emit({"event": "error", "message": f"Sending to {NOTIFIERS[notifier_id].label} failed: {logs.describe(exc)}"})
 
         configured = {nid: config for nid, config in self.settings.get("notifiers", {}).items() if nid in NOTIFIERS}
         await asyncio.gather(*(deliver(notifier_id, config) for notifier_id, config in configured.items()))
 
     async def _cmd_notify_send(self, message: dict[str, Any]) -> None:
         """Sends a caller's own message through the configured channels."""
-        title = str(message.get("title") or "PrintGuard").strip()[:80]
+        title = str(message.get("title") or "PrintGuard").strip()[:80].strip()
         body = str(message.get("text", "")).strip()[:400]
         if not body:
             raise ValueError("a notification needs something to say")
-        await self.send_alerts(title, body, None)
+        await self.send_alerts(title, body, None, urgent=False)
 
     async def _cmd_plugin_install(self, message: dict[str, Any]) -> None:
         """Fetches, verifies and registers a plugin, or reinstalls one in place.
@@ -1949,7 +1968,7 @@ class Engine:
             json=filled["json"],
             binary=message.get("binary") is True,
             timeout=PLUGIN_TIMEOUT_S,
-            follow_redirects=False,
+            redirects="answer",
             max_bytes=MAX_PLUGIN_BODY,
         )
         self.emit(

@@ -218,6 +218,44 @@ async def test_a_test_alert_makes_the_request_a_defect_alert_does() -> None:
     assert next(e for e in events if e.get("event") == "notify_test")["ok"]
 
 
+async def test_a_plugins_notice_goes_out_quietly_and_a_test_alert_does_not() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _events):
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}, "pushover": {"api_token": "a", "user_key": "u"}}}})
+        platform.http_requests.clear()
+        await engine.handle({"cmd": "notify.send", "title": "Progress", "text": "Benchy is 50% done"})
+        quiet = list(platform.http_requests)
+        platform.http_requests.clear()
+        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {"url": "http://ntfy/topic"}, "req_id": 1})
+        (test,) = platform.http_requests
+    ntfy = next(request for request in quiet if request["url"] == "http://ntfy/topic")
+    pushover = next(request for request in quiet if "pushover" in request["url"])
+    assert "Priority" not in ntfy["headers"] and "Tags" not in ntfy["headers"]
+    assert b"priority=0" in pushover["data"] or b'name="priority"\r\n\r\n0' in pushover["data"]
+    assert test["headers"]["Priority"] == "urgent", "the test alert no longer tests the urgent path"
+
+
+async def test_a_long_notice_title_is_cut_without_ending_in_a_space() -> None:
+    platform = FakePlatform()
+    title = "x" * 79 + " tail"
+    async with running_engine(platform, camera_fps=[]) as (engine, _events):
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        platform.http_requests.clear()
+        await engine.handle({"cmd": "notify.send", "title": title, "text": "x"})
+    sent = next(request for request in platform.http_requests if request["url"] == "http://ntfy/topic")["headers"]["Title"]
+    assert sent == title[:79], "a trailing space reaches the header, which h11 refuses"
+
+
+async def test_a_printer_and_a_notifier_never_follow_a_redirect() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _events):
+        await engine.handle({"cmd": "printer.test", **OCTOPRINT, "req_id": 1})
+        await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {"url": "http://ntfy/topic"}, "req_id": 2})
+    asked = [request for request in platform.http_requests if request["url"].startswith(("http://ntfy/", "http://op/"))]
+    assert {request["url"].split("/")[2] for request in asked} == {"ntfy", "op"}
+    assert all(request["redirects"] == "refuse" for request in asked)
+
+
 async def test_slow_printer_action_does_not_pause_inference(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "ACT_ATTEMPTS", 1)
     monkeypatch.setattr(watchdog, "ACT_RETRY_S", 0.01)
@@ -919,7 +957,7 @@ async def test_a_channel_that_never_answers_holds_up_neither_the_others_nor_the_
         assert monitor_id not in engine.watchdog.responding, "the monitor can never respond to a defect again"
 
     assert ("POST", "http://disc/hook") in platform.http_calls, "the channel behind the silent one was never sent to"
-    assert any(message.startswith("ntfy notification failed") for message in (event["message"] for event in _of(events, "error")))
+    assert any(message.startswith("Sending to ntfy failed") for message in (event["message"] for event in _of(events, "error")))
 
 
 async def test_overlapping_reconciles_open_a_printer_camera_once(monkeypatch) -> None:
@@ -1002,6 +1040,55 @@ async def test_a_printer_camera_follows_its_printers_new_address(monkeypatch) ->
         assert camera.frame_source not in (None, first_source), "the camera is attached again at the new address"
 
 
+async def test_refresh_keeps_a_printer_camera_that_works_and_moves_one_that_does_not(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "CAMERA_SETTLE_S", 0.3)
+
+    async def webcam(http, config):
+        return [{"key": "webcam", "name": "Shop cam", "source": {"kind": "fake", "fps": 20.0, "url": "http://op/webcam"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", webcam)
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, _):
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.1)
+        camera = engine.cameras.values()[0]
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "m", "camera_id": camera.id}})
+        camera.source = {"kind": "fake", "fps": 20.0, "url": "http://op:5000/webcam"}
+        await engine.handle({"cmd": "printer.cameras.refresh"})
+        assert camera.source["url"] == "http://op:5000/webcam", "a camera that delivers frames was moved to an address that may be wrong"
+        camera.frame_source.online = False
+        await engine.handle({"cmd": "printer.cameras.refresh"})
+        assert camera.source["url"] == "http://op/webcam", "a camera that delivers nothing stayed at an address that does not work"
+        assert camera.printer_id == printer_id
+
+
+async def test_a_printer_that_answers_after_boot_has_its_cameras_listed_once(monkeypatch) -> None:
+    monkeypatch.setattr(engine_module, "CAMERA_SETTLE_S", 0.1)
+    asked: list[str] = []
+
+    async def webcam(http, config):
+        asked.append(config["base_url"])
+        return [{"key": "webcam", "name": "Shop cam", "source": {"kind": "fake", "fps": 20.0, "url": "http://op/webcam"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", webcam)
+    platform = FakePlatform()
+    platform.state = {
+        "printers": [{"id": "p1", "name": "P", "provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}],
+        "cameras": [{"id": "p1-webcam", "name": "Shop cam", "source": {"kind": "device", "device_id": "/dev/gone"}, "printer_id": "p1", "max_fps": 15.0}],
+    }
+    platform.responses["http://op/api/job"] = (500, {})
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.watchdog.refresh(engine.printers.get("p1"))
+        await asyncio.sleep(0.3)
+        assert asked == [] and not _of(events, "warning"), "a printer that was switched off at boot was asked for its cameras"
+        del platform.responses["http://op/api/job"]
+        await engine.watchdog.refresh(engine.printers.get("p1"))
+        await asyncio.sleep(0.4)
+        assert asked == ["http://op"] and engine.cameras.get("p1-webcam").source["url"] == "http://op/webcam", "the camera kept the address it was saved at"
+        await engine.watchdog.refresh(engine.printers.get("p1"))
+        await asyncio.sleep(0.2)
+        assert asked == ["http://op"], "the printer was asked again after it had answered"
+
+
 async def test_testing_a_printer_closes_the_connection_it_opened(monkeypatch) -> None:
     closed: list[dict | None] = []
 
@@ -1044,6 +1131,11 @@ async def test_testing_from_the_edit_form_keeps_the_connection_the_printer_is_us
         elsewhere = {**stored, "host": "10.0.0.10"}
         await engine.handle({"cmd": "printer.test", "provider": "elegoo", "config": elsewhere}, events.append)
         assert closed == [elsewhere]
+        closed.clear()
+        await engine.handle({"cmd": "printer.update", "id": next(iter(engine.printers.items)), "patch": {"config": {**stored, "family": "moonraker"}}})
+        closed.clear()
+        await engine.handle({"cmd": "printer.test", "provider": "elegoo", "config": stored})
+        assert closed == [stored], "a Centauri test beside a printer registered as Moonraker left its connection open"
 
 
 async def test_a_requested_action_waits_as_long_as_the_printers_service_can_take(monkeypatch) -> None:

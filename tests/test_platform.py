@@ -379,8 +379,35 @@ async def test_a_redirect_never_turns_a_command_into_a_read(answer: str, reached
                 with pytest.raises(RuntimeError, match=f"{registered} redirects to {moved}, which {outcome}"):
                     await ServerPlatform.http(holder, "POST", f"{registered}/api/job", json={"command": "pause"})
             assert (await ServerPlatform.http(holder, "GET", f"{registered}/api/job"))[0] == 204
-            assert (await ServerPlatform.http(holder, "POST", f"{registered}/api/job", follow_redirects=False))[0] == int(answer[:3])
+            assert (await ServerPlatform.http(holder, "POST", f"{registered}/api/job", redirects="answer"))[0] == int(answer[:3])
     assert arrived == [*reached, "GET"]
+
+
+@pytest.mark.parametrize("answer", ["301 Moved Permanently", "302 Found", "307 Temporary Redirect", "308 Permanent Redirect"])
+@pytest.mark.parametrize("method", ["GET", "POST", "PUT"])
+async def test_a_redirect_an_adapter_meets_is_refused_and_takes_its_key_nowhere(answer: str, method: str) -> None:
+    """A command to a service that redirects fails when it is registered, and an API key never follows it to another host."""
+    arrived: list[bytes] = []
+
+    async def elsewhere(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        arrived.append(await reader.readuntil(b"\r\n\r\n"))
+        writer.write(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    async def proxy(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(f"HTTP/1.1 {answer}\r\nLocation: {moved}/api/job\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".encode())
+        await writer.drain()
+        writer.close()
+
+    async with await asyncio.start_server(elsewhere, "127.0.0.1", 0) as behind, await asyncio.start_server(proxy, "127.0.0.1", 0) as front:
+        moved = f"http://127.0.0.1:{behind.sockets[0].getsockname()[1]}"
+        registered = f"http://127.0.0.1:{front.sockets[0].getsockname()[1]}"
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            with pytest.raises(RuntimeError, match=f"^{registered} redirects to {moved}. Register the address the service answers on$"):
+                await ServerPlatform.http(SimpleNamespace(_client=client), method, f"{registered}/api/job", headers={"X-Api-Key": "secret"}, redirects="refuse")
+    assert arrived == []
 
 
 def test_a_camera_that_will_not_open_keeps_its_password_out_of_the_error() -> None:

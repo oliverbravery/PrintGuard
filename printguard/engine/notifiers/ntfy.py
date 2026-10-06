@@ -18,11 +18,11 @@ from .base import HttpFn, NotifierAdapter
 def _header(text: str) -> str:
     """Encodes a header value as an RFC 2047 word unless it is printable ASCII.
 
-    HTTP clients send header values as ASCII, and ntfy decodes RFC 2047 in
-    every header, so a name with an accent or a message with a line break
-    travels this way.
+    HTTP clients send header values as ASCII and refuse one with a space at
+    either end, and ntfy decodes RFC 2047 in every header, so a name with an
+    accent or a message with a line break or an edge space travels this way.
     """
-    if text.isascii() and text.isprintable():
+    if text.isascii() and text.isprintable() and text == text.strip():
         return text
     return f"=?UTF-8?B?{base64.b64encode(text.encode()).decode()}?="
 

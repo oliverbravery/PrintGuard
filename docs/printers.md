@@ -40,7 +40,7 @@ channels.
 Open the printer registry, choose the service, fill in the form and press **Test connection**
 before saving. A printer with a starred field left blank is not saved, and the error names the
 field. A key or password the service rejects fails the test with that as the reason, and so does
-an address that answers but not as the service's API does, or a PrusaLink one that redirects.
+an address that answers but not as the service's API does, or one that redirects.
 
 A saved key, password or access code is never shown again. Its field is empty and reads
 "Saved. Leave blank to keep it". Type in it to replace the saved one, or press **Clear** and
@@ -125,8 +125,9 @@ MK2.5. It authenticates with HTTP Digest.
 1. Enable **PrusaLink** on the printer under Settings, Network, then PrusaLink.
 2. Register it with its URL and the password shown there. The username is `maker` on the printer's own firmware. PrusaLink on a Raspberry Pi uses the one you chose when setting it up, so enter that under **Username**.
 
-PrusaLink reports ATTENTION as paused, ERROR as error and BUSY as unknown. With no job running
-the printer's own state is used.
+PrusaLink reports ERROR as error, and ATTENTION and BUSY as unknown. Buddy firmware shows a
+warning over a print that keeps running, as ATTENTION or as a paused job, so PrintGuard keeps what it
+last knew while one is up. With no job running the printer's own state is used.
 
 PrusaConnect is not used, so no frames or job data leave hardware you own. PrusaLink's
 webcam feature pushes snapshots to PrusaConnect rather than serving a local video stream, so
@@ -218,8 +219,7 @@ heater off.
 A target above 350 °C for the nozzle or 150 °C for the bed, or one that isn't a number, is
 refused. The dashboard moves what you type, and each preheat preset, to the limit instead, and the
 printer's own firmware applies its limits on top. Temperatures refresh with the printer's state, about every
-five seconds. Printers are read together, so the gap grows to about fifteen seconds while one of
-them isn't answering.
+five seconds. Printers are read separately, so one that isn't answering doesn't slow the others.
 
 ## Networking caveats
 
@@ -227,10 +227,10 @@ The hub makes every request to a print service itself, so the address you regist
 one the hub can reach, not one your browser can. The browser never calls the printer, so an
 `http://` printer works from a hub you open over HTTPS.
 
-Register the address the service answers on, not one that redirects to it. A proxy that answers
-`http://` with a 301 or 302 to `https://` turns a pause into a read, so PrintGuard reports the
-command as failed and names the address to use. A 307 or 308 keeps the command and is followed,
-except for PrusaLink, which names the address on any redirect.
+Register the address the service answers on, not one that redirects to it. A printer or an alert
+channel that answers with a redirect, such as a proxy sending `http://` to `https://`, fails with
+the address it redirects to, and **Test connection** says so too. A redirect is never followed, so
+a key or a command never reaches an address you didn't register.
 
 ### Where a printer's webcam is read from
 
@@ -247,7 +247,8 @@ same from the address you registered:
 
 An OctoPrint container published as `5000:80` can't be told apart from OctoPrint's own port, so
 its webcam is looked for on port 80. Publish it on another port, or set an absolute stream URL
-in OctoPrint's webcam settings, which is used as it is.
+in OctoPrint's webcam settings, which is used as it is. Refresh and a restart keep a camera that
+already works, so one registered before you updated stays where it was.
 
 A Moonraker webcam set to the MediaMTX or go2rtc WebRTC service is pulled from that server's
 WHEP endpoint. One set to camera-streamer is read from its MJPEG stream, since camera-streamer

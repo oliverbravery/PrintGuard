@@ -100,7 +100,7 @@ for the hub:
 | `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list |
 | `open_camera(id, source)` | A `FrameSource`, once it has given a frame, which it gets `OPEN_WAIT_S` for, 25 s. MediaMTX pulls every URL that is not plain HTTP, so RTSP, RTMP and WHEP, and PyAV reads HTTP MJPEG and capture devices directly. A `path` source reads a stream already on MediaMTX, and a `bambu` source the A1 and P1 chamber camera. A stream FFmpeg can demux but has no decoder for, such as an SVG, fails with `no decoder for this stream`, and an address MediaMTX refuses with `PrintGuard can't use that address`. An error names the address as the user wrote it, with credentials removed |
 | `release_camera(id, source)` | Closes the source and removes its MediaMTX pull path. A reader that is stuck inside a device read cannot be stopped, so `open_camera` refuses to start another for that camera while it lasts |
-| `http(...)` | httpx. A redirect that would replay the request under another method, such as a POST answered with 301 or 302, raises. So does a body over `max_bytes`, which a plugin's request, a plugin install, the catalogue and the update check pass, counted as it is decompressed, and an answer to one of those in any encoding but gzip |
+| `http(...)` | httpx. A printer's or a notifier's request refuses any redirect and names where it points, a plugin's gets the redirect back as the answer, and any other follows it, though one that would replay the request under another method, such as a POST answered with 301 or 302, raises. So does a body over `max_bytes`, which a plugin's request, a plugin install, the catalogue and the update check pass, counted as it is decompressed, and an answer to one of those in any encoding but gzip |
 | `open_socket(url, arrived)` | A `Socket`, a `websockets` client connection held for a plugin, which refuses a redirect |
 | `encode_jpeg(rgb)` / `decode_jpeg(data)` | PyAV. `encode_jpeg` logs a warning and returns `None` when a frame cannot be encoded, and `decode_jpeg` refuses an image over `CLASSIFY_MAX_PIXELS`, 50 megapixels, or one with no decoder |
 | `load_state()` / `save_state(state)` | `data/state.json`, written atomically and readable only by its owner. `save_state` returns at once: the state is serialised on the caller's thread and written and synced on a writer thread, where a save made while one waits replaces it, and `close()` writes the last one. A write that fails is a `Notice`, once per outage. A file that will not parse, or parses to something the engine never saves, such as a top-level list or a section of the wrong type, is kept as `state.json.corrupt` and the hub starts empty, and a later one as `.corrupt.1` up to `.4`. One the hub may not read or move aside stops it with the data directory and its owner named |
@@ -269,7 +269,9 @@ Elegoo Centauri chamber camera, and the Bambu chamber camera, over RTSP on the X
 series or the proprietary port 6000 protocol on the A1 and P1. The adapter's optional
 `cameras()` declares them, and the engine reconciles them in the background after a printer is
 added or updated, so neither command waits on a camera opening, and on demand through
-`printer.cameras.refresh` to pick up a camera attached later. A printer moved to another
+`printer.cameras.refresh` to pick up a camera attached later, and once for each printer after its
+first read at boot. Neither of those moves a camera that delivers frames or rests with no monitor
+watching it, waiting `CAMERA_SETTLE_S` for one still opening. A printer moved to another
 service loses the cameras the old one exposed. One printer is
 reconciled by one caller at a time, and a camera whose source changed with the printer's
 connection details is attached again at the new address with its name and tuning kept. A
@@ -592,6 +594,7 @@ the scheduler's at the top of [`engine/scheduler.py`](../printguard/engine/sched
 | `RESULT_EVENT_INTERVAL_S` | 0.2 s | The gap between `result` events for one monitor |
 | `REQUEST_TIMEOUT_S` | 15 s | How long `engine.request()` waits, which the REST API, MCP server, plugins and Home Assistant bridge all call. The dashboard's socket calls `engine.handle()` and waits as long as a command takes. `_time_allowed` adds the adapter's `slow_action_s` for a printer action or heater target, `CAMERA_OPEN_WAIT_S` for `camera.add`, that four times over for `printer.cameras.refresh`, and `RUNTIME_DRAIN_TIMEOUT_S` plus `RUNTIME_LOAD_ALLOWANCE_S` for a runtime switch |
 | `CAMERA_OPEN_WAIT_S`, `CAMERAS_OPENED_IN_TURN` | 25 s, 4 | What a camera gets to give a first frame, and how many of one printer's the refresh allows for |
+| `CAMERA_SETTLE_S` | 10 s | How long a refresh or the boot check waits for a printer's camera that is still opening before moving it to a new address |
 | `RUNTIME_LOAD_ALLOWANCE_S` | 60 s | What loading the model after a runtime switch is allowed, on top of the drain |
 | `RECENT_EVENTS_MAX` | 100 | The alert, warning and error events `recent_events()` keeps |
 | `UPDATE_CHECK_INTERVAL_S`, `UPDATE_RETRY_S` | 86400 s, 900 s | The gap between update checks, and after one that failed |

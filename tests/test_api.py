@@ -263,6 +263,44 @@ def test_bambu_jpeg_stream_strips_frame_headers() -> None:
     assert out == b"".join(jpegs), "the 16-byte frame headers are stripped, leaving concatenated JPEGs"
 
 
+def test_bambu_jpeg_stream_refuses_a_frame_that_is_not_plausible(monkeypatch) -> None:
+    import struct
+
+    from printguard.server import bambu_camera
+    from printguard.server.bambu_camera import BambuJpegStream
+
+    class HostileSock:
+        def __init__(self) -> None:
+            self.handed_over = 0
+            self.sent_header = False
+
+        def recv(self, count: int) -> bytes:
+            if not self.sent_header:
+                self.sent_header = True
+                return struct.pack("<IIII", 0x7FFFFFFF, 0, 0, 0)[:count]
+            self.handed_over += count
+            return b"\xff" * count
+
+        def close(self) -> None:
+            pass
+
+    sock = HostileSock()
+    with pytest.raises(ValueError, match="announced a 2147483647 byte frame"):
+        BambuJpegStream(sock).read(4096)
+    assert sock.handed_over == 0, "the frame was read before it was refused"
+
+    class SlowSock(HostileSock):
+        def recv(self, count: int) -> bytes:
+            if not self.sent_header:
+                self.sent_header = True
+                return struct.pack("<IIII", 1_000_000, 0, 0, 0)[:count]
+            return b"\xff"
+
+    monkeypatch.setattr(bambu_camera, "FRAME_DEADLINE_S", 0.05)
+    with pytest.raises(TimeoutError, match="took too long"):
+        BambuJpegStream(SlowSock()).read(4096)
+
+
 def test_callable_mjpeg_sources_cap_pyav_probe(monkeypatch) -> None:
     from printguard.server import platform
 

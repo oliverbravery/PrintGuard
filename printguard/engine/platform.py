@@ -8,7 +8,7 @@ disk. Those services live behind these protocols, implemented by the hub in
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncIterable, AsyncIterator, Awaitable, Callable, Protocol
+from typing import TYPE_CHECKING, Any, AsyncIterable, AsyncIterator, Awaitable, Callable, Literal, Protocol
 
 import numpy as np
 
@@ -16,6 +16,9 @@ from . import sockets
 
 if TYPE_CHECKING:
     from .registry import Plugin
+
+Redirects = Literal["follow", "answer", "refuse"]
+"""What a request does with a 3xx: follow it, hand it back as the answer, or fail naming where it points."""
 
 
 @dataclass
@@ -216,20 +219,24 @@ class Platform(Protocol):
         data: bytes | None = None,
         binary: bool = False,
         timeout: float = 10.0,
-        follow_redirects: bool = True,
+        redirects: Redirects = "follow",
         max_bytes: int | None = None,
     ) -> tuple[int, Any]:
         """Performs an HTTP request and returns (status, parsed body).
 
-        A plugin's request passes ``follow_redirects=False`` and gets the
+        A plugin's request passes ``redirects="answer"`` and gets the
         redirect itself back, since only the address it named was checked
-        against its grant. It passes ``max_bytes`` too, as do a plugin
-        install, the catalogue and the update check, since none of those
-        answers comes from anywhere PrintGuard trusts.
+        against its grant. An adapter's or a notifier's passes ``"refuse"``,
+        so the address that redirects is reported while it is registered and
+        no command or key is sent anywhere else. A plugin's request passes
+        ``max_bytes`` too, as do a plugin install, the catalogue and the
+        update check, since none of those answers comes from anywhere
+        PrintGuard trusts.
 
         Raises:
-            RuntimeError: If following a redirect would send the request under
-                another method, so a command never arrives as a read, or if
+            RuntimeError: If a redirect is refused, if following one would send
+                the request under another method, so a command never arrives as
+                a read, or if
                 the body is larger than ``max_bytes`` once decompressed, which
                 is noticed while it arrives and not after, or a capped request
                 is answered in an encoding other than gzip.

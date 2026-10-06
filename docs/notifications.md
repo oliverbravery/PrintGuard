@@ -36,8 +36,8 @@ Every enabled channel gets every notice, so there's no routing to set up. A moni
 
 | Channel | You need | Notes |
 |---|---|---|
-| [ntfy](https://ntfy.sh) | A topic URL, on ntfy.sh or your own server | No account needed. Use a hard-to-guess topic, or a protected one with an access token. Anyone with an open topic's URL can read it, so the URL is kept out of the dashboard, bug reports and the API like a password. Defect alerts and fault warnings are sent at urgent priority, and recoveries without it. Your own server takes snapshots once [attachments](https://docs.ntfy.sh/config/#attachments) are on, which needs `attachment-cache-dir` and `base-url` set |
-| [Pushover](https://pushover.net) | An application token from [pushover.net/apps/build](https://pushover.net/apps/build) and your user key | A one-off app purchase. Priority defaults to High, which bypasses the quiet hours set on the device. Recoveries go at Normal at most |
+| [ntfy](https://ntfy.sh) | A topic URL, on ntfy.sh or your own server | No account needed. Use a hard-to-guess topic, or a protected one with an access token. Anyone with an open topic's URL can read it, so the URL is kept out of the dashboard, bug reports and the API like a password. Defect alerts and fault warnings are sent at urgent priority, and recoveries and a plugin's notices without it. Your own server takes snapshots once [attachments](https://docs.ntfy.sh/config/#attachments) are on, which needs `attachment-cache-dir` and `base-url` set |
+| [Pushover](https://pushover.net) | An application token from [pushover.net/apps/build](https://pushover.net/apps/build) and your user key | A one-off app purchase. Priority defaults to High, which bypasses the quiet hours set on the device. Recoveries and a plugin's notices go at Normal at most |
 | [Telegram](https://telegram.org) | A bot token from @BotFather and your chat ID | Recoveries are sent without a sound |
 | [Discord](https://discord.com) | A webhook URL, from Server Settings, Integrations, then Webhooks | Recoveries are sent with notifications suppressed |
 | Desktop notification | Nothing to fill in | Desktop app only. A native notification on the computer running the app, with the window open or closed. macOS asks for permission the first time, and a send fails with an error while notifications are switched off for PrintGuard in the system settings. A recovery looks like any other notice |
@@ -72,9 +72,8 @@ A channel that fails to deliver raises an error on the dashboard. It isn't retri
 that refuses the snapshot is sent the alert again as text, and the dashboard error says the
 picture was refused.
 
-Give a channel the address it answers on, not one that redirects to it. A 301 or 302 turns a text
-alert into a read, so PrintGuard reports it as failed and names the address to use. An ntfy alert
-with a picture is a `PUT`, which is replayed and delivered.
+Give a channel the address it answers on, not one that redirects to it. A redirect is never
+followed, so the alert, or the test alert, fails and names the address to use.
 
 ## Faults and the grace period
 

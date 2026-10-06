@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import aiomqtt
 
+from ..engine import logs
 from ..engine.integrations import HEATERS
 from .events import ConflatedEventQueue
 
@@ -429,7 +430,7 @@ class MqttBridge:
             async with target:
                 await self._engine.request(command)
         except Exception as exc:
-            self._engine.emit({"event": "error", "message": f"Home Assistant command failed: {exc}"})
+            self._engine.emit({"event": "error", "message": f"Home Assistant command failed: {logs.describe(exc)}"})
         finally:
             slots.release()
 

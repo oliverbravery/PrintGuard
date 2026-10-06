@@ -80,6 +80,7 @@ class Watchdog:
         self.responding: set[str] = set()
         self._cooldown_until: dict[str, float] = {}
         self._last_notified: dict[tuple[str, str], float] = {}
+        self._cameras_unchecked: set[str] = set()
         self._down_since: dict[str, float] = {}
         self._healthy_since: dict[str, float] = {}
         self._flaps: dict[str, int] = {}
@@ -92,6 +93,13 @@ class Watchdog:
         self._coverage: dict[str, deque[bool]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._polls: dict[str, asyncio.Task[None]] = {}
+
+    def reconcile_cameras_once_read(self, printer_ids: Iterable[str]) -> None:
+        """Has these printers' cameras listed once each, after the first read that gets an answer.
+
+        A printer switched off at boot is not asked, so it is not warned about.
+        """
+        self._cameras_unchecked.update(printer_ids)
 
     def _schedule(self, what: str, coroutine: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         task = asyncio.create_task(coroutine)
@@ -182,7 +190,7 @@ class Watchdog:
         turn = next(self._reads)
         failure: Exception | None = None
         try:
-            snapshot = (await adapter.fetch_state(self._engine.platform.http, printer.config)).public()
+            snapshot = (await adapter.fetch_state(self._engine.service_http, printer.config)).public()
         except Exception as exc:
             if after_command:
                 logger.warning("printer '%s' took a command but could not be read back: %s", printer.name, logs.describe(exc))
@@ -196,6 +204,9 @@ class Watchdog:
         ):
             return False
         self._answered[printer.id] = turn
+        if failure is None and printer.id in self._cameras_unchecked:
+            self._cameras_unchecked.discard(printer.id)
+            self._schedule(f"listing the cameras of '{printer.name}'", self._engine.reconcile_printer_cameras(printer, keep_working=True))
         changed = printer.observe(snapshot)
         if changed:
             if failure:
@@ -577,7 +588,7 @@ class Watchdog:
             async with asyncio.timeout(deadline):
                 for _ in range(ACT_ATTEMPTS):
                     try:
-                        await adapter.send(self._engine.platform.http, printer.config, action)
+                        await adapter.send(self._engine.service_http, printer.config, action)
                         return wanted
                     except Exception as exc:
                         last_error = exc
