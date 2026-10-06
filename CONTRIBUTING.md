@@ -176,7 +176,9 @@ Bambu and Elegoo tests do.
    [`IntegrationAdapter`](printguard/engine/integrations/base.py):
    - set `id`, the key it is registered and stored under, and `label`, the name in the form.
    - implement `fetch_state()`, normalising to the canonical `DeviceStatus` values.
-     `offline` must mean "unreachable", not "idle", because it keeps inference watching. Fill
+     `offline` must mean "unreachable", not "idle", because it keeps inference watching. Raise
+     with the reason when the service can't be reached or doesn't answer like its API, which
+     the watchdog takes as offline and logs, so **Test connection** can show it. Fill
      in `remaining_s`, `nozzle` and `bed` where the service reports them, the heaters through
      `Heater.reported()`, so the dashboard can show them.
    - implement `send()` for pause, resume and cancel, raising `RuntimeError` on rejection.
@@ -192,10 +194,12 @@ Bambu and Elegoo tests do.
      say which config fields that connection depends on, so testing an edited printer doesn't
      close the one it is polled over.
    - set `slow_action_s` if the service answers an action only once the printer has carried
-     it out. REST, MCP and Home Assistant wait that much longer for it.
+     it out. The engine gives a command to it that much longer, on every transport.
    - describe the config form as a JSON Schema, where `secret: true` masks fields,
-     `placeholder` hints at the expected value, and `default` preselects an optional
-     `enum`, so the form never offers an empty choice the adapter quietly fills in.
+     `placeholder` hints at the expected value, `default` preselects an optional
+     `enum`, so the form never offers an empty choice the adapter quietly fills in, and
+     `required` names the fields the service can't be reached without. `Adapter.require()`
+     enforces it, so saving or testing with one blank fails naming the field.
    - set `docs_url` to the official API reference. It is required for review. `setup_url` and
      `setup_hint` put a setup guide and a one-line note on the form, for steps taken on the
      printer itself.
@@ -215,9 +219,11 @@ Notifiers deliver defect snapshots and watchdog warnings.
 
 1. Create `printguard/engine/notifiers/<service>.py` subclassing
    [`NotifierAdapter`](printguard/engine/notifiers/base.py):
-   - implement `send(http, config, title, body, image)`. Attach the JPEG `image` when the
-     service supports uploads, where `multipart_form()` from `engine/adapters.py` builds the body,
-     and raise `RuntimeError` with the service's error detail on rejection.
+   - implement `send(http, config, title, body, image, *, urgent=True)`. Attach the JPEG
+     `image` when the service supports uploads, where `multipart_form()` from
+     `engine/adapters.py` builds the body, and raise `RuntimeError` with the service's error
+     detail on rejection. `urgent` is `False` for a recovery, so use the service's quieter
+     delivery where it has one.
    - `id`, `label`, the JSON Schema config and `docs_url`, exactly as for integrations.
    - set `desktop_only` for a channel that only works inside the desktop app, as the native
      notifier does.
@@ -334,6 +340,9 @@ On merge, the [release workflow](.github/workflows/release.yml):
    and `latest` for `amd64` and `arm64`, plus the `-intel` and `-nvidia` variants for `amd64`.
 2. only once the images are published, drafts the GitHub release for `vX.Y.Z` with the
    changelog section as its notes, so a failed build never becomes a release.
+   A re-run of the workflow moves a draft that isn't published yet to the new commit and notes,
+   and fails once the release is published, since that version is out and the fix needs a new
+   one.
 3. deploys the website to GitHub Pages.
 4. builds the macOS and Windows desktop apps and, once both have built, attaches them to the
    draft. The macOS app is signed and notarised with the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
