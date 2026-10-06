@@ -90,8 +90,8 @@ def keep_url(sent: Any, stored: Any, scrubbed: Callable[[str], str] = scrub_url)
 
 
 def _address(config: dict[str, Any]) -> tuple[Any, ...]:
-    """Where a config points, with an absent port read as the default one its ``tls`` setting implies."""
-    port = config.get("port") or (8883 if config.get("tls") else 1883)
+    """Where a config points, with an absent port read as the default one, so typing it is not a move."""
+    port = config.get("port") or 1883
     return tuple(port if field == "port" else config.get(field) for field in ADDRESS_FIELDS)
 
 
