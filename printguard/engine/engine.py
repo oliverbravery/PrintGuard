@@ -16,7 +16,7 @@ import time
 import traceback
 import uuid
 from collections import deque
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Coroutine
 
 import numpy as np
 
@@ -73,6 +73,7 @@ FEEDBACK_UNSENDABLE = ("details", "not_jpeg", "too_large", "length")
 LOOP_RETRY_S = 1.0
 FAILURE_REPORT_EVERY_S = 30.0
 NOTIFY_TIMEOUT_S = 30.0
+FINISHING_COMMANDS = frozenset({"camera.remove", "printer.remove", "monitor.remove", "print.remove"})
 READ_ONLY_COMMANDS = frozenset({"history.get", "snapshot.get", "review.get", "camera.snapshot"})
 UNSAVED_COMMANDS = frozenset(
     {
@@ -157,6 +158,7 @@ class Engine:
         self._requester: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = contextvars.ContextVar("requester", default=None)
         self._recent: deque[dict[str, Any]] = deque(maxlen=RECENT_EVENTS_MAX)
         self._tasks: list[asyncio.Task[None]] = []
+        self._finishing: set[asyncio.Task[None]] = set()
         self._attach_tasks: dict[str, asyncio.Task[None]] = {}
         self._reconciles: dict[str, asyncio.Lock] = {}
         self._reconcile_tasks: set[asyncio.Task[None]] = set()
@@ -310,7 +312,7 @@ class Engine:
         carry out. The cameras stay registered, so a command still in flight
         that saves on its way out writes every one of them.
         """
-        background = (*self._tasks, *self._sends.values(), *self._reconcile_tasks)
+        background = (*self._tasks, *self._sends.values(), *self._reconcile_tasks, *self._finishing)
         for task in background:
             task.cancel()
         for camera in self.cameras.values():
@@ -438,9 +440,25 @@ class Engine:
         """
         reset = self._requester.set(reply)
         try:
-            await self._dispatch(message)
+            if isinstance(message.get("cmd"), str) and message["cmd"] in FINISHING_COMMANDS:
+                await self._finish(self._dispatch(message))
+            else:
+                await self._dispatch(message)
         finally:
             self._requester.reset(reset)
+
+    async def _finish(self, work: Coroutine[Any, Any, None]) -> None:
+        """Runs a command to its end even when whoever issued it is cancelled.
+
+        A removal that stopped half way would leave a camera out of the
+        registry but still bound to its monitor and in the saved state, so it
+        carries on without its issuer, which a socket that closes or a request
+        that times out has stopped waiting for.
+        """
+        task = asyncio.ensure_future(work)
+        self._finishing.add(task)
+        task.add_done_callback(self._finishing.discard)
+        await asyncio.shield(task)
 
     async def _dispatch(self, message: dict[str, Any]) -> None:
         """Runs a command, then closes it with the state event its issuer waits on.
@@ -1294,6 +1312,9 @@ class Engine:
         start for a printer still being sent a file is refused for the same
         reason.
 
+        A send cut short, as by a socket that closes, emits an error saying so,
+        since the file may have reached the printer.
+
         Raises:
             PermissionError: If the file is tagged for other printers.
             RuntimeError: If the service cannot print the format, the printer
@@ -1321,6 +1342,9 @@ class Engine:
                 raise RuntimeError(f"{printer.name} is {state.status.value}, so {record.name} was not sent")
             data = await self.platform.files.read(record.file_key)
             await adapter.print_file(self.platform.http, printer.config, printer_filename(record.name, record.ext), data)
+        except asyncio.CancelledError:
+            self.emit({"event": "error", "message": f"Sending {record.name} to {printer.name} was interrupted, so check whether it started", "req_id": message.get("req_id")})
+            raise
         finally:
             self._starting.discard(printer.id)
         logger.info("print '%s' started on printer '%s'", record.name, printer.name)

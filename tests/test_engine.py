@@ -4096,6 +4096,94 @@ async def test_a_printer_being_sent_a_file_is_not_sent_a_second(monkeypatch) -> 
         assert "already being sent a file" in next(e for e in _of(events, "error") if e.get("req_id") == 2)["message"]
 
 
+async def _cancelled_after(engine: Engine, message: dict, seconds: float) -> None:
+    task = asyncio.create_task(engine.handle(message, lambda event: None))
+    await asyncio.sleep(seconds)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_a_camera_removal_cancelled_while_its_source_is_released_still_finishes() -> None:
+    platform = FakePlatform()
+    release = platform.release_camera
+
+    async def slow_release(camera_id: str, source: dict) -> None:
+        await asyncio.sleep(0.2)
+        await release(camera_id, source)
+
+    platform.release_camera = slow_release
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        camera = engine.cameras.values()[0]
+        await _cancelled_after(engine, {"cmd": "camera.remove", "id": camera.id}, 0.05)
+        await asyncio.sleep(0.5)
+        assert not engine.cameras.values(), "the camera stayed registered"
+        assert [m["camera_id"] for m in engine.monitors.values()] == [""], "its monitor stayed bound to it"
+        assert platform.state["cameras"] == [], "state.json still lists it"
+
+
+async def test_a_printer_removal_cancelled_while_its_connection_closes_still_finishes(monkeypatch) -> None:
+    closed: list[dict | None] = []
+
+    async def slow_close(config=None):
+        await asyncio.sleep(0.2)
+        closed.append(config)
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "close", slow_close)
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        monitor_id = next(iter(engine.monitors))
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": printer_id}})
+        await _cancelled_after(engine, {"cmd": "printer.remove", "id": printer_id}, 0.05)
+        await asyncio.sleep(0.5)
+        assert not engine.printers.values(), "the printer stayed registered"
+        assert engine.monitors[monitor_id]["printer_id"] == "", "its monitor kept the printer"
+        assert platform.state["printers"] == [], "state.json still lists it"
+        assert closed, "its connection was never closed"
+
+
+async def test_a_monitor_removal_cancelled_while_its_frames_are_deleted_still_finishes(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    remove = platform.files.remove
+
+    async def slow_remove(key: str) -> None:
+        await asyncio.sleep(0.1)
+        await remove(key)
+
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await _finished_review(engine, 0.6)
+        assert engine.state_event()["reviews"]
+        monkeypatch.setattr(platform.files, "remove", slow_remove)
+        await _cancelled_after(engine, {"cmd": "monitor.remove", "id": monitor_id}, 0.05)
+        await asyncio.sleep(1.0)
+        assert not engine.monitors, "the monitor stayed registered"
+        assert not engine.state_event()["reviews"], "the prints of a monitor that is gone stayed listed"
+        assert platform.state["monitors"] == []
+
+
+async def test_a_print_start_cancelled_while_the_file_is_sent_says_so(monkeypatch) -> None:
+    from test_gcode import PRUSA
+
+    platform = FakePlatform()
+    platform.device_status = "Operational"
+
+    async def slow_upload(http, config, filename, data) -> None:
+        await asyncio.sleep(0.5)
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "print_file", slow_upload)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        printer_id = await _register_printer(engine)
+        await platform.files.store("abcd1234.gcode", _chunks(PRUSA))
+        await engine.handle({"cmd": "print.add", "id": "abcd1234", "filename": "benchy.gcode"})
+        await _cancelled_after(engine, {"cmd": "print.start", "id": "abcd1234", "printer_id": printer_id}, 0.1)
+        errors = [e["message"] for e in _of(events, "error")]
+
+    assert any("benchy" in message and "interrupted" in message for message in errors), errors
+    assert not engine._starting
+
+
 async def test_print_add_rewrites_temperatures_and_drops_a_file_it_cannot() -> None:
     from test_gcode import PRUSA_HEATED, bgcode
 
