@@ -2653,6 +2653,40 @@ async def test_a_refused_print_waits_and_sends_the_rest_after_the_limit_resets(m
     assert sorted(upload["frame"] for upload in uploads) == sorted(frame["id"] for frame in review["frames"]), "no frame is uploaded twice"
 
 
+async def test_a_print_dismissed_before_its_upload_begins_sends_nothing_and_leaves_no_send_behind(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    uploads = _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine)
+        await asyncio.gather(
+            engine.handle({"cmd": "review.send", "id": review["id"]}),
+            engine.handle({"cmd": "review.dismiss", "id": review["id"]}),
+        )
+        await asyncio.sleep(0.2)
+        status = engine.state_event()["reviews"][0]["status"]
+
+    assert not uploads and status == "dismissed"
+    assert not engine._sends, "a send that stopped before it began was never cleared"
+    assert not _of(events, "error")
+
+
+async def test_a_print_whose_monitor_is_gone_is_dropped_with_a_message_and_not_left_sending(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    uploads = _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine)
+        await engine.handle({"cmd": "review.send", "id": review["id"]})
+        engine.monitors.clear()
+        await asyncio.sleep(0.3)
+        listed = engine.state_event()["reviews"]
+
+    assert not uploads and not listed, "frames of a monitor that no longer exists were kept or sent"
+    assert not engine._sends
+    assert any("monitor was removed" in e["message"] for e in _of(events, "error")), _of(events, "error")
+
+
 async def test_a_reset_time_already_past_on_the_hubs_clock_does_not_retry_every_tick(monkeypatch) -> None:
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.05)
     platform = FakePlatform(infer_s=0.02)

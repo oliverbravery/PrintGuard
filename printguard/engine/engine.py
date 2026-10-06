@@ -789,20 +789,27 @@ class Engine:
         A send that is cut short keeps no retry time, which makes it due again
         at once. A print dismissed or submitted afresh while it uploads stops
         after the frame in flight, since those choices are no longer the ones
-        to send.
+        to send, and one dismissed before its turn is not sent at all. A print
+        whose monitor was removed meanwhile is deleted with the rest of that
+        monitor's.
         """
         submission = review.submission or {}
-        monitor = self.monitors[review.monitor_id]
-        printer = self.printers.get(monitor.get("printer_id") or "")
-        print_details = {
-            "print": review.id,
-            "threshold": monitor["threshold"],
-            "version": self.platform.version,
-            "provider": printer.provider if printer else "none",
-            "printer": submission["printer"],
-        }
-        submission["code"] = submission["retry_at"] = None
         try:
+            if review.submission is None:
+                return
+            monitor = self.monitors.get(review.monitor_id)
+            if monitor is None:
+                await self.reviews.forget(review.monitor_id)
+                raise LookupError("that print's monitor was removed, so it was not sent")
+            printer = self.printers.get(monitor.get("printer_id") or "")
+            print_details = {
+                "print": review.id,
+                "threshold": monitor["threshold"],
+                "version": self.platform.version,
+                "provider": printer.provider if printer else "none",
+                "printer": submission["printer"],
+            }
+            submission["code"] = submission["retry_at"] = None
             for frame in review.unsent():
                 frame_details = {"frame": frame["id"], "label": submission["labels"][frame["id"]], "kind": frame["kind"], "score": frame["score"], "ts": frame["ts"]}
                 taken = await self._send_frame(frame_key(review.id, frame["id"]), {**print_details, **frame_details})
@@ -830,7 +837,7 @@ class Engine:
             if not refused:
                 self.report_failure("sending a reviewed print", exc)
         finally:
-            del self._sends[review.id]
+            self._sends.pop(review.id, None)
             self.save()
         self.emit({"event": "review_sent", **review.public(), "ok": review.status == "sent", "req_id": req_id})
         self.emit(self.state_event())
