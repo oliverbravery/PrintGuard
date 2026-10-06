@@ -241,6 +241,40 @@ test("a review answered before its frames arrive still marks the alert frames, a
   expect(await page.evaluate(() => (window as any).__pg.getState().snapshotCache)).toEqual({});
 });
 
+test("a review frame shows whole whatever its shape and any frame opens full size", async ({ page }) => {
+  const square = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"/>')}`;
+  const frames = [
+    { id: "s1", ts: 60, score: 0.1, kind: "spaced", size: 1 },
+    { id: "a1", ts: 120, score: 0.9, kind: "alert", action: "pause", size: 1 },
+  ];
+  await dashboard(page, { engine: engine({ reviews: [review({ frames: 2 })] }), reviewId: "r1", snapshotCache: { s1: square, a1: square } });
+  await emit(page, { event: "review", ...review({ frames: 2 }), frames });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  await sheet.getByRole("button", { name: "Yes" }).click();
+  await expect(sheet.locator("img")).toHaveCount(2);
+  expect(await sheet.locator("img").first().evaluate((img) => getComputedStyle(img).objectFit)).toBe("contain");
+
+  await sheet.getByRole("button", { name: /^Enlarge frame 1 of 2 at/ }).click();
+  const enlarged = page.getByRole("dialog", { name: /10%/ });
+  await expect(enlarged.locator("img")).toHaveAttribute("src", square);
+  await page.keyboard.press("Escape");
+  await expect(enlarged).toBeHidden();
+  await expect(sheet).toBeVisible();
+});
+
+test("opening the history asks only for the snapshots near the screen", async ({ page }) => {
+  await dashboard(page, { statsMonitorId: "m1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · history" });
+  const snaps = Array.from({ length: 90 }, (_, index) => ({ id: `s${index}`, ts: 1_700_000_000 - index, score: 0.9, action: "failed" }));
+  await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_100, buckets: [], snaps, alerts: [], stats: {} });
+  const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "snapshot.get").map((c: any) => c.id));
+  await expect.poll(async () => (await asked()).length).toBeGreaterThan(0);
+  expect((await asked()).length).toBeLessThan(30);
+
+  await sheet.getByRole("button", { name: /Snapshot at 90% risk/ }).last().scrollIntoViewIfNeeded();
+  await expect.poll(asked).toContain("s89");
+});
+
 test("review frames whose pictures were lost to a reconnect are asked for again", async ({ page }) => {
   await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
   await emit(page, { event: "review", ...review(), frames: [{ id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 }] });

@@ -1,8 +1,11 @@
+import { Maximize2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { clock, isDailyLimit, LIMIT_REASON, sending, waitingMessage } from "../review";
+import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Monitor, ReviewFrame, ReviewSummary } from "../types";
 import { Sheet } from "./Dialog";
+import { SnapshotLightbox } from "./SnapshotLightbox";
 
 type Outcome = "fine" | "failed";
 
@@ -25,6 +28,7 @@ function FrameCard({
   removed,
   onToggle,
   onRemove,
+  onEnlarge,
 }: {
   monitorId: string;
   frame: ReviewFrame;
@@ -33,16 +37,12 @@ function FrameCard({
   removed: boolean;
   onToggle: () => void;
   onRemove: () => void;
+  onEnlarge: () => void;
 }) {
-  const url = useStore((s) => s.snapshotCache[frame.id]);
-  const fetchSnapshot = useStore((s) => s.fetchSnapshot);
-  const reconnecting = useStore((s) => s.reconnecting);
-  useEffect(() => {
-    if (!reconnecting) fetchSnapshot(monitorId, frame.id);
-  }, [monitorId, frame.id, reconnecting]);
+  const { ref, url } = useLazySnapshot<HTMLDivElement>(monitorId, frame.id);
   const label = verdict(frame, failure);
   return (
-    <div className={`panel relative overflow-hidden ${failure && !removed ? "!border-bad" : ""}`}>
+    <div ref={ref} className={`panel relative overflow-hidden ${failure && !removed ? "!border-bad" : ""}`}>
       <button
         type="button"
         className={`block w-full text-left ${removed ? "opacity-40" : "cursor-pointer"}`}
@@ -51,13 +51,21 @@ function FrameCard({
         disabled={removed}
         onClick={onToggle}
       >
-        <div className="aspect-video bg-ink-0">{url && <img src={url} alt="" className="h-full w-full object-cover" />}</div>
-        <span className="flex items-center justify-between gap-2 px-2 py-1.5">
+        <div className="aspect-video bg-ink-0">{url && <img src={url} alt="" className="h-full w-full object-contain" />}</div>
+        <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 py-1.5">
           <span className={`chip ${failure ? "chip-bad" : "chip-ok"}`}>{label}</span>
-          <span className="label">
+          <span className="label ml-auto">
             {clock(frame.ts)} · {(frame.score * 100).toFixed(0)}%
           </span>
         </span>
+      </button>
+      <button
+        type="button"
+        className="btn absolute left-1 top-1 !bg-ink-1 !px-2 !py-1"
+        aria-label={`Enlarge ${position.toLowerCase()} at ${clock(frame.ts)}`}
+        onClick={onEnlarge}
+      >
+        <Maximize2 size={14} aria-hidden />
       </button>
       <button
         type="button"
@@ -117,6 +125,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
   const [relabelled, setRelabelled] = useState<Set<string>>(new Set());
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [printer, setPrinter] = useState("");
+  const [enlarged, setEnlarged] = useState<ReviewFrame | null>(null);
   const frames = reviewData[review.id]?.frames ?? [];
   const kept = frames.filter((frame) => !removed.has(frame.id));
   const showsFailure = (frame: ReviewFrame) => (outcome === "failed" && frame.kind === "alert") !== relabelled.has(frame.id);
@@ -178,6 +187,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
                     removed={removed.has(frame.id)}
                     onToggle={() => setRelabelled((current) => toggled(current, frame.id))}
                     onRemove={() => setRemoved((current) => toggled(current, frame.id))}
+                    onEnlarge={() => setEnlarged(frame)}
                   />
                 ))}
               </div>
@@ -212,6 +222,13 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
             </button>
           </div>
         </div>
+      )}
+      {enlarged && (
+        <SnapshotLightbox
+          snapshotId={enlarged.id}
+          onClose={() => setEnlarged(null)}
+          caption={`${clock(enlarged.ts)} · ${(enlarged.score * 100).toFixed(0)}%`}
+        />
       )}
     </Sheet>
   );
