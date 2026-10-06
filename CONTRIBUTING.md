@@ -322,9 +322,11 @@ blocking a merge. A pull request into a release branch runs **tests**, **audit**
 | **version** | The version has no release tag yet and has a matching `CHANGELOG.md` section, dated the day it merges into `main` in London time. Re-publishing an existing tag is refused |
 
 Every action in the workflows is pinned to a commit, with its version in a comment. The base
-images in the `Dockerfile` are pinned by digest beside their tag, and the MediaMTX archive in
-`packaging/build.sh` and the Intel GPU packages in both workflows carry the sha256 their release
-publishes. Bumping any of them means changing the version and its hash together.
+images in the `Dockerfile` and the QEMU, BuildKit and SBOM scanner images the workflows pull are
+pinned by digest beside their tag, and the MediaMTX archive in `packaging/build.sh` and the Intel
+GPU packages in both workflows carry the sha256 their release publishes. Bumping any of them means
+changing the version and its hash together. Node in the workflows matches the `node:22-alpine`
+digest in the `Dockerfile`, and `hatchling` is pinned in `pyproject.toml`.
 
 On merge, the [release workflow](.github/workflows/release.yml):
 
