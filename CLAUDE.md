@@ -24,8 +24,8 @@ cd web && npm run site                    # the GitHub Pages landing page (web/s
 cd feedback-worker && npm ci && npm test  # the training inbox Worker
 ```
 
-There is no Python lint step. The **tests** check in CI runs `uv run pytest`, `npm run typecheck`
-and `npm run test:sandbox` in `web/`, and the feedback Worker's `typecheck` and tests.
+There is no Python lint step. The **tests** check in CI runs `uv run pytest`, `npm run typecheck`,
+`npm run site:build` and `npm run test:sandbox` in `web/`, and the feedback Worker's `typecheck` and tests.
 
 ## Architecture
 
@@ -180,8 +180,8 @@ heading in [CHANGELOG.md](CHANGELOG.md). The release branch owns the bump and th
 The changelog section is published **verbatim** as the GitHub release notes - write it for
 someone deciding whether to pull the new image, not about the implementation.
 
-Five checks are required: **tests** (`uv run pytest`, the UI's `typecheck` and `test:sandbox`,
-and the feedback Worker's `typecheck` and tests), **audit** (`uv audit` and `npm audit`
+Five checks are required: **tests** (`uv run pytest`, the UI's `typecheck`, `site:build` and
+`test:sandbox`, and the feedback Worker's `typecheck` and tests), **audit** (`uv audit` and `npm audit`
 over the lockfiles), the production **image** build (which
 also builds the UI), **version** (not yet tagged, with a matching
 changelog section) and, on pull requests into `main` only, **launch** (the container and both

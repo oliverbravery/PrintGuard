@@ -39,7 +39,7 @@ cd web && npm run test:sandbox       # the browser plugin sandbox, in chromium a
 cd feedback-worker && npm ci && npm run typecheck && npm test   # the training inbox Worker, in the Workers runtime
 ```
 
-The **tests** check in CI runs all four. `typecheck` covers the Playwright suites as well as the
+The **tests** check in CI runs all four and `npm run site:build` for the landing page. `typecheck` covers the Playwright suites as well as the
 UI, and `test:sandbox` needs `npx playwright install chromium webkit` once.
 
 `tests/test_engine.py` simulates cameras and printers against a fake platform, covering
@@ -314,7 +314,7 @@ blocking a merge. A pull request into a release branch runs **tests**, **audit**
 
 | Check | Enforces |
 |---|---|
-| **tests** | Everything under `tests/`, with `uv run pytest`. The UI and its Playwright suites type-check, and the browser plugin sandbox holds in chromium and webkit. The feedback Worker type-checks and passes its tests |
+| **tests** | Everything under `tests/`, with `uv run pytest`. The UI and its Playwright suites type-check, the landing page builds, and the browser plugin sandbox holds in chromium and webkit. The feedback Worker type-checks and passes its tests |
 | **audit** | `uv audit` and `npm audit` find no known vulnerability in `uv.lock` or either `package-lock.json`. A new advisory fails every open pull request until the dependency is bumped |
 | **image** | Every production image variant builds, which also builds the UI. The check builds for `amd64` only, so the `arm64` image is first built by the release itself |
 | **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |

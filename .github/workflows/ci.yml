@@ -24,6 +24,7 @@ jobs:
       - run: uv sync --frozen
       - run: uv run pytest
       - run: npm run typecheck --prefix web
+      - run: npm run site:build --prefix web
       - id: playwright
         run: echo "version=$(node -p 'require("./web/node_modules/@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
