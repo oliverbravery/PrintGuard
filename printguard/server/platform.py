@@ -71,6 +71,20 @@ CLASSIFY_MAX_PIXELS = 50_000_000
 """Most pixels a supplied image may have: a few kilobytes of JPEG can describe a
 frame that decodes to gigabytes, and an 8K frame is 33 million."""
 
+STATE_SECTIONS: dict[str, type | tuple[type, ...]] = {
+    "cameras": list,
+    "printers": list,
+    "prints": list,
+    "monitors": list,
+    "reviews": list,
+    "tokens": list,
+    "plugins": list,
+    "settings": dict,
+    "feedback_token": (str, type(None)),
+}
+"""What the engine saves under each top-level key of the state file, so one
+holding anything else is treated as damaged."""
+
 SOCKET_TIMEOUT_S = 10.0
 SOCKET_MAX_BYTES = 256 * 1024
 DEVICE_SIZE_CAP = 1280 * 720
@@ -968,15 +982,22 @@ class ServerPlatform:
 
         Returns:
             The saved state, or nothing on a first boot. A file that will not
-            parse is moved aside before the hub starts empty, so the next save
-            cannot overwrite what is left of it.
+            parse, or parses to something the engine never saves, is moved
+            aside before the hub starts empty, so the next save cannot
+            overwrite what is left of it.
 
         Raises:
             RuntimeError: If the file is there and the hub may not read it,
                 saying whose it has to be.
         """
         try:
-            return json.loads(self._state_path.read_text())
+            state = json.loads(self._state_path.read_text())
+            if not isinstance(state, dict):
+                raise ValueError(f"it holds {type(state).__name__}, not an object")
+            for section, expected in STATE_SECTIONS.items():
+                if section in state and not isinstance(state[section], expected):
+                    raise ValueError(f"its {section} are {type(state[section]).__name__}")
+            return state
         except FileNotFoundError:
             return {}
         except PermissionError as exc:

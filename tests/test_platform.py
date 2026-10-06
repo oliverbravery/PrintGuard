@@ -765,3 +765,31 @@ async def test_an_image_with_more_pixels_than_the_cap_is_refused_before_it_is_de
     assert await ServerPlatform.decode_jpeg(holder, jpeg(101)) is None
     assert decoded == []
     assert (await ServerPlatform.decode_jpeg(holder, jpeg(100))).shape == (100, 100, 3)
+
+
+@pytest.mark.parametrize(
+    "saved",
+    ["null", "[]", '"state"', '{"settings": "x"}', '{"cameras": {"cam1": {}}}', '{"feedback_token": 5}', '{"tokens": null}'],
+)
+def test_a_state_file_of_the_wrong_shape_is_kept_like_one_that_will_not_parse(tmp_path, caplog, saved: str) -> None:
+    """Valid JSON that is not what the engine saves started an empty hub, or ended the start with an AttributeError."""
+    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
+    (tmp_path / "state.json").write_text(saved)
+
+    assert ServerPlatform.load_state(holder) == {}
+    ServerPlatform.save_state(holder, {})
+
+    assert (tmp_path / "state.json.corrupt").read_text() == saved
+    assert [record.levelname for record in caplog.records] == ["ERROR"]
+    assert "state.json.corrupt" in caplog.text
+
+
+def test_a_state_file_of_the_shape_the_engine_saves_is_read(tmp_path) -> None:
+    state = {
+        "cameras": [], "printers": [], "prints": [], "monitors": [], "reviews": [], "tokens": [], "plugins": [],
+        "settings": {}, "feedback_token": None,
+    }
+    holder = SimpleNamespace(_state_path=tmp_path / "state.json")
+    (tmp_path / "state.json").write_text(json.dumps(state))
+
+    assert ServerPlatform.load_state(holder) == state
