@@ -176,6 +176,7 @@ const nextReqId = () => `${TAB_ID}-${++reqSeq}`;
 const issuedHere = (reqId: unknown) => typeof reqId === "string" && reqId.startsWith(`${TAB_ID}-`);
 let uploadSeq = 0;
 let resumed = false;
+const toastedStartupWarnings = new Set<string>();
 
 function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: () => void): EngineLink {
   let socket: WebSocket;
@@ -516,6 +517,11 @@ export const useStore = create<PgStore>((set, get) => {
           savedAt: { ...s.savedAt, ...Object.fromEntries(acknowledged.map((key) => [key, Date.now()])) },
           ...(firstRun ? { dialog: "intro" as const } : {}),
         }));
+        for (const warning of server.startup_warnings ?? []) {
+          if (toastedStartupWarnings.has(warning)) continue;
+          toastedStartupWarnings.add(warning);
+          get().toast("alert", warning);
+        }
         stopUnregisteredPublishers(server.cameras);
         if (!resumed) {
           resumed = true;

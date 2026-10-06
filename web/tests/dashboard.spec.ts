@@ -81,6 +81,20 @@ test("a dropped hub shows in the header, frees its buttons and gets the unsaved 
   await expect.poll(() => page.evaluate(() => Object.keys((window as any).__pg.getState().optimistic).length)).toBe(0);
 });
 
+test("a warning raised while the hub started is toasted once per page load, not on every state or reconnect", async ({ page }) => {
+  const warnings = ["The GPU cannot run the model, using the CPU", "Dropped a camera the hub no longer accepts"];
+  const state = engine({ startup_warnings: warnings });
+  const { sockets } = await hub(page, undefined, state);
+  for (const warning of warnings) await expect(page.getByText(warning)).toHaveCount(1);
+
+  sockets[0].send(JSON.stringify({ event: "state", ...state }));
+  await sockets[0].close();
+  await expect.poll(() => sockets.length, { timeout: 8000 }).toBe(2);
+  sockets[1].send(JSON.stringify({ event: "state", ...state }));
+  await expect(page.getByText("reconnecting")).toBeHidden();
+  for (const warning of warnings) await expect(page.getByText(warning)).toHaveCount(1);
+});
+
 test("a dashboard left open through an update reloads onto the new version", async ({ page }) => {
   const { sockets } = await hub(page);
   sockets[0].send(JSON.stringify({ event: "state", ...engine({ version: "next" }) }));

@@ -393,6 +393,7 @@ export interface EngineState {
   prints: PrintFile[];
   reviews: ReviewSummary[];
   feedback_hub: string | null;
+  startup_warnings?: string[];
   monitors: Monitor[];
   settings: {
     notifiers: Record<string, Record<string, string>>;
