@@ -918,3 +918,30 @@ def test_a_closed_device_leaves_no_frame_pointing_into_its_buffers(monkeypatch: 
     assert writable == [1]
     assert online_at_close == [False]
     assert source._latest is None and source._latest_rgb is None
+
+
+def test_a_live_view_listener_that_never_answers_fails_the_push_instead_of_stalling_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MediaMTX accepting on 8554 and never replying held the capture thread inside the first mux for good."""
+    from printguard.server.publish import H264Push
+
+    monkeypatch.setattr("printguard.server.publish.PUSH_TIMEOUT_US", 500_000)
+    outcome: list[BaseException | None] = []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        push = H264Push(f"rtsp://127.0.0.1:{listener.getsockname()[1]}/cam", 15)
+        frame = av.VideoFrame.from_ndarray(np.zeros((240, 320, 3), dtype=np.uint8), format="rgb24")
+
+        def send() -> None:
+            try:
+                push.send(frame)
+                outcome.append(None)
+            except BaseException as exc:
+                outcome.append(exc)
+
+        thread = threading.Thread(target=send, daemon=True)
+        thread.start()
+        thread.join(15)
+
+    assert not thread.is_alive(), "the push never gave up on a listener that does not answer"
+    assert isinstance(outcome[0], av.error.FFmpegError)

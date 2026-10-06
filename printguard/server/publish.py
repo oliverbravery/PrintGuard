@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 MAX_QUEUED_BYTES = 32 * 1024 * 1024
+PUSH_TIMEOUT_US = 3_000_000
+"""How long a connection to MediaMTX may wait on the socket, so a listener that
+accepts and never answers fails like a refused connection does."""
 
 
 class ChunkStream:
@@ -125,7 +128,9 @@ class H264Push:
         """Encodes and muxes one decoded frame, opening the push lazily."""
         now = time.monotonic()
         if self._push is None:
-            self._push = av.open(self._rtsp_url, mode="w", format="rtsp", options={"rtsp_transport": "tcp"})
+            self._push = av.open(
+                self._rtsp_url, mode="w", format="rtsp", options={"rtsp_transport": "tcp", "timeout": str(PUSH_TIMEOUT_US)}
+            )
             self._stream = self._push.add_stream("libx264", rate=self._fps)
             self._stream.width, self._stream.height = frame.width, frame.height
             self._stream.pix_fmt = "yuv420p"
