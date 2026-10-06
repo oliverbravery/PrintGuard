@@ -23,6 +23,8 @@ jobs:
       - run: npm ci --prefix web
       - run: uv sync --frozen
       - run: uv run pytest
+      - name: Run the tests again on the Python the image ships
+        run: uv run --isolated --frozen --python 3.13 pytest
       - run: npm run typecheck --prefix web
       - run: npm run site:build --prefix web
       - id: playwright
