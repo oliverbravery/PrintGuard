@@ -432,7 +432,7 @@ async def test_a_runtime_returning_non_finite_embeddings_is_an_inference_error_n
     assert not _of(events, "result") and not camera.last_result, "a frame with no embedding was scored as a success"
 
 
-async def test_a_failed_pass_does_not_end_printer_polling(monkeypatch) -> None:
+async def test_a_failed_save_does_not_end_printer_polling(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 0.05)
     monkeypatch.setattr(engine_module, "LOOP_RETRY_S", 0.05)
     platform = FakePlatform(infer_s=0.02)
@@ -454,7 +454,7 @@ async def test_a_failed_pass_does_not_end_printer_polling(monkeypatch) -> None:
         await asyncio.sleep(0.3)
         watching = engine.state_event()["monitors"][0]["watching"]
 
-    assert any("printer polling failed" in event["message"] for event in _of(events, "error")), "a failed poll is reported"
+    assert any("saving the state failed" in event["message"] for event in _of(events, "error")), "a failed save is reported"
     assert watching, "the next print is noticed after a poll failed"
 
 
@@ -834,6 +834,7 @@ async def test_a_full_disk_between_pause_attempts_does_not_lose_the_alert(monkey
 async def test_a_pause_that_worked_is_pushed_straight_after_one_that_failed(monkeypatch) -> None:
     monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
     monkeypatch.setattr(watchdog, "ACT_RETRY_S", 0.01)
+    monkeypatch.setattr(watchdog, "ACT_FAILED_COOLDOWN_S", 0.05)
     platform = FakePlatform(infer_s=0.02)
     attempts = 0
 
