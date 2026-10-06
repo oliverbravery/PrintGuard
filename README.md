@@ -122,7 +122,7 @@ as a camera for you.
 |---|---|
 | Print services | OctoPrint, Klipper (Moonraker), Elegoo, Prusa (PrusaLink), Bambu Lab |
 | Cameras | Printer webcams, USB cameras plugged into the hub, RTSP, RTMP, HTTP/MJPEG, WHEP and a phone's or laptop's own camera |
-| Alerts | ntfy, Pushover, Telegram, Discord, and native notifications in the desktop app |
+| Alerts | ntfy, Pushover, Telegram, Discord, and Desktop notification in the desktop app |
 
 Bambu, Elegoo and Prusa printers are reached over their local APIs and never their clouds. [docs/printers.md](docs/printers.md) has the setup for each service,
 [docs/cameras.md](docs/cameras.md) each camera source and
@@ -181,7 +181,7 @@ version. [docs/api.md](docs/api.md) has the full reference.
 
 Plugins are written in JavaScript and run in a sandbox. Install verified ones from the store in
 Settings, or from a GitHub repo or a zip. They ask for fine-grained permissions when you enable
-them, and you can take those back at any time.
+them, which you accept all or nothing.
 
 Four are in the store:
 
@@ -212,7 +212,7 @@ Themes are saved on the hub and follow every browser that opens it.
 </tr>
 </table>
 
-Tap **Customise** to drag monitors into any order, pin the ones that matter to the front and hide
+Tap the **Customise layout** chip (▦) in the header to drag monitors into any order, pin the ones that matter to the front and hide
 the rest. Cameras in the rail can be dragged and hidden the same way.
 
 ![Customise mode: drag to reorder and hide monitors and cameras, and pin a monitor](docs/assets/customise.png)
@@ -241,7 +241,7 @@ to pin a runtime.
 Anyone who can reach the hub sees every camera and can pause or cancel your printers, so put an
 identity layer in front before it leaves your network. [docs/deployment.md](docs/deployment.md)
 walks through Tailscale, which is what I use for a private hub, alongside Cloudflare Tunnel with
-Access and oauth2-proxy, and ends with a hardening checklist.
+Access and oauth2-proxy, and has a hardening checklist.
 
 ## Updates and support
 
