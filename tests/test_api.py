@@ -823,3 +823,12 @@ async def test_a_snapshot_whose_file_is_gone_is_a_404_that_names_no_path(tmp_pat
 
         assert gone.status_code == 404 and str(tmp_path) not in gone.text
         assert not any(str(tmp_path) in event.get("message", "") for event in engine.recent_events())
+
+
+async def test_moving_a_printer_without_its_key_is_a_400_that_keeps_both() -> None:
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, printer_id, _camera_id, tokens):
+        headers = {"Authorization": f"Bearer {tokens['manage']}"}
+        moved = await client.patch(f"/printers/{printer_id}", json={"config": {"base_url": "http://elsewhere"}}, headers=headers)
+
+        assert moved.status_code == 400 and "send api_key again" in moved.text and "k" not in moved.json()["detail"].split()
+        assert engine.printers.get(printer_id).config == OCTOPRINT["config"]
