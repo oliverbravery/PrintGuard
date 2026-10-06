@@ -33,6 +33,7 @@ datas = [
     (str(ROOT / "models"), "models"),
     (str(ROOT / "mediamtx.yml"), "."),
     (str(ROOT / "THIRD_PARTY_NOTICES.md"), "."),
+    (str(ROOT / "LICENSE.md"), "."),
     (str(ROOT / "web" / "dist"), "static"),
     (str(icon_png), "."),
     (str(ROOT / "printguard" / "server" / "runtime"), "printguard/server/runtime"),

@@ -47,6 +47,7 @@ COPY printguard/ printguard/
 COPY models/ models/
 COPY mediamtx.yml mediamtx.yml
 COPY THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
+COPY LICENSE.md LICENSE.md
 COPY --from=web /build/web/dist static/
 ENV PATH="/app/.venv/bin:$PATH" \
     PRINTGUARD_VARIANT=$VARIANT \

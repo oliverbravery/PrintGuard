@@ -1023,8 +1023,6 @@ def test_the_hub_takes_a_websocket_message_big_enough_for_a_plugin_zip(monkeypat
 
 
 def test_the_desktop_app_serves_the_same_websocket_limit(monkeypatch) -> None:
-    pytest.importorskip("pystray")
-    pytest.importorskip("webview")
     from printguard.server import desktop
 
     configs: list[dict] = []

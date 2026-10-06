@@ -54,7 +54,8 @@ first. A new adapter gets its payloads tested in the second. `tests/test_plugin_
 holds where a plugin's requests, sockets and sign-in may go, `tests/test_urls.py` the match
 patterns its grant is written in and `tests/test_plugin_schema.py` the manifest schema. The hub
 has `tests/test_app.py` for its routes and `tests/test_platform.py` for capture, inference and
-storage. The REST API, MCP server, MQTT bridge, tokens, update check, gcode reader and MediaMTX
+storage, and the desktop app's launch decisions are in `tests/test_desktop.py`. The training
+inbox's pull script has `tests/test_feedback_pull.py`. The REST API, MCP server, MQTT bridge, tokens, update check, gcode reader and MediaMTX
 client each have a `tests/test_<name>.py` of their own.
 
 `npm run test:sandbox` runs everything in `web/tests`. `sandbox.spec.ts` holds the browser
@@ -327,16 +328,21 @@ blocking a merge. A pull request into a release branch runs **tests**, **audit**
 
 | Check | Enforces |
 |---|---|
-| **tests** | Everything under `tests/`, with `uv run pytest`, on Python 3.12 and on the image's 3.13. The UI and its Playwright suites type-check, the landing page builds, and the browser plugin sandbox holds in chromium and webkit. The feedback Worker type-checks and passes its tests |
+| **tests** | Everything under `tests/`, with `uv run pytest`, on Python 3.12 (3.12.4 is the oldest supported) and on the image's 3.13. The UI and its Playwright suites type-check, the landing page builds, and the browser plugin sandbox holds in chromium and webkit. The feedback Worker type-checks and passes its tests |
 | **audit** | `uv audit` and `npm audit` find no known vulnerability in `uv.lock` or either `package-lock.json`. A new advisory fails every open pull request until the dependency is bumped |
 | **image** | Every production image variant builds, which also builds the UI. The check builds for `amd64` only, so the `arm64` image is first built by the release itself |
 | **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |
 | **version** | The version has no release tag yet and has a matching `CHANGELOG.md` section, dated the day it merges into `main` in London time. Re-publishing an existing tag is refused |
 
+Every check runs again when a pull request is edited, so retargeting a release-branch pull request
+at `main` brings in **launch** and the date. **launch** fails, not skips, on a pull request into
+`main` where the apps never started.
+
 Every action in the workflows is pinned to a commit, with its version in a comment. The base
 images in the `Dockerfile` and the QEMU, BuildKit and SBOM scanner images the workflows pull are
 pinned by digest beside their tag, and the MediaMTX archive in `packaging/build.sh` and the Intel
-GPU packages in both workflows carry the sha256 their release publishes. Bumping any of them means
+GPU packages in both workflows carry the sha256 their release publishes. `create-dmg`, which builds
+the macOS disk image, is cloned at the commit of its release in `packaging/build.sh`. Bumping any of them means
 changing the version and its hash together. Node in the workflows matches the `node:22-alpine`
 digest in the `Dockerfile`, and `hatchling` is pinned in `pyproject.toml`.
 
@@ -372,18 +378,19 @@ The release's pull request into `main` links every issue it resolves with a clos
 write `Reported in #123` instead, so the issue closes when the release goes out.
 
 A fix is not resolved until the reporter says it is, so
-[the issues workflow](.github/workflows/issues.yml) reopens what the merge closed and swaps
-the issue's `status:` label for `status: completed`. An issue its reporter closed before the
-merge stays closed and is not asked again. Once the release is actually published,
-the release workflow comments on each one naming the version and asking the reporter to close
-it if it worked, or to say what is still wrong. Thirty days without a reply closes it, and
-anyone can reopen it later.
+[the issues workflow](.github/workflows/issues.yml) reopens what a merge into `main` closed and swaps
+the issue's `status:` label for `status: completed`. A merge into a release branch leaves its
+issues alone. An issue its reporter closed before the merge stays closed and is not asked again.
+Once the release is actually published, the release workflow comments on every issue closed by a
+pull request merged into `main` since the previous release, naming the version and asking the
+reporter to close it if it worked, or to say what is still wrong. An issue whose latest comment is
+that one closes after thirty days. Any reply keeps it open, and anyone can reopen it later.
 
 ```mermaid
 flowchart LR
     merge["Release merged<br/>Fixes #123"] --> reopen["reopened,<br/>status: completed"]
     reopen --> notify["vX.Y.Z published:<br/>comment asks the reporter to verify"]
     notify --> confirmed["reporter closes it"]
-    notify --> quiet["30 days quiet:<br/>closed automatically"]
-    notify --> more["still broken:<br/>stays open"]
+    notify --> quiet["no reply in 30 days:<br/>closed automatically"]
+    notify --> more["any reply, such as still broken:<br/>stays open"]
 ```

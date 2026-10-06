@@ -7,18 +7,28 @@ MediaMTX and QuickJS-ng are separate programs (mere aggregation - each runs as i
 or in its own sandbox and is not linked into PrintGuard). FFmpeg, ONNX Runtime, LiteRT and
 Wasmtime are shared libraries the hub loads, taken as they come in each project's Python wheel.
 
-The hub also loads native code from the Python packages in the first table. The GPU images, the
-desktop apps and the dashboard carry further libraries after it, and the dashboard's typefaces
-come last.
+The hub also loads native code from the Python packages in the first table, which lists every
+package in the lock file that ships a compiled library apart from the ones with a section of their
+own. The GPU images, the desktop apps and the dashboard carry further libraries after it, and the
+dashboard's typefaces come last.
 
 | Package | Licence | Native libraries it carries |
 |---|---|---|
-| [NumPy](https://github.com/numpy/numpy) | BSD-3-Clause, the text under PyAV above | OpenBLAS |
+| [NumPy](https://github.com/numpy/numpy) | BSD-3-Clause, the text under PyAV below | OpenBLAS |
 | [Pillow](https://github.com/python-pillow/Pillow) | MIT-CMU | libjpeg, libtiff and FreeType among others |
 | [cryptography](https://github.com/pyca/cryptography) | Apache-2.0 OR BSD-3-Clause, the Apache-2.0 text under Wasmtime below | OpenSSL |
-| [uvloop](https://github.com/MagicStack/uvloop) | MIT, the text under MediaMTX above | libuv |
-| [pydantic-core](https://github.com/pydantic/pydantic-core) | MIT, the text under MediaMTX above | Its own Rust code |
+| [uvloop](https://github.com/MagicStack/uvloop) | MIT, the text under MediaMTX below | libuv |
+| [pydantic-core](https://github.com/pydantic/pydantic-core) | MIT, the text under MediaMTX below | Its own Rust code |
 | [paho-mqtt](https://github.com/eclipse-paho/paho.mqtt.python) | [EPL-2.0](https://www.eclipse.org/legal/epl-2.0/) OR BSD-3-Clause | None, and its source is at the link |
+| [httptools](https://github.com/MagicStack/httptools) | MIT, Copyright (c) 2015 MagicStack Inc., the text under MediaMTX below | llhttp (MIT, Copyright © 2018 Fedor Indutny) and http-parser (MIT, Copyright Joyent, Inc. and other Node contributors) |
+| [websockets](https://github.com/python-websockets/websockets) | BSD-3-Clause, Copyright (c) Aymeric Augustin and contributors, the text under PyAV below | Its own C speedups |
+| [watchfiles](https://github.com/samuelcolvin/watchfiles) | MIT, Copyright (c) 2017 to present Samuel Colvin, the text under MediaMTX below | Rust, with the notify crate (CC0-1.0) and further crates under MIT OR Apache-2.0 |
+| [PyYAML](https://github.com/yaml/pyyaml) | MIT, Copyright (c) 2017-2021 Ingy döt Net and 2006-2016 Kirill Simonov, the text under MediaMTX below | libyaml (MIT, Copyright (c) 2017-2020 Ingy döt Net and 2006-2016 Kirill Simonov) |
+| [cffi](https://github.com/python-cffi/cffi) | MIT-0, which asks for no notice | libffi (MIT, Copyright (c) Anthony Green, Red Hat, Inc and others) |
+| [protobuf](https://github.com/protocolbuffers/protobuf) | BSD-3-Clause, Copyright 2008 Google Inc., the text under PyAV below | Its own C code |
+| [ml-dtypes](https://github.com/jax-ml/ml_dtypes) | Apache-2.0, the text under Wasmtime below | Its own C++ code and the Eigen headers ([MPL-2.0](https://www.mozilla.org/MPL/2.0/), whose source is at https://gitlab.com/libeigen/eigen) |
+| [rpds-py](https://github.com/crate-py/rpds) | MIT, Copyright (c) 2023 Julian Berman, the text under MediaMTX below | Rust, with crates under MIT OR Apache-2.0 |
+| [caio](https://github.com/mosquito/caio) | Apache-2.0, the text under Wasmtime below | Its own C code |
 
 
 ## MediaMTX
@@ -400,6 +410,23 @@ oneTBB and hwloc libraries the provider loads.
 - Licence: MIT, as the wheel's metadata gives it and as reproduced under MediaMTX above. The wheel
   carries no licence text for the libraries inside it
 
+## Intel GPU compute runtime
+
+In the `-intel` image only, installed from the four `.deb` packages Intel publishes with its
+releases, each pinned by SHA-256 in the image build, and not modified.
+
+| Package | Project | Version | Licence |
+|---|---|---|---|
+| `intel-opencl-icd` | [compute-runtime](https://github.com/intel/compute-runtime) | 26.27.39122.11 | MIT, Copyright (C) 2021 Intel Corporation |
+| `libigdgmm12` | [gmmlib](https://github.com/intel/gmmlib) | 22.10.0 | MIT, Copyright (c) 2017 Intel Corporation |
+| `intel-igc-core-2` and `intel-igc-opencl-2` | [intel-graphics-compiler](https://github.com/intel/intel-graphics-compiler) | 2.38.2 | MIT, Copyright (C) 2019-2021 Intel Corporation |
+
+The MIT text is reproduced under MediaMTX above. The graphics compiler embeds LLVM and Clang
+17.0.6 (Apache-2.0 WITH LLVM-exception, reproduced under Wasmtime above), SPIRV-Tools (Apache-2.0),
+SPIRV-Headers (Copyright (c) 2015-2018 The Khronos Group Inc.), SPIRV-LLVM-Translator, libclc and
+protobuf (BSD-3-Clause, Copyright 2008 Google Inc.). Intel keeps their licences in the compiler's
+[NOTICES.txt](https://github.com/intel/intel-graphics-compiler/blob/v2.38.2/NOTICES.txt).
+
 ## NVIDIA CUDA runtime and TensorRT RTX provider
 
 In the `-nvidia` image only.
@@ -433,6 +460,46 @@ which carries `Microsoft.WindowsAppRuntime.Bootstrap.dll`:
 
 - Project: https://github.com/pywinrt/pywinrt
 - Licence: MIT, as the wheels' metadata gives it. They carry no licence text for the DLL
+
+## WebView2 SDK
+
+The Windows app's window, from the `pywebview` wheel, which carries `Microsoft.Web.WebView2.Core.dll`,
+`Microsoft.Web.WebView2.WinForms.dll` and `WebView2Loader.dll` from the Microsoft.Web.WebView2
+1.0.3856.49 package. The Edge WebView2 runtime itself is not included, so the window uses the one
+installed on the PC.
+
+- Project: https://aka.ms/webview
+- Licence: BSD-style, as the package's `LICENSE.txt` gives it
+
+```
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * The name of Microsoft Corporation, or the names of its contributors
+may not be used to endorse or promote products derived from this
+software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ## CPython
 

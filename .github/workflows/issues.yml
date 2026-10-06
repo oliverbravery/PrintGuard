@@ -27,7 +27,7 @@ jobs:
 
   resolved:
     name: resolved
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.merged
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.merged && github.event.pull_request.base.ref == github.event.repository.default_branch
     runs-on: ubuntu-24.04
     permissions:
       issues: write
@@ -57,13 +57,18 @@ jobs:
     permissions:
       issues: write
     steps:
-      - name: Close completed issues the reporter has not come back on
+      - name: Close completed issues whose release follow-up has had no reply for 30 days
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cutoff=$(date -u -d '30 days ago' +%F)
-          issue_numbers=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "label:\"status: completed\" updated:<$cutoff" --json number --jq '.[].number')
+          cutoff=$(date -u -d '30 days ago' +%FT%TZ)
+          issue_numbers=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "status: completed" --json number --jq '.[].number')
           for issue_number in $issue_numbers; do
+            unanswered=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments" --jq '.[]' \
+              | jq -s --arg cutoff "$cutoff" '(last // {}) | ((.body // "") | contains("<!-- release-follow-up:")) and ((.created_at // "") < $cutoff)')
+            if [ "$unanswered" != "true" ]; then
+              continue
+            fi
             gh issue close "$issue_number" --repo "$GITHUB_REPOSITORY" --reason completed \
               --comment "Closing automatically after 30 days with no follow-up. Reopen it if the problem is still there."
           done

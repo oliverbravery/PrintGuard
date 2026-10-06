@@ -8,6 +8,7 @@
 set -euo pipefail
 
 MEDIAMTX_VERSION=1.21.1
+CREATE_DMG_COMMIT=a2b71d0fda6d0df2a86dc7f67082d4d73e84c59f # v1.3.0
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 rm -rf dist build/desktop build/pyinstaller
@@ -59,10 +60,11 @@ uv run --extra desktop pyinstaller packaging/printguard.spec --noconfirm --distp
 
 if [ "$OS" = darwin ]; then
   out="dist/PrintGuard-${LABEL}.dmg"
-  command -v create-dmg >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install create-dmg
+  git clone -q https://github.com/create-dmg/create-dmg "build/desktop/create-dmg"
+  git -C "build/desktop/create-dmg" checkout -q "$CREATE_DMG_COMMIT"
   staging="build/desktop/dmg"; rm -rf "$staging"; mkdir -p "$staging"
   cp -R dist/PrintGuard.app "$staging/"
-  create-dmg \
+  "build/desktop/create-dmg/create-dmg" \
     --volname PrintGuard \
     --volicon build/desktop/icon.icns \
     --window-size 600 400 \
