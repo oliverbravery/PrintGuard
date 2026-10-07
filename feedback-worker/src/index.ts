@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Gate, type Refusal } from "./gate";
-import { DAY_MS, EXPIRY_DAYS, EXPIRY_WARN_DAYS, FRAME_BYTES_MAX, RATE_PERIOD_S, RECOUNT_GAP_MS, STORED_BYTES_MAX, STORED_BYTES_WARN } from "./limits";
+import { DAY_MS, EXPIRY_DAYS, EXPIRY_WARN_DAYS, FRAME_BYTES_MAX, RATE_PERIOD_S, RECOUNT_GAP_MS, RECOUNT_PAGES_PER_RUN, STORED_BYTES_MAX, STORED_BYTES_WARN } from "./limits";
 import { isJpeg } from "./jpeg";
 import { hubOf, issueToken, keyed } from "./token";
 
@@ -115,25 +115,30 @@ export const expiresSoon = (uploaded: Date, now: number) =>
 
 async function recountBucket(env: Env, minimumGapMs: number): Promise<{ bytes: number; expiring: number } | null> {
   const gate = env.GATE.getByName("gate");
-  if (!(await gate.beginRecount(minimumGapMs))) return null;
+  const listing = await gate.resumeRecount(minimumGapMs);
+  if (!listing) return null;
   const now = Date.now();
-  const inbox = { bytes: 0, expiring: 0 };
-  let cursor: string | undefined;
-  do {
-    const page = await env.FRAMES.list({ cursor });
+  for (let pages = 0; pages < RECOUNT_PAGES_PER_RUN; pages += 1) {
+    const page = await env.FRAMES.list({ cursor: listing.cursor });
     for (const object of page.objects) {
-      inbox.bytes += object.size;
-      if (expiresSoon(object.uploaded, now)) inbox.expiring += 1;
+      listing.bytes += object.size;
+      if (expiresSoon(object.uploaded, now)) listing.expiring += 1;
     }
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
-  await gate.recount(inbox.bytes);
-  return inbox;
+    listing.cursor = page.truncated ? page.cursor : undefined;
+    if (!listing.cursor) {
+      await gate.recount(listing.bytes);
+      return listing;
+    }
+    await gate.checkpointRecount(listing);
+  }
+  return null;
 }
 
-async function recountAndRemind(env: Env): Promise<void> {
-  const inbox = await recountBucket(env, 0);
-  const lines = reminders(inbox!);
+async function recountAndRemind(env: Env, scheduledTime: number): Promise<void> {
+  const onTheHour = new Date(scheduledTime).getUTCMinutes() === 0;
+  const inbox = await recountBucket(env, onTheHour ? 0 : Infinity);
+  if (!inbox) return;
+  const lines = reminders(inbox);
   if (lines.length === 0) return;
   await env.EMAIL.send({
     to: env.REMINDER_TO,
@@ -151,7 +156,7 @@ export default {
     if (request.method === "PUT" && pathname === "/frame") return storeFrame(request, env, context);
     return new Response(null, { status: 404 });
   },
-  async scheduled(_controller, env) {
-    await recountAndRemind(env);
+  async scheduled(controller, env) {
+    await recountAndRemind(env, controller.scheduledTime);
   },
 } satisfies ExportedHandler<Env>;

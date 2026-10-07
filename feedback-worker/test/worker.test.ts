@@ -549,13 +549,15 @@ describe("an inbox that has been pulled", () => {
 });
 
 describe("the daily recount", () => {
+  const at = (minute: number) => createScheduledController({ scheduledTime: Date.UTC(2026, 9, 7, 3, minute) });
+
   it("resets the stored total to what is really in the bucket", async () => {
     const token = await issueToken(env.TOKEN_SECRET);
     await upload(token, "203.0.113.20", frameId(5000));
     const before = await env.GATE.getByName("gate").storedBytes();
     await env.FRAMES.delete(`${token.split(".")[0]}/aaaaaaaaaaaa/${frameId(5000)}.jpg`);
 
-    await worker.scheduled(createScheduledController(), env);
+    await worker.scheduled(at(0), env);
 
     const inBucket = (await env.FRAMES.list()).objects.reduce((bytes, object) => bytes + object.size, 0);
     expect(await env.GATE.getByName("gate").storedBytes()).toBe(inBucket);
@@ -577,9 +579,47 @@ describe("the daily recount", () => {
       },
     });
 
-    await expect(worker.scheduled(createScheduledController(), { ...env, FRAMES: cutShort })).rejects.toThrow("cut off");
+    await expect(worker.scheduled(at(0), { ...env, FRAMES: cutShort })).rejects.toThrow("cut off");
 
     expect((await gateState()).rows.filter(({ key }) => key === "old-hub")).toEqual([]);
+  });
+
+  it("picks the listing up where a run that was cut off left it, and leaves the stored total alone until it finishes", async () => {
+    const gate = env.GATE.getByName("gate");
+    for (const name of ["a", "b", "c"]) await env.FRAMES.put(`interrupted/${name}.jpg`, JPEG);
+    const inBucket = (await env.FRAMES.list()).objects;
+    await gate.recount(STORED_BYTES_MAX);
+    const onePerPage = (pagesBeforeTheCut: number) => {
+      const cursors: (string | undefined)[] = [];
+      const bucket = new Proxy(env.FRAMES, {
+        get(target, property) {
+          const value = Reflect.get(target, property);
+          if (property !== "list") return typeof value === "function" ? value.bind(target) : value;
+          return async (options: R2ListOptions) => {
+            if (cursors.length === pagesBeforeTheCut) throw new Error("cut off");
+            cursors.push(options.cursor);
+            return target.list({ ...options, limit: 1 });
+          };
+        },
+      });
+      return { bucket, cursors };
+    };
+
+    const cut = onePerPage(2);
+    await expect(worker.scheduled(at(0), { ...env, FRAMES: cut.bucket })).rejects.toThrow("cut off");
+    expect(await gate.storedBytes()).toBe(STORED_BYTES_MAX);
+
+    const resumed = onePerPage(Infinity);
+    for (let minute = 5; (await gate.storedBytes()) === STORED_BYTES_MAX; minute += 5) {
+      await worker.scheduled(at(minute), { ...env, FRAMES: resumed.bucket });
+    }
+    expect(resumed.cursors[0]).toBeDefined();
+    expect(cut.cursors.length + resumed.cursors.length).toBe(inBucket.length);
+    expect(await gate.storedBytes()).toBe(inBucket.reduce((bytes, object) => bytes + object.size, 0));
+
+    const afterwards = countingCalls(env.FRAMES, "list");
+    await worker.scheduled(at(55), { ...env, FRAMES: afterwards.bucket });
+    expect(afterwards.calls).toEqual([]);
   });
 
   it("keeps the bytes that arrive while the bucket is being listed", async () => {

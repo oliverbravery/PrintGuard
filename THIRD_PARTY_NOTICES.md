@@ -532,6 +532,34 @@ declared packages are in the first table or have a section of their own.
 
 The MIT text is reproduced under MediaMTX above.
 
+## PyInstaller bootloader
+
+The launcher inside both desktop apps, with PyInstaller's loader modules and run-time hooks.
+
+- Project: https://github.com/pyinstaller/pyinstaller
+- Licence: [GPL-2.0-or-later](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html) with the bootloader exception below. The run-time hooks are Apache-2.0, the text under Wasmtime above.
+
+```
+Copyright (c) 2010-2023, PyInstaller Development Team
+Copyright (c) 2005-2009, Giovanni Bajo
+Based on previous work under copyright (c) 2002 McMillan Enterprises, Inc.
+
+PyInstaller is licensed under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2 of the License,
+or (at your option) any later version.
+
+Bootloader Exception
+--------------------
+
+In addition to the permissions in the GNU General Public License, the
+authors give you unlimited permission to link or embed compiled bootloader
+and related files into combinations with other programs, and to distribute
+those combinations without any restriction coming from the use of those
+files. (The General Public License restrictions do apply in other respects;
+for example, they cover modification of the files, and distribution when
+not linked into a combined executable.)
+```
+
 ## Desktop app libraries
 
 | Library | In | Licence | Copyright |

@@ -113,28 +113,28 @@ const PERMISSIONS = [
 
 const CATALOGUE = [
   {
-    id: "picture-in-picture", name: "Picture in picture", version: "1.2.0", author: "oliverbravery",
+    id: "picture-in-picture", name: "Picture in picture", version: "1.0.0", author: "oliverbravery",
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
     icon: "icon.png", media: ["shots/monitor.png"],
     repo: "oliverbravery/PrintGuard", path: "plugins/picture-in-picture", ref: "a".repeat(40),
     permissions: ["state:read", "camera:view"], platforms: [], surfaces: ["monitor", "float"], digests: {},
   },
   {
-    id: "alert-sounds", name: "Alert sounds", version: "1.1.0", author: "oliverbravery",
+    id: "alert-sounds", name: "Alert sounds", version: "1.0.0", author: "oliverbravery",
     description: "Sounds a horn, a bell or an alarm the moment a defect is caught, on the monitors you switch it on for.",
     icon: "icon.png", media: ["shots/settings.png"],
     repo: "oliverbravery/PrintGuard", path: "plugins/alert-sounds", ref: "c".repeat(40),
     permissions: ["state:read", "sound"], platforms: [], surfaces: ["settings"], digests: {},
   },
   {
-    id: "progress-reports", name: "Progress reports", version: "1.0.0", author: "oliverbravery",
+    id: "progress-reports", name: "Progress reports", version: "1.0.1", author: "oliverbravery",
     description: "Sends how far a print has got and how many defects it has seen, as often as you ask, on the monitors you switch it on for.",
     icon: "icon.png", media: ["shots/settings.png"],
     repo: "oliverbravery/PrintGuard", path: "plugins/progress-reports", ref: "d".repeat(40),
     permissions: ["state:read", "alert:send"], platforms: [], surfaces: ["settings"], digests: {},
   },
   {
-    id: "spotify", name: "Spotify", version: "1.0.0", author: "oliverbravery",
+    id: "spotify", name: "Spotify", version: "1.0.1", author: "oliverbravery",
     description: "Puts the current cover behind the dashboard, with the track and the transport in a panel.",
     icon: "icon.png", media: ["shots/dashboard.jpg"],
     repo: "oliverbravery/PrintGuard", path: "plugins/spotify", ref: "e".repeat(40),
@@ -155,7 +155,7 @@ function installed(id: string, name: string, permissions: string[], surfaces: st
   return {
     id,
     manifest: {
-      id, name, version: "1.0.0", description: "", author: "oliverbravery", homepage: "",
+      id, name, version: CATALOGUE.find((listed) => listed.id === id)!.version, description: "", author: "oliverbravery", homepage: "",
       icon: "icon.png", media: [],
       permissions, reasons: {}, surfaces, platforms: [], assets: [], urls: [],
       secrets: {}, provides: {}, consumes: [], oauth: {}, events: files.includes("panel.html") ? ["http"] : [], tick_s: 0,
@@ -176,7 +176,7 @@ function installed(id: string, name: string, permissions: string[], surfaces: st
 const INSTALLED = {
   id: "picture-in-picture",
   manifest: {
-    id: "picture-in-picture", name: "Picture in picture", version: "1.2.0", author: "oliverbravery", homepage: "",
+    id: "picture-in-picture", name: "Picture in picture", version: "1.0.0", author: "oliverbravery", homepage: "",
     icon: "icon.png", media: ["shots/monitor.png"],
     description: "Puts a pop-out button on every monitor that floats its camera above your other windows.",
     permissions: ["state:read", "camera:view"], reasons: {}, surfaces: ["monitor"], platforms: [], assets: [],

@@ -33,7 +33,7 @@ jobs:
       issues: write
       pull-requests: read
     steps:
-      - name: Reopen the issues the merge closed, leave the ones their reporter closed, and mark them all completed
+      - name: Wait up to a minute for the merge to close each issue, reopen those, leave the ones their reporter closed, and mark them all completed
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -41,8 +41,12 @@ jobs:
         run: |
           issue_numbers=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
           for issue_number in $issue_numbers; do
-            closed_before_merge=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json closedAt --jq "(.closedAt // \"$MERGED_AT\") < \"$MERGED_AT\"")
-            if [ "$closed_before_merge" = "false" ]; then
+            for attempt in $(seq 12); do
+              closed_by_merge=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json closedAt --jq "if .closedAt then .closedAt >= \"$MERGED_AT\" else \"open\" end")
+              [ "$closed_by_merge" != "open" ] && break
+              sleep 5
+            done
+            if [ "$closed_by_merge" = "true" ]; then
               gh issue reopen "$issue_number" --repo "$GITHUB_REPOSITORY"
             fi
             gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json labels \

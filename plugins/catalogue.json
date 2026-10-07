@@ -47,7 +47,7 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/picture-in-picture",
-      "ref": "8130da16252383ed647ebd62356b06a0d1cca1bd",
+      "ref": "ef5c6ee564f905eb56292feb52ab000344dec287",
       "digests": {
         "plugin.json": "c6675a27abbf6c09fdbfabaff7dd8283ae2124796cfadccc44cc26dee9887d39",
         "plugin.js": "9625952af0f6765e172104bea611cf27eb48fed6034cea4a154ca98ac6ccf233"
@@ -101,7 +101,7 @@
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/spotify",
-      "ref": "97ca80ac09c7e746a87cd3ed9db747bdcd505bd7",
+      "ref": "ef5c6ee564f905eb56292feb52ab000344dec287",
       "digests": {
         "plugin.json": "d6c5d54ebcc26744b8cea68d72aee67a925a24cb2186874a89f80bf3cdd5d3e2",
         "panel.html": "d052ea07869b4a076ab3902df42449c82dd6fa9fe10325c651fe05005bca2256"

@@ -62,5 +62,5 @@ ENV PATH="/app/.venv/bin:$PATH" \
 VOLUME /data
 EXPOSE 8000 8554 1935
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \
-    CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", \"8000\")}/api/health', timeout=4)"]
+    CMD ["python", "-c", "import os, urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open(f'http://127.0.0.1:{os.environ.get(\"PORT\", \"8000\")}/api/health', timeout=4)"]
 CMD ["printguard"]

@@ -15,6 +15,7 @@ jobs:
   tests:
     name: tests
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
@@ -49,6 +50,7 @@ jobs:
   audit:
     name: audit
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
@@ -64,6 +66,7 @@ jobs:
   image:
     name: image (${{ matrix.name }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     strategy:
       matrix:
         include:
@@ -121,6 +124,7 @@ jobs:
     needs: image
     if: always()
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - name: Every image variant must have built, under a name branch protection can require
         env:
@@ -284,6 +288,7 @@ jobs:
   version:
     name: version
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -310,3 +315,17 @@ jobs:
             fi
           fi
           echo "v${version} is unreleased and documented"
+      - name: The image and the desktop apps must bundle the same MediaMTX, and the image must build with the uv the workflows pin
+        run: |
+          image_mediamtx=$(sed -n 's|^FROM bluenviron/mediamtx:\([0-9.]*\)@.*|\1|p' Dockerfile)
+          desktop_mediamtx=$(sed -n 's|^MEDIAMTX_VERSION=||p' packaging/build.sh)
+          if [ -z "${image_mediamtx}" ] || [ "${image_mediamtx}" != "${desktop_mediamtx}" ]; then
+            echo "::error file=packaging/build.sh::the Dockerfile bundles MediaMTX '${image_mediamtx}' and packaging/build.sh '${desktop_mediamtx}', move MEDIAMTX_VERSION and its checksums to match"
+            exit 1
+          fi
+          image_uv=$(sed -n 's|.*ghcr.io/astral-sh/uv:\([0-9.]*\)@.*|\1|p' Dockerfile)
+          workflow_uv=$(grep -rhoE 'version: "[0-9.]+"' .github/workflows | sort -u)
+          if [ -z "${image_uv}" ] || [ "${workflow_uv}" != "version: \"${image_uv}\"" ]; then
+            echo "::error file=Dockerfile::the Dockerfile builds with uv '${image_uv}' and the workflows pin '${workflow_uv}', move setup-uv's version in every workflow to match"
+            exit 1
+          fi

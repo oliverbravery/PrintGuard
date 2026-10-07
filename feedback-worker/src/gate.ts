@@ -10,10 +10,12 @@ import {
 
 export type Refusal = { status: number; code: string; retryAt?: number };
 export type Reservation = { bytes: number; uploads: number; day: string; recountBeganAt: number };
+export type Listing = { bytes: number; expiring: number; cursor?: string };
 
 const STORED_BYTES = "stored_bytes";
 const BYTES_SINCE_RECOUNT_BEGAN = "bytes_since_recount_began";
 const RECOUNT_BEGAN_AT = "recount_began_at";
+const RECOUNT_LISTING = "recount_listing";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -66,8 +68,19 @@ export class Gate extends DurableObject<Env> {
     return true;
   }
 
+  resumeRecount(minimumGapMs: number): Listing | null {
+    const unfinished = this.ctx.storage.kv.get<Listing>(RECOUNT_LISTING);
+    if (unfinished && Date.now() - this.recountBeganAt() < DAY_MS) return unfinished;
+    return this.beginRecount(minimumGapMs) ? { bytes: 0, expiring: 0 } : null;
+  }
+
+  checkpointRecount(listing: Listing): void {
+    this.ctx.storage.kv.put(RECOUNT_LISTING, listing);
+  }
+
   recount(listedBytes: number): void {
     this.ctx.storage.kv.put(STORED_BYTES, listedBytes + this.bytesSinceRecountBegan());
+    this.ctx.storage.kv.delete(RECOUNT_LISTING);
   }
 
   storedBytes(): number {
