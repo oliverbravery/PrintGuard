@@ -777,6 +777,27 @@ async def test_bambu_holds_one_connection_and_merges_what_changed(bambu_printers
     assert not printer.connected
 
 
+@pytest.mark.parametrize(
+    "report",
+    [
+        b"[1, 2]",
+        b"null",
+        b'{"info": {"command": "get_version", "module": [1]}}',
+        b'{"info": {"command": "get_version", "module": 1}}',
+        b'{"print": {"command": "pause", "sequence_id": [1]}}',
+    ],
+)
+async def test_bambu_report_of_another_shape_is_ignored(bambu_printers, report: bytes) -> None:
+    """paho ends its network thread on what on_message raises, and the connection still says it is live."""
+    adapter = BambuAdapter()
+    await adapter.fetch_state(None, BAMBU_CONFIG)
+    (printer,) = bambu_printers
+    printer.on_message(printer, None, SimpleNamespace(payload=report))
+    printer.report({"print": {"command": "push_status", "mc_percent": 50}})
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).progress == 50.0
+    await adapter.close()
+
+
 async def test_bambu_printer_that_goes_silent_is_reconnected_not_believed(bambu_printers, monkeypatch) -> None:
     adapter = BambuAdapter()
     assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.PRINTING

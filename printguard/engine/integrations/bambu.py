@@ -212,24 +212,29 @@ class _Session:
         self._full.clear()
 
     def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
+        """Reads a report, ignoring one that is not the shape a printer sends.
+
+        paho raises what a callback raises on its network thread, which ends
+        the thread and leaves the connection looking live with nothing read.
+        """
         try:
             payload = json.loads(message.payload)
-        except ValueError:
+            self._heard_at = time.monotonic()
+            for body in payload.values():
+                if not isinstance(body, dict):
+                    continue
+                command = body.get("command")
+                if command == "push_status":
+                    self._report.update(body)
+                    if "gcode_state" in self._report:
+                        self._full.set()
+                elif command == "get_version":
+                    self._product = next((m["product_name"] for m in body.get("module") or [] if m.get("product_name")), "")
+                    self._versioned.set()
+                elif echoes := self._echoes.get((command, body.get("sequence_id"))):
+                    echoes.put(body)
+        except (ValueError, TypeError, AttributeError):
             return
-        self._heard_at = time.monotonic()
-        for body in payload.values():
-            if not isinstance(body, dict):
-                continue
-            command = body.get("command")
-            if command == "push_status":
-                self._report.update(body)
-                if "gcode_state" in self._report:
-                    self._full.set()
-            elif command == "get_version":
-                self._product = next((m["product_name"] for m in body.get("module") or [] if m.get("product_name")), "")
-                self._versioned.set()
-            elif echoes := self._echoes.get((command, body.get("sequence_id"))):
-                echoes.put(body)
 
 
 class BambuAdapter(IntegrationAdapter):
