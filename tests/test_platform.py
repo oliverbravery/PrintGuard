@@ -903,6 +903,29 @@ def test_a_camera_whose_stream_has_no_decoder_goes_offline_with_the_reason(tmp_p
     assert child.stdout.strip() == "False no decoder for this stream"
 
 
+SDP_STREAM = b"v=0\no=- 0 0 IN IP4 127.0.0.1\ns=x\nc=IN IP4 127.0.0.1\nt=0 0\nm=video 41000 RTP/AVP 96\na=rtpmap:96 H264/90000"
+
+
+async def test_a_stream_description_posted_as_an_image_is_refused_without_listening_for_its_stream() -> None:
+    """FFmpeg read an SDP body as a stream to receive, bound its UDP port and held a worker thread about 20 seconds."""
+    started = time.monotonic()
+
+    assert await ServerPlatform.decode_jpeg(SimpleNamespace(), SDP_STREAM) is None
+    assert time.monotonic() - started < 2
+
+
+@pytest.mark.parametrize("image_format", ["JPEG", "PNG"])
+async def test_a_jpeg_and_a_png_are_decoded(image_format: str) -> None:
+    from PIL import Image
+
+    encoded = io.BytesIO()
+    Image.new("RGB", (64, 48), (0, 0, 255)).save(encoded, image_format)
+
+    frame = await ServerPlatform.decode_jpeg(SimpleNamespace(), encoded.getvalue())
+
+    assert frame.shape == (48, 64, 3) and frame[0, 0, 2] > 200
+
+
 async def test_an_image_with_more_pixels_than_the_cap_is_refused_before_it_is_decoded(monkeypatch: pytest.MonkeyPatch) -> None:
     """A 2 MB JPEG of 12000x12000 pixels grew the hub from 386 MB to 1.6 GB."""
     from PIL import Image

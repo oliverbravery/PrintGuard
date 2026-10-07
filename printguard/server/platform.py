@@ -1018,9 +1018,20 @@ class ServerPlatform:
             return None
 
     async def decode_jpeg(self, data: bytes) -> np.ndarray | None:
-        """Decodes supplied image bytes to an RGB frame with PyAV."""
+        """Decodes a supplied JPEG or PNG to an RGB frame with PyAV.
+
+        FFmpeg is held to its two still-image demuxers, since left to probe the
+        bytes it will take an SDP description and listen on the network for its stream.
+
+        Args:
+            data: The image file's bytes.
+
+        Returns:
+            The frame, or None for anything but a JPEG or PNG it can decode within
+            ``CLASSIFY_MAX_PIXELS``.
+        """
         def decode() -> np.ndarray:
-            with av.open(io.BytesIO(data)) as container:
+            with av.open(io.BytesIO(data), options={"format_whitelist": "jpeg_pipe,png_pipe"}) as container:
                 stream = _decodable_video_stream(container)
                 if stream.width * stream.height > CLASSIFY_MAX_PIXELS:
                     raise ValueError(f"{stream.width}x{stream.height} is more than {CLASSIFY_MAX_PIXELS} pixels")
