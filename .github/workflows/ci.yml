@@ -5,7 +5,7 @@ on:
     types: [opened, synchronize, reopened, edited]
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number }}
+  group: ci-${{ github.event.pull_request.number }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-edit-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -124,7 +124,7 @@ jobs:
 
   launch:
     name: launch (${{ matrix.name }})
-    if: github.base_ref == 'main'
+    if: github.base_ref == 'main' && (github.event.action != 'edited' || github.event.changes.base)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -247,12 +247,30 @@ jobs:
     needs: launch
     if: always()
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      checks: read
+      contents: read
     steps:
-      - name: Into main, the container and both desktop apps must have started and caught a failing print, and a skipped launch fails, under a name branch protection can require
+      - name: Into main, the container and both desktop apps must have started and caught a failing print, a skipped launch fails, and a title or body edit takes the result already on this commit, under a name branch protection can require
         env:
           BASE_REF: ${{ github.base_ref }}
           RESULT: ${{ needs.launch.result }}
-        run: '[ "$BASE_REF" != main ] || [ "$RESULT" = "success" ]'
+          EDITED_ONLY: ${{ github.event.action == 'edited' && !github.event.changes.base }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ "$BASE_REF" != main ] && exit 0
+          [ "$RESULT" = success ] && exit 0
+          [ "$RESULT" = skipped ] && [ "$EDITED_ONLY" = true ] || exit 1
+          while :; do
+            latest=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs?per_page=100" \
+              --jq '.check_runs[] | select((.name | startswith("launch (")) and .conclusion != "skipped") | {name, status, conclusion, started_at}' \
+              | jq -s 'group_by(.name) | map(sort_by(.started_at) | last)')
+            jq -e 'length == 3 and all(.status == "completed")' <<< "$latest" > /dev/null && break
+            sleep 60
+          done
+          jq -e 'all(.conclusion == "success")' <<< "$latest" > /dev/null
 
   version:
     name: version
