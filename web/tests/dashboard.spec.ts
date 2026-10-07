@@ -331,6 +331,17 @@ test("opening the history asks only for the snapshots near the screen", async ({
   await expect.poll(asked).toContain("s89");
 });
 
+test("a minute of history on its own is drawn across its width, not as a dot", async ({ page }) => {
+  await dashboard(page, { statsMonitorId: "m1" });
+  const chart = page.getByRole("dialog", { name: "Prusa · history" }).getByRole("img", { name: "Risk over time" });
+  const bucket = (t: number) => ({ t, n: 10, sum: 4.5, min: 0.4, max: 0.5, defects: 10, watched: 60 });
+  await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_200, buckets: [bucket(1_699_999_980), bucket(1_700_000_100)], snaps: [], alerts: [], stats: {} });
+
+  await expect(chart.locator("path")).toHaveCount(4);
+  const widths = await chart.locator("path").evaluateAll((paths) => paths.map((path) => path.getBoundingClientRect().width));
+  for (const width of widths) expect(width).toBeGreaterThan(100);
+});
+
 test("a history chart spanning more than a day dates the ends of its axis", async ({ page }) => {
   await dashboard(page, { statsMonitorId: "m1" });
   const sheet = page.getByRole("dialog", { name: "Prusa · history" });
