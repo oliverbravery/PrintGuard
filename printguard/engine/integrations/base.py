@@ -228,6 +228,28 @@ class IntegrationAdapter(Adapter):
         """Releases persistent connections for one configuration or all configurations."""
 
 
+def require_reply(service: str, doing: str, status: int, genuine: bool) -> None:
+    """Raises unless a service answered a command with the reply only its own API gives.
+
+    A base URL that answers 200 with something else, such as an auth proxy's
+    sign-in page, would otherwise pass for a command taken.
+
+    Args:
+        service: The service's name, for the error.
+        doing: What was asked, for the error.
+        status: The HTTP status of the answer.
+        genuine: Whether the status and body are the service's success reply.
+
+    Raises:
+        RuntimeError: If the service rejected the command with an error
+            status, or answered with anything but its success reply.
+    """
+    if status >= 400:
+        raise RuntimeError(f"{service} rejected {doing}: HTTP {status}")
+    if not genuine:
+        raise RuntimeError(f"{service} did not answer {doing} like its API: HTTP {status}")
+
+
 def webcam_url(base_url: str, stream: str, api_ports: Container[int]) -> str:
     """Resolves the webcam URL a service reports against the address its web interface is served on.
 

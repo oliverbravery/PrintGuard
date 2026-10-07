@@ -29,7 +29,7 @@ from pyprusalink.client import DigestAuthWorkaround
 from pyprusalink.types import Conflict, InvalidAuth, NotFound
 
 from ..adapters import redirect_message
-from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, require_reply
 
 _USERNAME = "maker"
 _TIMEOUT_S = 10.0
@@ -38,6 +38,11 @@ _UPLOAD_HEADERS = {"Content-Type": "text/x.gcode", "Print-After-Upload": "?1", "
 _TLS = httpx.create_ssl_context()
 """One TLS context for every client. A client builds its own otherwise, which reads the CA bundle on the event loop at every poll."""
 
+_JOB_COMMANDS = {
+    DeviceAction.PAUSE: ("PUT", "/pause"),
+    DeviceAction.RESUME: ("PUT", "/resume"),
+    DeviceAction.CANCEL: ("DELETE", ""),
+}
 _STATUS_MAP = {
     "PRINTING": DeviceStatus.PRINTING,
     "PAUSED": DeviceStatus.PAUSED,
@@ -107,7 +112,7 @@ class PrusaAdapter(IntegrationAdapter):
         """Reads the active job from /api/v1/job and the heaters from /api/v1/status.
 
         With no active job (HTTP 204) the printer's own state is the answer,
-        idle when it says none. The HTTP function is unused - pyprusalink owns
+        unknown when it says none. The HTTP function is unused - pyprusalink owns
         the digest-authenticated client.
 
         Raises:
@@ -125,8 +130,7 @@ class PrusaAdapter(IntegrationAdapter):
             "bed": Heater.reported(printer.get("temp_bed"), printer.get("target_bed")),
         }
         if not job:
-            idle = _STATUS_MAP.get(str(printer.get("state", "IDLE")).upper(), DeviceStatus.UNKNOWN)
-            return DeviceState(idle, **heaters)
+            return DeviceState(_STATUS_MAP.get(str(printer.get("state", "")).upper(), DeviceStatus.UNKNOWN), **heaters)
         file = job.get("file") or {}
         remaining = job.get("time_remaining")
         job_status = _STATUS_MAP.get(str(job.get("state", "")).upper(), DeviceStatus.UNKNOWN)
@@ -175,8 +179,7 @@ class PrusaAdapter(IntegrationAdapter):
             stored = await client.put(f"/api/v1/files{storage.rstrip('/')}/{filename}", content=data, headers=_UPLOAD_HEADERS)
         if stored.is_redirect:
             raise RuntimeError(redirect_message(stored))
-        if stored.status_code >= 400:
-            raise RuntimeError(f"PrusaLink rejected the file: HTTP {stored.status_code}")
+        require_reply("PrusaLink", "the file", stored.status_code, stored.status_code == 201)
 
     async def _read(self, config: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         async with self._link(config) as link:
@@ -190,13 +193,16 @@ class PrusaAdapter(IntegrationAdapter):
         return dict(job) if job else None
 
     async def _command(self, config: dict[str, Any], job_id: int, action: DeviceAction) -> None:
-        async with self._link(config) as link:
-            if action is DeviceAction.PAUSE:
-                await link.pause_job(job_id)
-            elif action is DeviceAction.RESUME:
-                await link.resume_job(job_id)
-            else:
-                await link.cancel_job(job_id)
+        """Pauses, resumes or cancels a job, each of which PrusaLink answers with 204.
+
+        pyprusalink's own calls drop the answer, so the request goes through its client.
+
+        Raises:
+            RuntimeError: If PrusaLink answers with anything but 204.
+        """
+        method, path = _JOB_COMMANDS[action]
+        async with self._link(config) as link, link.client.request(method, f"/api/v1/job/{job_id}{path}") as response:
+            require_reply("PrusaLink", action.value, response.status_code, response.status_code == 204)
 
     @asynccontextmanager
     async def _link(self, config: dict[str, Any]) -> AsyncIterator[Any]:

@@ -64,6 +64,9 @@ class RoutedHttp(RecordingHttp):
         return next((answer for key, answer in self.routes.items() if key in url), (404, {}))
 
 
+SIGN_IN_PAGE = (200, "<html>Sign in</html>")
+MOONRAKER_OK = {"result": "ok"}
+OCTOPRINT_UPLOADED = {"files": {"local": {"name": "benchy.gcode"}}, "done": True, "effectiveSelect": True, "effectivePrint": True}
 OCTOPRINT_HEATERS = {"temperature": {"tool0": {"actual": 209.6, "target": 210.0, "offset": 0}, "bed": {"actual": 60.2, "target": 60.0, "offset": 0}}}
 
 
@@ -419,7 +422,7 @@ async def test_klipper_without_progress_has_no_time_left() -> None:
 
 
 async def test_klipper_heater_targets_go_through_gcode_script() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=MOONRAKER_OK)
     await INTEGRATIONS["klipper"].heat(http, {"base_url": "http://kl/", "api_key": "kk"}, "nozzle", 215.0)
     assert (http.last["method"], http.last["url"]) == ("POST", "http://kl/printer/gcode/script")
     assert http.last["json"] == {"script": "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=215"}
@@ -431,7 +434,7 @@ async def test_klipper_heater_targets_go_through_gcode_script() -> None:
 
 
 async def test_klipper_actions_and_auth() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=MOONRAKER_OK)
     await INTEGRATIONS["klipper"].send(http, {"base_url": "http://kl/", "api_key": "kk"}, DeviceAction.CANCEL)
     assert http.last["url"] == "http://kl/printer/print/cancel"
     assert http.last["headers"] == {"X-Api-Key": "kk"}
@@ -1307,6 +1310,7 @@ async def test_elegoo_moonraker_reuses_klipper_protocol() -> None:
     assert state.progress == 50.0
     assert http.last["url"] == "http://192.168.1.91:7125/printer/objects/query?print_stats&virtual_sdcard&extruder&heater_bed"
     assert http.last["headers"] == {"X-Api-Key": "secret"}
+    http = RecordingHttp(body=MOONRAKER_OK)
     await INTEGRATIONS["elegoo"].send(http, ELEGOO_MOONRAKER_CONFIG, DeviceAction.PAUSE)
     assert http.last["url"] == "http://192.168.1.91:7125/printer/print/pause"
     await INTEGRATIONS["elegoo"].heat(http, ELEGOO_MOONRAKER_CONFIG, "bed", 60.0)
@@ -1367,6 +1371,13 @@ async def test_prusa_no_active_job_is_idle(monkeypatch) -> None:
     assert state.status is DeviceStatus.IDLE
     assert state.job is None, "204 No Content from /api/v1/job is idle, not a phantom job"
     assert state.public()["bed"] == {"actual": 59.6, "target": 60.0}, "an idle printer still reports its heaters"
+
+
+@pytest.mark.parametrize("status", [{}, {"printer": {}}])
+async def test_prusa_that_says_nothing_of_its_state_is_not_idle(monkeypatch, status: dict[str, Any]) -> None:
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(None, status))
+    state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
+    assert state.status is DeviceStatus.UNKNOWN, "missing data is not a positive not-printing, which would stand a monitor down"
 
 
 async def test_prusa_unreachable_says_why(monkeypatch) -> None:
@@ -1606,7 +1617,7 @@ async def test_an_adapter_without_uploads_says_so() -> None:
 
 
 async def test_octoprint_uploads_selected_and_printing() -> None:
-    http = RecordingHttp(status=201)
+    http = RecordingHttp(status=201, body=OCTOPRINT_UPLOADED)
     await INTEGRATIONS["octoprint"].print_file(http, {"base_url": "http://op/", "api_key": "k"}, "benchy.gcode", b"G1 X1\n")
     call = http.last
     assert (call["method"], call["url"]) == ("POST", "http://op/api/files/local")
@@ -1615,6 +1626,23 @@ async def test_octoprint_uploads_selected_and_printing() -> None:
     assert b'name="file"; filename="benchy.gcode"\r\nContent-Type: application/octet-stream\r\n\r\nG1 X1\n' in call["data"]
     with pytest.raises(RuntimeError, match="HTTP 415"):
         await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=415), {"base_url": "http://op", "api_key": "k"}, "x.gcode", b"")
+
+
+@pytest.mark.parametrize("command", ["pause", "resume", "cancel", "nozzle", "bed"])
+async def test_octoprint_that_answers_a_command_with_a_page_has_not_taken_it(command: str) -> None:
+    http = RecordingHttp(*SIGN_IN_PAGE)
+    adapter = INTEGRATIONS["octoprint"]
+    with pytest.raises(RuntimeError, match="did not answer .* like its API: HTTP 200"):
+        if command in ("nozzle", "bed"):
+            await adapter.heat(http, {"base_url": "http://op"}, command, 200.0)
+        else:
+            await adapter.send(http, {"base_url": "http://op"}, DeviceAction(command))
+
+
+@pytest.mark.parametrize("answer", [SIGN_IN_PAGE, (201, "<html>Sign in</html>"), (200, OCTOPRINT_UPLOADED), (201, {"done": True})])
+async def test_octoprint_that_answers_an_upload_with_something_else_has_not_taken_it(answer: tuple[int, Any]) -> None:
+    with pytest.raises(RuntimeError, match="did not answer benchy.gcode like its API"):
+        await INTEGRATIONS["octoprint"].print_file(RecordingHttp(*answer), {"base_url": "http://op"}, "benchy.gcode", b"G1\n")
 
 
 async def test_octoprint_upload_it_stored_but_did_not_start_raises() -> None:
@@ -1631,6 +1659,29 @@ def test_prusa_signs_in_as_maker_unless_another_username_is_given() -> None:
 
 
 MOONRAKER_UPLOADED = {"item": {"path": "benchy.gcode", "root": "gcodes"}, "print_started": True, "print_queued": False, "action": "create_file"}
+
+
+@pytest.mark.parametrize("command", ["pause", "resume", "cancel", "nozzle", "bed"])
+async def test_klipper_that_answers_a_command_with_a_page_has_not_taken_it(command: str) -> None:
+    http = RecordingHttp(*SIGN_IN_PAGE)
+    adapter = INTEGRATIONS["klipper"]
+    with pytest.raises(RuntimeError, match="did not answer .* like its API: HTTP 200"):
+        if command in ("nozzle", "bed"):
+            await adapter.heat(http, {"base_url": "http://kl"}, command, 200.0)
+        else:
+            await adapter.send(http, {"base_url": "http://kl"}, DeviceAction(command))
+
+
+@pytest.mark.parametrize("answer", [SIGN_IN_PAGE, (201, "<html>Sign in</html>"), (200, MOONRAKER_UPLOADED), (201, {"result": "ok"})])
+async def test_klipper_that_answers_an_upload_with_something_else_has_not_taken_it(answer: tuple[int, Any]) -> None:
+    with pytest.raises(RuntimeError, match="did not answer benchy.gcode like its API"):
+        await INTEGRATIONS["klipper"].print_file(RecordingHttp(*answer), {"base_url": "http://mr:7125"}, "benchy.gcode", b"G1\n")
+
+
+async def test_klipper_upload_that_moonraker_queued_says_it_may_start_later() -> None:
+    queued = {**MOONRAKER_UPLOADED, "print_started": False, "print_queued": True}
+    with pytest.raises(RuntimeError, match="queued benchy.gcode and will print it when the printer is free"):
+        await INTEGRATIONS["klipper"].print_file(RecordingHttp(status=201, body=queued), {"base_url": "http://mr:7125"}, "benchy.gcode", b"G1\n")
 
 
 async def test_klipper_upload_that_does_not_start_the_print_raises() -> None:
@@ -1654,8 +1705,8 @@ async def test_klipper_uploads_into_gcodes_and_prints() -> None:
 class FakePrusaLink:
     """A loopback PrusaLink that challenges every request without digest credentials."""
 
-    def __init__(self, storages: list[dict[str, Any]], listing: int = 200) -> None:
-        self.storages, self.listing = storages, listing
+    def __init__(self, storages: list[dict[str, Any]], listing: int = 200, stored: str = "201 Created") -> None:
+        self.storages, self.listing, self.stored = storages, listing, stored
         self.received: list[tuple[str, str, bool, dict[str, str], bytes]] = []
 
     async def __aenter__(self) -> dict[str, str]:
@@ -1679,7 +1730,7 @@ class FakePrusaLink:
             status, extra = f"{self.listing} Listing", "Content-Type: application/json\r\n"
             payload = jsonlib.dumps({"storage_list": self.storages}).encode()
         else:
-            status, extra, payload = "201 Created", "", b""
+            status, extra, payload = self.stored, "", b""
         writer.write(f"HTTP/1.1 {status}\r\nContent-Length: {len(payload)}\r\nConnection: close\r\n{extra}\r\n".encode() + payload)
         await writer.drain()
         writer.close()
@@ -1704,6 +1755,29 @@ async def test_prusa_puts_onto_the_first_writable_storage_and_sends_the_file_onc
     assert (upload["content-type"], upload["print-after-upload"], upload["overwrite"]) == ("text/x.gcode", "?1", "?1"), (
         "PrusaLink on a Raspberry Pi sniffs the destination for any other type, which fails for a new file name"
     )
+
+
+async def test_prusa_that_answers_an_upload_with_something_else_has_not_taken_it() -> None:
+    async with FakePrusaLink([{"path": "/usb", "available": True}], stored="200 OK") as config:
+        with pytest.raises(RuntimeError, match="did not answer the file like its API: HTTP 200"):
+            await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G1")
+
+
+async def test_prusa_commands_are_taken_on_a_204_and_on_nothing_else() -> None:
+    for action, method, path in (
+        (DeviceAction.PAUSE, "PUT", "/api/v1/job/7/pause"),
+        (DeviceAction.RESUME, "PUT", "/api/v1/job/7/resume"),
+        (DeviceAction.CANCEL, "DELETE", "/api/v1/job/7"),
+    ):
+        async with FakePrusaLink([], stored="204 No Content") as config:
+            await INTEGRATIONS["prusa"]._command(config, 7, action)
+        async with FakePrusaLink([], stored="200 OK") as config:
+            with pytest.raises(RuntimeError, match=f"did not answer {action.value} like its API: HTTP 200"):
+                await INTEGRATIONS["prusa"]._command(config, 7, action)
+    commands = FakePrusaLink([], stored="204 No Content")
+    async with commands as config:
+        await INTEGRATIONS["prusa"]._command(config, 7, DeviceAction.CANCEL)
+    assert [(method, path) for method, path, *_ in commands.received] == [("DELETE", "/api/v1/job/7"), ("DELETE", "/api/v1/job/7")]
 
 
 async def test_prusa_without_storage_raises() -> None:
