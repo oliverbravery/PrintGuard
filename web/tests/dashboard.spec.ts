@@ -614,6 +614,26 @@ test("a heater target the printer refuses goes back to what the printer has", as
   await expect(target).toHaveValue("0");
 });
 
+test("the bed target can be typed while the nozzle target just set is still on its way to the printer", async ({ page }) => {
+  const heater = { actual: 21, target: 0 };
+  const device = { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: heater, bed: heater };
+  const printer = { id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true, device_state: device };
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
+  const nozzle = page.getByRole("spinbutton", { name: "nozzle target" });
+  const bed = page.getByRole("spinbutton", { name: "bed target" });
+  await nozzle.fill("215");
+  await bed.click();
+  await expect(nozzle).toBeDisabled();
+  await expect(bed).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type("60");
+
+  const answered = { ...device, nozzle: { actual: 21, target: 215 } };
+  await emit(page, { event: "device", printer_id: "p1", req_id: (await sent(page, "printer.heat")).req_id, ...answered });
+  await expect(nozzle).toBeEnabled();
+  await expect(bed).toHaveValue("60");
+});
+
 test("a monitor name or heater target typed and left with Escape is still saved", async ({ page }) => {
   const heater = { actual: 21, target: 0 };
   const printer = {

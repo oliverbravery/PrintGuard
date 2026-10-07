@@ -197,6 +197,7 @@ export function PrinterControls({ printer }: { printer: Printer }) {
   const presets = engine?.settings.preheat ?? [];
   const acting = isPending("printer.action");
   const heating = isPending("printer.heat");
+  const [committed, setCommitted] = useState<HeaterName[]>([]);
   const heat = (targets: Partial<Record<HeaterName, number>>) => send({ cmd: "printer.heat", id: printer.id, ...targets });
   const heaters = HEATERS.filter((name) => state?.[name]);
   const permitted = { pause: state?.status !== "paused", resume: state?.status === "paused", cancel: activeJob(state) };
@@ -232,7 +233,17 @@ export function PrinterControls({ printer }: { printer: Printer }) {
       {heaters.length > 0 && (
         <div className="grid gap-2 sm:grid-cols-2">
           {heaters.map((name) => (
-            <HeaterCard key={name} name={name} heater={state![name]!} control={control} busy={heating} onTarget={(target) => heat({ [name]: target })} />
+            <HeaterCard
+              key={name}
+              name={name}
+              heater={state![name]!}
+              control={control}
+              busy={heating && committed.includes(name)}
+              onTarget={(target) => {
+                setCommitted(heating ? [...committed, name] : [name]);
+                heat({ [name]: target });
+              }}
+            />
           ))}
         </div>
       )}
