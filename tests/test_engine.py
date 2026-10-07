@@ -637,6 +637,59 @@ async def test_a_defect_response_is_sent_once_with_no_cooldown(monkeypatch) -> N
     assert not monitor["watching"] and monitor["alert"], "the pause stands the monitor down with its alert showing"
 
 
+@pytest.mark.parametrize("read_back", ["fails", "says_unknown"])
+async def test_a_taken_command_is_not_resent_when_the_read_back_does_not_show_it(monkeypatch, read_back: str) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    platform = FakePlatform(infer_s=0.02)
+    answer = platform.http
+    pause_taken = False
+
+    async def pausing(method: str, url: str, **request) -> tuple[int, object]:
+        nonlocal pause_taken
+        if method == "POST" and "/api/job" in url:
+            pause_taken = True
+        elif pause_taken and method == "GET":
+            if read_back == "fails":
+                raise RuntimeError("busy")
+            platform.device_status = "Mystery"
+        return await answer(method, url, **request)
+
+    monkeypatch.setattr(platform, "http", pausing)
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.2)
+        patch = {"printer_id": printer_id, "on_defect": "pause", "cooldown_s": 0, "consecutive": 1}
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": patch})
+        platform.failing = True
+        await asyncio.sleep(1.2)
+        printer = engine.state_event()["printers"][0]
+
+    commands = [call for call in platform.http_calls if call[0] == "POST" and "/api/job" in call[1]]
+    assert len(commands) == 1, "a command the printer took is not sent again every frame"
+    assert len(_of(events, "alert")) == 1
+    assert printer["online"] or read_back == "says_unknown", "a failed read after a command that went through does not take the printer offline"
+
+
+async def test_a_camera_dropout_ends_the_defect_streak() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.inference_blocked = True
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        monitor = next(iter(engine.monitors.values()))
+        camera = next(iter(engine.cameras.values()))
+        await engine.handle({"cmd": "monitor.update", "id": monitor["id"], "patch": {"consecutive": 3, "notify": False}})
+        monitor = engine.monitors[monitor["id"]]
+        frame = Frame(rgb=np.zeros((48, 64, 3), np.uint8), seq=0.0, ts=time.time())
+        await engine.watchdog.on_score(monitor, frame, 0.99)
+        await engine.watchdog.on_score(monitor, frame, 0.99)
+        camera.frame_source.online = False
+        await engine.watchdog.watch_health()
+        await engine.watchdog.on_score(monitor, frame, 0.99)
+        await asyncio.sleep(0)
+
+    assert not _of(events, "alert"), "two defect frames before a dropout and one after are not three in a row"
+
+
 async def test_a_removed_monitor_leaves_nothing_behind_in_the_watchdog() -> None:
     platform = FakePlatform(infer_s=0.02, failing=True)
     async with running_engine(platform, camera_fps=[15.0]) as (engine, events):

@@ -424,8 +424,10 @@ floor per monitor and outcome. A printer action is tried 3 times, 1 s apart and 
 `ACT_DEADLINE_S` in all, then reported as failed in the alert, the UI error feed and the push
 notification, and tried again after `ACT_FAILED_COOLDOWN_S` at the latest. A printer that
 refuses the command but reads as finished counts as having taken a pause or a cancel, and one
-that reads as already paused counts only for a pause. A streak is dropped when its monitor stands down or is
-bound to another camera. The notification channels are sent to together with `NOTIFY_TIMEOUT_S`
+that reads as already paused counts only for a pause. A command the printer took whose read-back
+does not show the print stopped is not sent again for `ACT_FAILED_COOLDOWN_S` either, and a failed
+read-back does not take the printer offline. A streak is dropped when its monitor stands down, is
+bound to another camera, or its camera goes offline or stalls. The notification channels are sent to together with `NOTIFY_TIMEOUT_S`
 each, 30 s, so one that never answers cannot hold the response open.
 
 Everything that writes to disk comes after the part that protects the print. A frame is
