@@ -236,8 +236,13 @@ async function coverRange(src: string): Promise<{ lo: number; hi: number }> {
   return { lo, hi };
 }
 
+let coverShown: string | null = null;
+
 export async function measureCover(src: string | null): Promise<void> {
-  cover = src ? await coverRange(src).catch(() => null) : null;
+  coverShown = src;
+  const measured = src ? await coverRange(src).catch(() => null) : null;
+  if (coverShown !== src) return;
+  cover = measured;
   applyTheme(current.themeId, current.themes, current.glass);
 }
 

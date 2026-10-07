@@ -1410,6 +1410,23 @@ test("glass keeps status colours readable and distinct over a bright picture, bl
   expect(tint).toBe("rgb(0 0 0 / 0.000)");
 });
 
+test("glass is tinted for the picture on show, not one taken down while it was still being measured", async ({ page }) => {
+  await dashboard(page);
+  await emit(page, { event: "state", ...engine({ settings: { ...engine().settings, theme: "glass" } }) });
+  const tint = await page.evaluate(async () => {
+    const loaded = performance.getEntriesByType("resource").find((entry) => entry.name.includes("/src/theme.ts"))!.name;
+    const { measureCover } = await import(/* @vite-ignore */ loaded);
+    const picture = document.createElement("canvas");
+    picture.getContext("2d")!.fillStyle = "#ffffff";
+    picture.getContext("2d")!.fillRect(0, 0, picture.width, picture.height);
+    const takenDown = measureCover(picture.toDataURL());
+    await measureCover(null);
+    await takenDown;
+    return document.documentElement.style.getPropertyValue("--glass-surface");
+  });
+  expect(tint).toBe("rgb(0 0 0 / 0.000)");
+});
+
 test("copy works where the clipboard API is missing", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(Navigator.prototype, "clipboard", { get: () => undefined });
