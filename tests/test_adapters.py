@@ -552,6 +552,16 @@ async def test_klipper_webrtc_without_snapshot_derives_mjpeg_from_stream_path() 
     assert cams[0]["source"]["url"] == "http://kl/webcam/stream", "absent a snapshot URL the MJPEG path is derived from the WebRTC path"
 
 
+async def test_klipper_derives_mjpeg_without_renaming_the_host() -> None:
+    body = {"result": {"webcams": [
+        {"name": "Still", "uid": "u1", "service": "webrtc-camerastreamer", "stream_url": "http://snapshot-cam.local/webrtc",
+         "snapshot_url": "http://snapshot-cam.local/snapshot"},
+        {"name": "Rtc", "uid": "u2", "service": "webrtc-camerastreamer", "stream_url": "http://webrtc-cam.local/webcam/webrtc"},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl"})
+    assert [cam["source"]["url"] for cam in cams] == ["http://snapshot-cam.local/stream", "http://webrtc-cam.local/webcam/stream"]
+
+
 async def test_klipper_preserves_whep_endpoint() -> None:
     body = {"result": {"webcams": [
         {"name": "WHEP", "uid": "u1", "stream_url": "/webcam/whep", "enabled": True},

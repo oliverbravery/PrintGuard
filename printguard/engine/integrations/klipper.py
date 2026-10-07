@@ -191,8 +191,15 @@ def _mjpeg_endpoint(webcam: dict[str, Any]) -> str:
     """
     snapshot = str(webcam.get("snapshot_url") or "")
     if snapshot:
-        return snapshot.replace("snapshot", "stream")
-    return str(webcam.get("stream_url") or "").replace("webrtc", "stream")
+        return _stream_sibling(snapshot, "snapshot")
+    return _stream_sibling(str(webcam.get("stream_url") or ""), "webrtc")
+
+
+def _stream_sibling(url: str, named: str) -> str:
+    """Swaps a name for ``stream`` in the last part of a URL's path and in its query, never in its host."""
+    parts = urlsplit(url)
+    path = re.sub(rf"{named}(?=[^/]*/?$)", "stream", parts.path)
+    return urlunsplit(parts._replace(path=path, query=parts.query.replace(named, "stream")))
 
 
 def _mediamtx_whep(stream: str) -> str:
