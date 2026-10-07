@@ -1294,6 +1294,14 @@ async def test_a_requested_action_waits_as_long_as_the_printers_service_can_take
         assert INTEGRATIONS["elegoo"].slow_action_s == 90.0, "pycentauri gives a Centauri Carbon 2 this long to answer"
 
 
+@pytest.mark.parametrize("command", ["printer.action", "printer.heat"])
+async def test_a_printer_command_with_an_id_that_is_not_text_fails_as_any_command_does(command: str) -> None:
+    async with running_engine(FakePlatform(), camera_fps=[]) as (engine, events):
+        with pytest.raises(RuntimeError):
+            await engine.request({"cmd": command, "id": ["p"], "action": "resume"})
+        assert _of(events, "error"), "the transport was handed the exception with no error event"
+
+
 @pytest.mark.parametrize(
     ("provider", "partial", "blank"),
     [

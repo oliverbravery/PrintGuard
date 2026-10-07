@@ -627,7 +627,7 @@ class Engine:
         """
         command = message.get("cmd")
         if command in ("printer.action", "printer.heat"):
-            printer = self.printers.get(message.get("id") or "")
+            printer = self.printers.get(message["id"]) if isinstance(message.get("id"), str) else None
             return REQUEST_TIMEOUT_S + (INTEGRATIONS[printer.provider].slow_action_s if printer else 0.0)
         if command == "camera.add":
             return REQUEST_TIMEOUT_S + CAMERA_OPEN_WAIT_S
