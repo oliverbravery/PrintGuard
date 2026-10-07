@@ -375,6 +375,30 @@ async def test_a_dead_broker_warns_once_and_again_when_it_is_back(monkeypatch) -
     ]
 
 
+async def test_a_broker_that_drops_the_session_is_reported_with_its_reason(monkeypatch) -> None:
+    """The command loop's task group wrapped it, so the warning read "unhandled errors in a TaskGroup (1 sub-exception)"."""
+
+    class Dropping(FakeBroker):
+        async def __anext__(self) -> Any:
+            raise mqtt.aiomqtt.MqttError("Disconnected during message iteration")
+
+    broker = Dropping()
+    monkeypatch.setattr(mqtt.aiomqtt, "Client", broker.client)
+    monkeypatch.setattr(mqtt, "RECONNECT_DELAY_S", 0.01)
+    engine = Engine(FakePlatform())
+    await engine.start()
+    bridge = mqtt.MqttBridge(engine, lambda: {"enabled": True, "host": "broker"})
+    bridge.start()
+    try:
+        await _until(lambda: any(event["event"] == "warning" for event in engine.recent_events()))
+        warnings = [event["message"] for event in engine.recent_events() if event["event"] == "warning"]
+    finally:
+        await bridge.stop()
+        await engine.stop()
+
+    assert warnings[0] == "Home Assistant MQTT unavailable: Disconnected during message iteration"
+
+
 async def test_settings_refuse_an_mqtt_port_that_is_not_one() -> None:
     engine = Engine(FakePlatform())
     await engine.start()
