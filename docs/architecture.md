@@ -94,7 +94,7 @@ for the hub:
 | `plugin_runtime` | A `PluginRuntime`, or `None` with `PRINTGUARD_PLUGINS=off` |
 | `secrets` | Credentials the deployment holds outside the engine's state, such as the login in `MEDIAMTX_API`, which the engine scrubs from every message and report |
 | `files` | A `FileStore` |
-| `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count |
+| `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count. A runtime it replaces is closed once every frame already on it has come back, including one from `classify` |
 | `take_notices()` | What the hub has worked around since the last call, as `Notice` records: an accelerator passed over for the CPU, and a camera whose live view cannot publish or has come back. The hub meets these on its own threads, so the engine collects them on its ticker and raises each as a `warning`, and reads the ones from loading the model once at start into `startup_warnings` |
 | `infer(rgb)` | `vision.preprocess`, the selected LiteRT or ONNX Runtime model, then `vision.classify` |
 | `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list |

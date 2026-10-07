@@ -746,7 +746,11 @@ class ServerPlatform:
             logger.warning("plugins are disabled by PRINTGUARD_PLUGINS=off")
 
     async def configure(self, settings: dict[str, Any]) -> None:
-        """Selects the requested inference runtime."""
+        """Selects the requested inference runtime.
+
+        The runtime it replaces is closed once every frame already sent to it
+        has come back, including one a ``classify`` call made outside the scheduler.
+        """
         runtime = settings["inference_runtime"]
         inference = await asyncio.to_thread(Inference, self._model_dir, runtime)
         previous = self._inference
@@ -754,6 +758,7 @@ class ServerPlatform:
         self.workers = inference.workers
         self.inference_device = inference.device
         if previous is not None:
+            await previous.drained()
             previous.close()
         self._notices += [Notice(message) for message in inference.skipped]
         logger.info(

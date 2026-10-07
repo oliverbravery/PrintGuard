@@ -68,6 +68,34 @@ async def test_model_inference(tmp_path: Path, runtime: str) -> None:
     assert platform.workers > 0
 
 
+async def test_a_frame_in_flight_finishes_on_the_runtime_it_started_on_when_the_runtime_is_switched(tmp_path: Path) -> None:
+    """A classify call is outside the scheduler's drain, and closing the ONNX session under it ended in an AttributeError."""
+    platform = ServerPlatform(Path("models"), tmp_path, "http://localhost:9997", "rtsp://localhost:8554")
+    await platform.configure({"inference_runtime": "onnx"})
+    selected = platform._inference._selected
+    run = selected.run
+    entered, release = threading.Event(), threading.Event()
+
+    def held(tensor: np.ndarray) -> np.ndarray:
+        entered.set()
+        release.wait(10)
+        return run(tensor)
+
+    selected.run = held
+    image = np.arange(240 * 320 * 3, dtype=np.uint8).reshape(240, 320, 3)
+    classifying = asyncio.ensure_future(platform.infer(image))
+    await asyncio.to_thread(entered.wait, 10)
+    switching = asyncio.ensure_future(platform.configure({"inference_runtime": "litert"}))
+    await asyncio.sleep(0.5)
+    assert not switching.done(), "the runtime was closed with a frame still on it"
+    release.set()
+    result = await classifying
+    await switching
+    await platform.close()
+
+    assert result["prediction"] == "success" and platform.inference_device == "LiteRT CPU"
+
+
 async def test_a_login_in_the_video_servers_addresses_is_one_the_engine_scrubs(tmp_path: Path) -> None:
     platform = ServerPlatform(Path("models"), tmp_path, "http://pg:API-PASS-31@mediamtx:9997", "rtsp://hub:RTSP-PASS-77@mediamtx:8554")
     await platform.close()
