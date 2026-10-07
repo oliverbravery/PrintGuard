@@ -166,8 +166,9 @@ The same run renders the crops the in-app guide shows, from `CROPS` in that file
 the element to frame and is captured in both themes, since the guide picks the one matching the
 theme the reader is on. Point a guide entry at one with `shot: "<id>"` in `web/src/guide.tsx`.
 
-It also renders each shipped plugin's own screenshots from `PLUGIN_SHOTS`. Those files are
-hashed into the catalogue, so rerun `uv run python plugins/pin.py` if they change.
+It also renders each shipped plugin's own screenshots from `PLUGIN_SHOTS`. The catalogue doesn't
+hash them, but it pins the last commit that touched the plugin's folder, so commit them and rerun
+`uv run python plugins/pin.py` if they change.
 
 ## Adding a printer integration
 

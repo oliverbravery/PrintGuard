@@ -85,7 +85,6 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A plugin zip over 12 MB is refused in the dashboard before it's sent and again by the hub. One
   with a member that unpacks past its size limit is refused, whatever size the zip gives for it,
   and so is one with a member compressed any way but stored or deflate.
-- A plugin gate's answer is kept per query string as well as per path.
 - A plugin route that answers a status outside 100 to 599, or headers that aren't text, stops the
   plugin and answers 502.
 - A plugin's own pages under `/plugins/<id>/` can't load anything from another host or use `fetch`,
@@ -194,14 +193,14 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   revoking a token and resetting the layout each ask for a second press. So does closing the upload
   sheet with files still in it.
 - Buttons, tabs and the dialog close button are 44 pixels tall on touch screens.
-- Enter submits the add monitor, API token and register printer forms. A printer can't be registered
-  until its required fields are filled, and the MQTT port only takes a whole number from 1 to 65535.
+- Enter submits the add monitor, API token and register printer forms.
 - A printer or alert channel is refused when a choice isn't one of those offered, such as a Pushover
   priority of 7 or an unknown Elegoo family.
 - An alert channel keeps only the fields its service has, as a printer does, so a field sent by
   mistake isn't stored or shown.
-- `POST /api/v1/classify` and the MCP `classify_frame` tool score two images at a time and the rest
-  wait, and the MCP server answers `413` to a request body over 42 MB without reading it.
+- `POST /api/v1/classify` and the MCP `classify_frame` tool read two images at a time. Eight more
+  callers wait and one past that answers `503`. The MCP server answers `413` to a request body over
+  42 MB without reading it.
 - A retained MQTT message on a command topic is ignored, so a retained `cancel` no longer cancels
   the print each time the hub reconnects.
 - A plugin's stored data, the JSON it sends in a request and what it passes another plugin can nest
@@ -226,6 +225,31 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - The `camera:control` permission says it changes a camera's detection rate, not its frame rate, and
   the plugin manifest schema agrees with the hub on asset name length, the number of OAuth scopes
   and the letter case of an address.
+- An alert counts as delivered only when ntfy, Discord, Telegram or Pushover answers in its own way.
+  A topic or webhook address that answers with a sign-in page is reported as failed, where it
+  counted as sent.
+- A printer, ntfy or Discord address without `http://` or `https://` is refused when saved or
+  tested.
+- A pause, resume, cancel or heater target the printer doesn't take in time answers `400` naming the
+  printer over the REST API, where it was a `504`. The dashboard waits the same 15 seconds, 105 on
+  an Elegoo printer.
+- Messages sent through your alert channels by a plugin or the API are limited to 20 a minute.
+- A plugin's request is cut off after 10 seconds in total, where each read had 10 seconds.
+- A plugin's WebSocket sent more than 300 frames in 10 seconds is closed with an error.
+- A plugin's `render` runs when its state or store has changed, not on every update from the hub,
+  and a store written more than once a second is saved once a second.
+- Every request, socket and sign-in the hub makes for a plugin carries an `X-PrintGuard-Plugin`
+  header, which a plugin can't set.
+- Removing a plugin that isn't installed is an error, where it answered as if it had worked.
+- An MCP tool call with `NaN` or `Infinity` anywhere in its arguments is a tool error. A nested one
+  used to be read as a field left out.
+- The shipped `mediamtx.yml` no longer grants `playback` without a login.
+- Stopping the container gives open requests 3 seconds before it shuts down.
+- The container's health check ignores `HTTP_PROXY`, so a hub behind a proxy no longer reads as
+  unhealthy.
+- The website's download button says the macOS app is for Apple silicon.
+- `THIRD_PARTY_NOTICES.md` carries the PyInstaller bootloader's licence, which is inside both
+  desktop apps.
 
 ### Fixed
 
@@ -631,6 +655,68 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   toasts no longer cover a dialog's Save button on a phone, and a short dashboard no longer scrolls
   by the toolbar's height on iOS Safari.
 - An open dashboard no longer reapplies its theme every second when nothing has changed.
+- A Bambu X1 or H2 camera follows a changed access code or certificate, where it stayed offline with
+  "that stream is already registered".
+- A monitor switched off or set to alert only while another monitor on its camera was keeping a
+  frame no longer pauses the print.
+- A monitor removed while its camera is being reattached is no longer warned about.
+- A stream pushed to the hub and added by its address, such as `rtsp://localhost:8554/cam`, opens
+  with the hub's own login. In Docker with bridge networking, add it as
+  `rtsp://localhost:8554/<path>`.
+- Pausing, resuming or cancelling from the API, MCP server or Home Assistant no longer reports a
+  timeout when the printer took the command and was slow to be read back.
+- A Moonraker or OctoPrint webcam whose address is on the printer's own loopback, such as
+  `http://127.0.0.1:8080/?action=snapshot`, is read from the printer's address. A camera-streamer
+  webcam whose snapshot address is only a still is read from its stream.
+- A pause, resume or cancel PrusaLink turns down for a wrong password says so, where it said
+  "InvalidAuth".
+- Starting a print on OctoPrint older than 1.8.0 no longer reports a failure for a file it started.
+- Correcting a file's first layer temperature is refused when it would bring a later layer to 0°C or
+  below, where it wrote a set-point that turned the heater off mid-print.
+- Unlinking a printer from a monitor removes its Pause, Resume, Cancel, status, progress and
+  temperature entities from Home Assistant.
+- Quitting the desktop app or stopping the container while an MCP client is connected no longer
+  skips the shutdown, so Home Assistant is told the hub is offline and the last state is saved.
+- A streaming server that restarts gets every camera path back when one of them is refused.
+- A failed inference is reported for each camera it happens on, where one camera's error hid the
+  others' for 30 seconds.
+- An offline camera reports a detection rate of 0 over the API, where it kept its last one.
+- A refused API or MCP command no longer pushes alerts out of `GET /events` and bug reports, and
+  logs one line where each printed a traceback.
+- `/hls//…` answers `404`, where it was a `500`.
+- Refreshing printer cameras finishes when the tab that asked closes, so a camera it found is saved.
+- Notifier, MQTT or printer settings of the wrong kind, and a camera name that isn't text, are
+  refused in words over the dashboard socket, where they answered a Python error or were stored as
+  given.
+- A dashboard, MQTT or plugin connection the hub drops after an error raises a warning, where it
+  only wrote a log line.
+- A training upload answered with a reset time that isn't a number is retried in six hours, where it
+  restarted every second.
+- The training inbox counts what it holds a few pages at a time, so a count cut short picks up where
+  it stopped.
+- A cancelled request for a camera's frame can no longer leave two conversions running on one
+  scaler.
+- A plugin's panel saving its store no longer undoes a key its worker saved in the meantime, and a
+  `plugin.js` that writes its store on every render no longer saves and redraws in a loop.
+- A plugin removed or reinstalled while its sign-in is being renewed no longer has its request sent,
+  and a reinstall keeps the renewed sign-in. Disconnecting during a renewal stays disconnected.
+- A plugin that signs in can make its other requests before a client id is typed.
+- The redirect URI shown for a plugin's sign-in is right on a hub opened at a name that starts with
+  `localhost`, such as `localhost.lan`.
+- A plugin's icon or screenshot with a capital in its path, such as `shots/Panel.png`, shows on its
+  page.
+- Picture in picture and Spotify show their current screenshots in the plugin store.
+- A dialog the browser closes by itself, such as on a second Escape some seconds after the first or
+  the Android back gesture, no longer leaves the page unable to scroll and later upload sheets
+  hidden until a reload.
+- A double click or double tap no longer goes straight through a button that asks twice.
+- The preset remove button, the drag handles, the review frame buttons and the small chips are 44
+  pixels on touch screens.
+- Keyboard focus moves to the next control when the one you pressed goes away, such as Next on the
+  introduction's last page, Set crop, an attachment's remove button and a new token's Dismiss.
+- The print library shows every file again when the printer it was filtered by is removed.
+- A dashboard with plugin panels hidden counts them as panels, where it called them monitors.
+- The guide says a monitor's printer is optional.
 
 ### Security
 
@@ -689,6 +775,18 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A plugin's request can't set a `Host` header to reach another site on the same server.
 - The hub talks to its own MediaMTX directly when `HTTP_PROXY` is set, so the stream server's login
   never goes to the proxy.
+- A plugin allowed to reach your network can no longer call the hub's own API, MCP server or live
+  streams, which gave it state, camera stills and history it had no permission for.
+- A plugin guarding the hub that an update or restart switches off keeps refusing requests until you
+  accept or remove it, where the hub was left open.
+- A plugin's server flooding its WebSocket, or a dashboard that stops reading, can no longer use up
+  the hub's memory. A dashboard 256 events behind is disconnected and reconnects.
+- A plugin address pattern with a wildcard over the end of an IP address, such as
+  `http://*.168.1.1/*`, needs Reach your own network and is listed under it.
+- A printer address saved without its scheme, such as `admin:password@host`, used to be shown with
+  its password. It's now refused.
+- A key after a `#` in an address is redacted, and a percent-encoded password is scrubbed in its
+  decoded form too.
 
 ## [2.5.0] - 2026-09-21
 

@@ -153,7 +153,9 @@ filament and temperatures. Every other print temperature the slicer set moves by
 temperatures a start gcode probes or wipes at stay put. A file sliced with several filaments shows
 the one its first layer prints with and moves only that filament's temperatures, and nothing moves
 past 350°C on the nozzle or 150°C on the bed. A file whose slicer lists no print
-temperatures has every set-point above zero moved. Binary gcode keeps the temperatures it
+temperatures has every set-point above zero moved. A correction that would bring a later
+layer's temperature to 0°C or below is refused, since that turns the heater off mid-print: a bed
+sliced at 60°C then 55°C can't have its first layer set under 6°C. Binary gcode keeps the temperatures it
 was sliced with, and so does a line a host numbered and checksummed, such as `N5 M104 S215*33`.
 
 Each file keeps the preview, estimated time, filament and printer model its slicer wrote into it.
@@ -178,7 +180,8 @@ report idle at the moment you press **Print**, so nothing lands on top of a runn
 | Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the printer's storage over FTPS, then the first plate is started over MQTT |
 
 A file the service stores but doesn't start, or a start the printer refuses, is reported as a
-failed print. Moonraker set to queue uploads can hold a file that can't start at once, which is
+failed print. OctoPrint before 1.8.0 doesn't say whether it started the file, so a stored one
+counts as started. Moonraker set to queue uploads can hold a file that can't start at once, which is
 reported as queued and may print later.
 
 A pause, cancel, heater target or file counts as sent only when the service answers in its own
@@ -236,6 +239,9 @@ The hub makes every request to a print service itself, so the address you regist
 one the hub can reach, not one your browser can. The browser never calls the printer, so an
 `http://` printer works from a hub you open over HTTPS.
 
+An address is saved with its `http://` or `https://` in front. One without, such as
+`192.168.1.50:5000`, is refused when you save or test it.
+
 Register the address the service answers on, not one that redirects to it. A printer or an alert
 channel that answers with a redirect, such as a proxy sending `http://` to `https://`, fails with
 the address it redirects to, and **Test connection** says so too. A redirect is never followed, so
@@ -256,12 +262,15 @@ same from the address you registered:
 
 An OctoPrint container published as `5000:80` can't be told apart from OctoPrint's own port, so
 its webcam is looked for on port 80. Publish it on another port, or set an absolute stream URL
-in OctoPrint's webcam settings, which is used as it is. Refresh and a restart keep a camera that
+in OctoPrint's webcam settings, which is used as it is. A stream URL on the printer's own
+loopback, such as `http://127.0.0.1:8080/?action=stream`, is read from the registered host on
+that port, so the webcam server has to listen on the network and not on loopback only. Refresh and a restart keep a camera that
 already works, so one registered before you updated stays where it was.
 
 A Moonraker webcam set to the MediaMTX or go2rtc WebRTC service is pulled from that server's
 WHEP endpoint. One set to camera-streamer is read from its MJPEG stream, since camera-streamer
-has no WHEP endpoint. A webcam set to Janus with no snapshot URL, to an iframe or to jMuxer isn't
+has no WHEP endpoint. The stream is found beside the snapshot URL, or beside the WebRTC path when
+the snapshot URL is a still such as `/webcam/snap.jpg`. A webcam set to Janus with neither, to an iframe or to jMuxer isn't
 registered, since PrintGuard can't read those. Add its RTSP or MJPEG address as a
 [stream URL](cameras.md#stream-urls) instead.
 

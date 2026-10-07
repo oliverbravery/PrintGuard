@@ -73,7 +73,10 @@ characters and ntfy a 250 character title and a 4096 byte message.
 Channels are sent to together and each gets 30 seconds to answer. One that doesn't is reported as
 failed and holds up neither the others nor the monitor.
 
-A channel that fails to deliver raises an error on the dashboard. It isn't retried. An ntfy server
+A channel that fails to deliver raises an error on the dashboard. It isn't retried. An alert
+counts as delivered only when the service answers in its own way, so a topic or webhook URL that
+answers with a sign-in page, as an auth proxy does, is reported as failed. A topic or webhook URL
+is saved with its `http://` or `https://` in front. An ntfy server
 that refuses the snapshot is sent the alert again as text, and the dashboard error says the
 picture was refused.
 

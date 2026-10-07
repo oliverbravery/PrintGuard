@@ -73,6 +73,10 @@ registered camera, including a printer's webcam, is the hub's own stream and isn
 publishing for this, as [deployment](deployment.md#what-listens-where) explains, and the
 compose file publishes only `8554`.
 
+A pushed stream can also be added as a stream URL, as `rtsp://localhost:8554/<path>` or with
+any other address of the machine the hub runs on. In Docker with bridge networking the container
+can't tell the host's address is its own, so use `localhost` there.
+
 The URL has to be one the hub can reach. In Docker, `localhost` is the container, covered under
 [networking](printers.md#networking-caveats).
 

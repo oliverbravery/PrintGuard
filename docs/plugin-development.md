@@ -121,7 +121,7 @@ A plugin needs at least one of the three source files.
 | `description` | Cut at 400 characters |
 | `author` | Cut at 80 characters |
 | `homepage` | An `http` or `https` link |
-| `icon`, `media` | Image paths inside the folder, as `png`, `jpg`, `jpeg`, `webp`, `gif` or `svg`. 8 media at most |
+| `icon`, `media` | Image paths inside the folder, as `png`, `jpg`, `jpeg`, `webp`, `gif` or `svg`, in the case the file is named with. 8 media at most |
 | `permissions` | Names from the [permissions table](plugins.md#permissions) |
 | `reasons` | One line for every permission asked for, cut at 200 characters |
 | `surfaces` | `panel`, `monitor` or `settings`. Leaving it out means `panel` |
@@ -240,13 +240,19 @@ A URL with a `.` or `..` segment in its path matches no pattern, percent-encoded
 A pattern on this machine or the network around it needs `net:local` as well as `net`. That is
 any address that is not a public one, `localhost`, or a name ending `.local`, `.lan`,
 `.home`, `.home.arpa`, `.internal` or `.localhost`. A wildcard host counts, since it covers
-both, and so does a wildcard over one of those suffixes, such as `*.local`. An address in any
+both, and so does a wildcard over one of those suffixes, such as `*.local`, or over the end of
+an IPv4 address, such as `*.168.1.50`. An address in any
 spelling a browser takes counts too, such as `127.1` or `2130706433`, and so does an IPv4 address
 written inside an IPv6 one, such as `[64:ff9b::c0a8:101]`. A multicast or site-local address counts as well, such as `224.0.0.1` or `[fec0::1]`. Without `net:local`, PrintGuard
 resolves a name once when a request or socket connects, refuses it if any address it resolves to
 is on this network and connects to an address it checked, so a public name pointing somewhere
 private gets nowhere, however often its answer changes. That connection never goes through a
 proxy named in the environment.
+
+A plugin can't call the hub's own API, with or without `net:local`. Every request, sign-in and
+socket PrintGuard makes for a plugin carries `X-PrintGuard-Plugin: 1`, and the hub answers `403`
+to anything that arrives with it. A request that sets that header itself is refused, as one that
+sets `Host` is. Read the dashboard with `state:read`, `camera:frames` and `history:read`.
 
 ## The three halves
 
@@ -281,7 +287,7 @@ The hub only lets its own pages and the origins in `PRINTGUARD_ORIGINS` put the 
 `plugin.render` returns a tree of [nodes](#nodes). PrintGuard draws them with its own
 components, so a plugin matches the dashboard and inherits the user's theme.
 
-`render` runs on every state change and after every action and every event it hooks, so keep it
+`render` runs when the state or store it is handed has changed, and after every action and every event it hooks, so keep it
 a plain function of the `ctx` it is handed. On the `monitor` and `settings` surfaces it is called once more per
 monitor, with `ctx.target` naming which and `ctx.surface` naming where. It runs whether or not
 there is a panel, and returning `null` draws nothing.
@@ -381,9 +387,9 @@ A worker has `plugin`, the JavaScript built-ins and QuickJS's own `atob`, `btoa`
 `ctx.log`, and no timers or `fetch`. A call ends when your handler returns, so a promise or a
 `queueMicrotask` callback never runs and an `import()` never resolves.
 
-A worker saves only the keys it added, changed or deleted, over whatever is stored by the time
-it returns. Two writers touching different keys don't undo each other, and on the same key the
-last write wins.
+A worker, a `plugin.js` and a `panel.html` each save only the keys they added, changed or
+deleted, and the hub applies them over whatever is stored when the write arrives. Two writers
+touching different keys don't undo each other, and on the same key the last write wins.
 
 ## The ctx API
 
@@ -597,6 +603,12 @@ still connecting at that moment is closed as soon as it opens. The manifest need
 A redirect is not followed here either. The socket fails to open, so declare the address the
 service finally answers on.
 
+A socket that is sent more than 300 frames in 10 seconds is closed. Its `closed` event says why
+in `text`, which is empty for any other close, and an `error` event goes out alongside it.
+Subscribe to what the plugin needs if the service can send more than that. A dashboard that has
+256 events waiting to be sent to it is disconnected and reconnects, so a frame it had not been
+sent by then never reaches that `plugin.js`.
+
 ```js
 plugin.on("tick", (event, ctx) => ctx.socket({ url: "wss://hub.local:8123/api/websocket", tag: "hub" }));
 
@@ -794,23 +806,24 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | Secrets | 8, each value 4 KB |
 | OAuth scopes | 20 |
 | Channels | 8 in `provides`, 16 in `consumes` |
-| Store | 16 KB |
+| Store | 16 KB. A write that changes nothing is not saved. Writes less than a second apart are saved together within a second, and other dashboards see them then |
 | Body of a call, answer or publish | 16 KB |
 | Nesting | Objects and lists 32 deep in the store, and in the JSON a `ctx.http` request sends, 31 deep in the body of a call, answer or publish. Anything deeper is refused |
 | `tick_s` | 5 to 86400 seconds, fired on a 5 second clock, so 7 means 10 |
 | Effects | 32 per call. The rest are dropped |
-| `plugin.js` call | 4 seconds, then the plugin is stopped |
+| `plugin.js` call | 4 seconds, then the plugin is stopped. That holds in Chrome. A `plugin.js` that never returns freezes the dashboard tab in Safari and the macOS desktop app, which both use WebKit, and Firefox is untested |
 | Worker call | 96 MB of memory and 400 million units of wasmtime fuel, then the plugin is disabled. A call that waits more than 5 seconds to start is dropped |
 | Worker output | 512 KB per call, the store, the effects and a route's response body together, then the plugin is disabled. So is one whose output is not an object carrying a list of effects |
 | Node tree | 400 nodes |
 | Node text | `label` 80 characters, `action` 60, `placeholder` 60 |
 | `select` options | 60 |
 | `panel.html` height | 900px |
-| `ctx.http` | 60 requests a minute per plugin, counting each socket it opens, 10 seconds each. A refused request gets no `http` event. One refused for an address the manifest doesn't cover, a `Host` header or a secret before the path doesn't count towards the 60, and one refused for a blank secret or a failed sign-in does |
+| `ctx.http` | 60 requests a minute per plugin, counting each socket it opens, 10 seconds each from the request leaving to the last of its answer. A refused request gets no `http` event. One refused for an address the manifest doesn't cover, a `Host` header or a secret before the path doesn't count towards the 60, and one refused for a blank secret or a failed sign-in does |
 | `ctx.http` answer | 256 KB once decompressed, whatever its type. A larger one fails the request and no `http` event arrives |
-| Sockets | 4 open per plugin, 64 KB per text frame sent, 256 KB per frame received, 10 seconds to open |
+| Sockets | 4 open per plugin, 64 KB per text frame sent, 256 KB per frame received, 10 seconds to open. One sent more than 300 frames in 10 seconds is closed |
 | Sandbox start | 8 seconds for `plugin.js` or `panel.html` to load |
 | OAuth sign-in | 10 minutes to finish it |
+| `notify.send` | 20 a minute across the hub, whoever sends them. One past that is refused |
 | `ctx.notify` | Cut at 200 characters |
 | `ctx.log` from a worker | Cut at 400 characters |
 | `ctx.sound` | 24 tones, 4 seconds, 20 to 12000 Hz |
@@ -892,7 +905,7 @@ An entry carries what the store shows and what a verified install has to match.
       "platforms": [],
       "repo": "oliverbravery/PrintGuard",
       "path": "plugins/picture-in-picture",
-      "ref": "8130da16252383ed647ebd62356b06a0d1cca1bd",
+      "ref": "ef5c6ee564f905eb56292feb52ab000344dec287",
       "digests": {
         "plugin.json": "c6675a27abbf6c09fdbfabaff7dd8283ae2124796cfadccc44cc26dee9887d39",
         "plugin.js": "9625952af0f6765e172104bea611cf27eb48fed6034cea4a154ca98ac6ccf233"

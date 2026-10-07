@@ -130,7 +130,7 @@ that permission. Accept it on the plugin's page to turn it back on. One whose si
 | `notify` | Raise a message in the dashboard |
 | `alert:send` | Send through whichever of your ntfy, Pushover, Telegram, Discord and desktop notification channels are set up |
 | `net` | Reach the addresses its manifest lists |
-| `net:local` | Reach addresses on this machine and the network around it, which covers private addresses, `localhost`, names ending `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost`, a wildcard over one of those such as `*.local`, and an IPv4 address written inside an IPv6 one |
+| `net:local` | Reach addresses on this machine and the network around it, which covers private addresses, `localhost`, names ending `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost`, a wildcard over one of those such as `*.local` or over the end of an address such as `*.168.1.50`, and an IPv4 address written inside an IPv6 one |
 | `monitor:manage` | Add monitors and delete them |
 | `camera:control` | Rename any camera and change its brightness, contrast, sharpness, crop, rotation and detection rate |
 | `camera:manage` | Register cameras and delete them, and scan for ones not yet registered |
@@ -186,7 +186,8 @@ time, so a plugin that sends its frame elsewhere is stopped with "sandbox naviga
 | Read your credentials at all | State is cut down to the fields a permission names. Printer configuration, notifier settings, MQTT credentials and API tokens are in no permission. The exceptions are `routes` and `gate`, which see the cookie and authorisation headers of the requests they answer |
 | Read your camera frames | A camera in a plugin's panel is a placeholder PrintGuard fills with its own player, and the video never enters the sandbox. Reading the picture itself is `camera:frames`, which is its own thing to agree to, and a plugin's own pages are refused the live stream |
 | Hang or exhaust the hub | The worker runs each call against a memory cap and a CPU budget, and a call that waits more than 5 seconds to start is dropped. A plugin that fails, or answers with anything but its data and a list of effects, is disabled and reported |
-| Open the hub by breaking its own gate | A plugin holding `gate` that fails refuses every request until you enable it again, reinstall it or remove it |
+| Read the dashboard through the hub's own API | Every request, sign-in and socket made for a plugin carries an `X-PrintGuard-Plugin` header the plugin can't set or remove, and the hub answers `403` to anything that arrives with it, at any address, name or proxy. The video server beside it needs a login only the hub holds |
+| Open the hub by breaking its own gate | A plugin holding `gate` that fails refuses every request until you enable it again, reinstall it or remove it. So does a running one the hub switches off because an update asks for more than you accepted, until you accept it or remove it, and one whose saved record can't be read at start, until you install it again or restart the hub |
 | Do something it was not granted | Every command maps to a permission, checked at the sandbox edge before it goes anywhere |
 | Pretend to be PrintGuard | A `plugin.js` has no styling and no markup of its own, and PrintGuard draws what it describes with its own components. A `panel.html` does draw itself, inside a panel carrying the plugin's name. A plugin's own pages are served into a sandboxed origin that is not the dashboard's |
 | Change after review | The manifest and every source file are pinned by SHA-256 at a commit |
@@ -242,7 +243,8 @@ and keeps the client id.
 ## Switching plugins off at boot
 
 A plugin holding **Authorise every request** can lock you out. One that fails locks everyone out,
-since a hub with a broken gate refuses every request.
+since a hub with a broken gate refuses every request. So does one an update switched off until
+you accept what it now asks for.
 
 To start the hub with plugins off, add `PRINTGUARD_PLUGINS=off` to its environment, then remove the plugin or enable it again.
 

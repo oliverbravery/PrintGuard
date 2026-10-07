@@ -104,12 +104,13 @@ or `notify_test` event as it was sent, `event` and `req_id` included.
 
 | Status | When |
 |---|---|
-| `400` | The engine refused the command. That covers updating, removing or starting an id nothing matches, binding a monitor to a camera or printer that isn't registered, a value a setting doesn't take such as a `rotation` of 45, a file the library doesn't take and an image that can't be decoded |
+| `400` | The engine refused the command. That covers updating, removing or starting an id nothing matches, binding a monitor to a camera or printer that isn't registered, a value a setting doesn't take such as a `rotation` of 45, a file the library doesn't take, an image that can't be decoded, and a printer that did not answer an action or a heater target in time, which reads `did not answer within 15 s, so check whether it took the command` |
 | `401` | A missing or invalid token, once a token has been issued. With none issued a missing token is never a `401`, so read routes answer and control and manage routes are a `403` |
 | `403` | A token whose scope is too narrow |
 | `404` | A read of an id nothing matches, and a printer action or heater target for a printer that isn't registered |
 | `413` | A frame over 32 MB or a print file over 512 MB |
 | `422` | A body of the wrong shape, which includes `NaN` or `Infinity` anywhere in a JSON body, a printer's `config`, a channel's config, `mqtt` or a preheat preset among them. In an upload's `nozzle` or `bed` it is a `400` |
+| `503` | A frame sent to `/classify` while two are being scored and eight more are waiting. It carries `Retry-After: 1` |
 | `504` | The engine did not finish in time |
 
 A field a body doesn't list is ignored, a field of the body sent as `null` is left as it was,
@@ -160,11 +161,11 @@ unaffected.
 | `GET` | `/cameras` | List cameras with rate, health and latest classification |
 | `GET` | `/cameras/{id}` | One camera |
 | `GET` | `/cameras/{id}/frame` | Freshest frame as `image/jpeg`. `404` while the camera is on standby or offline, since it has no current frame |
-| `POST` | `/classify` | Classify a supplied frame, a JPEG or PNG body of up to 32 MB and 50 megapixels. No registered camera needed. A file over 32 MB is a `413`, and one over 50 megapixels or that isn't a JPEG or PNG is a `400`. Two are scored at a time, here and through the MCP tool together, and the rest wait |
+| `POST` | `/classify` | Classify a supplied frame, a JPEG or PNG body of up to 32 MB and 50 megapixels. No registered camera needed. A file over 32 MB is a `413`, and one over 50 megapixels or that isn't a JPEG or PNG is a `400`. Two are read and scored at a time, here and through the MCP tool together. Eight more wait without their body being read, and one past that is a `503` |
 | `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
 | `GET` | `/prints/{id}` | One print file |
 | `GET` | `/prints/{id}/file` | Download a print file as the library keeps it |
-| `GET` | `/events` | The last 100 alerts, warnings and errors. A printer's status and progress are in `/printers` |
+| `GET` | `/events` | The last 100 alerts, warnings and errors. A command the hub refused is answered to its caller and isn't among them. A printer's status and progress are in `/printers` |
 
 </details>
 
@@ -215,6 +216,10 @@ The bodies the manage routes take. Every field is optional on a `PATCH`.
 | Print file update | `name`, `printer_ids` |
 | Settings | `notifiers` keyed by channel id, [`mqtt`](#home-assistant), `inference_runtime` of `auto`, `litert` or `onnx`, `preheat` as a list of `{"name", "nozzle", "bed"}`, `fault_grace_s` in seconds (30 to 900, a number outside that is moved to the nearest end), `update_check` as true or false and `feedback` as `ask` or `off` |
 
+A monitor's `threshold`, `consecutive` and `cooldown_s` and a camera's `brightness`, `contrast`,
+`sharpness`, `detect_fps` and `crop` are moved to the nearest end of their range when a number falls
+outside it, and the request still answers `200`. A `rotation` that isn't one of the four and a heater target over its limit are refused.
+
 `GET /state` lists each printer service and alert channel under `integrations` and `notifiers`,
 with the config fields it takes.
 
@@ -252,7 +257,11 @@ without the slash answers the same. Tools mirror the REST operations one to one 
 `operation_id`, with the same bodies, answers and refusals, and the list a client sees is
 filtered to the scopes its token holds. With no tokens issued that is the `read` tools. Once
 any token exists, a request with no valid bearer is a `401` before a session opens. A request
-body over 42 MB, which is room for a 32 MB image in base64, is a `413`.
+body over 42 MB, which is room for a 32 MB image in base64, is a `413`. Two requests over 64 KB,
+which only an image can be, are read at a time. Eight more wait unread and one past that is a `503`.
+
+A tool call with `NaN` or `Infinity` anywhere in its arguments is a tool error, and a call the
+REST route would refuse is a tool error carrying that route's status and reason.
 
 | Scope | Tools |
 |---|---|
@@ -326,7 +335,8 @@ on one broker, or stopping one marks the other's entities unavailable too.
 
 Removing a monitor removes its device and clears its retained topics. One removed while the
 broker is unreachable is cleared when the bridge reconnects, as long as the hub hasn't restarted
-in between.
+in between. Unlinking a monitor's printer removes the printer's entities from its device the
+same way.
 
 The hub publishes these retained at QoS 1, with `<base>` the base topic and `<prefix>` the
 discovery prefix:
@@ -381,7 +391,7 @@ engine's one snapshot, which holds none of them.
 | The MQTT password | Left out |
 | `secrets_set` on a printer | The names of its secret fields that hold a saved value, such as `["api_key"]` |
 | `secrets_set` in `/state` | The same names for each alert channel and for the broker, as `{"notifiers": {"pushover": ["api_token", "user_key"]}, "mqtt": ["password"]}` |
-| An address in a config or a camera source | Without its `user:pass@`, which may hold a `/`, `?` or `#` (everything up to the last `@` counts as login, so an address with a later `@` is redacted more than it needs to be), with every query value replaced by `[redacted]`, as is any part of the path that is a UUID or 16 or more letters and digits, which is where UniFi Protect puts a stream's key |
+| An address in a config or a camera source | Without its `user:pass@`, which may hold a `/`, `?` or `#` (everything up to the last `@` counts as login, so an address with a later `@` is redacted more than it needs to be), with every query value and anything after a `#` replaced by `[redacted]`, as is any part of the path that is a UUID or 16 or more letters and digits, which is where UniFi Protect puts a stream's key |
 | A custom plugin catalogue URL | Without its login, with every query value replaced and its whole path shown as `[redacted]`. The default catalogue is shown as it is |
 | The access code in a Bambu printer camera's source | Left out |
 | A notifier this version doesn't know | Left out |
@@ -424,7 +434,7 @@ The camera object, from `GET /cameras` and `GET /cameras/{id}`:
   "source": { /* redacted of any access_code / credentials */ },
   "printer_id": "9c41d7e0" | null,
   "declared": false,                                        // passed in by the deployment
-  "max_fps": 5.0, "target_fps": 2.0, "achieved_fps": 1.9,   // rate
+  "max_fps": 5.0, "target_fps": 2.0, "achieved_fps": 1.9,   // rate, the last two 0 while offline
   "detect_fps": 60.0,                                       // cap on target_fps, set by the user
   "inferring": true, "in_use": true, "online": true,        // health
   "standby": false,                                         // no monitor is watching it and nobody is viewing it
