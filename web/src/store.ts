@@ -23,6 +23,7 @@ const UPDATE_DEBOUNCE_MS = 250;
 const REMOVAL = /^(camera|monitor|print)\.remove$/;
 const RECONNECT_DELAY_MS = 1500;
 const HUB_SILENCE_LIMIT_MS = 10_000;
+const BLOCKED_PAGE_SLACK_MS = 2_000;
 const BOOT_DROPS_BEFORE_HINT = 3;
 const HUB_NOT_ANSWERING = "The hub is not answering. Check the address, and that a proxy forwards WebSockets and the Origin header";
 const updateTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -218,7 +219,9 @@ function connectHub(onEvent: (event: any) => void, onUp: () => void, onDown: (wa
     };
     const expectTick = () => {
       clearTimeout(silence);
+      const armedAt = performance.now();
       silence = setTimeout(() => {
+        if (performance.now() - armedAt > HUB_SILENCE_LIMIT_MS + BLOCKED_PAGE_SLACK_MS) return expectTick();
         log("warn", "hub socket went silent");
         opening.close();
         drop();
