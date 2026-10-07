@@ -26,6 +26,7 @@ const CTX_PERMISSIONS: Record<string, string> = { notify: "notify", sound: "soun
 const PLUGIN_PERMISSIONS: Record<string, string> = { route: "routes", gate: "gate", serve: "link:provide" };
 const NETWORK_CALLS = ["http", "socket"];
 const LINK_CALLS: Record<string, string> = { call: "link:consume", publish: "link:provide" };
+const WITHHELD_SECRETS = ["oauth_refresh", "oauth_expires", "oauth_client_id"];
 const SECRET_REFERENCE = /\{\{\s*secret\.([a-z0-9_-]{1,40})\s*\}\}/g;
 
 function literalField(node: any, field: string): string | null {
@@ -172,7 +173,7 @@ export function lint(
     if (!declared) findings.push({ kind: "undeclared", what: call.link.name });
   }
   for (const name of new Set(secrets)) {
-    if (!(name in manifest.secrets) && !name.startsWith("oauth")) findings.push({ kind: "undeclared", what: `{{secret.${name}}}` });
+    if ((!(name in manifest.secrets) && name !== "oauth") || WITHHELD_SECRETS.includes(name)) findings.push({ kind: "undeclared", what: `{{secret.${name}}}` });
   }
   for (const what of new Set(calls.map((call) => call.dynamic).filter(Boolean) as string[])) {
     findings.push({ kind: "dynamic", what });
