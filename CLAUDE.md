@@ -12,7 +12,7 @@ they set up, and nothing else leaves unless they review a print and send its fra
 
 ```bash
 uv sync                                   # Python engine + hub server (use uv, never pip)
-uv run printguard                         # hub on :8000 (MediaMTX is bundled into the image; for video in dev: brew install mediamtx, 1.19.0 or newer, && MEDIAMTX_BINARY=$(which mediamtx) uv run printguard)
+uv run printguard                         # hub on :8000 (MediaMTX is bundled into the image. For video in dev: brew install mediamtx, 1.19.0 or newer, && MEDIAMTX_BINARY=$(which mediamtx) uv run printguard)
 cd web && npm install && npm run dev      # UI hot-reload on :5173, proxied to :8000
 
 uv run pytest                             # engine simulation + adapter contract tests
@@ -30,7 +30,7 @@ again on the image's 3.13, `npm run typecheck`, `npm run site:build` and `npm ru
 
 ## Architecture
 
-Read [docs/architecture.md](docs/architecture.md) for the full picture and diagrams; the
+Read [docs/architecture.md](docs/architecture.md) for the full picture and diagrams. The
 essentials a change must respect:
 
 - **The engine decides, the platform does.** The engine's own logic in `printguard/engine/` does
@@ -45,7 +45,7 @@ essentials a change must respect:
 - **The engine owns one JSON command/event protocol.**
   [`engine/engine.py`](printguard/engine/engine.py) dispatches commands through its
   `_handlers` map and broadcasts events to subscribed transport "sinks". `state_event()`
-  is the full snapshot the UI renders; any new engine-owned data the UI needs is added
+  is the full snapshot the UI renders, and any new engine-owned data the UI needs is added
   there. The UI is **presentation-only** - it never holds logic the engine should own, and
   it reaches the engine over one WebSocket (`/api/ws`), bar a sliced file's bytes, which go to
   `POST /api/prints`.
@@ -69,7 +69,7 @@ essentials a change must respect:
   actions all follow from the adapter. CONTRIBUTING.md has the step-by-step.
 
 - **Plugins are third-party code, and none of it runs in the engine.**
-  [`engine/plugins.py`](printguard/engine/plugins.py) only sources and hash-pins it; execution
+  [`engine/plugins.py`](printguard/engine/plugins.py) only sources and hash-pins it. Execution
   is a sandbox on each side (an opaque-origin iframe in the dashboard for `plugin.js` and
   `panel.html`, QuickJS in WebAssembly on the hub for `worker.js`, via
   `platform.plugin_runtime`). A plugin returns a view and a list of effects and
@@ -85,7 +85,7 @@ essentials a change must respect:
   per monitor via MQTT discovery (config in `settings.mqtt`, gated by broker access). None
   add logic, so they cannot drift from the dashboard.
 
-- **Fail safe, fail loud.** A monitor's `watching` state gates inference; only a *positive*
+- **Fail safe, fail loud.** A monitor's `watching` state gates inference, and only a *positive*
   "not printing" stands it down (losing the signal keeps the last answer). Nothing on the alert
   path swallows errors - failed printer actions, notifier failures, an alert picture that cannot
   be encoded and dropped feeds emit `error`/`warning` events. See `engine/watchdog.py`.
@@ -99,7 +99,7 @@ essentials a change must respect:
 
 ## Conventions
 
-- **No comments; let names document intent.** The TypeScript/React UI carries **no** comments
+- **No comments, let names document intent.** The TypeScript/React UI carries **no** comments
   or JSDoc - never narrate what the code does. Everything under [`plugins/`](plugins) is the
   exception, since it is what a plugin author reads to learn the API:
   [`plugin.d.ts`](plugins/plugin.d.ts) carries TSDoc on every member for the hover, and the
@@ -110,31 +110,31 @@ essentials a change must respect:
   whenever the function takes arguments, gives something back or fails. Never repeat a type
   there: the signature is annotated, so say what a value means, not what it is.
 - **Minimal and consolidated.** No fallbacks, defensive guards or speculative abstractions
-  unless asked. Prefer extending/refactoring existing code over adding parallel variants;
-  delete code a change makes dead.
-- `from __future__ import annotations` heads every Python module; type everything.
+  unless asked. Prefer extending/refactoring existing code over adding parallel variants,
+  and delete code a change makes dead.
+- `from __future__ import annotations` heads every Python module. Type everything.
 - **The version lives only in `pyproject.toml`.** Read it at runtime via
-  `importlib.metadata.version("printguard")`; bump it with `uv version --bump {patch,minor,major}`.
+  `importlib.metadata.version("printguard")` and bump it with `uv version --bump {patch,minor,major}`.
 - **Tests.** `tests/test_engine.py` simulates the engine against `tests/fakes.py`
-  (`FakePlatform`); `tests/test_adapters.py` pins each adapter's exact request shapes;
+  (`FakePlatform`). `tests/test_adapters.py` pins each adapter's exact request shapes.
   `tests/test_plugin_runtime.py` runs real JavaScript in the shipped QuickJS build to hold the
   hub's plugin sandbox to what it promises, and `web/tests/sandbox.spec.ts` does the same for
   the browser sandbox through Playwright (`npm run test:sandbox`, chromium and webkit), beside
   `web/tests/dashboard.spec.ts`, which drives the dashboard against a faked hub, and
   `web/tests/markdown.spec.ts` for README rendering. `tests/test_plugin_network.py` holds where
   a plugin's requests, sockets and sign-in may go, with `test_urls.py` and
-  `test_plugin_schema.py` beside it; `tests/test_app.py` and `tests/test_platform.py` cover the
-  hub's routes and its `Platform`; `tests/test_desktop.py` holds the desktop app's launch
-  decisions and `tests/test_feedback_pull.py` the training inbox's pull script; the REST API, MCP
+  `test_plugin_schema.py` beside it. `tests/test_app.py` and `tests/test_platform.py` cover the
+  hub's routes and its `Platform`. `tests/test_desktop.py` holds the desktop app's launch
+  decisions and `tests/test_feedback_pull.py` the training inbox's pull script. The REST API, MCP
   server, MQTT bridge, tokens, update check, gcode reader, MediaMTX client, plugin linter, plugin
   install, state file and feedback each have a `tests/test_<name>.py`.
   `web/launch/launch.spec.ts` drives a running build from camera to alert, and CI runs it on
   the container and both desktop apps before a release merges. New
-  scheduler/monitor/watchdog/protocol behaviour extends the former; a new adapter is tested
+  scheduler/monitor/watchdog/protocol behaviour extends the former, and a new adapter is tested
   in the latter. Tests reach the engine through `engine.handle()`/`engine.request()`, not by
   poking internals.
 - **Prose: English, no em dashes.** Never use `—` in docs, changelog entries, commit
-  messages, PR descriptions or UI copy; use a comma, colon, brackets or a spaced hyphen.
+  messages, PR descriptions or UI copy. Use a comma, colon, brackets or a spaced hyphen.
   Concise and factual, no filler or salesmanship.
 - **Anything published is written in the first person, as the maintainer.** PR titles and
   descriptions, issue and PR comments, commit messages and release notes all go out under the

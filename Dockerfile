@@ -16,10 +16,10 @@ WORKDIR /app
 ENV UV_LINK_MODE=copy
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project --compile-bytecode $INFERENCE_EXTRA
+    uv sync --locked --no-dev --no-install-project --compile-bytecode $INFERENCE_EXTRA
 COPY printguard/ printguard/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --compile-bytecode $INFERENCE_EXTRA
+    uv sync --locked --no-dev --compile-bytecode $INFERENCE_EXTRA
 RUN apt-get update && apt-get install -y --no-install-recommends binutils \
     && find .venv \( -name '*.cpython-*.so' -o -name '*.abi3.so' \) -exec strip --strip-debug {} +
 
