@@ -15,11 +15,13 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
-from fakes import FakePlatform, FakeSocket, redirected_socket
+import websockets
+from fakes import FakePlatform, FakePluginRuntime, FakeSocket, redirected_socket
 
 from printguard.engine import engine as engine_module
 from printguard.engine import oauth, plugins, sockets, urls
 from printguard.engine.engine import MAX_PLUGIN_BODY, Engine
+from printguard.engine.platform import PLUGIN_HEADER
 from printguard.server.platform import ServerPlatform
 from printguard.server.public_network import PublicOnlyTransport
 
@@ -246,7 +248,7 @@ async def test_a_request_cannot_name_a_host_its_address_did_not(headers: object)
             await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "headers": headers})
         await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "headers": {"X-Forwarded-Host": "kept"}})
 
-    assert [sent["headers"] for sent in platform.http_requests if sent["url"].startswith(API)] == [{"X-Forwarded-Host": "kept"}]
+    assert [sent["headers"] for sent in platform.http_requests if sent["url"].startswith(API)] == [{"X-Forwarded-Host": "kept", PLUGIN_HEADER: "1"}]
 
 
 async def test_the_address_is_checked_again_with_its_secrets_filled_in() -> None:
@@ -791,7 +793,7 @@ async def test_a_request_carries_the_access_token_and_nothing_else_of_a_sign_in(
         with pytest.raises(RuntimeError, match="refers to a secret it does not hold"):
             await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "headers": {"A": f"{{{{secret.{name}}}}}"}})
 
-    assert [r["headers"] for r in platform.http_requests] == [{"A": "Bearer at-1"}]
+    assert [r["headers"] for r in platform.http_requests] == [{"A": "Bearer at-1", PLUGIN_HEADER: "1"}]
 
 
 @pytest.mark.parametrize(
@@ -840,3 +842,187 @@ async def test_a_plugin_is_connected_to_public_addresses_only_unless_it_holds_ne
 
     assert platform.http_requests[-1]["public_only"] is public_only
     assert platform.sockets[0].public_only is public_only
+
+
+@pytest.mark.parametrize("name", [PLUGIN_HEADER, PLUGIN_HEADER.lower(), PLUGIN_HEADER.upper()])
+async def test_everything_sent_for_a_plugin_carries_a_header_the_plugin_cannot_set(name: str) -> None:
+    """The hub refuses whatever arrives with it, which is what keeps a plugin on this network out of the hub's own API."""
+    platform = FakePlatform()
+    platform.responses[f"{API}/token"] = (200, {"access_token": "at-1", "refresh_token": "rt-1"})
+    async with engine_with(platform, SIGNS_IN) as engine:
+        await engine.finish_sign_in((await start_sign_in(engine))["state"][0], "code-1")
+        await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "headers": {"Accept": "text/plain"}})
+        with pytest.raises(RuntimeError, match=f"plugin demo may not set the {PLUGIN_HEADER} header"):
+            await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "headers": {name: "0"}})
+
+    sent = [request["headers"] for request in platform.http_requests if request["url"].startswith(API)]
+    assert sent[0][PLUGIN_HEADER] == "1", "the sign-in went without it"
+    assert sent[1:] == [{"Accept": "text/plain", PLUGIN_HEADER: "1"}]
+
+
+async def test_a_plugins_socket_carries_the_header_the_hub_refuses() -> None:
+    named: list[str | None] = []
+
+    async def feed(connection: websockets.ServerConnection) -> None:
+        named.append(connection.request.headers.get(PLUGIN_HEADER))
+
+    async with websockets.serve(feed, "127.0.0.1", 0) as server:
+        opened = await ServerPlatform.open_socket(None, f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}/feed", lambda state, text: None)
+        await opened.close()
+
+    assert named == ["1"]
+
+
+async def test_a_plugins_request_has_one_deadline_however_slowly_the_answer_arrives(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dashboard's socket waits as long as a command takes, and the platform's timeout is for each read."""
+    monkeypatch.setattr(engine_module, "PLUGIN_TIMEOUT_S", 0.1)
+
+    class Trickling(FakePlatform):
+        async def http(self, method: str, url: str, **request):
+            if url.startswith(API):
+                await asyncio.sleep(5.0)
+            return await super().http(method, url, **request)
+
+    async with engine_with(Trickling(), manifest("net", urls=[f"{API}/v1/*"])) as engine:
+        heard: list[dict] = []
+        await asyncio.wait_for(engine.handle({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/slow", "req_id": 1}, heard.append), 1.0)
+        refusals = [event["message"] for event in engine.recent_events()]
+
+    assert not [event for event in heard if event["event"] == "http"]
+    assert refusals == [], "a refusal that answers a command belongs to its caller"
+
+
+class GatedRuntime(FakePluginRuntime):
+    """A plugin runtime that records the gates it was told to refuse for."""
+
+    def __init__(self) -> None:
+        self.refusing: list[set[str]] = []
+
+    async def reload(self, running, failed_gates) -> None:
+        self.refusing.append(set(failed_gates))
+
+
+def stored(declared: dict, **record) -> dict:
+    """A plugin as the state file holds it."""
+    return {"id": declared["id"], "manifest": declared, "sources": {}, "digests": {}, "source": {"kind": "file"}, "installed": 1.0, **record}
+
+
+async def test_a_gate_an_update_stands_down_goes_on_refusing_until_it_is_accepted() -> None:
+    platform = FakePlatform()
+    platform.plugin_runtime = GatedRuntime()
+    async with engine_with(platform, manifest("gate")) as engine:
+        assert platform.plugin_runtime.refusing[-1] == set()
+        await install(engine, manifest("gate", "net", urls=[f"{API}/v1/*"]))
+        stood_down = platform.plugin_runtime.refusing[-1]
+        shown = engine.state_event()["plugins"][0]
+        await engine.request({"cmd": "plugin.update", "id": "demo", "patch": {"granted": ["gate", "net"], "enabled": True}})
+
+    assert stood_down == {"demo"}, "an update nobody had accepted left the hub open"
+    assert not shown["enabled"] and shown["failure"] == "this version asks for more than was accepted"
+    assert platform.plugin_runtime.refusing[-1] == set()
+
+
+async def test_a_gate_stood_down_or_dropped_at_start_goes_on_refusing() -> None:
+    platform = FakePlatform()
+    platform.plugin_runtime = GatedRuntime()
+    reaches_home = {**manifest("gate", "net", urls=["http://127.1/*"]), "id": "guard"}
+    platform.state = {
+        "plugins": [
+            stored(reaches_home, granted=["gate", "net"], enabled=True),
+            stored({"id": "broken"}, manifest=5, granted=["gate"], enabled=True),
+            stored({**manifest("net", urls=["http://127.1/*"]), "id": "reader"}, granted=["net"], enabled=True),
+            stored({"id": "unread"}, manifest=5, granted=["net"], enabled=True),
+        ]
+    }
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        refusing = platform.plugin_runtime.refusing[-1]
+        guard = engine.plugins.get("guard")
+        warned = engine.startup_warnings
+        await engine.request({"cmd": "plugin.remove", "id": "guard"})
+        after_removal = platform.plugin_runtime.refusing[-1]
+    finally:
+        await engine.stop()
+
+    assert refusing == {"guard", "broken"}, "a gate the hub switched off or could not read left the hub open"
+    assert not guard.enabled and "has not been accepted" in guard.failure
+    assert any("(broken)" in warning and "every request is refused" in warning for warning in warned), warned
+    assert after_removal == {"broken"}
+
+
+class HeldTokens(FakePlatform):
+    """Holds the token endpoint's answer until told, the way a slow provider does."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked = asyncio.Event()
+        self.answer = asyncio.Event()
+        self.answer.set()
+
+    async def http(self, method: str, url: str, **request):
+        if url == f"{API}/token":
+            self.asked.set()
+            await self.answer.wait()
+        return await super().http(method, url, **request)
+
+
+@asynccontextmanager
+async def refreshing(platform: HeldTokens):
+    """Signs the demo plugin in, expires its token and starts a request that waits on the refresh."""
+    platform.responses[f"{API}/token"] = (200, {"access_token": "at-1", "refresh_token": "rt-1"})
+    async with engine_with(platform, SIGNS_IN) as engine:
+        await engine.finish_sign_in((await start_sign_in(engine))["state"][0], "code-1")
+        engine.plugins.get("demo").secrets[oauth.EXPIRES] = "0"
+        platform.responses[f"{API}/token"] = (200, {"access_token": "at-2", "refresh_token": "rt-2"})
+        platform.asked.clear()
+        platform.answer.clear()
+        request = asyncio.ensure_future(engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now"}))
+        await platform.asked.wait()
+        yield engine, request
+
+
+async def test_a_plugin_removed_while_its_token_is_renewed_sends_nothing() -> None:
+    platform = HeldTokens()
+    async with refreshing(platform) as (engine, request):
+        await engine.request({"cmd": "plugin.remove", "id": "demo"})
+        platform.answer.set()
+        with pytest.raises(RuntimeError, match="plugin may not reach the network"):
+            await request
+
+    assert not [sent for sent in platform.http_requests if sent["url"] == f"{API}/v1/now"]
+    assert platform.state["plugins"] == []
+
+
+async def test_a_plugin_reinstalled_while_its_token_is_renewed_keeps_the_new_session() -> None:
+    """The provider has retired the refresh token that was spent, so the record now installed needs the one it answered with."""
+    platform = HeldTokens()
+    async with refreshing(platform) as (engine, request):
+        await install(engine, SIGNS_IN)
+        platform.answer.set()
+        with pytest.raises(RuntimeError, match="plugin may not reach the network"):
+            await request
+        installed = engine.plugins.get("demo")
+
+    assert not installed.enabled and installed.secrets[oauth.REFRESH] == "rt-2"
+    assert platform.state["plugins"][0]["secrets"][oauth.REFRESH] == "rt-2"
+
+
+async def test_a_disconnect_made_while_a_token_is_renewed_stands() -> None:
+    platform = HeldTokens()
+    async with refreshing(platform) as (engine, request):
+        await engine.request({"cmd": "plugin.oauth", "id": "demo", "action": "forget"})
+        platform.answer.set()
+        await request
+        held = engine.plugins.get("demo").secrets
+
+    assert set(held) == {oauth.CLIENT_ID}, "the refresh in flight signed the plugin back in"
+    assert set(platform.state["plugins"][0]["secrets"]) == {oauth.CLIENT_ID}
+
+
+async def test_a_plugin_that_signs_in_can_make_a_request_before_anybody_types_a_client_id() -> None:
+    platform = FakePlatform()
+    async with engine_with(platform, SIGNS_IN) as engine:
+        answer = await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/public"})
+
+    assert [event["status"] for event in answer if event["event"] == "http"] == [200]

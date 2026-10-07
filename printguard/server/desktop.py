@@ -342,10 +342,14 @@ class _Server:
     """
 
     def __init__(self, port: int) -> None:
-        from .app import WEBSOCKET_MAX_BYTES, create_app
+        from .app import SHUTDOWN_GRACE_S, WEBSOCKET_MAX_BYTES, create_app
 
         self._port = port
-        self._server = uvicorn.Server(uvicorn.Config(create_app(), log_config=None, access_log=False, ws_max_size=WEBSOCKET_MAX_BYTES))
+        self._server = uvicorn.Server(
+            uvicorn.Config(
+                create_app(), log_config=None, access_log=False, ws_max_size=WEBSOCKET_MAX_BYTES, timeout_graceful_shutdown=SHUTDOWN_GRACE_S
+            )
+        )
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self.port_held = False
 

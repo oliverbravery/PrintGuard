@@ -291,13 +291,19 @@ class Watchdog:
         also ends the defect streak, so the frames either side of the gap are
         not counted as consecutive.
 
+        Each monitor is read when its turn comes, and re-attaching its camera
+        is the last thing done for it, since that is awaited and a monitor
+        edited or removed meanwhile must not be warned about as it was.
+
         Returns:
             Seconds until the next check.
         """
         now = time.monotonic()
         grace = self._engine.settings["fault_grace_s"]
-        for monitor in list(self._engine.monitors.values()):
-            mid = monitor["id"]
+        for mid in list(self._engine.monitors):
+            monitor = self._engine.monitors.get(mid)
+            if monitor is None:
+                continue
             watching = monitor_watching(monitor, self._engine.printers)
             printer = self._engine.printers.get(monitor["printer_id"]) if monitor.get("printer_id") else None
             device_key = f"device:{mid}"
@@ -348,8 +354,7 @@ class Watchdog:
                 f"Camera '{camera.name}' is offline, so '{monitor['name']}' is NOT being monitored",
                 f"Camera '{camera.name}' is back, so '{monitor['name']}' is monitored again",
             )
-            if not camera.online and self._due_restart(offline_key, camera, now):
-                await self._engine.restart_camera(camera)
+            restart = not camera.online and self._due_restart(offline_key, camera, now)
             if not camera.online and offline_key in self._warned:
                 self._forget(stall_key)
             progressing = (
@@ -367,11 +372,12 @@ class Watchdog:
                     f"Camera '{camera.name}' feed has stalled, so '{monitor['name']}' is NOT being monitored",
                     f"Camera '{camera.name}' feed recovered, so '{monitor['name']}' is monitored again",
                 )
-            if camera.online and not progressing and self._due_restart(stall_key, camera, now):
-                await self._engine.restart_camera(camera)
+            restart = restart or (camera.online and not progressing and self._due_restart(stall_key, camera, now))
             if not (camera.online and progressing):
                 self.drop_streak(mid)
             await self._cover(monitor, camera, offline_key in self._warned or stall_key in self._warned, camera.online and progressing, now)
+            if restart:
+                await self._engine.restart_camera(camera)
         return WATCH_TICK_S
 
     def _forget(self, key: str) -> None:

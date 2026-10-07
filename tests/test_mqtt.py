@@ -365,6 +365,50 @@ async def test_a_removed_monitor_leaves_nothing_retained_even_when_the_bridge_wa
         await engine.stop()
 
 
+async def test_unlinking_a_printer_tells_home_assistant_to_drop_its_entities(monkeypatch) -> None:
+    """Home Assistant keeps a component a newer config leaves out, so the buttons stayed behind and did nothing."""
+    import json
+
+    broker, engine, bridge = await _bridged(monkeypatch, {"enabled": True, "host": "broker"})
+
+    def configs() -> list[dict[str, Any]]:
+        return [json.loads(payload)["components"] for topic, payload, _ in broker.published if topic.endswith("/config") and payload]
+
+    try:
+        await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 10.0}})
+        await engine.handle({"cmd": "printer.add", "printer": {"name": "P", "provider": "octoprint", "config": {"base_url": "http://printer", "api_key": "k"}}})
+        printer_id = next(iter(engine.printers.items))
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "M", "camera_id": next(iter(engine.cameras.items)), "printer_id": printer_id}})
+        monitor_id = next(iter(engine.monitors))
+        await _until(lambda: configs() and "pause" in configs()[-1])
+        linked = configs()[-1]
+        printer_parts = {key: {"p": part["p"]} for key, part in linked.items() if key not in ("defect", "score", "phase", "enabled", "snapshot")}
+        assert {"printer_status", "progress", "pause", "resume", "cancel"} <= set(printer_parts)
+
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"printer_id": ""}})
+        await _until(lambda: "pause" not in configs()[-1])
+        removal, settled = configs()[-2:]
+        assert {key: part for key, part in removal.items() if key in printer_parts} == printer_parts
+        assert set(settled) == {"defect", "score", "phase", "enabled", "snapshot"} == set(removal) - set(printer_parts)
+
+        published = len(configs())
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"name": "Renamed"}})
+        await _until(lambda: len(configs()) > published)
+        assert len(configs()) == published + 1, "the removal goes out once"
+    finally:
+        await bridge.stop()
+        await engine.stop()
+
+
+def test_the_bridge_queues_only_the_events_it_acts_on() -> None:
+    """Every plugin socket frame and warning used to wait behind a slow broker."""
+    bridge = mqtt.MqttBridge(SimpleNamespace(), dict)
+    for kind in ("socket", "warning", "http", "alert"):
+        bridge._sink({"event": kind})
+
+    assert list(bridge._queue._events) == [{"event": "alert"}]
+
+
 async def test_a_bridge_survives_settings_it_cannot_use(monkeypatch) -> None:
     config: dict[str, Any] = {"enabled": True, "host": "broker", "port": "abc"}
     broker, engine, bridge = await _bridged(monkeypatch, config)

@@ -7,7 +7,6 @@ authInternalUsers:
   - user: any
     permissions:
       - action: publish
-      - action: playback
 
 rtsp: yes
 rtspAddress: :8554

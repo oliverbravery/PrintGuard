@@ -17,6 +17,7 @@ import pytest
 
 from printguard.server import app as app_module
 from printguard.server.app import ASSET_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, WebStaticFiles, create_app, host_trusted
+from printguard.server import events as events_module
 from printguard.server.events import ConflatedEventQueue, parse_json
 
 
@@ -380,6 +381,47 @@ async def test_a_tick_state_queued_before_a_commands_state_is_not_delivered_afte
     assert await queue.get() == {"event": "state", "req_id": 7, "version": "command"}
     assert await queue.get() == {"event": "warning", "message": "camera stalled"}
     assert queue._state is None and not queue._events
+
+
+async def test_a_queue_nobody_is_reading_fails_its_reader_instead_of_growing() -> None:
+    """A plugin socket's frames are 256 KB each, and a dashboard that stopped reading kept every one."""
+    queue = ConflatedEventQueue()
+    for number in range(events_module.MAX_ORDERED_EVENTS + 50):
+        queue.put({"event": "socket", "text": str(number)})
+
+    assert not queue._events
+    with pytest.raises(OverflowError, match="256 events"):
+        await queue.overflow()
+
+
+async def test_a_dashboard_that_stops_reading_is_closed_to_reconnect(monkeypatch) -> None:
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+
+    monkeypatch.setattr(events_module, "MAX_ORDERED_EVENTS", 8)
+    engine = Engine(FakePlatform())
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    stuck = asyncio.Event()
+    listening = len(engine._sinks)
+
+    class StuckTab(Tab):
+        async def _keep(self, message: dict) -> None:
+            if message["type"] == "websocket.send":
+                await stuck.wait()
+            await super()._keep(message)
+
+    try:
+        async with StuckTab(app) as tab:
+            await asyncio.sleep(0.05)
+            for number in range(10):
+                engine.emit({"event": "socket", "id": "plugin", "tag": "feed", "state": "message", "text": str(number)})
+            assert await tab.closed() == 1013
+            assert len(engine._sinks) == listening
+    finally:
+        await engine.stop()
 
 
 async def test_hls_view_wakes_camera_before_proxying() -> None:
@@ -1252,7 +1294,7 @@ async def test_a_failed_publish_closes_its_socket_without_the_streaming_servers_
     assert "Connection refused" in reason and "RTSP-PASS-77" not in reason
 
 
-@pytest.mark.parametrize("path", ["/hls/%00", "/hls/%ff%fe", "/hls/cam/%7f.m3u8"])
+@pytest.mark.parametrize("path", ["/hls/%00", "/hls/%ff%fe", "/hls/cam/%7f.m3u8", "/hls//x:abc/y", "/hls//mediamtx.example/cam/index.m3u8"])
 async def test_a_stream_path_that_cannot_be_asked_for_is_a_404(path: str) -> None:
     """These answered 500 with a traceback in the log, to anyone who could reach the hub."""
     platform = SimpleNamespace(view_camera=AsyncMock(), plugin_runtime=None)
@@ -1312,3 +1354,16 @@ async def test_a_page_on_another_site_cannot_call_the_rest_api_or_the_mcp_server
                 assert (await client.post("/api/v1/classify", content=b"\xff\xd8jpeg", headers=allowed)).status_code == 200, allowed
     finally:
         await engine.stop()
+
+
+async def test_what_the_hub_sent_for_a_plugin_is_refused_when_it_comes_back_to_the_hub(monkeypatch) -> None:
+    """With no token issued the API answers anybody, so a plugin that may reach this network would read what its permissions keep from it."""
+    marked = {"x-printguard-plugin": "1"}
+    async with named_hub(monkeypatch) as (app, client, _told):
+        for path in ("/api/v1/state", "/mcp", "/hls/x/index.m3u8", "/api/health", "/"):
+            refused = await client.get(path, headers=marked)
+            assert refused.status_code == 403 and "a plugin made" in refused.text, path
+        assert (await client.get("/api/health")).status_code == 200
+        dashboard = {"host": "test", "origin": "http://test"}
+        assert await handshake_answer(app, "/api/ws", {**dashboard, **marked}) == "websocket.close"
+        assert await handshake_answer(app, "/api/publish/cam", {**dashboard, **marked}) == "websocket.close"

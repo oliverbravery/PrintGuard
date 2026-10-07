@@ -10,6 +10,7 @@ import contextlib
 import logging
 import os
 import signal
+import socket
 import subprocess
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit, urlunsplit
@@ -44,6 +45,30 @@ def pull_source(url: str) -> str | None:
     return url
 
 
+async def _on_this_machine(host: str) -> bool:
+    """Whether a host name or address belongs to the machine the hub runs on.
+
+    Args:
+        host: A name or an address from a URL.
+
+    Returns:
+        True when it resolves to an address a socket here can be bound to,
+        which only an address of one of this machine's own interfaces can be.
+    """
+    try:
+        resolved = await asyncio.get_running_loop().getaddrinfo(host, 0, type=socket.SOCK_DGRAM)
+    except OSError:
+        return False
+    for family, kind, protocol, _name, address in resolved:
+        with socket.socket(family, kind, protocol) as probe:
+            try:
+                probe.bind(address)
+            except OSError:
+                continue
+        return True
+    return False
+
+
 class MediaMTX:
     """Manages stream paths on a MediaMTX instance.
 
@@ -75,6 +100,28 @@ class MediaMTX:
     def rtsp_url(self, path: str) -> str:
         """Internal RTSP URL the server reads frames from, with the login a bundled server asks readers for."""
         return f"{self._rtsp}/{path}"
+
+    async def own_path(self, url: str) -> str | None:
+        """Names the path a URL reads from this server's own RTSP listener.
+
+        A stream pushed to the hub can be added by the address it was pushed
+        to. Pulled as any other address it would be this server asking itself
+        with no login, which a bundled server refuses.
+
+        Args:
+            url: A camera's address.
+
+        Returns:
+            The path, or None when the address is not this server's listener
+            on the machine the hub runs on.
+        """
+        asked, own = urlsplit(url), urlsplit(self._rtsp)
+        path = asked.path.strip("/")
+        if asked.scheme != "rtsp" or not asked.hostname or not path or (asked.port or 554) != (own.port or 554):
+            return None
+        if not (await _on_this_machine(asked.hostname) and await _on_this_machine(own.hostname)):
+            return None
+        return path
 
     async def list_paths(self) -> list[str]:
         """Names of currently active stream paths."""
@@ -144,9 +191,19 @@ class MediaMTX:
         A camera that is being watched finds its way back by reconnecting, but
         one asleep until its printer starts is only asked for by a viewer, and
         the server would answer that it has no such path.
+
+        Raises:
+            RuntimeError: If any path could not be added, naming each one and
+                why, after every other path has been tried.
         """
+        failed: list[str] = []
         for name, payload in list(self._pulled.items()):
-            await self._add_path(name, payload)
+            try:
+                await self._add_path(name, payload)
+            except Exception as exc:
+                failed.append(f"{name} ({exc})")
+        if failed:
+            raise RuntimeError(", ".join(failed))
 
 
 class EmbeddedMediaMTX:

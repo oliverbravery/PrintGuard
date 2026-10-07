@@ -34,6 +34,7 @@ import printguard
 
 from ..engine import logs, oauth
 from ..engine.engine import Engine
+from ..engine.platform import PLUGIN_HEADER
 from ..engine.reports import MESSAGE_STANDALONE_BELOW, scrub, url_secrets
 from ..engine.urls import DEFAULT_PORTS, LOCAL_HOSTNAMES, LOCAL_SUFFIXES
 from .api import ApiAuth, build_api_app
@@ -249,6 +250,28 @@ class HostGuard:
             await PlainTextResponse(message, status_code=403)(scope, receive, send)
 
 
+class PluginGuard:
+    """Refuses every request and socket the hub made for a plugin.
+
+    The API answers anybody on the hub's network while no token is issued, so a
+    plugin that may reach that network would read the state, stills and history
+    its permissions keep from it. Whatever is sent for a plugin carries
+    ``PLUGIN_HEADER``, whichever address, name or proxy brings it back here.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Passes a request on, or answers 403 to one carrying the plugin header."""
+        if scope["type"] not in ("http", "websocket") or PLUGIN_HEADER not in Headers(scope=scope):
+            await self._app(scope, receive, send)
+        elif scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1008, "reason": "a plugin may not reach the hub"})
+        else:
+            await PlainTextResponse("PrintGuard refused a request a plugin made to the hub itself.", status_code=403)(scope, receive, send)
+
+
 class OriginGuard:
     """Refuses a request to the REST API or the MCP server that a page on another site made.
 
@@ -281,6 +304,11 @@ PLUGIN_RESPONSE_HEADERS = ("set-cookie", "location", "cache-control")
 PLUGIN_BODY_LIMIT = 64 * 1024
 SOCKET_COMMANDS_IN_FLIGHT = 16
 WEBSOCKET_MAX_BYTES = 24 * 1024 * 1024
+SHUTDOWN_GRACE_S = 3.0
+"""How long a stopping server waits for open requests before it cancels them.
+Uvicorn otherwise waits without end, and an MCP client holds a stream open for
+as long as it is connected, so the engine would never be stopped, Home
+Assistant never told the hub is offline and the last state never written."""
 PLUGIN_PAGE_CSP = (
     "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob: data:; "
     "font-src data:; connect-src 'none'; form-action 'self'; base-uri 'none'; sandbox allow-forms allow-scripts; frame-ancestors 'none'"
@@ -458,6 +486,7 @@ def create_app() -> FastAPI:
     app.add_middleware(McpSlash)
     app.add_middleware(OriginGuard, allowed=allowed_origins)
     app.add_middleware(HostGuard, named={urlsplit(origin).hostname or "" for origin in allowed_origins})
+    app.add_middleware(PluginGuard)
 
     @app.api_route("/plugins/{plugin_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
     async def plugin_route(plugin_id: str, path: str, request: Request) -> Response:
@@ -540,6 +569,8 @@ def create_app() -> FastAPI:
         and ahead of the tab closing, since a close read first would cancel it unrun.
         A tab with ``SOCKET_COMMANDS_IN_FLIGHT`` commands running is not read
         from until one finishes, so one socket cannot pile up tasks without end.
+        One that stops reading its events is closed with 1013 once its queue is
+        full, and the dashboard reconnects to a fresh snapshot.
         """
         if not origin_allowed(websocket, allowed_origins, required=True):
             logger.warning("rejected cross-origin engine socket (origin=%s)", websocket.headers.get("origin"))
@@ -574,19 +605,25 @@ def create_app() -> FastAPI:
                         await asyncio.sleep(0)
 
         engine.add_sink(queue.put)
-        tasks = [asyncio.ensure_future(pump()), asyncio.ensure_future(receive())]
+        tasks = [asyncio.ensure_future(pump()), asyncio.ensure_future(receive()), asyncio.ensure_future(queue.overflow())]
+        behind = False
         try:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 task.result()
         except* WebSocketDisconnect:
             pass
+        except* OverflowError:
+            behind = True
         finally:
             logger.info("UI disconnected")
             engine.remove_sink(queue.put)
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+        if behind:
+            logger.warning("closed a UI connection that stopped reading its events")
+            await websocket.close(code=1013, reason="too far behind")
 
     hls_warned_at = [0.0]
 
@@ -605,11 +642,12 @@ def create_app() -> FastAPI:
 
         A path with anything but printable ASCII in it is a 404 here, since no
         stream has such a name and neither the request to MediaMTX nor the
-        redirect it answers with can carry one.
+        redirect it answers with can carry one. So is one that starts with a
+        slash, which would be read as the host to ask in place of MediaMTX.
         """
         if not origin_allowed(request, allowed_origins):
             raise HTTPException(403, "origin not allowed")
-        if not (path.isascii() and path.isprintable()):
+        if not (path.isascii() and path.isprintable()) or path.startswith("/"):
             raise HTTPException(404, "no such stream")
         await app.state.engine.platform.view_camera(path.split("/", 1)[0])
         client: httpx.AsyncClient = app.state.hls
@@ -691,7 +729,15 @@ def main() -> None:
     the root handlers, and without access logs - per-request lines for the
     HLS polling would drown the tail that bug reports attach.
     """
-    uvicorn.run(create_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), log_config=None, access_log=False, ws_max_size=WEBSOCKET_MAX_BYTES)
+    uvicorn.run(
+        create_app(),
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "8000")),
+        log_config=None,
+        access_log=False,
+        ws_max_size=WEBSOCKET_MAX_BYTES,
+        timeout_graceful_shutdown=SHUTDOWN_GRACE_S,
+    )
 
 
 if __name__ == "__main__":

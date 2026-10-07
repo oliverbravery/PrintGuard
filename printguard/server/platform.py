@@ -30,7 +30,7 @@ import websockets
 from av.video.reformatter import VideoReformatter
 from ..engine import logs, vision
 from ..engine.adapters import redirect_message
-from ..engine.platform import Frame, Notice, Redirects
+from ..engine.platform import PLUGIN_HEADER, Frame, Notice, Redirects
 from ..engine.reports import scrub_url, url_secrets
 from .bambu_camera import open_bambu_jpeg_stream
 from .events import parse_json, require_finite
@@ -78,6 +78,11 @@ frame that decodes to gigabytes, and an 8K frame is 33 million."""
 
 SOCKET_TIMEOUT_S = 10.0
 SOCKET_MAX_BYTES = 256 * 1024
+SOCKET_FLOOD_FRAMES = 300
+SOCKET_FLOOD_WINDOW_S = 10.0
+"""Frames one plugin socket may receive in a window before it is closed. Each
+frame becomes an event for every dashboard and the plugin's worker, so a server
+sending them at wire speed would otherwise set the hub's pace."""
 DEVICE_SIZE_CAP = 1280 * 720
 DEVICE_PIXEL_FORMATS = {"420v": "nv12", "420f": "nv12", "yuvs": "yuyv422", "2vuy": "uyvy422"}
 """AVFoundation format subtypes mapped to ffmpeg pixel formats. avfoundation
@@ -352,7 +357,8 @@ class AVSource:
     Frames are converted to RGB through one reused single-threaded scaler,
     for the reason H264Push documents, and one conversion at a time: a scaler
     is a single FFmpeg context, and the scheduler and a snapshot request can
-    both ask for the freshest frame at once.
+    both ask for the freshest frame at once. The conversion's own thread holds
+    that turn, since a cancelled ``grab`` leaves its thread still converting.
     """
 
     def __init__(
@@ -378,7 +384,7 @@ class AVSource:
         self._latest: tuple[av.VideoFrame, float, float] | None = None
         self._latest_rgb: Frame | None = None
         self._reformatter = VideoReformatter()
-        self._converting = asyncio.Lock()
+        self._converting = threading.Lock()
         self._seq = 0
         self._stop = False
         self._monitoring = True
@@ -535,18 +541,18 @@ class AVSource:
         latest = self._latest
         if latest is None or not self.online:
             return None
+        return await asyncio.to_thread(self._converted, latest)
+
+    def _converted(self, latest: tuple[av.VideoFrame, float, float]) -> Frame:
+        """Converts a decoded frame to RGB on the calling thread, or hands back the one already converted."""
         frame, seq, ts = latest
-        async with self._converting:
+        with self._converting:
             if self._latest_rgb is not None and self._latest_rgb.seq == seq:
                 return self._latest_rgb
-            rgb = await asyncio.to_thread(self._to_rgb, frame)
-            result = Frame(rgb=rgb, seq=seq, ts=ts)
+            result = Frame(rgb=self._reformatter.reformat(frame, format="rgb24", threads=1).to_ndarray(), seq=seq, ts=ts)
             if self._latest is latest:
                 self._latest_rgb = result
             return result
-
-    def _to_rgb(self, frame: av.VideoFrame) -> np.ndarray:
-        return self._reformatter.reformat(frame, format="rgb24", threads=1).to_ndarray()
 
     def close(self) -> None:
         """Asks the reader thread to stop."""
@@ -627,17 +633,32 @@ class WebSocket:
         self._reader: asyncio.Task[None] | None = None
 
     def read(self, arrived: Callable[[str, str], None]) -> None:
-        """Starts reporting frames, and reports the close whatever ends it."""
+        """Starts reporting frames, and reports the close whatever ends it.
+
+        A socket sent more than ``SOCKET_FLOOD_FRAMES`` frames inside
+        ``SOCKET_FLOOD_WINDOW_S`` is closed, and its ``closed`` carries the reason.
+        """
 
         async def pump() -> None:
             arrived("open", "")
+            flooded = ""
+            window_ends, frames = 0.0, 0
             try:
                 async for frame in self._connection:
+                    now = time.monotonic()
+                    if now >= window_ends:
+                        window_ends, frames = now + SOCKET_FLOOD_WINDOW_S, 0
+                    frames += 1
+                    if frames > SOCKET_FLOOD_FRAMES:
+                        flooded = f"it was sent more than {SOCKET_FLOOD_FRAMES} frames in {SOCKET_FLOOD_WINDOW_S:.0f} seconds"
+                        break
                     arrived("message", frame if isinstance(frame, str) else frame.decode("utf-8", "replace"))
             except Exception as exc:
                 logger.info("plugin socket ended: %s", exc)
             finally:
-                arrived("closed", "")
+                arrived("closed", flooded)
+            if flooded:
+                self._connection.transport.abort()
 
         self._reader = asyncio.ensure_future(pump())
 
@@ -816,7 +837,8 @@ class ServerPlatform:
     async def open_camera(self, camera_id: str, source: dict[str, Any]) -> AVSource:
         """Attaches to a stream, getting URL sources into MediaMTX for viewers.
 
-        RTSP/RTMP URLs and WebRTC WHEP endpoints are pulled by MediaMTX;
+        RTSP/RTMP URLs and WebRTC WHEP endpoints are pulled by MediaMTX, with
+        its own login when the address is a stream pushed to its own listener;
         HTTP/MJPEG ones are read directly and transcoded back into MediaMTX so
         both inference and viewers see them. Device sources are the host's own
         cameras, captured through libavdevice in this process - not a browser
@@ -851,6 +873,9 @@ class ServerPlatform:
                 target = source["url"]
                 publish_url = self.mediamtx.rtsp_url(camera_id)
             else:
+                pushed = await self.mediamtx.own_path(source["url"])
+                if pushed is not None:
+                    pulled = self.mediamtx.rtsp_url(pushed)
                 await self.mediamtx.ensure_path(camera_id, pulled, source.get("fingerprint"))
                 target = self.mediamtx.rtsp_url(camera_id)
                 shown_as = scrub_url(source["url"])
@@ -978,10 +1003,12 @@ class ServerPlatform:
         return resp.status_code, _parsed(content, resp.encoding, binary)
 
     async def open_socket(self, url: str, arrived: Callable[[str, str], None], public_only: bool = False) -> WebSocket:
-        """Connects a WebSocket and reads it on a task of its own.
+        """Connects a plugin's WebSocket and reads it on a task of its own.
 
         A ``public_only`` connection is made to an address checked as
         ``http`` checks it, and not through a proxy named in the environment.
+        The handshake carries ``PLUGIN_HEADER``, so the hub refuses one that
+        comes back to itself.
 
         Raises:
             PermissionError: If ``public_only`` is set and the host is on this
@@ -989,7 +1016,7 @@ class ServerPlatform:
             websockets.InvalidStatus: If the server answers with anything but
                 the upgrade, a redirect included.
         """
-        options: dict[str, Any] = {"open_timeout": SOCKET_TIMEOUT_S, "max_size": SOCKET_MAX_BYTES}
+        options: dict[str, Any] = {"open_timeout": SOCKET_TIMEOUT_S, "max_size": SOCKET_MAX_BYTES, "additional_headers": {PLUGIN_HEADER: "1"}}
         if public_only:
             target = urlsplit(url)
             port = target.port or (443 if target.scheme == "wss" else 80)

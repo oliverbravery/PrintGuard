@@ -131,7 +131,11 @@ class Camera:
         self.last_result = result
 
     def public(self) -> dict[str, Any]:
-        """Serialises the camera with live stats for the state event, its source without credentials."""
+        """Serialises the camera with live stats for the state event, its source without credentials.
+
+        The allocated and achieved rates read 0 while the camera is offline,
+        since the last ones measured are not being achieved.
+        """
         return {
             "id": self.id,
             "name": self.name,
@@ -140,8 +144,8 @@ class Camera:
             "declared": self.declared,
             "max_fps": round(self.max_fps, 2),
             "detect_fps": round(self.detect_fps, 2),
-            "target_fps": round(self.target_fps, 2),
-            "achieved_fps": round(self.achieved_fps, 2),
+            "target_fps": round(self.target_fps if self.online else 0.0, 2),
+            "achieved_fps": round(self.achieved_fps if self.online else 0.0, 2),
             "inferring": self.inferring,
             "in_use": self.in_use,
             "online": self.online,

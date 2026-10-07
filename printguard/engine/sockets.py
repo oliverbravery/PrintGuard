@@ -40,7 +40,8 @@ OpenFn = Callable[[str, Callable[[str, str], None], bool], Awaitable[Socket]]
 """Opens a URL, refusing this network when told to, and calls back with ``(state, text)`` for every frame.
 
 State is ``open`` when the connection is up, ``message`` for each frame, and
-``closed`` once it ends for any reason.
+``closed`` once it ends for any reason, with text only when the platform ended
+it itself and has a reason to give.
 """
 
 
@@ -94,6 +95,8 @@ class SocketBroker:
         def arrived(state: str, text: str) -> None:
             if state == "closed" and socket is not None and self._sockets.get(key) is socket:
                 del self._sockets[key]
+            if state == "closed" and text:
+                self._emit({"event": "error", "message": f"plugin {plugin_id} had a socket closed: {text}"})
             self._emit({"event": "socket", "id": plugin_id, "tag": tag, "state": state, "text": text})
 
         self._opening[key] = arrived

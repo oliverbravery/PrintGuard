@@ -11,8 +11,9 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
+from contextlib import asynccontextmanager
 from importlib.metadata import version as package_version
-from typing import Annotated, Any, Awaitable, Callable, Literal
+from typing import Annotated, Any, AsyncIterator, Awaitable, Callable, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
@@ -195,7 +196,9 @@ UPLOAD_BODY = {
 }
 MAX_FRAME_BYTES = 32 * 1024 * 1024
 CLASSIFY_IN_FLIGHT = 2
-"""Supplied images decoded and scored at once. One decodes to as much as 150 MB, and the rest wait their turn."""
+"""Supplied images read, decoded and scored at once. One decodes to as much as 150 MB, and the rest wait their turn."""
+CLASSIFY_WAITING = 8
+"""Callers that may wait for one of those turns. One past that is refused, since each holds a connection open."""
 FRAME_BODY = {
     "requestBody": {
         "required": True,
@@ -289,21 +292,42 @@ def public_state(engine: Engine) -> dict[str, Any]:
     return state
 
 
-async def classify(api: FastAPI, data: bytes) -> dict[str, Any]:
-    """Classifies a supplied image for the REST route and the MCP tool, ``CLASSIFY_IN_FLIGHT`` at a time.
+class Busy(Exception):
+    """As many callers as may wait for a turn are already waiting."""
 
-    Args:
-        api: The REST app, which holds the engine and the slots.
-        data: The image file's bytes.
 
-    Returns:
-        The model's verdict and defect score.
+class Turns:
+    """Lets a few callers work at once and a few more wait, and refuses the rest.
 
-    Raises:
-        RuntimeError: If the image cannot be decoded.
+    A caller takes its turn before it reads the image it was sent, so the ones
+    waiting hold a connection each and no image.
     """
-    async with api.state.classifying:
-        return await api.state.engine.classify(data)
+
+    def __init__(self, at_once: int, waiting: int) -> None:
+        """Sets the bounds.
+
+        Args:
+            at_once: How many may hold a turn together.
+            waiting: How many more may wait for one.
+        """
+        self._working = asyncio.Semaphore(at_once)
+        self._room = at_once + waiting
+
+    @asynccontextmanager
+    async def turn(self) -> AsyncIterator[None]:
+        """Holds a turn for the block, waiting for one if it must.
+
+        Raises:
+            Busy: If too many callers are waiting already.
+        """
+        if not self._room:
+            raise Busy("too many images are waiting to be classified, try again in a moment")
+        self._room -= 1
+        try:
+            async with self._working:
+                yield
+        finally:
+            self._room += 1
 
 
 def build_api_app(auth: ApiAuth) -> FastAPI:
@@ -317,7 +341,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
     )
     api.router.route_class = ScopedRoute
     api.state.api_auth = auth
-    api.state.classifying = asyncio.Semaphore(CLASSIFY_IN_FLIGHT)
+    api.state.classifying = Turns(CLASSIFY_IN_FLIGHT, CLASSIFY_WAITING)
 
     @api.exception_handler(RuntimeError)
     async def command_failed(request: Request, exc: RuntimeError) -> JSONResponse:
@@ -329,6 +353,11 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         """Answers 422 without echoing the input, since a NaN in it cannot be written as JSON."""
         errors = [{key: value for key, value in error.items() if key != "input"} for error in exc.errors()]
         return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
+
+    @api.exception_handler(Busy)
+    async def turned_away(request: Request, exc: Busy) -> JSONResponse:
+        """Answers 503 to an image sent while too many are waiting to be classified."""
+        return JSONResponse(status_code=503, content={"detail": str(exc)}, headers={"Retry-After": "1"})
 
     @api.exception_handler(TimeoutError)
     async def command_timeout(request: Request, exc: TimeoutError) -> JSONResponse:
@@ -519,9 +548,10 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         return Response(jpeg, media_type="image/jpeg")
 
     @api.post("/classify", operation_id="classify_frame", tags=["read"], openapi_extra=FRAME_BODY)
-    async def classify_frame(request: Request) -> dict[str, Any]:
+    async def classify_frame(request: Request, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
         """Classifies a supplied JPEG frame - the model's verdict without a registered camera."""
-        return await classify(api, b"".join([chunk async for chunk in capped(request.stream(), MAX_FRAME_BYTES)]))
+        async with api.state.classifying.turn():
+            return await engine.classify(b"".join([chunk async for chunk in capped(request.stream(), MAX_FRAME_BYTES)]))
 
     @api.post("/cameras", operation_id="add_camera", tags=["manage"], response_model=list[CameraOut])
     async def add_camera(body: CameraCreate, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:

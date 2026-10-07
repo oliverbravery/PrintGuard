@@ -166,6 +166,55 @@ async def test_pull_paths_are_added_again_to_a_server_that_restarted() -> None:
     assert json.loads(requests[0].content)["sourceFingerprint"] == "ab12"
 
 
+async def test_a_path_that_cannot_be_added_again_does_not_stop_the_rest() -> None:
+    """The first failure ended the loop, so every camera after it stayed without a path."""
+    added: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        name = request.url.path.rsplit("/", 1)[1]
+        if request.method == "POST" and name == "first" and added:
+            return httpx.Response(400, json={"error": "invalid source"})
+        added.append(name)
+        return httpx.Response(200)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        mediamtx = MediaMTX("http://mediamtx", "rtsp://mediamtx", client)
+        for name in ("first", "second", "third"):
+            await mediamtx.ensure_path(name, f"rtsp://user:hunter22@camera/{name}")
+        added[:] = ["restarted"]
+        with pytest.raises(RuntimeError, match=r"^first \(PrintGuard can't use that address: invalid source\)$"):
+            await mediamtx.restore_paths()
+
+    assert added == ["restarted", "second", "third"]
+
+
+@pytest.mark.parametrize(
+    ("url", "path"),
+    [
+        ("rtsp://localhost:8554/garage", "garage"),
+        ("rtsp://127.0.0.1:8554/garage", "garage"),
+        ("rtsp://viewer:pass@127.0.0.1:8554/garage/", "garage"),
+        ("rtsp://127.0.0.1:8555/garage", None),
+        ("rtsp://127.0.0.1/garage", None),
+        ("rtsp://127.0.0.1:8554/", None),
+        ("rtsp://192.0.2.7:8554/garage", None),
+        ("rtsp://camera.invalid:8554/garage", None),
+        ("rtmp://127.0.0.1:8554/garage", None),
+    ],
+)
+async def test_only_an_address_on_the_hubs_own_rtsp_listener_names_one_of_its_paths(url: str, path: str | None) -> None:
+    """A stream pushed to the hub and added by address was pulled with no login, which the bundled server refuses from 2.6.0."""
+    mediamtx = MediaMTX("http://localhost:9997", "rtsp://localhost:8554", None, ("printguard", "LOGIN"))
+
+    assert await mediamtx.own_path(url) == path
+
+
+async def test_a_server_on_another_machine_has_no_path_at_this_machines_address() -> None:
+    mediamtx = MediaMTX("http://192.0.2.9:9997", "rtsp://192.0.2.9:8554", None)
+
+    assert await mediamtx.own_path("rtsp://127.0.0.1:8554/garage") is None
+
+
 async def _nothing() -> None:
     """Stands in for restoring paths where a test never restarts the server."""
 
@@ -306,8 +355,7 @@ def test_the_shipped_config_grants_the_control_api_and_reading_to_nobody() -> No
     assert users == (
         "  - user: any\n"
         "    permissions:\n"
-        "      - action: publish\n"
-        "      - action: playback"
+        "      - action: publish"
     )
     assert "action: api" not in config and "action: read" not in config
     assert "\napiAllowOrigins: []\n" in config

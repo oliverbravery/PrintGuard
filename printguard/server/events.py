@@ -59,11 +59,24 @@ def encode_event(event: dict[str, Any]) -> str:
     return json.dumps(event, allow_nan=False)
 
 
+MAX_ORDERED_EVENTS = 256
+"""Ordered events one transport may have waiting. A plugin socket's frame is
+one of them at up to 256 KB, so this many is 64 MB at most, shared by every
+transport since each queues the same event."""
+
+
 class ConflatedEventQueue:
-    """Keeps ordered events intact while replacing stale telemetry."""
+    """Keeps ordered events intact while replacing stale telemetry.
+
+    A transport that leaves ``MAX_ORDERED_EVENTS`` waiting has fallen too far
+    behind to be caught up, so the queue drops what it holds, takes nothing
+    more and ends ``overflow``, which the transport waits on beside its reader
+    since a reader stuck sending never comes back to ``get``.
+    """
 
     def __init__(self) -> None:
         self._events: deque[dict[str, Any]] = deque()
+        self._overflowed = asyncio.Event()
         self._state: dict[str, Any] | None = None
         self._results: dict[str, dict[str, Any]] = {}
         self._ready = asyncio.Event()
@@ -75,6 +88,12 @@ class ConflatedEventQueue:
         drops that one, which would otherwise be delivered after it and undo
         the command on screen until the next tick.
         """
+        if self._overflowed.is_set():
+            return
+        if len(self._events) >= MAX_ORDERED_EVENTS:
+            self._overflowed.set()
+            self._events.clear()
+            return
         kind = event.get("event")
         if kind == "result":
             self._results[event["monitor_id"]] = event
@@ -98,3 +117,12 @@ class ConflatedEventQueue:
             return state
         monitor_id = next(iter(self._results))
         return self._results.pop(monitor_id)
+
+    async def overflow(self) -> None:
+        """Waits for the reader to fall ``MAX_ORDERED_EVENTS`` behind.
+
+        Raises:
+            OverflowError: Once it has.
+        """
+        await self._overflowed.wait()
+        raise OverflowError(f"more than {MAX_ORDERED_EVENTS} events were waiting to be sent")

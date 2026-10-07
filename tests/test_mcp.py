@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 from unittest.mock import AsyncMock
 
 import httpx
@@ -219,31 +220,102 @@ async def test_a_session_is_not_opened_without_a_bearer_once_tokens_exist() -> N
         await engine.stop()
 
 
-async def test_a_tool_call_carrying_nan_is_refused_and_registers_nothing() -> None:
+HANDSHAKE = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}},
+}
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("add_printer", '{"name": "P", "provider": "octoprint", "config": {"base_url": "http://printer", "api_key": "k", "note": NaN}}'),
+        ("update_settings", '{"preheat": [{"name": "PLA", "nozzle": NaN, "bed": 60}]}'),
+        ("update_settings", '{"mqtt": {"enabled": false, "host": "broker", "port": Infinity}}'),
+        ("update_settings", '{"fault_grace_s": NaN}'),
+        ("update_settings", '{"fault_grace_s": 1e999}'),
+    ],
+)
+async def test_a_tool_call_carrying_a_number_that_is_not_finite_is_refused_and_changes_nothing(tool: str, arguments: str) -> None:
+    """Nested ones reached the REST layer as null and were accepted, and the old test was only ever refused for having no token."""
     engine = Engine(FakePlatform())
     await engine.start()
     auth = ApiAuth(internal_token="INT")
     api_app = build_api_app(auth)
     api_app.state.engine = engine
     app = build_mcp_app(api_app, lambda: engine, auth, "INT")
-    headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
-    handshake = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}},
-    }
-    call = b'{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "add_printer", "arguments": {"name": "P", "provider": "octoprint", "config": {"note": NaN}}}}'
+    created = await engine.request({"cmd": "token.create", "name": "agent", "scope": "manage"})
+    token = next(event["token"] for event in created if event.get("event") == "token_created")
+    headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+    before = {key: engine.settings.get(key) for key in ("preheat", "mqtt", "fault_grace_s")}
+    call = f'{{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {{"name": "{tool}", "arguments": {arguments}}}}}'
     try:
         async with app.lifespan(app), httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
-            session = (await client.post("/", json=handshake, headers=headers)).headers["mcp-session-id"]
+            session = (await client.post("/", json=HANDSHAKE, headers=headers)).headers["mcp-session-id"]
             headers["mcp-session-id"] = session
             await client.post("/", json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=headers)
-            answer = await client.post("/", content=call, headers=headers)
-        assert "isError" in answer.text and "true" in answer.text.split("isError")[1][:8], answer.text
+            answer = await client.post("/", content=call.encode(), headers=headers)
+        assert '"isError":true' in answer.text.replace(" ", ""), answer.text
+        assert "finite number" in answer.text, answer.text
         assert not list(engine.printers.items)
+        assert {key: engine.settings.get(key) for key in before} == before
     finally:
         await engine.stop()
+
+
+async def test_a_call_the_rest_layer_refuses_is_a_tool_error_logged_in_one_line(caplog: pytest.LogCaptureFixture, capfd: pytest.CaptureFixture[str]) -> None:
+    """FastMCP printed a rich traceback to stderr for each one, past the hub's log format."""
+    engine, mcp, _ = await _server()
+    try:
+        with caplog.at_level(logging.INFO, logger="printguard.server.mcp"):
+            async with Client(mcp) as client:
+                with pytest.raises(Exception, match="HTTP error 404.*no monitor"):
+                    await client.call_tool("get_monitor", {"monitor_id": "missing"})
+    finally:
+        await engine.stop()
+
+    said = [record.getMessage() for record in caplog.records if record.name == "printguard.server.mcp"]
+    assert said == ["MCP tool call refused: GET /monitors/missing answered 404"]
+    assert not [record for record in caplog.records if record.exc_info or "Error calling tool" in record.getMessage()]
+    assert "Traceback" not in capfd.readouterr().err
+
+
+async def test_an_image_sent_while_too_many_wait_is_turned_away_before_it_is_read(monkeypatch) -> None:
+    """Every caller's body was read and decoded before the two turns were asked for, so the ones waiting held an image each."""
+    monkeypatch.setattr(mcp_module, "CALL_BYTES", 64)
+    monkeypatch.setattr(mcp_module, "CLASSIFY_WAITING", 1)
+    engine = Engine(FakePlatform())
+    await engine.start()
+    auth = ApiAuth(internal_token="INT")
+    api_app = build_api_app(auth)
+    api_app.state.engine = engine
+    release = asyncio.Event()
+    read: list[int] = []
+
+    async def held(scope, receive, send) -> None:
+        read.append(len((await receive())["body"]))
+        await release.wait()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    gate = mcp_module.BearerGate(held, auth, lambda: engine)
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gate), base_url="http://127.0.0.1") as client:
+            images = [asyncio.ensure_future(client.post("/", content=b"x" * 128)) for _ in range(CLASSIFY_IN_FLIGHT + 1)]
+            await asyncio.sleep(0.05)
+            turned_away = await client.post("/", content=b"x" * 128)
+            small = asyncio.ensure_future(client.post("/", content=b"{}"))
+            await asyncio.sleep(0.05)
+            assert read == [128] * CLASSIFY_IN_FLIGHT + [2], "a waiting image is not read, and a plain call does not wait"
+            release.set()
+            answers = await asyncio.gather(*images, small)
+    finally:
+        await engine.stop()
+
+    assert turned_away.status_code == 503 and turned_away.headers["retry-after"] == "1"
+    assert [answer.status_code for answer in answers] == [200] * (CLASSIFY_IN_FLIGHT + 2)
 
 
 async def test_a_snapshot_whose_file_is_gone_is_a_tool_error_that_names_no_path(tmp_path) -> None:

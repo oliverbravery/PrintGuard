@@ -21,7 +21,7 @@ from urllib.parse import urlencode, urlsplit
 
 from .adapters import HttpFn
 from .bounds import clamp
-from .platform import plain_failure
+from .platform import PLUGIN_HEADER, plain_failure
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,11 @@ def _urlsafe(raw: bytes) -> str:
 def without_session(secrets: dict[str, str]) -> dict[str, str]:
     """The same secrets signed out, keeping the app the user registered."""
     return {name: value for name, value in secrets.items() if name not in SESSION}
+
+
+def expiring(held: dict[str, str]) -> bool:
+    """Whether a plugin's access token is about to expire and there is a refresh token to renew it with."""
+    return bool(held.get(REFRESH)) and time.time() >= float(held.get(EXPIRES) or 0) - REFRESH_MARGIN_S
 
 
 @dataclass
@@ -165,22 +170,19 @@ class OAuthFlows:
             "code_verifier": pending.verifier,
         })
 
-    async def refreshed(self, provider: dict[str, Any], held: dict[str, str]) -> dict[str, str] | None:
-        """Renews an access token that is about to expire.
+    async def refreshed(self, provider: dict[str, Any], held: dict[str, str]) -> dict[str, str]:
+        """Renews an access token with the refresh token held beside it.
 
         Args:
             provider: The manifest's ``oauth`` block.
-            held: The secrets currently stored for the plugin.
+            held: The secrets currently stored for the plugin, which ``expiring`` says are due.
 
         Returns:
-            The secrets to store, or None when the one held is still good or
-            there is nothing to refresh with.
+            The secrets to store.
 
         Raises:
             SignInRefused: If the provider no longer honours the refresh token.
         """
-        if not held.get(REFRESH) or time.time() < float(held.get(EXPIRES) or 0) - REFRESH_MARGIN_S:
-            return None
         renewed = await self._tokens(provider, {
             "grant_type": "refresh_token",
             "refresh_token": held[REFRESH],
@@ -193,7 +195,7 @@ class OAuthFlows:
             status, body = await self._http(
                 "POST",
                 provider["token_url"],
-                headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+                headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json", PLUGIN_HEADER: "1"},
                 data=urlencode(form).encode(),
                 timeout=TOKEN_TIMEOUT_S,
                 redirects="answer",

@@ -47,6 +47,9 @@ COMMANDS_IN_FLIGHT = 8
 GOODBYE_TIMEOUT_S = 2.0
 KEEPALIVE_S = 30
 STATE_DEADBAND = 5.0
+BRIDGED_EVENTS = ("state", "result", "alert")
+"""The engine events the bridge acts on. Nothing else is queued, so a plugin
+socket's frames or a run of warnings cannot fill a queue a slow broker is draining."""
 CONTINUOUS_FIELDS = ("score", "progress", "nozzle_temp", "bed_temp")
 MANUFACTURER = "PrintGuard"
 MODEL = "Print monitor"
@@ -310,6 +313,12 @@ class MqttBridge:
     Everything a monitor is announced by is retained, so the broker keeps it
     until it is cleared. The monitors announced are remembered from one session
     to the next for that, since one can be removed while the broker is away.
+
+    Home Assistant keeps a component a newer config merely leaves out, such as
+    the printer's buttons once the printer is unlinked. It drops one only when
+    told to by a config naming it with nothing but its platform, so that goes
+    out once ahead of the config without it. The components announced are
+    remembered between sessions as the monitors are.
     """
 
     def __init__(self, engine: "Engine", get_config: Callable[[], dict[str, Any]]) -> None:
@@ -318,7 +327,7 @@ class MqttBridge:
         self._queue = ConflatedEventQueue()
         self._reported: dict[str, dict[str, Any]] = {}
         self._published: dict[str, str] = {}
-        self._devices: set[str] = set()
+        self._announced: dict[str, dict[str, str]] = {}
         self._state: dict[str, Any] = {}
         self._task: asyncio.Task | None = None
         self._client_id = f"printguard-{secrets.token_hex(4)}"
@@ -335,7 +344,8 @@ class MqttBridge:
             await asyncio.gather(self._task, return_exceptions=True)
 
     def _sink(self, event: dict[str, Any]) -> None:
-        self._queue.put(event)
+        if event.get("event") in BRIDGED_EVENTS:
+            self._queue.put(event)
 
     async def _run(self) -> None:
         while True:
@@ -376,6 +386,7 @@ class MqttBridge:
             self._published.clear()
             self._reported.clear()
             self._state = {}
+            self._queue = ConflatedEventQueue()
             logger.info("Home Assistant MQTT bridge connected to %s", config["host"])
             await client.publish(status_topic(base), "online", qos=1, retain=True)
             await client.subscribe(f"{base}/monitor/+/+/set", qos=1)
@@ -386,6 +397,7 @@ class MqttBridge:
             tasks = [
                 asyncio.ensure_future(self._publish_loop(client, base, prefix, signature)),
                 asyncio.ensure_future(self._command_loop(client, base)),
+                asyncio.ensure_future(self._queue.overflow()),
             ]
             try:
                 done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
@@ -461,19 +473,25 @@ class MqttBridge:
         self._state = state
         version = state.get("version", "")
         printers = {p["id"]: p for p in state.get("printers", [])}
-        desired = set()
+        desired: dict[str, dict[str, str]] = {}
         for monitor in state.get("monitors", []):
             monitor_id = monitor["id"]
-            desired.add(monitor_id)
             printer = printers.get(monitor.get("printer_id") or "")
-            await self._publish(client, device_config_topic(prefix, monitor_id), json.dumps(discovery_config(monitor, printer, version, base)))
+            config = discovery_config(monitor, printer, version, base)
+            topic = device_config_topic(prefix, monitor_id)
+            desired[monitor_id] = {key: component["p"] for key, component in config["components"].items()}
+            removed = {key: {"p": platform} for key, platform in self._announced.get(monitor_id, {}).items() if key not in desired[monitor_id]}
+            if removed:
+                await client.publish(topic, json.dumps({**config, "components": config["components"] | removed}), qos=1, retain=True)
+            await self._publish(client, topic, json.dumps(config))
+            self._announced[monitor_id] = desired[monitor_id]
             await self._publish_state(client, monitor_id, base)
-        for monitor_id in self._devices - desired:
+        for monitor_id in self._announced.keys() - desired.keys():
             for topic in (device_config_topic(prefix, monitor_id), state_topic(base, monitor_id), snapshot_topic(base, monitor_id)):
                 await client.publish(topic, "", qos=1, retain=True)
             self._published.pop(device_config_topic(prefix, monitor_id), None)
             self._reported.pop(monitor_id, None)
-        self._devices = desired
+        self._announced = desired
 
     async def _publish_state(self, client: aiomqtt.Client, monitor_id: str, base: str) -> None:
         monitor = next((m for m in self._state.get("monitors", []) if m["id"] == monitor_id), None)

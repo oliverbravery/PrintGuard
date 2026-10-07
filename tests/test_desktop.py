@@ -157,3 +157,56 @@ def test_reopening_the_running_app_opens_its_window(monkeypatch: pytest.MonkeyPa
     assert delegates == [returned]
     assert returned.applicationShouldHandleReopen_hasVisibleWindows_(application, False) is True
     assert opened == [True]
+
+
+def test_stopping_runs_the_hubs_shutdown_while_a_client_holds_a_stream_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An MCP client's open stream kept the server waiting, so the engine was never stopped and the state never flushed."""
+    import asyncio
+    import socket
+    from contextlib import asynccontextmanager
+    from importlib import metadata
+
+    import httpx
+    from fastapi import FastAPI
+    from fastapi.responses import StreamingResponse
+
+    from printguard.server import app as app_module
+
+    shut_down = threading.Event()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        shut_down.set()
+
+    hub = FastAPI(lifespan=lifespan)
+
+    @hub.get("/api/health")
+    def health() -> dict[str, Any]:
+        return {"ok": True, "version": metadata.version("printguard")}
+
+    @hub.get("/stream")
+    async def stream() -> StreamingResponse:
+        async def forever():
+            while True:
+                yield b"data: held\n\n"
+                await asyncio.sleep(0.05)
+
+        return StreamingResponse(forever(), media_type="text/event-stream")
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    monkeypatch.setattr(app_module, "create_app", lambda: hub)
+    monkeypatch.setattr(app_module, "SHUTDOWN_GRACE_S", 0.3)
+    monkeypatch.setattr(desktop, "STOP_TIMEOUT_S", 3.0)
+    monkeypatch.setattr(desktop, "_health", lambda port: httpx.get(f"http://127.0.0.1:{port}/api/health").json())
+    server = desktop._Server(port)
+    assert server.start()
+
+    with httpx.stream("GET", f"http://127.0.0.1:{port}/stream") as held:
+        arriving = held.iter_bytes()
+        assert next(arriving)
+        server.stop()
+        assert shut_down.is_set()
+    assert not server._thread.is_alive()

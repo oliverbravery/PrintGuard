@@ -12,12 +12,14 @@ import base64
 import contextvars
 import functools
 import logging
+import math
 import re
 import time
 import traceback
 import uuid
 from collections import Counter, defaultdict, deque
-from typing import Any, Awaitable, Callable, Coroutine
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Awaitable, Callable, Coroutine
 
 import numpy as np
 
@@ -28,8 +30,8 @@ from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
 from .monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor, stored_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
-from .platform import Frame, Platform, as_chunks, plain_failure
-from .printers import PREHEAT_DEFAULTS, sanitise_printer, sanitise_targets
+from .platform import PLUGIN_HEADER, Frame, FrameSource, Platform, as_chunks, plain_failure
+from .printers import PREHEAT_DEFAULTS, connection_settings, sanitise_printer, sanitise_targets
 from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers, stored_print
 from .registry import (
     Camera,
@@ -57,6 +59,7 @@ STATE_TICK_S = 1.0
 RESULT_EVENT_INTERVAL_S = 0.2
 REATTACH_EVERY_TICKS = 10
 REQUEST_TIMEOUT_S = 15.0
+READ_BACK_S = 5.0
 CAMERA_OPEN_WAIT_S = 25.0
 CAMERA_SETTLE_S = 10.0
 CAMERAS_OPENED_IN_TURN = 4
@@ -74,6 +77,8 @@ RUNTIME_DRAIN_TIMEOUT_S = 10.0
 PLUGIN_RATE_LIMIT = 60
 PLUGIN_RATE_WINDOW_S = 60.0
 PLUGIN_TIMEOUT_S = 10.0
+PLUGIN_STORE_SAVE_S = 1.0
+NOTIFY_SEND_LIMIT = 20
 MAX_PLUGIN_BODY = 256 * 1024
 CALL_TTL_S = 30.0
 FEEDBACK_RETRY_S = 6 * 3600.0
@@ -87,6 +92,7 @@ FINISHING_COMMANDS = frozenset(
         "camera.remove",
         "printer.update",
         "printer.remove",
+        "printer.cameras.refresh",
         "monitor.remove",
         "print.remove",
         "settings.update",
@@ -175,7 +181,10 @@ class Engine:
         self.watchdog = Watchdog(self)
         self.sockets = SocketBroker(platform.open_socket, self.emit)
         self.oauth = oauth.OAuthFlows(platform.http)
-        self._plugin_calls: dict[str, list[float]] = {}
+        self._calls: dict[str, list[float]] = {}
+        self._store_saved_at: dict[str, float] = {}
+        self._stores_unsaved = False
+        self._dropped_gates: set[str] = set()
         self._pending_calls: dict[str, tuple[str, str, str, float, str]] = {}
         self._answered_calls: dict[str, tuple[str, float]] = {}
         self._sign_in_refreshes: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -298,6 +307,9 @@ class Engine:
                     if isinstance(record, dict) and record.get("id"):
                         self.dropped_ids.add(str(record["id"]))
                     kept = " (its file stays in the data directory until the hub next starts)" if kind in ("prints", "reviews") else ""
+                    if kind == "plugins" and self._was_gating(record):
+                        self._dropped_gates.add(str(record["id"]))
+                        kept = ". It was guarding the hub, so every request is refused until it is installed again or the hub restarts"
                     self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}{kept}")
         for monitor in self.monitors.values():
             if monitor["printer_id"] and self.printers.get(monitor["printer_id"]) is None:
@@ -363,12 +375,26 @@ class Engine:
             self._warn_at_start(f"The saved {title.partition(' (')[0]} of {owner} could not be used, so it was cleared")
         return config
 
+    @staticmethod
+    def _was_gating(record: Any) -> bool:
+        """Whether a stored plugin record that could not be read was guarding the hub, running or failed."""
+        if not isinstance(record, dict) or not isinstance(record.get("id"), str) or not isinstance(record.get("granted"), list):
+            return False
+        return "gate" in record["granted"] and bool(record.get("enabled", True) or record.get("failure"))
+
     def _restore_plugin(self, record: dict[str, Any]) -> None:
+        """Restores a plugin, standing it down when its manifest now asks for more than was accepted.
+
+        A gate stood down this way keeps the reason as its failure, so the hub
+        goes on refusing requests as it does for a gate that failed.
+        """
         plugin = Plugin(**{**record, "manifest": plugins.restored_manifest(record["manifest"])})
         asked_now = [name for name in plugin.manifest["permissions"] if name not in record["manifest"].get("permissions", [])]
         if asked_now:
-            plugin.enabled = False
             wanted = ", ".join(plugins.PERMISSIONS[name]["label"] for name in asked_now)
+            if plugin.enabled and plugin.may("gate"):
+                plugin.failure = f"it now needs {wanted}, which has not been accepted"
+            plugin.enabled = False
             self._warn_at_start(f"Plugin {plugin.manifest['name']} now needs {wanted}, so it is off until you accept that in Plugins")
         try:
             plugin.config = plugins.sanitise_config(plugin.config)
@@ -388,8 +414,11 @@ class Engine:
         An inference left running would score its frame after the printers
         were closed, and could start a defect response nothing is left to
         carry out. The cameras stay registered, so a command still in flight
-        that saves on its way out writes every one of them.
+        that saves on its way out writes every one of them. A plugin's store
+        write still waiting for the tick to save it is written here.
         """
+        if self._stores_unsaved:
+            self.save()
         background = (*self._tasks, *self._sends.values(), *self._background)
         for task in background:
             task.cancel()
@@ -442,15 +471,32 @@ class Engine:
         return reports.scrub(text, reports.collect_secrets(self) | typed, standalone_below=reports.MESSAGE_STANDALONE_BELOW)
 
     def _broadcast(self, event: dict[str, Any]) -> None:
-        """Delivers an event to recent history and every transport sink."""
-        if event.get("event") in RECENT_EVENT_TYPES:
+        """Delivers an event to recent history and every transport sink.
+
+        An error that answers a command is a refusal its caller hears, so it
+        stays out of the recent history, where a caller that keeps asking
+        would push the alerts out. A sink that raises is unsubscribed, and a
+        warning says so, since whatever it fed has stopped hearing the hub.
+        """
+        refusal = event.get("event") == "error" and event.get("req_id") is not None
+        if event.get("event") in RECENT_EVENT_TYPES and not refusal:
             self._recent.append(event)
+        failures = []
         for sink in list(self._sinks):
             try:
                 sink(event)
-            except Exception:
+            except Exception as exc:
                 logger.warning("dropping transport sink that failed to accept an event", exc_info=True)
-                self._sinks.remove(sink)
+                self.remove_sink(sink)
+                failures.append(exc)
+        for failure in failures:
+            self.emit(
+                {
+                    "event": "warning",
+                    "message": f"Something listening to the hub's events failed and was dropped, so a dashboard, MQTT or the plugins may be out of date until the hub restarts: {logs.describe(failure)}",
+                    "recovered": False,
+                }
+            )
 
     def state_event(self) -> dict[str, Any]:
         """Builds the full state snapshot event.
@@ -573,7 +619,9 @@ class Engine:
         """Runs a command, then closes it with the state event its issuer waits on.
 
         A command that changes nothing persisted saves nothing, and its closing
-        snapshot goes to its issuer alone. The rest save and tell everybody.
+        snapshot goes to its issuer alone, as does that of a handler that
+        returns False to say it changed nothing to save now. The rest save and
+        tell everybody.
         """
         handler = self._handlers.get(message["cmd"]) if isinstance(message.get("cmd"), str) else None
         req_id = message.get("req_id")
@@ -582,8 +630,8 @@ class Engine:
             return
         logger.debug("command %s", message.get("cmd"))
         try:
-            await handler(message)
-            if message["cmd"] in UNSAVED_COMMANDS:
+            unsaved = await handler(message) is False
+            if unsaved or message["cmd"] in UNSAVED_COMMANDS:
                 self._reply({**self.state_event(), "req_id": req_id})
             elif message["cmd"] not in READ_ONLY_COMMANDS:
                 self._sync(req_id)
@@ -633,7 +681,7 @@ class Engine:
             if reply is not None:
                 reply(event)
 
-        self.add_sink(sink)
+        self._sinks.append(sink)
         try:
             await asyncio.wait_for(self.handle({**message, "req_id": req_id}, requester), timeout or self._time_allowed(message))
         finally:
@@ -647,7 +695,9 @@ class Engine:
         """Seconds a requested command may run.
 
         More than REQUEST_TIMEOUT_S for the commands that are slow by design: a
-        printer whose adapter says its actions are slow, a camera that is given
+        printer command, which has that long to be sent, longer where the
+        adapter says its actions are slow, and READ_BACK_S after it for the
+        printer to be read back, a camera that is given
         CAMERA_OPEN_WAIT_S to open, one printer's cameras that open in turn, and
         a switch of inference runtime, which waits for the inferences in flight
         and then loads the model.
@@ -655,7 +705,7 @@ class Engine:
         command = message.get("cmd")
         if command in ("printer.action", "printer.heat"):
             printer = self.printers.get(message["id"]) if isinstance(message.get("id"), str) else None
-            return REQUEST_TIMEOUT_S + (INTEGRATIONS[printer.provider].slow_action_s if printer else 0.0)
+            return self._send_allowed(printer) + READ_BACK_S if printer else REQUEST_TIMEOUT_S
         if command == "camera.add":
             return REQUEST_TIMEOUT_S + CAMERA_OPEN_WAIT_S
         if command == "printer.cameras.refresh":
@@ -664,6 +714,11 @@ class Engine:
         if command == "settings.update" and isinstance(patch, dict) and patch.get("inference_runtime", self.settings["inference_runtime"]) != self.settings["inference_runtime"]:
             return REQUEST_TIMEOUT_S + RUNTIME_DRAIN_TIMEOUT_S + RUNTIME_LOAD_ALLOWANCE_S
         return REQUEST_TIMEOUT_S
+
+    @staticmethod
+    def _send_allowed(printer: Printer) -> float:
+        """Seconds a command may take to reach a printer, longer for one whose adapter says its actions are slow."""
+        return REQUEST_TIMEOUT_S + INTEGRATIONS[printer.provider].slow_action_s
 
     async def snapshot(self, camera_id: str) -> bytes | None:
         """Encodes the freshest frame of a camera as JPEG, or None if unavailable.
@@ -703,6 +758,7 @@ class Engine:
 
     def save(self) -> None:
         """Writes the registries and settings to the platform's state store."""
+        self._stores_unsaved = False
         self.platform.save_state(
             {
                 "cameras": [c.persisted() for c in self.cameras.values()],
@@ -746,11 +802,25 @@ class Engine:
             source.close()
             await self.platform.release_camera(camera.id, camera.source)
             return
+        self._attach_source(camera, source)
+        logger.info("camera '%s' (%s) attached at %.1f fps", camera.name, camera.id, source.fps)
+
+    @staticmethod
+    def _attach_source(camera: Camera, source: FrameSource) -> None:
+        """Hands a camera the frame source that was opened for it."""
         camera.frame_source = source
         source.set_monitoring(camera.in_use)
         if source.fps > 0:
             camera.max_fps = source.fps
-        logger.info("camera '%s' (%s) attached at %.1f fps", camera.name, camera.id, source.fps)
+
+    async def _detach(self, camera: Camera) -> None:
+        """Closes a camera's frame source, cancelling its inference in flight, and releases what the platform holds for it."""
+        source = camera.frame_source
+        if source is not None:
+            self.scheduler.cancel_camera(camera)
+            camera.frame_source = None
+            source.close()
+        await self.platform.release_camera(camera.id, camera.source)
 
     def _schedule_attach(self, camera: Camera) -> None:
         """Starts attaching a camera, unless it is attached, being attached or being taken down to be attached afresh."""
@@ -767,15 +837,11 @@ class Engine:
 
     async def restart_camera(self, camera: Camera) -> None:
         """Releases a failed camera source and attaches it again from scratch."""
-        source = camera.frame_source
-        if source is None:
+        if camera.frame_source is None:
             return
         self._detaching[camera.id] += 1
         try:
-            self.scheduler.cancel_camera(camera)
-            camera.frame_source = None
-            source.close()
-            await self.platform.release_camera(camera.id, camera.source)
+            await self._detach(camera)
         finally:
             self._detaching[camera.id] -= 1
         if self.cameras.get(camera.id) is camera:
@@ -820,7 +886,7 @@ class Engine:
                     self._schedule_attach(camera)
             elif camera.frame_source.fps > 0:
                 camera.max_fps = camera.frame_source.fps
-        if self.settle_reviews():
+        if self.settle_reviews() or self._stores_unsaved:
             self.save()
         if self.settings["feedback"] == "ask":
             for review in self.reviews.due(time.time()):
@@ -868,13 +934,19 @@ class Engine:
         self.emit({"event": "error", "message": message})
 
     async def _on_result(self, camera: Camera, frame: Frame, result: dict[str, Any]) -> None:
+        """Scores a frame for every monitor watching through its camera.
+
+        Each monitor is read afresh when its turn comes and again after
+        anything awaited, since one edited, switched off or removed while an
+        earlier monitor's frame was being kept must not be acted on as it was.
+        """
         score = vision.defect_score(result)
-        for monitor in list(self.monitors.values()):
-            if monitor["camera_id"] != camera.id or monitor["id"] not in self.monitors or not monitor_watching(monitor, self.printers):
+        for monitor_id in [monitor["id"] for monitor in self.monitors.values() if monitor["camera_id"] == camera.id]:
+            monitor = self._watching_through(monitor_id, camera)
+            if monitor is None:
                 continue
             ts = time.time()
             point = {"score": round(score, 4), "ts": ts}
-            monitor_id = monitor["id"]
             self._results[monitor_id] = point
             self.history.setdefault(monitor_id, MonitorHistory()).record(ts, score, monitor["threshold"])
             emitted_at = time.monotonic()
@@ -892,12 +964,18 @@ class Engine:
                     }
                 )
             await self.watchdog.on_score(monitor, frame, score)
-            if self.settings["feedback"] == "ask" and self._print_known(monitor):
+            monitor = self._watching_through(monitor_id, camera)
+            if monitor is not None and self.settings["feedback"] == "ask" and self._print_known(monitor):
                 try:
                     if await self.reviews.sample(monitor, frame, score, ts):
                         self.save()
                 except Exception as exc:
                     self.report_failure(f"keeping a frame of '{monitor['name']}' for review", exc)
+
+    def _watching_through(self, monitor_id: str, camera: Camera) -> dict[str, Any] | None:
+        """The monitor as it stands now, if it is still watching through this camera."""
+        monitor = self.monitors.get(monitor_id)
+        return monitor if monitor and monitor["camera_id"] == camera.id and monitor_watching(monitor, self.printers) else None
 
     def _print_known(self, monitor: dict[str, Any]) -> bool:
         """Whether a frame of a monitor can be put down to a print.
@@ -961,7 +1039,7 @@ class Engine:
 
         A print the inbox has no room for stays queued with the reason and a
         time to try again, which is the inbox's own reset time when it gives
-        one, or six hours on when it gives none. A reset time already past on
+        one, or six hours on when it gives none or one that is not a time. A reset time already past on
         this hub's clock, which one running ahead of the inbox's sees, is tried
         again in a minute. A frame that can never be sent, because its file is
         gone or the inbox rejects that frame itself, is passed over so the rest still go,
@@ -1015,7 +1093,8 @@ class Engine:
         except Exception as exc:
             refused = exc if isinstance(exc, feedback.Refused) else None
             submission["code"] = refused.code if refused else "failed"
-            reset_at = refused.retry_at if refused else None
+            given = refused.retry_at if refused else None
+            reset_at = given if isinstance(given, (int, float)) and math.isfinite(given) else 0.0
             if not reset_at:
                 submission["retry_at"] = time.time() + FEEDBACK_RETRY_S
             else:
@@ -1119,18 +1198,24 @@ class Engine:
             fresh.append(source)
         self.emit({"event": "discovered", "sources": fresh, "req_id": message.get("req_id")})
 
-    def _registered_addresses(self) -> set[Any]:
-        return {_address(camera.source) for camera in self.cameras.values()}
+    def _registered_addresses(self, apart_from: Camera | None = None) -> set[Any]:
+        return {_address(camera.source) for camera in self.cameras.values() if camera is not apart_from}
 
-    def _stream_taken(self, source: dict[str, Any]) -> bool:
+    def _stream_taken(self, source: dict[str, Any], moving: Camera | None = None) -> bool:
         """Whether a camera is already registered, or being opened, on a source.
 
         Every way a camera arrives asks this first, so one stream is never two
         cameras however it was spelt or whichever command got there first.
+
+        Args:
+            source: The source a camera would open.
+            moving: The camera being moved to it, which does not count as
+                holding its own stream, so it can take a new login or
+                certificate fingerprint for the address it is already on.
         """
         publishes_a_camera = source.get("kind") == "path" and source.get("path") in self.cameras.items
         address = _address(source)
-        return publishes_a_camera or bool(address) and address in self._registered_addresses() | self._adding
+        return publishes_a_camera or bool(address) and address in self._registered_addresses(moving) | self._adding
 
     async def _cmd_camera_add(self, message: dict[str, Any]) -> None:
         """Registers a camera once it opens.
@@ -1138,8 +1223,12 @@ class Engine:
         Raises:
             ValueError: If its source is one the hub could not read back at its
                 next start, or its device or stream is already registered, or is
-                being registered by another command still waiting on it to open.
+                being registered by another command still waiting on it to open,
+                or its name is not text.
         """
+        name = message.get("name") or "Camera"
+        if not isinstance(name, str):
+            raise ValueError("a camera's name is text")
         source = dict(sanitise_source(message["source"]))
         if source.get("url"):
             source["url"] = tidy_stream_url(source["url"])
@@ -1150,7 +1239,7 @@ class Engine:
         camera_id = uuid.uuid4().hex[:8]
         camera = Camera(
             id=camera_id,
-            name=str(message.get("name") or "Camera").strip() or "Camera",
+            name=name.strip() or "Camera",
             source=source,
             max_fps=15.0,
         )
@@ -1159,10 +1248,7 @@ class Engine:
             source = await self.platform.open_camera(camera_id, camera.source)
         finally:
             self._adding.discard(address)
-        camera.frame_source = source
-        source.set_monitoring(camera.in_use)
-        if source.fps > 0:
-            camera.max_fps = source.fps
+        self._attach_source(camera, source)
         self.cameras.add(camera)
 
     async def _cmd_camera_update(self, message: dict[str, Any]) -> None:
@@ -1341,7 +1427,7 @@ class Engine:
                 camera = self.cameras.get(camera_id)
                 if camera:
                     if camera.source != source and not (keep_working and await self._is_working(camera)):
-                        if self._stream_taken(source):
+                        if self._stream_taken(source, moving=camera):
                             self.emit({"event": "warning", "message": f"Could not move the camera '{camera.name}' of printer '{printer.name}': that stream is already registered"})
                         else:
                             await self._move_camera(camera, source)
@@ -1363,10 +1449,7 @@ class Engine:
                     source.close()
                     await self.platform.release_camera(camera_id, camera.source)
                     break
-                camera.frame_source = source
-                source.set_monitoring(camera.in_use)
-                if source.fps > 0:
-                    camera.max_fps = source.fps
+                self._attach_source(camera, source)
                 self.cameras.add(camera)
                 changed = True
             if changed:
@@ -1395,11 +1478,7 @@ class Engine:
         self._detaching[camera.id] += 1
         try:
             await self._cancel_attach(camera.id)
-            if camera.frame_source:
-                self.scheduler.cancel_camera(camera)
-                camera.frame_source.close()
-                camera.frame_source = None
-            await self.platform.release_camera(camera.id, camera.source)
+            await self._detach(camera)
             camera.source = source
         finally:
             self._detaching[camera.id] -= 1
@@ -1433,7 +1512,7 @@ class Engine:
             base["config"] = {}
         elif "config" in patch:
             adapter = INTEGRATIONS[existing.provider]
-            patch["config"] = credentials.keep_stored(adapter.declared(patch["config"]), existing.config, adapter.secret_fields())
+            patch["config"] = credentials.keep_stored(adapter.declared(connection_settings(patch["config"])), existing.config, adapter.secret_fields())
         record = sanitise_printer(existing.id, patch, base)
         INTEGRATIONS[record["provider"]].require(record["config"])
         reports.require_storable(record["config"].values())
@@ -1470,8 +1549,37 @@ class Engine:
         adapter = INTEGRATIONS.get(printer.provider)
         if not adapter:
             raise RuntimeError("no printer service linked")
-        await adapter.send(self.service_http, printer.config, DeviceAction(message["action"]))
-        await self.watchdog.refresh(printer, after_command=True)
+        async with self._sending_to(printer):
+            await adapter.send(self.service_http, printer.config, DeviceAction(message["action"]))
+        await self._read_back(printer)
+
+    @asynccontextmanager
+    async def _sending_to(self, printer: Printer) -> AsyncIterator[None]:
+        """Holds a command to the time it may take to reach a printer.
+
+        Raises:
+            RuntimeError: If the printer has not answered in that time.
+        """
+        allowed = self._send_allowed(printer)
+        try:
+            async with asyncio.timeout(allowed) as deadline:
+                yield
+        except TimeoutError:
+            if not deadline.expired():
+                raise
+            raise RuntimeError(f"{printer.name} did not answer within {allowed:g} s, so check whether it took the command") from None
+
+    async def _read_back(self, printer: Printer) -> None:
+        """Reads a printer a command was just sent to, leaving a slow read to the next poll.
+
+        The command has gone, so a printer that takes its time to say what it
+        did with it is not a failed command.
+        """
+        try:
+            async with asyncio.timeout(READ_BACK_S):
+                await self.watchdog.refresh(printer, after_command=True)
+        except TimeoutError:
+            logger.warning("printer '%s' took a command but was slow to be read back", printer.name)
 
     async def _cmd_printer_heat(self, message: dict[str, Any]) -> None:
         """Sets a printer's nozzle and bed targets, then re-reads its state.
@@ -1488,9 +1596,10 @@ class Engine:
         if not targets:
             raise ValueError("a heat command names a nozzle or bed target")
         adapter = INTEGRATIONS[printer.provider]
-        for heater, target in targets.items():
-            await adapter.heat(self.service_http, printer.config, heater, target)
-        await self.watchdog.refresh(printer, after_command=True)
+        async with self._sending_to(printer):
+            for heater, target in targets.items():
+                await adapter.heat(self.service_http, printer.config, heater, target)
+        await self._read_back(printer)
 
     async def _cmd_printer_test(self, message: dict[str, Any]) -> None:
         """Reads a printer's state from connection details that need not be registered.
@@ -1635,7 +1744,7 @@ class Engine:
         finally:
             self._starting.discard(printer.id)
         logger.info("print '%s' started on printer '%s'", record.name, printer.name)
-        await self.watchdog.refresh(printer, after_command=True)
+        await self._read_back(printer)
         self.emit({"event": "print_started", "id": record.id, "printer_id": printer.id, "req_id": message.get("req_id")})
 
     async def _cmd_monitor_add(self, message: dict[str, Any]) -> None:
@@ -1789,6 +1898,9 @@ class Engine:
         unknown = sorted(set(patch) - set(SETTINGS_DEFAULTS))
         if unknown:
             raise ValueError(f"there is no {unknown[0]} setting")
+        for key in ("notifiers", "mqtt"):
+            if key in patch:
+                patch[key] = CHECKS[key](patch[key])
         for provider in patch.get("notifiers", {}):
             if provider not in NOTIFIERS:
                 raise ValueError(f"unknown notifier {provider!r}")
@@ -1917,8 +2029,12 @@ class Engine:
     async def _cmd_notify_send(self, message: dict[str, Any]) -> None:
         """Sends a caller's own message through the configured channels.
 
+        A plugin's command cannot be told from anybody else's, so the limit is
+        one for the hub and every caller counts against it.
+
         Raises:
             ValueError: If the title or text is not text, or there is no text.
+            PermissionError: If NOTIFY_SEND_LIMIT have been sent in the last minute.
         """
         title, text = message.get("title") or "PrintGuard", message.get("text", "")
         if not isinstance(title, str) or not isinstance(text, str):
@@ -1927,6 +2043,7 @@ class Engine:
         body = text.strip()[:400]
         if not body:
             raise ValueError("a notification needs something to say")
+        self._spend("notify.send", NOTIFY_SEND_LIMIT, "notifications are being sent")
         await self.send_alerts(title, body, None, urgent=False)
 
     async def _cmd_plugin_install(self, message: dict[str, Any]) -> None:
@@ -1943,6 +2060,8 @@ class Engine:
         token is never sent to an endpoint it was not issued by. A zip the
         catalogue vouches for is recorded as the catalogue's own install, so its
         README and pictures come from the pinned commit and never from the zip.
+        A running gate that an update stands down keeps the reason as its
+        failure, so the hub refuses requests until the update is accepted.
         """
         source = dict(message.get("source") or {})
         page: dict[str, str] = {}
@@ -1987,6 +2106,9 @@ class Engine:
         if keeps_data and not plugins.same_sign_in(existing.manifest, manifest):
             secrets = oauth.without_session(secrets)
             logger.warning("plugin %s signs in somewhere new, so it was signed out", manifest["id"])
+        enabled = bool(existing and existing.enabled and plugins.consented(manifest, granted))
+        stood_down = existing is not None and existing.enabled and existing.may("gate") and not enabled
+        self._dropped_gates.discard(manifest["id"])
         self.plugins.add(
             Plugin(
                 id=manifest["id"],
@@ -2000,8 +2122,9 @@ class Engine:
                 config=existing.config if keeps_data else {},
                 secrets=secrets,
                 verified=entry is not None,
-                enabled=bool(existing and existing.enabled and plugins.consented(manifest, granted)),
+                enabled=enabled,
                 installed=time.time(),
+                failure="this version asks for more than was accepted" if stood_down else None,
             )
         )
         logger.info(
@@ -2012,17 +2135,26 @@ class Engine:
         await self._reload_plugins()
 
     async def _cmd_plugin_remove(self, message: dict[str, Any]) -> None:
-        self.plugins.remove(message["id"])
+        if not self.plugins.remove(message["id"]):
+            raise LookupError(f"no plugin {message['id']}")
         await self._reload_plugins()
 
-    async def _cmd_plugin_update(self, message: dict[str, Any]) -> None:
+    async def _cmd_plugin_update(self, message: dict[str, Any]) -> bool | None:
         """Applies a patch, refusing to run a plugin with unaccepted permissions.
 
         A plugin that loses a network permission loses the sockets it opened
-        under it.
+        under it. A ``store`` names the keys a writer wrote and removed, which
+        go over whatever the plugin holds by now, so the dashboard and the
+        worker writing different keys do not undo each other.
+
+        Returns:
+            False when the patch only wrote the plugin's store and there is
+            nothing to save or broadcast now.
 
         Raises:
             PermissionError: If enabling one that asks for more than it holds.
+            ValueError: If ``store`` is not the keys written and the keys
+                removed, or the store it leaves is too large or too deep.
         """
         plugin = self.plugins.get(message["id"])
         if not plugin:
@@ -2031,8 +2163,13 @@ class Engine:
         granted = [p for p in patch["granted"] if p in plugin.manifest["permissions"]] if "granted" in patch else plugin.granted
         if patch.get("enabled") and not plugins.consented(plugin.manifest, granted):
             raise PermissionError(f"{plugin.id} asks for permissions that have not been accepted")
-        if "config" in patch:
-            plugin.config = plugins.sanitise_config(patch["config"])
+        stored = plugin.config
+        if "store" in patch:
+            changes = patch["store"] if isinstance(patch["store"], dict) else {}
+            written, removed = changes.get("written"), changes.get("removed")
+            if not isinstance(written, dict) or not isinstance(removed, list):
+                raise ValueError("a store write names the keys it wrote and the keys it removed")
+            plugin.config = plugins.sanitise_config({**{key: value for key, value in stored.items() if key not in removed}, **written})
         lost = set(plugin.granted) - set(granted)
         plugin.granted = granted
         if lost & {"net", "net:local"}:
@@ -2040,8 +2177,31 @@ class Engine:
         if "enabled" in patch:
             plugin.enabled = bool(patch["enabled"])
             plugin.failure = None
-        if not {"config"} >= set(patch):
+        if not {"store"} >= set(patch):
             await self._reload_plugins()
+            return None
+        return self._store_save_due(plugin, stored)
+
+    def _store_save_due(self, plugin: Plugin, stored: dict[str, Any]) -> bool:
+        """Whether a plugin's store write is saved and broadcast now.
+
+        A write that changed nothing is neither. One within
+        PLUGIN_STORE_SAVE_S of the plugin's last is held in memory for the next
+        tick to save and broadcast, so a ``plugin.js`` that writes its store on
+        every render costs one save a second and not one a render.
+
+        Args:
+            plugin: The plugin, holding the store as written.
+            stored: The store it held before.
+        """
+        if plugin.config == stored:
+            return False
+        now = time.monotonic()
+        if now - self._store_saved_at.get(plugin.id, float("-inf")) < PLUGIN_STORE_SAVE_S:
+            self._stores_unsaved = True
+            return False
+        self._store_saved_at[plugin.id] = now
+        return True
 
     async def _cmd_plugin_code(self, message: dict[str, Any]) -> None:
         plugin = self.plugins.get(message["id"])
@@ -2121,16 +2281,29 @@ class Engine:
         """Counts one request or socket a plugin opens against its window.
 
         Raises:
-            PermissionError: If it has made ``PLUGIN_RATE_LIMIT`` in the last
-                minute. A refused one is not counted, so a plugin that keeps
-                asking gets through again once its earlier requests age out.
+            PermissionError: If it has made ``PLUGIN_RATE_LIMIT`` in the last minute.
+        """
+        self._spend(plugin.id, PLUGIN_RATE_LIMIT, f"plugin {plugin.id} is making requests")
+
+    def _spend(self, spender: str, limit: int, doing: str) -> None:
+        """Counts one call against what its spender may make in a minute.
+
+        Args:
+            spender: Whose window it is, a plugin's id or a command's name.
+            limit: How many the window allows.
+            doing: What is being done too fast, as the refusal begins.
+
+        Raises:
+            PermissionError: If the window is full. A refused call is not
+                counted, so one that keeps being made gets through again once
+                the earlier ones age out.
         """
         now = time.monotonic()
-        recent = [at for at in self._plugin_calls.get(plugin.id, []) if now - at < PLUGIN_RATE_WINDOW_S]
-        if len(recent) >= PLUGIN_RATE_LIMIT:
-            self._plugin_calls[plugin.id] = recent
-            raise PermissionError(f"plugin {plugin.id} is making requests faster than {PLUGIN_RATE_LIMIT} a minute")
-        self._plugin_calls[plugin.id] = [*recent, now]
+        recent = [at for at in self._calls.get(spender, []) if now - at < PLUGIN_RATE_WINDOW_S]
+        if len(recent) >= limit:
+            self._calls[spender] = recent
+            raise PermissionError(f"{doing} faster than {limit} a minute")
+        self._calls[spender] = [*recent, now]
 
     async def _cmd_plugin_http(self, message: dict[str, Any]) -> None:
         """Makes an outbound request on a plugin's behalf, if it may.
@@ -2147,17 +2320,26 @@ class Engine:
         so the connection itself is refused an address on this network, which a
         name that resolves there would otherwise get past the check made here.
         A ``Host`` header is refused, since a server holding several sites
-        would answer as the one it names, not the one the address did.
+        would answer as the one it names, not the one the address did. Every
+        request carries ``PLUGIN_HEADER``, which the plugin may not set, so the
+        hub refuses one that comes back to itself. The
+        whole request has ``PLUGIN_TIMEOUT_S``, so an answer that trickles in
+        cannot hold it open. The plugin is looked up again once its sign-in
+        has been renewed, since it may have been removed or reinstalled while
+        the provider answered.
         """
         url = str(message.get("url", ""))
         if plugins.addresses_a_secret(url):
             raise PermissionError(f"plugin {message['id']} may only use a secret in the path of its address")
         plugin = self._network_allows(message["id"], url)
         headers = dict(message.get("headers") or {})
-        if any(str(name).lower() == "host" for name in headers):
-            raise PermissionError(f"plugin {plugin.id} may not set the Host header")
+        named = {str(name).lower() for name in headers}
+        for reserved in ("Host", PLUGIN_HEADER):
+            if reserved.lower() in named:
+                raise PermissionError(f"plugin {plugin.id} may not set the {reserved} header")
         self._spend_request(plugin)
         await self._refresh_sign_in(plugin)
+        plugin = self._network_allows(message["id"], url)
         request = {"url": url, "headers": headers or None, "json": plugins.shallow(message.get("json"), "a request body")}
         usable = plugins.fillable(plugin.secrets)
         blank = plugins.missing_secrets(request, usable)
@@ -2170,17 +2352,18 @@ class Engine:
             except PermissionError:
                 raise PermissionError(f"plugin {plugin.id} did not declare where its secrets take its address") from None
         try:
-            status, body = await self.platform.http(
-                str(message.get("method", "GET")).upper(),
-                filled["url"],
-                headers=filled["headers"],
-                json=filled["json"],
-                binary=message.get("binary") is True,
-                timeout=PLUGIN_TIMEOUT_S,
-                redirects="answer",
-                max_bytes=MAX_PLUGIN_BODY,
-                public_only=not plugin.may("net:local"),
-            )
+            async with asyncio.timeout(PLUGIN_TIMEOUT_S):
+                status, body = await self.platform.http(
+                    str(message.get("method", "GET")).upper(),
+                    filled["url"],
+                    headers={**(filled["headers"] or {}), PLUGIN_HEADER: "1"},
+                    json=filled["json"],
+                    binary=message.get("binary") is True,
+                    timeout=PLUGIN_TIMEOUT_S,
+                    redirects="answer",
+                    max_bytes=MAX_PLUGIN_BODY,
+                    public_only=not plugin.may("net:local"),
+                )
         except Exception as exc:
             raise self._network_failure(plugin.id, "request", exc) from None
         self.emit(
@@ -2366,6 +2549,10 @@ class Engine:
 
         Returns:
             The name of the plugin now signed in, or None if nothing was waiting.
+
+        Raises:
+            PermissionError: If the plugin may not connect an account, or lost
+                that, was removed or was reinstalled while the provider answered.
         """
         plugin_id = self.oauth.waiting_for(state)
         plugin = self.plugins.get(plugin_id) if plugin_id else None
@@ -2374,6 +2561,8 @@ class Engine:
         if not plugin.may("oauth"):
             raise PermissionError("plugin may not connect an account")
         session = await self.oauth.finish(state, code, self._provider(plugin))
+        if self.plugins.get(plugin.id) is not plugin or not plugin.may("oauth"):
+            raise PermissionError("plugin changed while it was signing in, so sign in again")
         plugin.secrets = {**plugin.secrets, **session}
         logger.info("plugin %s signed in", plugin.id)
         self.save()
@@ -2389,6 +2578,13 @@ class Engine:
         so later requests ask for a sign-in without calling the provider again
         and the panel sees it is no longer signed in.
 
+        A token that needs no renewing asks nothing of the sign-in, so a plugin
+        nobody has typed a client id for can still make its other requests.
+        The answer is written to the plugin installed once the provider has
+        answered, and only while it still holds the refresh token that was
+        spent, so a disconnect, a fresh sign-in or a removal made meanwhile
+        stands.
+
         Raises:
             RuntimeError: If the provider refused the refresh token.
         """
@@ -2396,16 +2592,25 @@ class Engine:
             return
         async with self._sign_in_refreshes[plugin.id]:
             held = plugin.secrets
+            if not oauth.expiring(held):
+                return
+            provider = self._provider(plugin)
+            refused: oauth.SignInRefused | None = None
+            renewed = held
             try:
-                renewed = await self.oauth.refreshed(self._provider(plugin), held)
+                renewed = await self.oauth.refreshed(provider, held)
             except oauth.SignInRefused as exc:
-                plugin.secrets = oauth.without_session(plugin.secrets)
+                refused = exc
+            current = self.plugins.get(plugin.id)
+            if current is None or current.secrets.get(oauth.REFRESH) != held[oauth.REFRESH]:
+                return
+            if refused:
+                current.secrets = oauth.without_session(current.secrets)
                 self.save()
                 self._broadcast(self.state_event())
-                raise RuntimeError(f"{exc}, so {plugin.id} was signed out") from None
-            if renewed is not None:
-                plugin.secrets = {**plugin.secrets, **{key: value for key, value in renewed.items() if held.get(key) != value}}
-                self.save()
+                raise RuntimeError(f"{refused}, so {plugin.id} was signed out")
+            current.secrets = {**current.secrets, **{key: value for key, value in renewed.items() if held.get(key) != value}}
+            self.save()
 
     async def _cmd_plugin_effect(self, message: dict[str, Any]) -> None:
         """Hands a plugin's effect to the dashboards that can perform it.
@@ -2441,14 +2646,16 @@ class Engine:
 
         Sockets belong to the plugin that opened them, so anything no longer
         running loses its connections rather than keeping them open behind a
-        grant that has gone. A gate that failed is named too, so the runtime
-        keeps refusing for it until somebody enables, reinstalls or removes it.
+        grant that has gone. A gate that failed is named too, and so is one the
+        hub stood down itself or could not read at start, so the runtime keeps
+        refusing for it until somebody enables, reinstalls or removes it.
         """
         running = self.plugins.running()
         await self.sockets.drop_all({plugin.id for plugin in running})
         runtime = self.platform.plugin_runtime
         if runtime is not None:
-            await runtime.reload(running, {plugin.id for plugin in self.plugins.values() if plugin.failure and plugin.may("gate")})
+            stopped_gates = {plugin.id for plugin in self.plugins.values() if plugin.failure and "gate" in plugin.manifest["permissions"]}
+            await runtime.reload(running, stopped_gates | self._dropped_gates)
 
     def plugin_failed(self, plugin_id: str, reason: str) -> None:
         """Disables a plugin its runtime could not keep running, drops it from the runtime and closes its sockets.

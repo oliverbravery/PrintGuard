@@ -45,7 +45,7 @@ class Scheduler:
         self._registry = registry
         self._on_result = on_result
         self._on_error = on_error
-        self._last_error_at = float("-inf")
+        self._last_error_at: dict[str, float] = {}
         self._dispatch_lock = asyncio.Lock()
         self._jobs: set[asyncio.Task[None]] = set()
         self._camera_jobs: dict[str, asyncio.Task[None]] = {}
@@ -192,8 +192,8 @@ class Scheduler:
         except Exception as exc:
             camera.next_due = time.monotonic() + STALE_RETRY_S
             logger.debug("inference failed on '%s'", camera.name, exc_info=True)
-            if time.monotonic() - self._last_error_at > ERROR_THROTTLE_S:
-                self._last_error_at = time.monotonic()
+            if time.monotonic() - self._last_error_at.get(camera.id, float("-inf")) > ERROR_THROTTLE_S:
+                self._last_error_at[camera.id] = time.monotonic()
                 self._on_error(f"inference failed on '{camera.name}': {logs.describe(exc)}")
 
     def _release(self, camera: Camera, _: asyncio.Task[None]) -> None:

@@ -17,6 +17,11 @@ from . import sockets
 if TYPE_CHECKING:
     from .registry import Plugin
 
+PLUGIN_HEADER = "X-PrintGuard-Plugin"
+"""The header on every request, sign-in and socket made for a plugin. The hub
+refuses whatever arrives carrying it, so a plugin that may reach this network
+cannot read the dashboard through the hub's own API."""
+
 Redirects = Literal["follow", "answer", "refuse"]
 """What a request does with a 3xx: follow it, hand it back as the answer, or fail naming where it points."""
 
@@ -144,8 +149,9 @@ class PluginRuntime(Protocol):
 
         Args:
             running: The enabled plugins.
-            failed_gates: Plugins holding ``gate`` that stopped on a failure.
-                Every request is refused while there is one.
+            failed_gates: Plugins that were gating and stopped on a failure,
+                or that the hub stood down or could not read at start. Every
+                request is refused while there is one.
         """
         ...
 
@@ -270,10 +276,10 @@ class Platform(Protocol):
         ...
 
     async def open_socket(self, url: str, arrived: Callable[[str, str], None], public_only: bool = False) -> sockets.Socket:
-        """Opens a WebSocket and reports every frame through the callback.
+        """Opens a plugin's WebSocket and reports every frame through the callback.
 
         A redirect is a failed handshake, never followed, since only ``url``
-        was checked.
+        was checked. The handshake carries ``PLUGIN_HEADER``.
 
         Args:
             url: A ``ws://`` or ``wss://`` URL, already checked against the

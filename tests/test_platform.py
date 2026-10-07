@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import errno
 import fcntl
 import gc
@@ -806,6 +807,106 @@ async def test_a_plugin_socket_to_a_name_on_this_network_is_refused_at_the_conne
         assert reached == [f"printer.example:{port}"]
 
 
+async def test_a_plugin_socket_sent_frames_at_wire_speed_is_closed_with_the_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every frame became an event for each dashboard, as fast as the other end cared to send them."""
+    monkeypatch.setattr("printguard.server.platform.SOCKET_FLOOD_FRAMES", 5)
+    hung_up = asyncio.Event()
+
+    async def flood(connection: websockets.ServerConnection) -> None:
+        with contextlib.suppress(websockets.ConnectionClosed):
+            while True:
+                await connection.send("frame")
+        hung_up.set()
+
+    heard: list[tuple[str, str]] = []
+    async with websockets.serve(flood, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        await ServerPlatform.open_socket(None, f"ws://127.0.0.1:{port}/feed", lambda state, text: heard.append((state, text)))
+        async with asyncio.timeout(5):
+            await hung_up.wait()
+
+    assert heard == [("open", ""), *[("message", "frame")] * 5, ("closed", "it was sent more than 5 frames in 10 seconds")]
+
+
+async def test_a_socket_the_hub_closed_for_flooding_is_an_error_that_names_no_tag() -> None:
+    from printguard.engine.sockets import SocketBroker
+
+    emitted: list[dict] = []
+    reports: list = []
+
+    async def open_socket(url: str, arrived, public_only: bool) -> SimpleNamespace:
+        reports.append(arrived)
+        return SimpleNamespace()
+
+    broker = SocketBroker(open_socket, emitted.append)
+    await broker.act("plugin", "open", "secret-tag", "wss://feed.example", "", True)
+    reports[0]("closed", "it was sent more than 300 frames in 10 seconds")
+
+    assert emitted == [
+        {"event": "error", "message": "plugin plugin had a socket closed: it was sent more than 300 frames in 10 seconds"},
+        {"event": "socket", "id": "plugin", "tag": "secret-tag", "state": "closed", "text": "it was sent more than 300 frames in 10 seconds"},
+    ]
+    assert not broker._sockets
+
+
+async def test_a_cancelled_grab_keeps_the_scaler_until_its_conversion_ends() -> None:
+    """The lock went with the cancelled task while its thread was still converting, and the next grab joined it on the one scaler."""
+    source = object.__new__(AVSource)
+    source.online, source._latest_rgb, source._converting = True, None, threading.Lock()
+    inside = most = 0
+    counting = threading.Lock()
+
+    class SlowScaler:
+        def reformat(self, frame: av.VideoFrame, **options: object) -> av.VideoFrame:
+            nonlocal inside, most
+            with counting:
+                inside += 1
+                most = max(most, inside)
+            time.sleep(0.2)
+            with counting:
+                inside -= 1
+            return frame.reformat(**options)
+
+    source._reformatter = SlowScaler()
+    source._latest = (av.VideoFrame.from_ndarray(np.zeros((48, 64, 3), np.uint8), format="rgb24"), 1.0, time.time())
+    first = asyncio.ensure_future(source.grab())
+    await asyncio.sleep(0.05)
+    first.cancel()
+    await asyncio.gather(first, return_exceptions=True)
+    source._latest = (source._latest[0], 2.0, time.time())
+
+    assert (await source.grab()).seq == 2.0
+    assert most == 1
+
+
+async def test_a_stream_pushed_to_the_hub_and_added_by_address_is_pulled_with_the_hubs_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    """From 2.6.0 the bundled server refuses a reader with no login, its own pull of itself included."""
+    pulled: list[tuple[str, str]] = []
+
+    async def ensure_path(name: str, source: str, fingerprint: object) -> None:
+        pulled.append((name, source))
+
+    async def remove_path(name: str) -> None:
+        return None
+
+    async def own_path(url: str) -> str | None:
+        return "garage" if "hub.local" in url else None
+
+    monkeypatch.setattr("printguard.server.platform.OPEN_WAIT_S", 0.1)
+    platform = object.__new__(ServerPlatform)
+    platform.mediamtx = SimpleNamespace(
+        rtsp_url=lambda path: f"rtsp://printguard:LOGIN@127.0.0.1:9/{path}", ensure_path=ensure_path, remove_path=remove_path, own_path=own_path
+    )
+    platform._sources, platform._closing, platform._notices = {}, {}, []
+
+    for address in ("rtsp://hub.local:8554/garage", "rtsp://camera.invalid:8554/garage"):
+        with pytest.raises(RuntimeError, match="no frames from camera cam1") as raised:
+            await platform.open_camera("cam1", {"kind": "url", "url": address})
+        assert "LOGIN" not in str(raised.value)
+
+    assert pulled == [("cam1", "rtsp://printguard:LOGIN@127.0.0.1:9/garage"), ("cam1", "rtsp://camera.invalid:8554/garage")]
+
+
 def _capability(card: bytes, device_caps: int) -> bytes:
     """A struct v4l2_capability as the kernel fills it for one node of a USB camera.
 
@@ -1253,10 +1354,13 @@ async def test_a_camera_pulled_through_the_hub_names_the_address_it_was_given(
     async def remove_path(name: str) -> None:
         return None
 
+    async def own_path(url: str) -> None:
+        return None
+
     monkeypatch.setattr("printguard.server.platform.OPEN_WAIT_S", 5.0)
     platform = object.__new__(ServerPlatform)
     platform.mediamtx = SimpleNamespace(
-        rtsp_url=lambda path: f"rtsp://127.0.0.1:9/{path}", ensure_path=ensure_path, remove_path=remove_path
+        rtsp_url=lambda path: f"rtsp://127.0.0.1:9/{path}", ensure_path=ensure_path, remove_path=remove_path, own_path=own_path
     )
     platform._sources, platform._closing, platform._notices = {}, {}, []
 

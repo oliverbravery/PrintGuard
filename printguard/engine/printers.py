@@ -35,7 +35,8 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
         another service marks secret cannot linger in it unhidden.
 
     Raises:
-        ValueError: If the provider is missing or not a known integration.
+        ValueError: If the provider is missing or not a known integration, or
+            the config is not a set of named settings.
     """
     record = {**(base or {}), **patch, "id": printer_id}
     provider = record.get("provider")
@@ -43,8 +44,19 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
         raise ValueError(f"unknown printer provider {provider!r}")
     record["provider"] = provider
     record["name"] = (str(record.get("name") or "").strip()) or INTEGRATIONS[provider].label
-    record["config"] = INTEGRATIONS[provider].declared(record.get("config") or {})
+    record["config"] = INTEGRATIONS[provider].declared(connection_settings(record.get("config") or {}))
     return record
+
+
+def connection_settings(raw: Any) -> dict[str, Any]:
+    """Takes a printer's config as a command sent it.
+
+    Raises:
+        ValueError: If it is not a set of named settings.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("a printer's config holds its connection settings")
+    return raw
 
 
 def _target(heater: str, value: Any, strict: bool = False) -> float:

@@ -148,7 +148,7 @@ async def test_a_store_nested_too_deep_is_refused_and_the_hub_goes_on_saving(run
 
         assert engine.plugins.get("guard").config["kept"] == engine_plugins.MAX_DEPTH - 2, "the deep store replaced the one that fitted"
         with pytest.raises(RuntimeError, match=f"nested more than {engine_plugins.MAX_DEPTH} deep"):
-            await engine.request({"cmd": "plugin.update", "id": "guard", "patch": {"config": json.loads('{"a":' * 40 + "1" + "}" * 40)}})
+            await engine.request({"cmd": "plugin.update", "id": "guard", "patch": {"store": {"written": json.loads('{"a":' * 40 + "1" + "}" * 40), "removed": []}}})
     finally:
         await engine.stop()
 
@@ -549,8 +549,8 @@ async def test_a_worker_reports_progress_and_defects_through_the_alert_channels(
         monitor_id = next(iter(engine.monitors))
         await install_and_accept(engine, REPORTS_MANIFEST, REPORTS)
         await engine.handle({"cmd": "plugin.update", "id": "progress-reports",
-                             "patch": {"config": {"on": {monitor_id: True}, "every": {monitor_id: 1},
-                                                  "sent": {monitor_id: 0}, "jobs": {monitor_id: None}}}})
+                             "patch": {"store": {"written": {"on": {monitor_id: True}, "every": {monitor_id: 1},
+                                                                 "sent": {monitor_id: 0}, "jobs": {monitor_id: None}}, "removed": []}}})
 
         engine.emit({"event": "result", "monitor_id": monitor_id, "camera_id": "c1", "score": 0.9,
                      "prediction": "failure", "ts": 1.0})
@@ -639,7 +639,7 @@ async def test_a_worker_can_act_on_a_single_inference_over_its_own_threshold(run
         await engine.handle({"cmd": "printer.add", "printer": {"name": "P", **OCTOPRINT}})
         printer_id = next(iter(engine.printers.items))
         await install_and_accept(engine, RISK_MANIFEST, RISK_WORKER)
-        await engine.handle({"cmd": "plugin.update", "id": "risk", "patch": {"config": {"limit": 0.8, "printer": printer_id}}})
+        await engine.handle({"cmd": "plugin.update", "id": "risk", "patch": {"store": {"written": {"limit": 0.8, "printer": printer_id}, "removed": []}}})
 
         for score in (0.10, 0.55, 0.91, 0.95):
             engine.emit({"event": "result", "monitor_id": "m1", "camera_id": "c1", "score": score, "ts": 1.0})
@@ -709,7 +709,7 @@ async def test_a_call_that_changed_nothing_does_not_undo_a_save_made_while_it_ra
         engine.emit({"event": "alert", "monitor_id": "m", "score": 0.9, "action": "none"})
         while "slow" not in runtime._busy:
             await asyncio.sleep(0)
-        await engine.request({"cmd": "plugin.update", "id": "slow", "patch": {"config": {"on": True}}})
+        await engine.request({"cmd": "plugin.update", "id": "slow", "patch": {"store": {"written": {"on": True}, "removed": []}}})
         await asyncio.sleep(1.0)
 
         assert engine.plugins.get("slow").config == {"on": True}, "a worker that changed nothing wrote its old copy back"
@@ -726,7 +726,7 @@ async def test_a_worker_that_changes_one_key_does_not_undo_a_save_to_another_mad
         engine.emit({"event": "result", "monitor_id": "m", "camera_id": "c", "score": 0.1})
         while "slow" not in runtime._busy:
             await asyncio.sleep(0)
-        await engine.request({"cmd": "plugin.update", "id": "slow", "patch": {"config": {"on": True}}})
+        await engine.request({"cmd": "plugin.update", "id": "slow", "patch": {"store": {"written": {"on": True}, "removed": []}}})
         await asyncio.sleep(1.0)
 
         assert engine.plugins.get("slow").config == {"on": True, "changed": True}

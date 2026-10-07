@@ -27,7 +27,7 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime, timezone
 from platform import platform as host_os
 from typing import TYPE_CHECKING, Any
-from urllib.parse import SplitResult, urlsplit, urlunsplit
+from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
 
 from . import logs, plugins
 from .adapters import HttpFn
@@ -94,7 +94,8 @@ def scrub_url(url: str, *, private_path: bool = False) -> str:
     Returns:
         The address without its ``user:pass@`` part, with every query value
         replaced, since ``?user=admin&pwd=...`` is how many cameras take a login,
-        and with each path segment that reads as a key replaced.
+        with each path segment that reads as a key replaced, and with its
+        fragment replaced, since ``#token=...`` is another place a key is put.
         An address that cannot be split is replaced whole, since nothing says
         where its credentials end.
     """
@@ -107,7 +108,7 @@ def scrub_url(url: str, *, private_path: bool = False) -> str:
     else:
         path = "/".join(REDACTED if PATH_TOKEN.fullmatch(segment) else segment for segment in parts.path.split("/"))
     query = "&".join(f"{pair.partition('=')[0]}={REDACTED}" if "=" in pair else pair for pair in parts.query.split("&"))
-    return urlunsplit(parts._replace(path=path, query=query))
+    return urlunsplit(parts._replace(path=path, query=query, fragment=REDACTED if parts.fragment else ""))
 
 
 def url_secrets(url: str, *, private_path: bool = False) -> set[str]:
@@ -119,9 +120,11 @@ def url_secrets(url: str, *, private_path: bool = False) -> set[str]:
             segments are taken.
 
     Returns:
-        Its username and password, each path segment that reads as a key, and
-        each query value with its key, since a value such as ``stream`` on its
-        own is an ordinary word. An address that cannot be split is a secret whole.
+        Its username and password, each path segment that reads as a key, its
+        fragment, and each query value with its key, since a value such as
+        ``stream`` on its own is an ordinary word. Each is there percent-decoded
+        as well, since a client that reports the login it sent quotes what the
+        encoding stands for. An address that cannot be split is a secret whole.
     """
     try:
         userinfo, parts = _parse_credentialed(url)
@@ -136,7 +139,9 @@ def url_secrets(url: str, *, private_path: bool = False) -> set[str]:
     for pair in parts.query.split("&"):
         if pair.partition("=")[2]:
             secrets.add(pair)
-    return secrets
+    if parts.fragment:
+        secrets.add(parts.fragment)
+    return secrets | {unquote(secret) for secret in secrets}
 
 
 def scrub_catalogue_url(url: str) -> str:

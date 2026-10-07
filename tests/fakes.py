@@ -124,6 +124,15 @@ class FakePluginRuntime:
         pass
 
 
+NOTIFIER_REPLIES: dict[str, tuple[int, Any]] = {
+    "ntfy": (200, {"id": "sPs71M8A2T", "time": 1, "event": "message", "topic": "topic"}),
+    "://disc/": (204, ""),
+    "api.pushover.net": (200, {"status": 1, "request": "r"}),
+    "api.telegram.org": (200, {"ok": True, "result": {}}),
+}
+"""What each alert service answers a delivery with, by what the address the tests reach it on holds."""
+
+
 class FakePlatform:
     """In-memory platform with deterministic latency and HTTP."""
 
@@ -218,6 +227,9 @@ class FakePlatform:
             return self.responses[url]
         if hostname == "api.github.com":
             return 200, self.releases
+        for service, reply in NOTIFIER_REPLIES.items():
+            if service in url:
+                return reply
         if hostname == "sentry.io" or hostname.endswith(".sentry.io"):
             return self.report_status, {}
         if method == "POST" and "/api/job" in url:
