@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from . import appearance
+from .adapters import require_typed
 from .printers import sanitise_presets
 from .watchdog import clamp_grace
 
@@ -61,6 +62,18 @@ CHECKS: dict[str, Callable[[Any], Any]] = {
 """What each setting is checked with, raising ValueError for one of the wrong kind and returning it as it is stored."""
 
 
+MQTT_PROPERTIES: dict[str, dict[str, Any]] = {
+    "enabled": {"title": "MQTT enabled", "type": "boolean"},
+    "host": {"title": "MQTT host", "type": "string"},
+    "username": {"title": "MQTT username", "type": "string"},
+    "password": {"title": "MQTT password", "type": "string"},
+    "tls": {"title": "MQTT tls", "type": "boolean"},
+    "base_topic": {"title": "MQTT base_topic", "type": "string"},
+    "discovery_prefix": {"title": "MQTT discovery_prefix", "type": "string"},
+}
+"""The broker settings beside ``port``, typed as an adapter's schema types its config."""
+
+
 def require_broker(mqtt: dict[str, Any]) -> None:
     """Checks broker settings a user has just saved, which a stored one may not meet.
 
@@ -68,14 +81,17 @@ def require_broker(mqtt: dict[str, Any]) -> None:
         mqtt: The broker settings as they would be stored.
 
     Raises:
-        ValueError: If the port is set and is not a whole number from 1 to
-            65535, the host is not text, or the bridge is enabled with no host.
+        ValueError: If it names a setting the broker does not have, the port
+            is set and is not a whole number from 1 to 65535, another value is
+            not of its setting's type, or the bridge is enabled with no host.
     """
+    unknown = sorted(set(mqtt) - set(MQTT_PROPERTIES) - {"port"})
+    if unknown:
+        raise ValueError(f"mqtt has no {unknown[0]} setting")
     port = mqtt.get("port")
     if port not in (None, "") and not (type(port) is int and 1 <= port <= 65535):
         raise ValueError("MQTT port must be a whole number from 1 to 65535")
+    require_typed(mqtt, MQTT_PROPERTIES)
     host = mqtt.get("host") or ""
-    if not isinstance(host, str):
-        raise ValueError("MQTT host is the broker's address")
     if mqtt.get("enabled") and not host.strip():
         raise ValueError("MQTT needs the broker's host before it is enabled")

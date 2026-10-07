@@ -134,9 +134,10 @@ async def sweep_orphans(engine: Engine, *, unnamed: bool) -> None:
     deletes a file. This runs once when the hub starts, before anything can be
     uploaded. Only names the hub generates are touched, so a folder is left
     alone, since a NAS keeps its own beside the files, such as Synology's
-    ``@eaDir``, and so is a file a user dropped in. The files of a record the
-    start could not read are kept too, since the record is gone but the file
-    may be all that is left of the print.
+    ``@eaDir``, and so is a file a user dropped in. The files of a record this
+    start could not read are kept too, so a backup of the state put in place
+    before the next start still finds them. That next start removes them
+    otherwise, since the record is gone from the state by then.
 
     Args:
         engine: The hub's engine, with its state loaded.

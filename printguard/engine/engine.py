@@ -16,7 +16,7 @@ import re
 import time
 import traceback
 import uuid
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from typing import Any, Awaitable, Callable, Coroutine
 
 import numpy as np
@@ -81,7 +81,20 @@ FEEDBACK_UNSENDABLE = ("details", "not_jpeg", "too_large", "length")
 LOOP_RETRY_S = 1.0
 FAILURE_REPORT_EVERY_S = 30.0
 NOTIFY_TIMEOUT_S = 30.0
-FINISHING_COMMANDS = frozenset({"camera.remove", "printer.update", "printer.remove", "monitor.remove", "print.remove"})
+FINISHING_COMMANDS = frozenset(
+    {
+        "camera.remove",
+        "printer.update",
+        "printer.remove",
+        "monitor.remove",
+        "print.remove",
+        "settings.update",
+        "plugin.install",
+        "plugin.remove",
+        "plugin.update",
+        "plugin.secrets",
+    }
+)
 READ_ONLY_COMMANDS = frozenset({"history.get", "snapshot.get", "review.get", "camera.snapshot"})
 UNSAVED_COMMANDS = frozenset(
     {
@@ -173,7 +186,7 @@ class Engine:
         self._tasks: list[asyncio.Task[None]] = []
         self._background: set[asyncio.Task[None]] = set()
         self._attach_tasks: dict[str, asyncio.Task[None]] = {}
-        self._detaching: set[str] = set()
+        self._detaching: Counter[str] = Counter()
         self._reconciles: dict[str, asyncio.Lock] = {}
         self._starting: set[str] = set()
         self._adding: set[Any] = set()
@@ -279,7 +292,7 @@ class Engine:
                     label = record.get("name") or record.get("id") if isinstance(record, dict) else None
                     if isinstance(record, dict) and record.get("id"):
                         self.dropped_ids.add(str(record["id"]))
-                    kept = " (its file was kept in the data directory)" if kind in ("prints", "reviews") else ""
+                    kept = " (its file stays in the data directory until the hub next starts)" if kind in ("prints", "reviews") else ""
                     self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}{kept}")
         for monitor in self.monitors.values():
             if monitor["printer_id"] and self.printers.get(monitor["printer_id"]) is None:
@@ -500,9 +513,11 @@ class Engine:
         """Runs a command to its end even when whoever issued it is cancelled.
 
         A removal that stopped half way would leave a camera out of the
-        registry but still bound to its monitor and in the saved state, so it
-        carries on without its issuer, which a socket that closes or a request
-        that times out has stopped waiting for.
+        registry but still bound to its monitor and in the saved state, a
+        runtime switch would leave the setting naming a runtime other than the
+        one loaded, and a plugin change would never reach the plugin runtime.
+        So it carries on without its issuer, which a socket that closes or a
+        request that times out has stopped waiting for.
         """
         await asyncio.shield(self._hold("a command", work))
 
@@ -612,7 +627,7 @@ class Engine:
         """
         command = message.get("cmd")
         if command in ("printer.action", "printer.heat"):
-            printer = self.printers.get(message.get("id") or "")
+            printer = self.printers.get(message["id"]) if isinstance(message.get("id"), str) else None
             return REQUEST_TIMEOUT_S + (INTEGRATIONS[printer.provider].slow_action_s if printer else 0.0)
         if command == "camera.add":
             return REQUEST_TIMEOUT_S + CAMERA_OPEN_WAIT_S
@@ -712,7 +727,7 @@ class Engine:
 
     def _schedule_attach(self, camera: Camera) -> None:
         """Starts attaching a camera, unless it is attached, being attached or being taken down to be attached afresh."""
-        if camera.frame_source is not None or camera.id in self._attach_tasks or camera.id in self._detaching:
+        if camera.frame_source is not None or camera.id in self._attach_tasks or self._detaching[camera.id]:
             return
         task = asyncio.create_task(self._attach(camera))
         self._attach_tasks[camera.id] = task
@@ -728,14 +743,14 @@ class Engine:
         source = camera.frame_source
         if source is None:
             return
-        self._detaching.add(camera.id)
+        self._detaching[camera.id] += 1
         try:
             self.scheduler.cancel_camera(camera)
             camera.frame_source = None
             source.close()
             await self.platform.release_camera(camera.id, camera.source)
         finally:
-            self._detaching.discard(camera.id)
+            self._detaching[camera.id] -= 1
         if self.cameras.get(camera.id) is camera:
             self._schedule_attach(camera)
 
@@ -782,7 +797,8 @@ class Engine:
             self.save()
         if self.settings["feedback"] == "ask":
             for review in self.reviews.due(time.time()):
-                self._start_send(review)
+                if review.id not in self._sends:
+                    self._start_send(review)
         for notice in self.platform.take_notices():
             camera = self.cameras.get(notice.camera_id) if notice.camera_id else None
             subject = f"'{camera.name}' " if camera else ""
@@ -1338,9 +1354,11 @@ class Engine:
         """Releases a camera's source and attaches it again at a new address.
 
         The re-attach tick leaves the camera alone while it is taken down, so
-        it is never opened at the address it is leaving.
+        it is never opened at the address it is leaving. A restart can be
+        taking it down at the same time, which is why what is taking it down
+        is counted.
         """
-        self._detaching.add(camera.id)
+        self._detaching[camera.id] += 1
         try:
             await self._cancel_attach(camera.id)
             if camera.frame_source:
@@ -1350,7 +1368,7 @@ class Engine:
             await self.platform.release_camera(camera.id, camera.source)
             camera.source = source
         finally:
-            self._detaching.discard(camera.id)
+            self._detaching[camera.id] -= 1
         self._schedule_attach(camera)
 
     async def _cmd_printer_add(self, message: dict[str, Any]) -> None:
@@ -1765,7 +1783,9 @@ class Engine:
 
         An inference that has not come back after RUNTIME_DRAIN_TIMEOUT_S is
         given up on, since one wedged in a runtime would hold every camera
-        still behind it. The load itself is never cut short.
+        still behind it. The load itself is never cut short, and
+        ``settings.update`` is a finishing command so that holds when its
+        issuer goes away.
 
         Raises:
             RuntimeError: If an inference did not finish, so nothing was switched.
@@ -1853,9 +1873,16 @@ class Engine:
         await asyncio.gather(*(deliver(notifier_id, config) for notifier_id, config in configured.items()))
 
     async def _cmd_notify_send(self, message: dict[str, Any]) -> None:
-        """Sends a caller's own message through the configured channels."""
-        title = str(message.get("title") or "PrintGuard").strip()[:80].strip()
-        body = str(message.get("text", "")).strip()[:400]
+        """Sends a caller's own message through the configured channels.
+
+        Raises:
+            ValueError: If the title or text is not text, or there is no text.
+        """
+        title, text = message.get("title") or "PrintGuard", message.get("text", "")
+        if not isinstance(title, str) or not isinstance(text, str):
+            raise ValueError("a notification's title and text are text")
+        title = title.strip()[:80].strip()
+        body = text.strip()[:400]
         if not body:
             raise ValueError("a notification needs something to say")
         await self.send_alerts(title, body, None, urgent=False)

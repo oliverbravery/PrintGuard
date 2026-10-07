@@ -322,6 +322,7 @@ class Watchdog:
                 self._forget(stall_key)
                 self._forget(f"unstable:{mid}")
                 if watching:
+                    self.drop_streak(mid)
                     await self._edge(
                         offline_key,
                         False,

@@ -116,7 +116,10 @@ A field a body doesn't list is ignored, a field of the body sent as `null` is le
 and a number outside its range is moved to the nearest end of it. A number sent as text or `true`
 is refused with a `422`, never converted. Three more are refused instead of moved, a
 heater target outside 0 to 350 for the nozzle or 0 to 150 for the bed, an `mqtt` `port` that isn't
-a whole number from 1 to 65535 and `mqtt` enabled with no `host`.
+a whole number from 1 to 65535 and `mqtt` enabled with no `host`. A printer's `config`, a
+channel's config and `mqtt` are refused with a `400` for a value that isn't of its field's type,
+which is text for every field but the `enabled` and `tls` of `mqtt`, and `mqtt` for a field it
+doesn't have.
 
 The engine sets how long each command may take, so the REST API, MCP server and plugins all wait
 the same:
