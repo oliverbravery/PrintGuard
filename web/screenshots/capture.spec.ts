@@ -252,8 +252,45 @@ async function openReview(page: Page): Promise<void> {
   await page.getByRole("button", { name: /^Frame \d+ of \d+ at .* marked Good/ }).last().click();
 }
 
+const HISTORY_SNAPS = [0.86, 0.91, 0.78].map((score, index) => ({ id: `h${index}`, ts: NOW / 1000 - 120 - index * 1500, score, action: index === 2 ? "none" : "pause" }));
+const HISTORY = {
+  now: NOW / 1000,
+  buckets: Array.from({ length: 60 }, (_, minute) => minute)
+    .filter((minute) => minute < 22 || minute > 27)
+    .map((minute) => {
+      const avg = minute < 50 ? 0.14 + 0.05 * Math.sin(minute / 4) : 0.2 + (minute - 50) * 0.07;
+      return { t: Math.floor(NOW / 60_000) * 60 - (59 - minute) * 60, n: 300, sum: avg * 300, min: avg - 0.05, max: avg + 0.1, defects: avg > 0.5 ? Math.round((avg - 0.4) * 300) : 0, watched: 60 };
+    }),
+  snaps: HISTORY_SNAPS,
+  alerts: HISTORY_SNAPS.map(({ ts, score, action }) => ({ ts, score, action })),
+  stats: { current: 0.86, avg: 0.21, max: 0.91, defect_pct: 6, inferences: 16_200, alerts: 3, watch_min: 54 },
+};
+const PRINTS_KEPT = [{ ...REVIEW, id: "r0", started: REVIEW.started - 172_800, ended: REVIEW.ended - 172_800, status: "sent" as const, frames: 12, sent: 12 }, REVIEW];
+
+async function openHistory(page: Page): Promise<void> {
+  await page.evaluate(
+    ({ history, picture }) => {
+      (window as unknown as { __pg: { setState: (s: unknown) => void } }).__pg.setState({
+        statsMonitorId: "m2",
+        historyData: { m2: history },
+        snapshotCache: Object.fromEntries(history.snaps.map((snap) => [snap.id, picture])),
+      });
+    },
+    { history: HISTORY, picture: FRAMES.defect },
+  );
+  await page.getByRole("button", { name: /^Snapshot at/ }).first().waitFor();
+}
+
+async function openCameraEditor(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+  await page.getByRole("slider", { name: "Detection rate" }).scrollIntoViewIfNeeded();
+}
+
 const SCENES: Scene[] = [
   { name: "review", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = [REVIEW]), prepare: openReview },
+  { name: "history", width: 1360, height: 860, theme: "dark", mutate: (e) => void (e.reviews = PRINTS_KEPT), prepare: openHistory },
+  { name: "camera-editor", width: 1360, height: 680, theme: "dark", dialog: "cameras", prepare: openCameraEditor },
+  { name: "settings-advanced", width: 1360, height: 860, theme: "dark", settingsTab: "advanced" },
   { name: "dashboard", width: 1360, height: 620, theme: "dark" },
   { name: "dashboard-light", width: 1360, height: 620, theme: "light" },
   { name: "printer-detail", width: 1360, height: 860, theme: "dark", detailId: "m1" },

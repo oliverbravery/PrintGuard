@@ -124,6 +124,8 @@ old ID can't be traced to your hub after that, so I couldn't find them to delete
 Turn off **Ask me to review frames after a print** in **Settings**, under **Advanced**. The hub
 then keeps only alert frames, for the risk history, and never prompts.
 
+![The Advanced tab in Settings, with the switch that asks you to review frames after a print](assets/settings-advanced.png)
+
 Switching it off also settles the prints the hub already holds. A print waiting for a review or
 waiting to send is dismissed, and every frame that isn't an alert is deleted from the hub. A
 print that is uploading stops after the frame it's on. Frames already sent stay in the inbox. Nothing is sent while it is off, and **Send** says so. A frame the hub can't delete is reported as a warning, and the switch still takes effect.

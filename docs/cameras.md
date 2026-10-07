@@ -132,6 +132,8 @@ Rename it from **Edit**, then set it up for the model. Rotation, the square crop
 contrast, sharpness and the detection rate are all in
 [tuning the camera](monitoring.md#tuning-the-camera). Then bind it to a monitor.
 
+![A camera open for editing in the camera registry, with its name, brightness, contrast, sharpness, detection rate and rotation](assets/camera-editor.png)
+
 A camera that no monitor is watching and nobody is viewing goes into standby after about ten
 seconds and stops being decoded. That covers an idle printer, a monitor you switched off and a
 camera with no monitor. It resumes when a print starts or someone opens the feed.
