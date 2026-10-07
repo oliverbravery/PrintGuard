@@ -87,16 +87,13 @@ export function MonitorTile({ monitor, index }: { monitor: Monitor; index: numbe
           </>
         )}
       </div>
-      <Feed camera={camera} active={!covered}>
+      <Feed
+        camera={camera}
+        active={!covered}
+        banner={alerting && <span className="display relative z-[4] bg-bad text-on-bad text-xs font-bold tracking-[0.3em] px-4 py-1.5">DEFECT DETECTED</span>}
+      >
         {activeJob(device) && <ProgressBar state={device} className="absolute inset-x-0 bottom-0 z-[3] h-[3px]" />}
       </Feed>
-      {alerting && (
-        <div className="pointer-events-none absolute inset-x-0 top-[calc(50%-14px)] z-[4] flex justify-center">
-          <span className="display bg-bad text-on-bad text-xs font-bold tracking-[0.3em] px-4 py-1.5">
-            DEFECT DETECTED
-          </span>
-        </div>
-      )}
       <div className="flex items-center gap-4 px-4 py-2.5">
         <RiskGauge score={score} threshold={monitor.threshold} size={56} />
         <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-1">

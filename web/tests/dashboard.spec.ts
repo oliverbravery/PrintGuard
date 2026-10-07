@@ -95,6 +95,15 @@ test("a warning raised while the hub started is toasted once per page load, not 
   for (const warning of warnings) await expect(page.getByText(warning)).toHaveCount(1);
 });
 
+test("the update dialog opened while the hub is away asks for the releases once it is back", async ({ page }) => {
+  await dashboard(page, { dialog: "update", reconnecting: true });
+  await expect(page.getByRole("dialog", { name: "Updates" })).toBeVisible();
+  expect(await sent(page, "update.releases")).toBeUndefined();
+
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: false }));
+  await expect.poll(() => sent(page, "update.releases")).toBeDefined();
+});
+
 test("a dashboard left open through an update reloads onto the new version", async ({ page }) => {
   const { sockets } = await hub(page);
   sockets[0].send(JSON.stringify({ event: "state", ...engine({ version: "next" }) }));
@@ -185,6 +194,7 @@ test("a hub that goes silent without closing is dropped and reached again", asyn
 test("a command pressed while the hub is away says so and leaves its button free", async ({ page }) => {
   const { sockets } = await hub(page);
   await page.evaluate(() => (window as any).__pg.getState().openDetail("m1"));
+  await page.routeWebSocket(/\/api\/ws$/, (socket) => void socket.close());
   await sockets[0].close();
   await expect(page.getByRole("status").getByText("reconnecting")).toBeVisible();
   const panel = page.getByRole("dialog", { name: "Prusa" });
@@ -319,6 +329,30 @@ test("opening the history asks only for the snapshots near the screen", async ({
 
   await sheet.getByRole("button", { name: /Snapshot at 90% risk/ }).last().scrollIntoViewIfNeeded();
   await expect.poll(asked).toContain("s89");
+});
+
+test("a minute of history on its own is drawn across its width, not as a dot", async ({ page }) => {
+  await dashboard(page, { statsMonitorId: "m1" });
+  const chart = page.getByRole("dialog", { name: "Prusa · history" }).getByRole("img", { name: "Risk over time" });
+  const bucket = (t: number) => ({ t, n: 10, sum: 4.5, min: 0.4, max: 0.5, defects: 10, watched: 60 });
+  await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_200, buckets: [bucket(1_699_999_980), bucket(1_700_000_100)], snaps: [], alerts: [], stats: {} });
+
+  await expect(chart.locator("path")).toHaveCount(4);
+  const widths = await chart.locator("path").evaluateAll((paths) => paths.map((path) => path.getBoundingClientRect().width));
+  for (const width of widths) expect(width).toBeGreaterThan(100);
+});
+
+test("a history chart spanning more than a day dates the ends of its axis", async ({ page }) => {
+  await dashboard(page, { statsMonitorId: "m1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · history" });
+  const bucket = (t: number) => ({ t, n: 10, sum: 4.5, min: 0.4, max: 0.5, defects: 0, watched: 60 });
+  const twoDays = 2 * 86_400;
+  const ends = sheet.getByRole("img", { name: "Defect frames per period" }).locator("xpath=following-sibling::div[1]/span");
+  await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_000 + twoDays, buckets: [bucket(1_700_000_000), bucket(1_700_000_000 + twoDays)], snaps: [], alerts: [], stats: {} });
+  await sheet.getByRole("button", { name: "all", exact: true }).click();
+
+  const [first, last] = await ends.allTextContents();
+  expect(first).not.toBe(last);
 });
 
 test("after a hub restart the alerts tile still counts the snapshots that were kept", async ({ page }) => {
@@ -611,6 +645,26 @@ test("a heater target the printer refuses goes back to what the printer has", as
   await emit(page, { event: "error", message: "the printer refused 250", req_id: (await sent(page, "printer.heat")).req_id });
   await expect(target).toBeEnabled();
   await expect(target).toHaveValue("0");
+});
+
+test("the bed target can be typed while the nozzle target just set is still on its way to the printer", async ({ page }) => {
+  const heater = { actual: 21, target: 0 };
+  const device = { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: heater, bed: heater };
+  const printer = { id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true, device_state: device };
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
+  const nozzle = page.getByRole("spinbutton", { name: "nozzle target" });
+  const bed = page.getByRole("spinbutton", { name: "bed target" });
+  await nozzle.fill("215");
+  await bed.click();
+  await expect(nozzle).toBeDisabled();
+  await expect(bed).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type("60");
+
+  const answered = { ...device, nozzle: { actual: 21, target: 215 } };
+  await emit(page, { event: "device", printer_id: "p1", req_id: (await sent(page, "printer.heat")).req_id, ...answered });
+  await expect(nozzle).toBeEnabled();
+  await expect(bed).toHaveValue("60");
 });
 
 test("a monitor name or heater target typed and left with Escape is still saved", async ({ page }) => {
@@ -1348,15 +1402,31 @@ test("closing settings part way through a theme puts the saved theme back", asyn
   await expect(page.locator("html")).toHaveAttribute("data-glass", "");
 });
 
-test("a theme saved while the hub is away stays in the editor with what was typed", async ({ page }) => {
+test("a theme saved while the hub is away is sent once it is back", async ({ page }) => {
+  const { sockets, commands } = await hub(page);
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("appearance"));
+  await page.getByRole("button", { name: "+ New" }).click();
+  await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
+  await sockets[0].close();
+  await expect(page.getByText("reconnecting")).toBeVisible();
+  await page.getByRole("button", { name: "Save theme" }).click();
+
+  await expect(page.getByRole("textbox", { name: "Theme name" })).toBeHidden();
+  await expect.poll(() => commands.filter((c) => c.cmd === "settings.update").at(-1)?.patch.themes?.[0].name, { timeout: 8000 }).toBe("Workshop");
+});
+
+test("a saved theme stays on screen through a state sent before the hub has answered it", async ({ page }) => {
   await dashboard(page, { dialog: "settings", settingsTab: "appearance" });
   await page.getByRole("button", { name: "+ New" }).click();
   await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
-  await page.evaluate(() => (window as any).__pg.setState({ link: { send: () => false, close() {} } }));
   await page.getByRole("button", { name: "Save theme" }).click();
+  await emit(page, { event: "state", ...engine() });
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--color-on-accent"))).not.toBe("");
 
-  await expect(page.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Theme name" })).toHaveValue("Workshop");
+  const saved = await page.evaluate(() => (window as any).__pg.getState().engine.settings);
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await emit(page, { event: "state", ...engine({ settings: saved }) });
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--color-on-accent"))).toBe("");
 });
 
 test("a theme started from dark keeps dark text on its accent", async ({ page }) => {
@@ -1404,6 +1474,23 @@ test("glass keeps status colours readable and distinct over a bright picture, bl
     const loaded = performance.getEntriesByType("resource").find((entry) => entry.name.includes("/src/theme.ts"))!.name;
     const { measureCover } = await import(/* @vite-ignore */ loaded);
     await measureCover("data:image/png;base64,AAAA");
+    return document.documentElement.style.getPropertyValue("--glass-surface");
+  });
+  expect(tint).toBe("rgb(0 0 0 / 0.000)");
+});
+
+test("glass is tinted for the picture on show, not one taken down while it was still being measured", async ({ page }) => {
+  await dashboard(page);
+  await emit(page, { event: "state", ...engine({ settings: { ...engine().settings, theme: "glass" } }) });
+  const tint = await page.evaluate(async () => {
+    const loaded = performance.getEntriesByType("resource").find((entry) => entry.name.includes("/src/theme.ts"))!.name;
+    const { measureCover } = await import(/* @vite-ignore */ loaded);
+    const picture = document.createElement("canvas");
+    picture.getContext("2d")!.fillStyle = "#ffffff";
+    picture.getContext("2d")!.fillRect(0, 0, picture.width, picture.height);
+    const takenDown = measureCover(picture.toDataURL());
+    await measureCover(null);
+    await takenDown;
     return document.documentElement.style.getPropertyValue("--glass-surface");
   });
   expect(tint).toBe("rgb(0 0 0 / 0.000)");
@@ -1563,7 +1650,7 @@ test("a slider is named by its label and reads its formatted value", async ({ pa
   await expect(page.getByRole("switch", { name: "Watch this monitor", exact: true })).toBeVisible();
 });
 
-test("an alerting tile opens from its banner, and an offline camera shows no inference figures", async ({ page }) => {
+test("an alerting tile opens from its banner, and an offline camera shows no signal below it and no inference figures", async ({ page }) => {
   await dashboard(page, {
     engine: engine({ cameras: [camera({ online: false })], monitors: [monitor({ alert: { score: 0.9, action: "pause", ts: 1 } })] }),
     history: { m1: [{ ts: 1, score: 0.9 }] },
@@ -1573,6 +1660,8 @@ test("an alerting tile opens from its banner, and an offline camera shows no inf
   await expect(tile.getByRole("img", { name: "risk unknown" })).toBeVisible();
 
   const banner = (await page.getByText("DEFECT DETECTED").boundingBox())!;
+  const signal = (await tile.getByText("no signal").boundingBox())!;
+  expect(signal.y).toBeGreaterThanOrEqual(banner.y + banner.height);
   await page.mouse.click(banner.x + banner.width / 2, banner.y + banner.height / 2);
   await expect(page.getByRole("dialog", { name: "Prusa" })).toBeVisible();
 });

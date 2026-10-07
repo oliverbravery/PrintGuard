@@ -84,16 +84,16 @@ export function SettingsDialog() {
   const saveTheme = () => {
     if (!editing) return;
     const next = upsertTheme(themes, { ...editing, name: editing.name.trim() || "Custom" });
-    if (!send({ cmd: "settings.update", patch: { themes: next, theme: editing.id } })) return;
     endPreview();
     applyTheme(editing.id, next, glass, true);
+    updateSettings({ themes: next, theme: editing.id });
     setEditing(null);
   };
   const deleteTheme = (id: string) => {
     const next = themes.filter((t) => t.id !== id);
     const selection = theme === id ? "system" : theme;
-    if (!send({ cmd: "settings.update", patch: { themes: next, theme: selection } })) return;
     applyTheme(selection, next, glass, true);
+    updateSettings({ themes: next, theme: selection });
   };
 
   useEffect(() => {
@@ -505,7 +505,7 @@ export function SettingsDialog() {
             </select>
             <span className="block text-[0.7rem] leading-relaxed text-text-2">
               Automatic benchmarks both models and uses the higher-throughput runtime. ONNX Runtime can use Core ML,
-              Windows ML, OpenVINO or NVIDIA hardware; LiteRT uses its optimised CPU runtime for this model.
+              Windows ML, OpenVINO or NVIDIA hardware. LiteRT uses its optimised CPU runtime for this model.
             </span>
             <div className="flex items-center justify-between gap-3 rounded border border-line-0 px-3 py-2">
               <span className="text-xs text-text-1">Active compute</span>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { alertOutcome, GROUP_S, groupBuckets, HISTORY_BUCKET_MS, PERIODS, type Period } from "../history";
-import { framesLabel, statusText } from "../review";
+import { clock, framesLabel, statusText } from "../review";
 import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Monitor, Snapshot } from "../types";
@@ -20,10 +20,6 @@ function ago(ts: number, now: number): string {
 function duration(min: number): string {
   if (min < 60) return `${min}m`;
   return `${Math.floor(min / 60)}h ${min % 60}m`;
-}
-
-function clock(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function StatTile({ label, value }: { label: string; value: string }) {
@@ -79,6 +75,10 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
   }, [monitor.id, reconnecting, alertsKept]);
 
   const grouped = useMemo(() => (history ? groupBuckets(history.buckets, period, history.now) : []), [history, period]);
+  const day = (ts: number) => new Date(ts * 1000).toDateString();
+  const withinOneDay = grouped.length > 0 && day(grouped[0].t) === day(grouped[grouped.length - 1].t);
+  const axisTime = (ts: number) =>
+    withinOneDay ? clock(ts) : new Date(ts * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const stats = history?.stats ?? {};
   const snaps = useMemo(
     () => [...(history?.snaps ?? [])].sort((a, b) => (sortByScore ? b.score - a.score : b.ts - a.ts)),
@@ -123,8 +123,8 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
             <RiskBandChart data={grouped} span={GROUP_S[period]} threshold={monitor.threshold} />
             <DefectBars data={grouped} span={GROUP_S[period]} />
             <div className="mt-1 flex justify-between">
-              <span className="label">{clock(grouped[0].t)}</span>
-              <span className="label">{clock(grouped[grouped.length - 1].t)}</span>
+              <span className="label">{axisTime(grouped[0].t)}</span>
+              <span className="label">{axisTime(grouped[grouped.length - 1].t)}</span>
             </div>
           </>
         )}

@@ -124,6 +124,7 @@ export interface HistoryBucket {
   min: number;
   max: number;
   defects: number;
+  watched: number;
 }
 
 export interface Snapshot {

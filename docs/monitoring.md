@@ -77,6 +77,8 @@ These settings live on the camera, under **Cameras**, so every monitor using tha
 them. They apply to the live view, the frames the model scores, the snapshots in your alerts and
 the frames the [API](api.md) returns.
 
+![A camera open for editing in the camera registry, with its name, brightness, contrast, sharpness, detection rate and rotation](assets/camera-editor.png)
+
 | Setting | Default | Range | What it does |
 |---|---|---|---|
 | **Rotation** | 0° | 0°, 90°, 180°, 270° | Sets a camera mounted sideways or upside down upright |
@@ -102,6 +104,8 @@ A monitor's panel shows the live score on a gauge beside its last 240 readings, 
 seconds at best since the dashboard hears of five results a second at most.
 **View detailed history** opens the full page.
 
+![A monitor's detailed history: stat tiles, the risk chart with a gap where it wasn't watching, two prints kept and three risky moments](assets/history.png)
+
 | Part | Shows |
 |---|---|
 | Stat tiles | Average and peak score, the share of frames over the threshold, frames scored, alerts and watch time |
@@ -125,6 +129,8 @@ PrintGuard keeps a few frames from each print on your hub. When a print ends its
 a button to review the frames from the last print, where you can label them and send them to help train the
 detection model. Nothing is sent unless you press **Send**.
 [Training frames](feedback.md) covers what's kept, what's sent and how to switch the prompt off.
+
+![The review sheet with a failed print's frames labelled good, failure and real failure](assets/review.png)
 
 ## Choosing values
 

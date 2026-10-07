@@ -15,13 +15,17 @@ function unbrokenRuns(data: GroupedBucket[], span: number): GroupedBucket[][] {
   return runs;
 }
 
+function acrossItsSpan(bucket: GroupedBucket, span: number): GroupedBucket[] {
+  return [-span / 2, span / 2].map((offset) => ({ ...bucket, t: bucket.t + offset }));
+}
+
 export function RiskBandChart({ data, span, threshold }: { data: GroupedBucket[]; span: number; threshold: number }) {
   const start = data[0].t;
   const width = data[data.length - 1].t - start + span;
   const x = (t: number) => (((t - start + span / 2) / width) * W).toFixed(1);
   const y = (v: number) => (CH - Math.max(0, Math.min(1, v)) * CH).toFixed(1);
   const line = (run: GroupedBucket[], value: (d: GroupedBucket) => number) => run.map((d) => `${x(d.t)},${y(value(d))}`).join(" L");
-  const runs = unbrokenRuns(data, span);
+  const runs = unbrokenRuns(data, span).map((run) => (run.length > 1 ? run : acrossItsSpan(run[0], span)));
   const colour = riskColor(data[data.length - 1].avg, threshold);
   return (
     <svg viewBox={`0 0 ${W} ${CH}`} className="w-full" style={{ height: CH }} preserveAspectRatio="none" role="img" aria-label="Risk over time">
@@ -29,7 +33,7 @@ export function RiskBandChart({ data, span, threshold }: { data: GroupedBucket[]
       {runs.map((run) => (
         <g key={run[0].t}>
           <path d={`M${line(run, (d) => d.max)} L${line([...run].reverse(), (d) => d.min)} Z`} fill={colour} fillOpacity="0.12" stroke="none" />
-          <path d={`M${line(run, (d) => d.avg)} h0`} fill="none" stroke={colour} strokeWidth="1.5" strokeLinecap="round" />
+          <path d={`M${line(run, (d) => d.avg)}`} fill="none" stroke={colour} strokeWidth="1.5" strokeLinecap="round" />
         </g>
       ))}
     </svg>
