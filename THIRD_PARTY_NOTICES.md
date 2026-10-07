@@ -508,6 +508,30 @@ The Python interpreter, inside the desktop apps and the images.
 - Project: https://www.python.org
 - Licence: [Python Software Foundation License Version 2](https://docs.python.org/3/license.html)
 
+## Python libraries
+
+The packages `pyproject.toml` declares that carry no compiled library, inside the images and the
+desktop apps. Each one's licence file is in its `.dist-info` folder beside the code. The other
+declared packages are in the first table or have a section of their own.
+
+| Library | Licence | Copyright |
+|---|---|---|
+| [aiomqtt](https://github.com/empicano/aiomqtt) | BSD-3-Clause, the text under PyAV above | Copyright 2020 (c) SBT Instruments |
+| [cachetools](https://github.com/tkem/cachetools) | MIT | Copyright (c) 2014-2026 Thomas Kemmer |
+| [FastAPI](https://github.com/fastapi/fastapi) | MIT | Copyright (c) 2018 Sebastián Ramírez |
+| [FastMCP](https://github.com/PrefectHQ/fastmcp) | Apache-2.0, the text under Wasmtime above | |
+| [httpcore](https://github.com/encode/httpcore) | BSD-3-Clause, the text under PyAV above | Copyright © 2020, Encode OSS Ltd |
+| [HTTPX](https://github.com/encode/httpx) | BSD-3-Clause, the text under PyAV above | Copyright © 2019, Encode OSS Ltd |
+| [idna](https://github.com/kjd/idna) | BSD-3-Clause, the text under PyAV above | Copyright (c) 2013-2026, Kim Davies and contributors. |
+| [packaging](https://github.com/pypa/packaging) | Apache-2.0 OR BSD-2-Clause, the Apache-2.0 text under Wasmtime above | Copyright (c) Donald Stufft and individual contributors. |
+| [pycentauri](https://github.com/brandonrthomas/pycentauri) | Apache-2.0, the text under Wasmtime above | |
+| [Pydantic](https://github.com/pydantic/pydantic) | MIT | Copyright (c) 2017 to present Pydantic Services Inc. and individual contributors. |
+| [pyprusalink](https://github.com/home-assistant-libs/pyprusalink) | Apache-2.0, the text under Wasmtime above | |
+| [Starlette](https://github.com/Kludex/starlette) | BSD-3-Clause, the text under PyAV above | Copyright © 2018, Encode OSS Ltd |
+| [Uvicorn](https://github.com/Kludex/uvicorn) | BSD-3-Clause, the text under PyAV above | Copyright © 2017-present, Encode OSS Ltd |
+
+The MIT text is reproduced under MediaMTX above.
+
 ## Desktop app libraries
 
 | Library | In | Licence | Copyright |

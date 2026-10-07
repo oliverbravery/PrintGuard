@@ -330,7 +330,7 @@ blocking a merge. A pull request into a release branch runs **tests**, **audit**
 |---|---|
 | **tests** | Everything under `tests/`, with `uv run pytest`, on Python 3.12 (3.12.4 is the oldest supported) and on the image's 3.13. The UI and its Playwright suites type-check, the landing page builds, and the browser plugin sandbox holds in chromium and webkit. The feedback Worker type-checks and passes its tests |
 | **audit** | `uv audit` and `npm audit` find no known vulnerability in `uv.lock` or either `package-lock.json`. A new advisory fails every open pull request until the dependency is bumped |
-| **image** | Every production image variant builds, which also builds the UI. The check builds for `amd64` only, so the `arm64` image is first built by the release itself |
+| **image** | Every production image variant builds, which also builds the UI. The check builds for `amd64`, and on pull requests into `main` the standard image builds for `arm64` too, so both halves of `latest` have built before a release merges |
 | **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |
 | **version** | The version has no release tag yet and has a matching `CHANGELOG.md` section, dated the day it merges into `main` in London time. Re-publishing an existing tag is refused |
 
@@ -346,7 +346,7 @@ pinned by digest beside their tag, and the MediaMTX archive in `packaging/build.
 GPU packages in both workflows carry the sha256 their release publishes. `create-dmg`, which builds
 the macOS disk image, is cloned at the commit of its release in `packaging/build.sh`. Bumping any of them means
 changing the version and its hash together. Dependabot opens a weekly pull request for the actions
-with the new commit and version, so retarget it at the open release branch. Node in the workflows matches the `node:22-alpine`
+with the new commit and version, and for the `Dockerfile`'s base images with the new digest, so retarget it at the open release branch. Node in the workflows matches the `node:22-alpine`
 digest in the `Dockerfile`, and `hatchling` is pinned in `pyproject.toml`.
 
 On merge, the [release workflow](.github/workflows/release.yml):
@@ -362,7 +362,9 @@ On merge, the [release workflow](.github/workflows/release.yml):
 4. builds the macOS and Windows desktop apps and, once both have built, attaches them to the
    draft. The macOS app is signed and notarised with the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
    `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` repository secrets, which the
-   **launch** check uses too. The build fails if the notarisation key is empty.
+   **launch** check uses too. `packaging/build.sh` signs with the certificate and never sees the
+   notarisation key, which goes only to the `packaging/notarise.sh` step after it. That step fails
+   if the key is empty.
 5. publishes the release, which tags the merge commit. The download links and the in-app
    update check only see a release once it's published, so neither points at a release with
    no desktop builds. If a desktop build fails, re-run it and the release publishes after it.

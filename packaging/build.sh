@@ -3,8 +3,8 @@
 # MediaMTX, generates a platform icon, runs PyInstaller, and packages the result
 # as a .dmg (macOS) or .zip (Windows) under dist/. The desktop app targets macOS
 # and Windows; Linux is served by the container image. Run after `uv sync`.
-# On macOS, APPLE_SIGNING_IDENTITY signs the app and disk image, and a signed build
-# fails unless APPLE_API_KEY (with APPLE_API_KEY_ID and APPLE_API_ISSUER) notarises it.
+# On macOS, APPLE_SIGNING_IDENTITY signs the app and disk image, and packaging/notarise.sh
+# then notarises the disk image, so the notarisation key is never in this script's environment.
 set -euo pipefail
 
 MEDIAMTX_VERSION=1.21.1
@@ -75,9 +75,6 @@ if [ "$OS" = darwin ]; then
     "$out" "$staging"
   if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
     codesign -s "$APPLE_SIGNING_IDENTITY" --timestamp "$out"
-    printf '%s' "${APPLE_API_KEY:?a signed build is notarised, and APPLE_API_KEY is empty}" > build/desktop/notary.p8
-    xcrun notarytool submit "$out" --key build/desktop/notary.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
-    xcrun stapler staple "$out"
   fi
 else
   out="dist/PrintGuard-${LABEL}.zip"

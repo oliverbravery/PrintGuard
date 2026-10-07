@@ -11,9 +11,10 @@ import os
 import shutil
 import sys
 import tempfile
-from importlib.metadata import version
+from importlib.metadata import requires, version
 from pathlib import Path
 
+from packaging.requirements import Requirement
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules, copy_metadata
 
 ROOT = Path(SPECPATH).parent
@@ -38,7 +39,10 @@ datas = [
     (str(icon_png), "."),
     (str(ROOT / "printguard" / "server" / "runtime"), "printguard/server/runtime"),
 ]
-datas += copy_metadata("printguard") + copy_metadata("fastmcp", recursive=True)
+datas += copy_metadata("printguard")
+for requirement in map(Requirement, requires("printguard")):
+    if requirement.marker is None or requirement.marker.evaluate({"extra": "desktop"}):
+        datas += copy_metadata(requirement.name, recursive=True)
 
 hiddenimports = (
     collect_submodules("uvicorn")

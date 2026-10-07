@@ -33,6 +33,7 @@ dependencies = [
     "websockets>=14.0",
     "cachetools>=7.1.4",
     "idna>=3.7",
+    "httpcore>=1.0",
 ]
 
 [project.scripts]

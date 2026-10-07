@@ -194,10 +194,14 @@ jobs:
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: Developer ID Application
+        run: bash packaging/build.sh
+      - name: Notarise the disk image, the only step handed the notarisation key
+        if: runner.os == 'macOS'
+        env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: bash packaging/build.sh
+        run: bash packaging/notarise.sh dist/PrintGuard-macos-arm64.dmg
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-${{ matrix.os }}

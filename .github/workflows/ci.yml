@@ -95,12 +95,17 @@ jobs:
             gpu_visible_devices: all
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        if: matrix.name == 'standard' && github.base_ref == 'main'
+        with:
+          image: tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
         with:
           driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
+          platforms: ${{ matrix.name == 'standard' && github.base_ref == 'main' && 'linux/amd64,linux/arm64' || '' }}
           push: false
           build-args: |
             VARIANT=${{ matrix.suffix }}
@@ -178,10 +183,14 @@ jobs:
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: Developer ID Application
+        run: bash packaging/build.sh
+      - name: Notarise the disk image, the only step handed the notarisation key
+        if: matrix.name == 'macOS'
+        env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: bash packaging/build.sh
+        run: bash packaging/notarise.sh dist/PrintGuard-macos-arm64.dmg
       - name: Install the app from the disk image and open it
         if: matrix.name == 'macOS'
         run: |
