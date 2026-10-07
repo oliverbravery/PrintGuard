@@ -1564,7 +1564,7 @@ test("a slider is named by its label and reads its formatted value", async ({ pa
   await expect(page.getByRole("switch", { name: "Watch this monitor", exact: true })).toBeVisible();
 });
 
-test("an alerting tile opens from its banner, and an offline camera shows no inference figures", async ({ page }) => {
+test("an alerting tile opens from its banner, and an offline camera shows no signal below it and no inference figures", async ({ page }) => {
   await dashboard(page, {
     engine: engine({ cameras: [camera({ online: false })], monitors: [monitor({ alert: { score: 0.9, action: "pause", ts: 1 } })] }),
     history: { m1: [{ ts: 1, score: 0.9 }] },
@@ -1574,6 +1574,8 @@ test("an alerting tile opens from its banner, and an offline camera shows no inf
   await expect(tile.getByRole("img", { name: "risk unknown" })).toBeVisible();
 
   const banner = (await page.getByText("DEFECT DETECTED").boundingBox())!;
+  const signal = (await tile.getByText("no signal").boundingBox())!;
+  expect(signal.y).toBeGreaterThanOrEqual(banner.y + banner.height);
   await page.mouse.click(banner.x + banner.width / 2, banner.y + banner.height / 2);
   await expect(page.getByRole("dialog", { name: "Prusa" })).toBeVisible();
 });
