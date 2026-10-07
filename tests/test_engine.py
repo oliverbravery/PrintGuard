@@ -637,6 +637,59 @@ async def test_a_defect_response_is_sent_once_with_no_cooldown(monkeypatch) -> N
     assert not monitor["watching"] and monitor["alert"], "the pause stands the monitor down with its alert showing"
 
 
+@pytest.mark.parametrize("read_back", ["fails", "says_unknown"])
+async def test_a_taken_command_is_not_resent_when_the_read_back_does_not_show_it(monkeypatch, read_back: str) -> None:
+    monkeypatch.setattr(watchdog, "DEVICE_POLL_S", 3600.0)
+    platform = FakePlatform(infer_s=0.02)
+    answer = platform.http
+    pause_taken = False
+
+    async def pausing(method: str, url: str, **request) -> tuple[int, object]:
+        nonlocal pause_taken
+        if method == "POST" and "/api/job" in url:
+            pause_taken = True
+        elif pause_taken and method == "GET":
+            if read_back == "fails":
+                raise RuntimeError("busy")
+            platform.device_status = "Mystery"
+        return await answer(method, url, **request)
+
+    monkeypatch.setattr(platform, "http", pausing)
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.2)
+        patch = {"printer_id": printer_id, "on_defect": "pause", "cooldown_s": 0, "consecutive": 1}
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": patch})
+        platform.failing = True
+        await asyncio.sleep(1.2)
+        printer = engine.state_event()["printers"][0]
+
+    commands = [call for call in platform.http_calls if call[0] == "POST" and "/api/job" in call[1]]
+    assert len(commands) == 1, "a command the printer took is not sent again every frame"
+    assert len(_of(events, "alert")) == 1
+    assert printer["online"] or read_back == "says_unknown", "a failed read after a command that went through does not take the printer offline"
+
+
+async def test_a_camera_dropout_ends_the_defect_streak() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.inference_blocked = True
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        monitor = next(iter(engine.monitors.values()))
+        camera = next(iter(engine.cameras.values()))
+        await engine.handle({"cmd": "monitor.update", "id": monitor["id"], "patch": {"consecutive": 3, "notify": False}})
+        monitor = engine.monitors[monitor["id"]]
+        frame = Frame(rgb=np.zeros((48, 64, 3), np.uint8), seq=0.0, ts=time.time())
+        await engine.watchdog.on_score(monitor, frame, 0.99)
+        await engine.watchdog.on_score(monitor, frame, 0.99)
+        camera.frame_source.online = False
+        await engine.watchdog.watch_health()
+        await engine.watchdog.on_score(monitor, frame, 0.99)
+        await asyncio.sleep(0)
+
+    assert not _of(events, "alert"), "two defect frames before a dropout and one after are not three in a row"
+
+
 async def test_a_removed_monitor_leaves_nothing_behind_in_the_watchdog() -> None:
     platform = FakePlatform(infer_s=0.02, failing=True)
     async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
@@ -1041,6 +1094,45 @@ async def test_a_printer_camera_follows_its_printers_new_address(monkeypatch) ->
         assert (camera.name, camera.rotation) == ("Nozzle", 180), "the camera keeps its name and tuning"
         assert camera.id in platform.released_cameras and not first_source.online, "the old source is closed"
         assert camera.frame_source not in (None, first_source), "the camera is attached again at the new address"
+
+
+@pytest.mark.parametrize("taken_down_by", ["a move to a new address", "a restart"])
+async def test_the_reattach_tick_leaves_a_camera_alone_while_it_is_taken_down(monkeypatch, taken_down_by: str) -> None:
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    monkeypatch.setattr(engine_module, "REATTACH_EVERY_TICKS", 1)
+
+    async def webcam(http, config):
+        return [{"key": "webcam", "name": "Shop cam", "source": {"kind": "fake", "fps": 20.0, "url": f"{config['base_url']}/stream"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", webcam)
+
+    class SlowRelease(FakePlatform):
+        opened: list[str] = []
+        release_s = 0.0
+
+        async def open_camera(self, camera_id, source):
+            self.opened.append(source["url"])
+            return await super().open_camera(camera_id, source)
+
+        async def release_camera(self, camera_id, source):
+            await asyncio.sleep(self.release_s)
+            await super().release_camera(camera_id, source)
+
+    platform = SlowRelease()
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.2)
+        camera = engine.cameras.values()[0]
+        platform.opened.clear()
+        platform.release_s = 0.4
+        if taken_down_by == "a restart":
+            await engine.restart_camera(camera)
+        else:
+            await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": {"base_url": "http://moved", "api_key": "k"}}})
+        await asyncio.sleep(1.0)
+
+    expected = "http://op/stream" if taken_down_by == "a restart" else "http://moved/stream"
+    assert platform.opened == [expected], "the camera was opened more than once, or at the address it was leaving"
 
 
 async def test_refresh_keeps_a_printer_camera_that_works_and_moves_one_that_does_not(monkeypatch) -> None:
@@ -2024,7 +2116,7 @@ async def test_flapping_camera_warns_once_per_outage(monkeypatch) -> None:
         assert len(warnings(True)) == 2, "recovery was never announced after the longer settled period"
 
 
-async def test_protocol_surfaces_errors_and_filters_settings() -> None:
+async def test_protocol_surfaces_errors_and_refuses_unknown_settings() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[]) as (engine, events):
         await engine.handle({"cmd": "nope", "req_id": 7})
@@ -2043,13 +2135,11 @@ async def test_protocol_surfaces_errors_and_filters_settings() -> None:
             "monitors": {"order": ["m2", "m1"], "pinned": ["m2"], "hidden": ["m3"]},
             "cameras": {"order": [], "pinned": [], "hidden": ["c1"]},
         }
-        await engine.handle(
-            {
-                "cmd": "settings.update",
-                "patch": {"bogus": 1, "notifiers": {"ntfy": {"url": "u"}}, "theme": "light", "themes": [custom], "layout": layout},
-            }
-        )
-        assert "bogus" not in engine.settings
+        patch = {"notifiers": {"ntfy": {"url": "u"}}, "theme": "light", "themes": [custom], "layout": layout}
+        await engine.handle({"cmd": "settings.update", "patch": {"bogus": 1, **patch}, "req_id": 9})
+        assert any(e["event"] == "error" and e["message"] == "there is no bogus setting" and e.get("req_id") == 9 for e in events)
+        assert "bogus" not in engine.settings and engine.settings["theme"] == "system", "a patch with an unknown setting changes nothing"
+        await engine.handle({"cmd": "settings.update", "patch": patch})
         assert engine.settings["notifiers"] == {"ntfy": {"url": "u"}}
         assert engine.settings["theme"] == "light"
         assert engine.settings["themes"] == [custom]
@@ -2578,6 +2668,34 @@ async def test_camera_add_refuses_a_source_already_registered() -> None:
         refused = [event for event in events if event["event"] == "error"]
         assert [event["req_id"] for event in refused] == [1, 3]
         assert "already registered" in refused[0]["message"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"kind": "device", "device_id": "/dev/video0", "url": None},
+        {"kind": "url", "url": 5},
+        {"kind": "url", "url": ["rtsp://cam.local/stream"]},
+        {"kind": "device", "device_id": {"path": "/dev/video0"}},
+        {"kind": "path", "path": 7},
+        {"kind": 3, "url": "rtsp://cam.local/stream"},
+        "rtsp://cam.local/stream",
+    ],
+)
+async def test_camera_add_refuses_a_source_the_next_start_could_not_read(source) -> None:
+    platform = FakePlatform()
+    platform.devices = [{"kind": "device", "device_id": "/dev/video0", "label": "Cam", "declared": False}]
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        with pytest.raises(RuntimeError, match="a camera's source"):
+            await engine.request({"cmd": "camera.add", "name": "Cam", "source": source})
+        assert engine.cameras.values() == []
+
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        assert restarted.startup_warnings == []
+    finally:
+        await restarted.stop()
 
 
 async def test_camera_add_delegates_whep_url_to_platform() -> None:
@@ -3148,6 +3266,61 @@ async def test_a_print_dismissed_before_its_upload_begins_sends_nothing_and_leav
     assert not _of(events, "error")
 
 
+async def test_a_print_queued_to_send_is_never_pushed_out_by_newer_ones(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "REVIEW_MAX", 2)
+    platform = FakePlatform(infer_s=0.02)
+    _inbox(platform, monkeypatch, lambda uploads: (429, {"code": "hub_daily", "retry_at": time.time() + 3600}))
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await asyncio.sleep(0.3)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        queued_id = engine.state_event()["reviews"][0]["id"]
+        await engine.handle({"cmd": "review.send", "id": queued_id})
+        await _sent(events)
+        for _ in range(3):
+            await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": True}})
+            await asyncio.sleep(0.3)
+            await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        kept = {review["id"]: review["status"] for review in engine.state_event()["reviews"]}
+
+    assert kept[queued_id] == "queued", "a print waiting for the inbox was deleted with its frames, unsent"
+    assert any(f"review-{queued_id}-" in key for key in platform.files.blobs)
+    assert len(kept) == 2, "the other prints still make room for each other"
+
+
+@pytest.mark.parametrize("command", ["review.send", "review.retry"])
+async def test_a_print_is_not_sent_while_the_review_switch_is_off(monkeypatch, command: str) -> None:
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    uploads = _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
+        review = await _finished_review(engine)
+        with pytest.raises(RuntimeError, match="switched off"):
+            await engine.request({"cmd": command, "id": review["id"]})
+        await asyncio.sleep(0.2)
+
+    assert not uploads and ("POST", f"{feedback.ENDPOINT}/register") not in platform.http_calls, "frames reached the inbox with feedback off"
+
+
+async def test_a_second_send_during_an_upload_is_answered_by_that_upload(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    uploads = _slow_inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine)
+        frames = [frame["id"] for frame in review["frames"]]
+        await engine.handle({"cmd": "review.send", "id": review["id"], "req_id": "first"})
+        await asyncio.sleep(0.15)
+        await engine.handle({"cmd": "review.send", "id": review["id"], "failures": frames, "req_id": "second"})
+        await asyncio.sleep(0.2 * len(frames) + 0.5)
+        state = engine.state_event()
+
+    answers = {event["req_id"]: (event["ok"], event["sent"]) for event in _of(events, "review_sent") if event.get("req_id")}
+    assert answers == {"first": (True, len(frames)), "second": (True, len(frames))}, "the second request was not answered by the upload in flight"
+    assert sorted(upload["frame"] for upload in uploads) == sorted(frames), "a frame was uploaded twice"
+    assert not _of(events, "error") and state["reviews"][0]["status"] == "sent"
+
+
 async def test_a_print_whose_monitor_is_gone_is_dropped_with_a_message_and_not_left_sending(monkeypatch) -> None:
     monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
     platform = FakePlatform(infer_s=0.02, failing=True)
@@ -3316,6 +3489,36 @@ async def test_switching_feedback_off_keeps_only_alert_frames_and_asks_nothing()
     assert review["status"] == "dismissed", "a finished print does not wait for a review nobody asked for"
 
 
+async def test_switching_feedback_off_holds_when_a_kept_frame_cannot_be_deleted(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    remove = platform.files.remove
+    stuck: list[str] = []
+
+    async def remove_unless_stuck(key: str) -> None:
+        if not stuck:
+            stuck.append(key)
+        if key == stuck[0]:
+            raise PermissionError(f"cannot delete {key}")
+        await remove(key)
+
+    async with running_engine(platform, camera_fps=[10.0, 10.0]) as (engine, events):
+        await asyncio.sleep(0.5)
+        for monitor_id in list(engine.monitors):
+            await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        monkeypatch.setattr(platform.files, "remove", remove_unless_stuck)
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}, "req_id": "off"})
+        state = next(event for event in reversed(events) if event.get("event") == "state" and event.get("req_id") == "off")
+        saved = platform.state["settings"]["feedback"]
+        statuses = [review["status"] for review in engine.state_event()["reviews"]]
+
+    assert not [event for event in _of(events, "error") if event.get("req_id") == "off"], "the switch was refused although it took effect"
+    assert state["settings"]["feedback"] == saved == "off", "the switch took effect in memory but was never saved or announced"
+    assert statuses == ["dismissed", "dismissed"]
+    assert [event["message"] for event in _of(events, "warning")] == [f"Could not delete the frames kept for review: cannot delete {stuck[0]}"]
+    assert list(platform.files.blobs) == [stuck[0]], "one frame that cannot go left the others behind"
+
+
 async def test_switching_feedback_off_settles_the_prints_that_already_ended(monkeypatch) -> None:
     monkeypatch.setattr(reviews, "SPACED_START_S", 0.1)
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.05)
@@ -3386,7 +3589,7 @@ async def test_cancelling_a_send_stops_after_the_frame_in_flight(monkeypatch) ->
     assert not outcome["ok"] and cancelled["status"] == "dismissed" and cancelled["chosen"] == 0, "a cancelled print ended up sent"
 
 
-async def test_a_second_send_during_an_upload_replaces_the_first(monkeypatch) -> None:
+async def test_a_second_send_during_an_upload_replaces_the_choices_and_repeats_no_frame(monkeypatch) -> None:
     monkeypatch.setattr(reviews, "SPACED_START_S", 0.1)
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.05)
     platform = FakePlatform(infer_s=0.02)
@@ -3403,7 +3606,7 @@ async def test_a_second_send_during_an_upload_replaces_the_first(monkeypatch) ->
     assert len(ids) >= 5 and not _of(events, "error")
     assert {upload["frame"] for upload in uploads} == set(ids[:3]), "a frame the second send left out was uploaded anyway"
     assert [upload["frame"] for upload in uploads[:2]] == ids[:2], "the first send stops after the frame in flight"
-    assert [(upload["frame"], upload["label"]) for upload in uploads[2:]] == [(ids[0], "failure"), (ids[1], "good"), (ids[2], "good")], "the second send's choices are the ones sent"
+    assert [upload["frame"] for upload in uploads[2:]] == [ids[2]], "a frame that was already sent went again"
     assert (final["status"], final["sent"], final["chosen"]) == ("sent", 3, 3)
 
 
@@ -3615,6 +3818,23 @@ async def test_plugin_installs_from_a_file_without_its_code_in_the_snapshot() ->
     assert record["digests"]["plugin.js"] == hashlib.sha256(PLUGIN_JS.encode()).hexdigest()
     snapshot = json.dumps(next(e for e in events if e.get("event") == "state" and e.get("plugins")))
     assert PLUGIN_JS not in snapshot, "plugin source rode along in the state snapshot"
+
+
+async def test_the_work_a_failed_plugin_starts_is_held_and_ended_with_the_engine(monkeypatch) -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        stalled = asyncio.Event()
+
+        async def never_closes(plugin_id: str) -> None:
+            await stalled.wait()
+
+        monkeypatch.setattr(engine.sockets, "drop_for", never_closes)
+        engine.plugin_failed("demo", "ran out of fuel")
+        await asyncio.sleep(0)
+
+    pending = [task for task in asyncio.all_tasks() if task is not asyncio.current_task() and not task.done()]
+    assert pending == [], "a task the engine started outlived it"
 
 
 async def test_a_manifest_stored_by_an_older_version_comes_back_in_todays_shape() -> None:
@@ -5489,6 +5709,8 @@ async def test_a_value_a_setting_does_not_take_is_refused_rather_than_rewritten(
             ({"cmd": "camera.update", "id": camera_id, "patch": {"crop": [0, 0, 1, 1]}}, "a crop holds x, y, w and h"),
             ({"cmd": "camera.update", "id": camera_id, "patch": {"name": None}}, "name is text"),
             ({"cmd": "camera.update", "id": camera_id, "patch": {"source": {"kind": "url"}}}, "a camera has no source setting"),
+            ({"cmd": "settings.update", "patch": {"volume": 3}}, "there is no volume setting"),
+            ({"cmd": "settings.update", "patch": {"theme": "dark", "volume": 3}}, "there is no volume setting"),
             ({"cmd": "settings.update", "patch": {"mqtt": {"port": True}}}, "MQTT port"),
             ({"cmd": "settings.update", "patch": {"update_check": "banana"}}, "update_check is true or false"),
             ({"cmd": "settings.update", "patch": {"catalogue_url": 5}}, "catalogue_url is an address"),
@@ -5585,6 +5807,23 @@ async def test_a_wrong_shaped_record_is_dropped_at_start_and_the_rest_load(caplo
     assert len(restarted.startup_warnings) == 8
 
 
+async def test_a_monitor_bound_to_a_printer_dropped_at_start_is_unlinked_with_a_warning() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": {"printer_id": printer_id, "on_defect": "pause"}})
+    saved = platform.state
+    platform.state = {**saved, "printers": [{**saved["printers"][0], "reported_status": ["idle"]}]}
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        monitor = next(iter(restarted.monitors.values()))
+        assert monitor["printer_id"] == "" and monitor["on_defect"] == "pause"
+        assert len(restarted.startup_warnings) == 2 and "no longer pauses" in restarted.startup_warnings[1], restarted.startup_warnings
+    finally:
+        await restarted.stop()
+
+
 async def test_a_print_record_dropped_at_start_says_its_file_is_kept() -> None:
     platform = FakePlatform()
     platform.state = {"prints": [{"id": "abcd1234", "filename": "benchy.gcode"}], "reviews": [{"id": "a1b2c3"}]}
@@ -5595,6 +5834,14 @@ async def test_a_print_record_dropped_at_start_says_its_file_is_kept() -> None:
 
 _FAKE_CAMERA = {"id": "c1", "name": "n", "source": {"kind": "fake"}, "max_fps": 15.0}
 _FAKE_REVIEW = {"id": "r1", "monitor_id": "m1", "started": 1.0, "spacing_s": 60.0, "ended": 2.0}
+_FAKE_FRAME = {"id": "f1", "ts": 1.5, "score": 0.9, "kind": "alert", "action": "none", "size": 6}
+_QUEUED_REVIEW = {
+    **_FAKE_REVIEW,
+    "status": "queued",
+    "frames": [_FAKE_FRAME],
+    "submission": {"labels": {"f1": "failure"}, "printer": "", "sent": [], "code": "rate_limited", "retry_at": 9e9},
+}
+_FAKE_TOKEN = {"id": "t1", "name": "t", "scope": "read", "hash": "0" * 64, "hint": "pg_abc…", "created": 1.0}
 
 
 @pytest.mark.parametrize(
@@ -5620,6 +5867,17 @@ _FAKE_REVIEW = {"id": "r1", "monitor_id": "m1", "started": 1.0, "spacing_s": 60.
         {"reviews": [{**_FAKE_REVIEW, "frames": [{"id": "f"}]}]},
         {"reviews": [{**_FAKE_REVIEW, "status": "queued"}]},
         {"reviews": [{**_FAKE_REVIEW, "status": "later"}]},
+        *({"reviews": [{**_QUEUED_REVIEW, "monitor_id": junk}]} for junk in ([], {}, None, 5)),
+        *({"reviews": [{**_QUEUED_REVIEW, "submission": {**_QUEUED_REVIEW["submission"], "retry_at": junk}}]} for junk in ("x", [1], {"a": 1}, True)),
+        {"reviews": [{**_QUEUED_REVIEW, "submission": {key: value for key, value in _QUEUED_REVIEW["submission"].items() if key != "retry_at"}}]},
+        {"reviews": [{**_QUEUED_REVIEW, "submission": {**_QUEUED_REVIEW["submission"], "labels": {"f1": "maybe"}}}]},
+        {"reviews": [{**_QUEUED_REVIEW, "submission": {**_QUEUED_REVIEW["submission"], "printer": ["Voron"]}}]},
+        {"reviews": [{**_QUEUED_REVIEW, "frames": [{key: value for key, value in _FAKE_FRAME.items() if key != "action"}]}]},
+        *({"reviews": [{**_QUEUED_REVIEW, "frames": [{**_FAKE_FRAME, "ts": junk}]}]} for junk in (None, "x", [], {}, True)),
+        {"reviews": [{**_QUEUED_REVIEW, "frames": [{**_FAKE_FRAME, "kind": "other"}]}]},
+        *({"tokens": [{**_FAKE_TOKEN, "hash": junk}]} for junk in ([], {}, None, 5)),
+        {"tokens": [{**_FAKE_TOKEN, "scope": "root"}]},
+        {"tokens": [{**_FAKE_TOKEN, "created": "now"}]},
         {"monitors": [{"id": "m1", "threshold": 10**400}]},
         {"monitors": [{"id": "m1", "threshold": True}]},
         {"prints": [{"id": "p", "name": "n", "filename": "f.gcode", "ext": "gcode", "size": 1, "printer_ids": None, "uploaded": 1, "meta": {}}]},
@@ -5636,6 +5894,19 @@ async def test_a_stored_value_of_the_wrong_kind_is_dropped_with_a_warning_and_th
         json.dumps(engine.state_event(), allow_nan=False)
         assert engine.reviews.public() == []
         await engine.request({"cmd": "settings.update", "patch": {"theme": "dark"}})
+    finally:
+        await engine.stop()
+
+
+async def test_a_queued_review_and_a_token_as_saved_are_restored() -> None:
+    platform = FakePlatform()
+    platform.state = {"reviews": [_QUEUED_REVIEW], "tokens": [_FAKE_TOKEN]}
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        assert engine.startup_warnings == []
+        assert [(review["status"], review["retry_at"]) for review in engine.reviews.public()] == [("queued", 9e9)]
+        assert engine.token_scopes() == {"0" * 64: "read"}
     finally:
         await engine.stop()
 

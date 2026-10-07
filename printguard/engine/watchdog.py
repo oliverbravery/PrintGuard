@@ -15,7 +15,7 @@ import itertools
 import logging
 import time
 from collections import deque
-from typing import TYPE_CHECKING, Any, Coroutine
+from typing import TYPE_CHECKING, Any, Coroutine, Iterable
 
 from . import logs
 from .bounds import clamp
@@ -65,6 +65,11 @@ def clamp_grace(seconds: Any) -> float:
         The grace period the watchdog will actually apply.
     """
     return clamp("fault_grace_s", seconds, GRACE_MIN_S, GRACE_MAX_S)
+
+
+def _stopped_statuses(wanted: str) -> tuple[str, ...]:
+    """The statuses that show a defect action has done its work: a paused print counts for a pause and not for a cancel."""
+    return ENDED_STATUSES if wanted == "cancel" else (*ENDED_STATUSES, DeviceStatus.PAUSED.value)
 
 
 class Watchdog:
@@ -282,7 +287,9 @@ class Watchdog:
         A watching monitor whose camera is not registered is as unwatched as
         one whose camera is offline, and is warned about the same way. A
         monitor that stands down forgets its camera faults, so the next print
-        starts with a full grace period.
+        starts with a full grace period. A camera that drops out or stalls
+        also ends the defect streak, so the frames either side of the gap are
+        not counted as consecutive.
 
         Returns:
             Seconds until the next check.
@@ -361,6 +368,8 @@ class Watchdog:
                 )
             if camera.online and not progressing and self._due_restart(stall_key, camera, now):
                 await self._engine.restart_camera(camera)
+            if not (camera.online and progressing):
+                self.drop_streak(mid)
             await self._cover(monitor, camera, offline_key in self._warned or stall_key in self._warned, camera.online and progressing, now)
         return WATCH_TICK_S
 
@@ -522,7 +531,10 @@ class Watchdog:
         and a removal means there is nothing left to alert on. A printer that
         took the command is read again without waiting for the poll, so a
         paused or cancelled print stands its monitor down before another
-        defect frame can repeat the command. The print's review stays open
+        defect frame can repeat the command. When that read does not show the
+        print stopped, as when it fails, the command is not sent again for
+        ACT_FAILED_COOLDOWN_S whatever the monitor's own cooldown, and the
+        failed read does not take the printer offline. The print's review stays open
         for as long as its monitor is responding, so a printer read idle while
         the notifiers are still answering cannot close it before the frame
         that stopped the print is kept, and it is settled once that is done.
@@ -555,7 +567,9 @@ class Watchdog:
             finally:
                 printer = self._engine.printers.get(monitor["printer_id"])
                 if action not in ("none", "failed") and printer:
-                    await self.refresh(printer)
+                    await self.refresh(printer, after_command=True)
+                    if printer.reported_status not in _stopped_statuses(action) and mid in self._cooldown_until:
+                        self._cooldown_until[mid] = max(self._cooldown_until[mid], time.monotonic() + ACT_FAILED_COOLDOWN_S)
         finally:
             self.responding.discard(mid)
             if self._engine.settle_reviews():
@@ -581,7 +595,7 @@ class Watchdog:
         if wanted == "none" or not adapter or printer is None:
             return "none"
         action = DeviceAction.PAUSE if wanted == "pause" else DeviceAction.CANCEL
-        stopped = ENDED_STATUSES if wanted == "cancel" else (*ENDED_STATUSES, DeviceStatus.PAUSED.value)
+        stopped = _stopped_statuses(wanted)
         deadline = ACT_DEADLINE_S + adapter.slow_action_s
         last_error: Exception = TimeoutError(f"the printer did not answer within {deadline:.0f} s")
         try:

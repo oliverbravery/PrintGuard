@@ -161,16 +161,18 @@ Every command may carry a `req_id`, echoed on the responding event so the UI can
 pending requests. A command that succeeds ends with a `state` event carrying that `req_id`,
 or with its own event for the four that only read, and one that fails ends with an `error`,
 an unknown command included. `camera.remove`, `printer.update`, `printer.remove`,
-`monitor.remove` and `print.remove` are `FINISHING_COMMANDS`. Each runs as a task `Engine._finishing`
+`monitor.remove` and `print.remove` are `FINISHING_COMMANDS`. Each runs as a task `Engine._background`
 holds, so it finishes when the socket that sent it closes or its request times out. An id nothing matches fails a remove as it does an update, apart
 from `plugin.remove`, and a monitor or camera patch is refused for a setting it doesn't have or
-a value its setting doesn't take, where a number out of range is clamped. A heater target is the
+a value its setting doesn't take, where a number out of range is clamped. `camera.add` refuses a source whose device, path or address isn't text. `settings.update` takes `notifiers`, `update_check`, `mqtt`, `theme`, `themes`, `glass`, `layout`, `inference_runtime`, `catalogue_url`, `fault_grace_s`, `preheat` and `feedback`, and refuses any other key. A heater target is the
 exception, and `printer.heat` refuses one outside 0 to 350 for the nozzle or 0 to 150 for the bed. An error that carries
 no text of its own, as a timeout does, is reported by its type.
 
 `printer.test`, `notify.test` and `report.send` succeed as commands whatever they find, and
 carry the outcome as `ok` in their own event. `review.send` and `review.retry` only start the
-upload, so their `review_sent` follows the closing `state` under the same `req_id`.
+upload, so their `review_sent` follows the closing `state` under the same `req_id`. Both are refused while
+`settings.feedback` is `off`. A request for a print that is already uploading replaces its
+choices and is answered by that upload, and a frame already sent is not sent again.
 
 Events, engine to UI:
 
@@ -424,8 +426,10 @@ floor per monitor and outcome. A printer action is tried 3 times, 1 s apart and 
 `ACT_DEADLINE_S` in all, then reported as failed in the alert, the UI error feed and the push
 notification, and tried again after `ACT_FAILED_COOLDOWN_S` at the latest. A printer that
 refuses the command but reads as finished counts as having taken a pause or a cancel, and one
-that reads as already paused counts only for a pause. A streak is dropped when its monitor stands down or is
-bound to another camera. The notification channels are sent to together with `NOTIFY_TIMEOUT_S`
+that reads as already paused counts only for a pause. A command the printer took whose read-back
+does not show the print stopped is not sent again for `ACT_FAILED_COOLDOWN_S` either, and a failed
+read-back does not take the printer offline. A streak is dropped when its monitor stands down, is
+bound to another camera, or its camera goes offline or stalls. The notification channels are sent to together with `NOTIFY_TIMEOUT_S`
 each, 30 s, so one that never answers cannot hold the response open.
 
 Everything that writes to disk comes after the part that protects the print. A frame is
@@ -591,7 +595,7 @@ the scheduler's at the top of [`engine/scheduler.py`](../printguard/engine/sched
 | Constant | Value | Governs |
 |---|---|---|
 | `STATE_TICK_S` | 1 s | The ticker that broadcasts `state`, settles finished prints, sends queued reviews and collects platform notices |
-| `REATTACH_EVERY_TICKS` | 10 | The ticks between tries at a camera with no source |
+| `REATTACH_EVERY_TICKS` | 10 | The ticks between tries at a camera with no source, which leaves alone one that is being moved or restarted |
 | `RESULT_EVENT_INTERVAL_S` | 0.2 s | The gap between `result` events for one monitor |
 | `REQUEST_TIMEOUT_S` | 15 s | How long `engine.request()` waits, which the REST API, MCP server, plugins and Home Assistant bridge all call. The dashboard's socket calls `engine.handle()` and waits as long as a command takes. `_time_allowed` adds the adapter's `slow_action_s` for a printer action or heater target, `CAMERA_OPEN_WAIT_S` for `camera.add`, that four times over for `printer.cameras.refresh`, and `RUNTIME_DRAIN_TIMEOUT_S` plus `RUNTIME_LOAD_ALLOWANCE_S` for a runtime switch |
 | `CAMERA_OPEN_WAIT_S`, `CAMERAS_OPENED_IN_TURN` | 25 s, 4 | What a camera gets to give a first frame, and how many of one printer's the refresh allows for |

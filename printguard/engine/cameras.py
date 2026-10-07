@@ -202,6 +202,24 @@ def sanitise_camera(camera_id: str, patch: dict[str, Any], base: dict[str, Any] 
     return record
 
 
+def sanitise_source(source: Any) -> dict[str, Any]:
+    """Checks that a camera source is one the hub can save and read back at the next start.
+
+    Args:
+        source: The source as a command or the state store holds it.
+
+    Returns:
+        The same source.
+
+    Raises:
+        ValueError: If it is not a record with a kind, or its device id, path
+            or address is not text.
+    """
+    if not isinstance(source, dict) or not isinstance(source.get("kind"), str) or not all(isinstance(source.get(key, ""), str) for key in ("device_id", "path", "url")):
+        raise ValueError("a camera's source has a kind, and its device, path and address are text")
+    return source
+
+
 def stored_camera(record: dict[str, Any]) -> dict[str, Any]:
     """Reads a camera back from the state store, with its tuning as a command would have left it.
 
@@ -215,9 +233,7 @@ def stored_camera(record: dict[str, Any]) -> dict[str, Any]:
         KeyError: If the record has no id, name, source or frame rate.
         ValueError: If a value is not of the kind its setting takes.
     """
-    source = record["source"]
-    if not isinstance(source, dict) or not isinstance(source.get("kind"), str) or not all(isinstance(source.get(key, ""), str) for key in ("device_id", "path", "url")):
-        raise ValueError("its source is not a device, a stream or a published path")
+    source = sanitise_source(record["source"])
     if not isinstance(record["name"], str):
         raise ValueError("its name is text")
     printer_id, declared = record.get("printer_id"), record.get("declared", False)

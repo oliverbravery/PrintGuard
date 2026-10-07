@@ -49,9 +49,9 @@ Open a monitor from the dashboard to change these. They save as you move them.
 | **Camera** | The one chosen when the monitor is made | Any registered camera, or none | The camera whose frames the monitor scores. With none the monitor doesn't watch |
 | **Printer** | The one chosen when the monitor is made | Any registered printer, or none | The printer the monitor follows and can pause or cancel. With none it only alerts |
 | **Alert threshold** | 0.75 | 0.05 to 0.95 | The score a frame has to reach to count as a defect |
-| **Consecutive detections to alert** | 3 | 1 to 30 | How many flagged frames in a row it takes to act |
+| **Consecutive detections to alert** | 3 | 1 to 30 | How many flagged frames in a row it takes to act. A camera dropout or a frozen feed starts the count again |
 | **On sustained defect** | Alert only | | Alert only, pause the print or cancel the print. Without a linked printer the last two only alert |
-| **Cooldown (seconds)** | 60 | 0 to 600 | The quiet gap after acting before the monitor can act again. At 0 the next flagged frame acts once the last response has finished. It ends when the print does, and a pause or cancel the printer didn't take is tried again after 30 seconds, however short the cooldown is |
+| **Cooldown (seconds)** | 60 | 0 to 600 | The quiet gap after acting before the monitor can act again. At 0 the next flagged frame acts once the last response has finished. It ends when the print does, and a pause or cancel the printer didn't take, or took but couldn't be read back as stopped, is tried again after 30 seconds, however short the cooldown is |
 | **Push notifications** | Off | | Sends this monitor's alerts and warnings to your [alert channels](notifications.md) |
 
 > [!IMPORTANT]

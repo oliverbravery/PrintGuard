@@ -29,7 +29,7 @@ Send.
 A frame is kept as the model was given it, after the camera's rotation, crop and adjustments. One
 over 512px on its shorter side is scaled down to that. Frames are stored in the hub's data
 directory, so they survive a restart. The hub keeps the last 20 prints or 200 MB across every
-monitor and drops the oldest finished print first. The alert frames are the ones the risk
+monitor and drops the oldest finished print first, apart from one waiting to send, which stays until it is sent or dismissed. The alert frames are the ones the risk
 history shows under **Risky moments**. Deleting a monitor deletes every print kept from it,
 including ones waiting for a review or to send.
 
@@ -85,8 +85,7 @@ Worker's secret key. The Worker keeps no logs or traces.
 ## Limits
 
 The inbox runs on Cloudflare's free tier, which has a fixed amount of room, so the Worker caps
-what it takes. A frame that hits a limit stays on your hub and sends by itself once the limit resets, unless
-20 newer prints or 200 MB push its print out first. A print also waits when the inbox is full,
+what it takes. A frame that hits a limit stays on your hub and sends by itself once the limit resets. A print also waits when the inbox is full,
 closed or can't be reached, and the hub tries it again after six hours, or sooner when the inbox
 says when there will be room.
 
@@ -127,4 +126,4 @@ then keeps only alert frames, for the risk history, and never prompts.
 
 Switching it off also settles the prints the hub already holds. A print waiting for a review or
 waiting to send is dismissed, and every frame that isn't an alert is deleted from the hub. A
-print that is uploading stops after the frame it's on. Frames already sent stay in the inbox.
+print that is uploading stops after the frame it's on. Frames already sent stay in the inbox. Nothing is sent while it is off, and **Send** says so. A frame the hub can't delete is reported as a warning, and the switch still takes effect.

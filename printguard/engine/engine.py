@@ -13,7 +13,6 @@ import contextvars
 import functools
 import logging
 import re
-import sys
 import time
 import traceback
 import uuid
@@ -23,8 +22,7 @@ from typing import Any, Awaitable, Callable, Coroutine
 import numpy as np
 
 from . import credentials, feedback, gcode, logs, oauth, plugins, reports, updates, urls, vision
-from .bounds import clamp
-from .cameras import declared_camera_id, same_stream, sanitise_camera, stored_camera, tidy_stream_url
+from .cameras import declared_camera_id, same_stream, sanitise_camera, sanitise_source, stored_camera, tidy_stream_url
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
 from .monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor, stored_monitor
@@ -44,11 +42,11 @@ from .registry import (
     Token,
     TokenRegistry,
 )
-from .reviews import Review, ReviewLibrary, frame_key
+from .reviews import Review, ReviewLibrary, frame_key, stored_review
 from .scheduler import Scheduler
 from .settings import CHECKS, require_broker
 from .sockets import SocketBroker
-from .tokens import new_token
+from .tokens import new_token, stored_token
 from .watchdog import GRACE_DEFAULT_S, Watchdog
 
 logger = logging.getLogger(__name__)
@@ -150,6 +148,7 @@ class Engine:
         self.reviews = ReviewLibrary(platform)
         self.feedback_token: str | None = None
         self._sends: dict[str, asyncio.Task[None]] = {}
+        self._send_requests: dict[str, list[Any]] = {}
         self._results: dict[str, dict[str, float]] = {}
         self._result_emitted_at: dict[str, float] = {}
         self.tokens = TokenRegistry()
@@ -172,10 +171,10 @@ class Engine:
         self.startup_warnings: list[str] = []
         self.dropped_ids: set[str] = set()
         self._tasks: list[asyncio.Task[None]] = []
-        self._finishing: set[asyncio.Task[None]] = set()
+        self._background: set[asyncio.Task[None]] = set()
         self._attach_tasks: dict[str, asyncio.Task[None]] = {}
+        self._detaching: set[str] = set()
         self._reconciles: dict[str, asyncio.Lock] = {}
-        self._reconcile_tasks: set[asyncio.Task[None]] = set()
         self._starting: set[str] = set()
         self._adding: set[Any] = set()
         self._registering = asyncio.Lock()
@@ -239,7 +238,8 @@ class Engine:
         A stored plugin manifest goes back through ``sanitise_manifest``, since
         one written by an earlier version is missing whatever has been added
         since. A record of any kind that no longer reads is dropped and warned
-        of, so one of them cannot keep the hub from starting. A stored setting
+        of, so one of them cannot keep the hub from starting, and a monitor
+        bound to a printer that was dropped is unlinked from it. A stored setting
         no command could have written is put back to its default on its own,
         since a theme no dashboard could render leaves nobody a page to fix it
         from, and any other would refuse every edit after it.
@@ -261,10 +261,10 @@ class Engine:
         self.scheduler.reset()
         self.feedback_token = persisted.get("feedback_token")
         restorers: dict[str, Callable[[dict[str, Any]], None]] = {
-            "tokens": lambda record: self.tokens.add(Token(**record)),
+            "tokens": lambda record: self.tokens.add(Token(**stored_token(record))),
             "printers": self._restore_printer,
             "monitors": lambda record: self.monitors.update({record["id"]: stored_monitor(record)}),
-            "reviews": self._restore_review,
+            "reviews": lambda record: self.reviews.restore([stored_review(record)]),
             "prints": lambda record: self.prints.add(PrintFile(**stored_print(record))),
             "plugins": lambda record: self.plugins.add(Plugin(**{**record, "manifest": plugins.sanitise_manifest(record["manifest"])})),
             "cameras": self._restore_camera,
@@ -281,6 +281,10 @@ class Engine:
                         self.dropped_ids.add(str(record["id"]))
                     kept = " (its file was kept in the data directory)" if kind in ("prints", "reviews") else ""
                     self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}{kept}")
+        for monitor in self.monitors.values():
+            if monitor["printer_id"] and self.printers.get(monitor["printer_id"]) is None:
+                monitor["printer_id"] = ""
+                self._warn_at_start(f"Monitor '{monitor['name']}' was bound to a printer that could not be read, so it is no longer linked to one and no longer pauses or cancels a print")
         await self.reconcile_declared_cameras()
         self.cameras.sync_in_use(self.monitors, self.printers)
         self.watchdog.reconcile_cameras_once_read(self.printers.items)
@@ -328,18 +332,6 @@ class Engine:
         self.cameras.add(camera)
         self._schedule_attach(camera)
 
-    def _restore_review(self, record: dict[str, Any]) -> None:
-        frames, submission = record.get("frames", []), record.get("submission")
-        if not isinstance(frames, list) or not all(isinstance(frame, dict) and {"id", "ts", "score", "kind", "size"} <= frame.keys() for frame in frames):
-            raise ValueError("its kept frames are not a list of frames")
-        if not (submission is None or isinstance(submission, dict) and isinstance(submission.get("labels"), dict) and isinstance(submission.get("sent"), list)):
-            raise ValueError("what was chosen to send is not a set of labels")
-        if record.get("status") not in ("running", "ready", "dismissed", "queued", "sent") or (record["status"] == "queued" and submission is None):
-            raise ValueError("it has a status it cannot have, or is queued with nothing chosen to send")
-        clamp("started", record.get("started"), 0.0, sys.float_info.max)
-        clamp("spacing_s", record.get("spacing_s"), 0.0, sys.float_info.max)
-        self.reviews.restore([record])
-
     async def stop(self) -> None:
         """Cancels background loops and inferences in flight, then closes every frame source.
 
@@ -348,7 +340,7 @@ class Engine:
         carry out. The cameras stay registered, so a command still in flight
         that saves on its way out writes every one of them.
         """
-        background = (*self._tasks, *self._sends.values(), *self._reconcile_tasks, *self._finishing)
+        background = (*self._tasks, *self._sends.values(), *self._background)
         for task in background:
             task.cancel()
         for camera in self.cameras.values():
@@ -503,10 +495,28 @@ class Engine:
         carries on without its issuer, which a socket that closes or a request
         that times out has stopped waiting for.
         """
-        task = asyncio.ensure_future(work)
-        self._finishing.add(task)
-        task.add_done_callback(self._finishing.discard)
-        await asyncio.shield(task)
+        await asyncio.shield(self._hold("a command", work))
+
+    def _hold(self, what: str, work: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
+        """Runs work in the background, holding its task so ``stop`` can cancel it and reporting it if it fails.
+
+        Args:
+            what: The work, as a failure is reported.
+            work: The coroutine to run.
+
+        Returns:
+            The task running it.
+        """
+        task = asyncio.create_task(work)
+        self._background.add(task)
+
+        def finished(done: asyncio.Task[None]) -> None:
+            self._background.discard(done)
+            if not done.cancelled() and done.exception():
+                self.report_failure(what, done.exception())
+
+        task.add_done_callback(finished)
+        return task
 
     async def _dispatch(self, message: dict[str, Any]) -> None:
         """Runs a command, then closes it with the state event its issuer waits on.
@@ -692,7 +702,8 @@ class Engine:
         logger.info("camera '%s' (%s) attached at %.1f fps", camera.name, camera.id, source.fps)
 
     def _schedule_attach(self, camera: Camera) -> None:
-        if camera.id in self._attach_tasks:
+        """Starts attaching a camera, unless it is attached, being attached or being taken down to be attached afresh."""
+        if camera.frame_source is not None or camera.id in self._attach_tasks or camera.id in self._detaching:
             return
         task = asyncio.create_task(self._attach(camera))
         self._attach_tasks[camera.id] = task
@@ -708,10 +719,14 @@ class Engine:
         source = camera.frame_source
         if source is None:
             return
-        self.scheduler.cancel_camera(camera)
-        camera.frame_source = None
-        source.close()
-        await self.platform.release_camera(camera.id, camera.source)
+        self._detaching.add(camera.id)
+        try:
+            self.scheduler.cancel_camera(camera)
+            camera.frame_source = None
+            source.close()
+            await self.platform.release_camera(camera.id, camera.source)
+        finally:
+            self._detaching.discard(camera.id)
         if self.cameras.get(camera.id) is camera:
             self._schedule_attach(camera)
 
@@ -756,8 +771,9 @@ class Engine:
                 camera.max_fps = camera.frame_source.fps
         if self.settle_reviews():
             self.save()
-        for review in self.reviews.due(time.time()):
-            self._start_send(review)
+        if self.settings["feedback"] == "ask":
+            for review in self.reviews.due(time.time()):
+                self._start_send(review)
         for notice in self.platform.take_notices():
             camera = self.cameras.get(notice.camera_id) if notice.camera_id else None
             subject = f"'{camera.name}' " if camera else ""
@@ -868,10 +884,23 @@ class Engine:
         return self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
 
     def _start_send(self, review: Review, req_id: Any = None) -> None:
-        if review.id not in self._sends:
-            self._sends[review.id] = asyncio.create_task(self._send_review(review, req_id))
+        """Starts uploading a review, or has the upload already under way answer this request too."""
+        if review.id in self._sends:
+            self._send_requests[review.id].append(req_id)
+            return
+        self._send_requests[review.id] = [req_id]
+        self._sends[review.id] = asyncio.create_task(self._send_review(review))
 
-    async def _send_review(self, review: Review, req_id: Any) -> None:
+    def _require_feedback_on(self) -> None:
+        """Refuses to send frames for training while the review switch is off.
+
+        Raises:
+            ValueError: If feedback is switched off.
+        """
+        if self.settings["feedback"] != "ask":
+            raise ValueError("Training frames are switched off in Settings, under Advanced, so nothing is sent")
+
+    async def _send_review(self, review: Review) -> None:
         """Uploads the frames a reviewer kept, stopping when the inbox turns the print away.
 
         A print the inbox has no room for stays queued with the reason and a
@@ -888,7 +917,9 @@ class Engine:
         after the frame in flight, since those choices are no longer the ones
         to send, and one dismissed before its turn is not sent at all. A print
         whose monitor was removed meanwhile is deleted with the rest of that
-        monitor's.
+        monitor's. A print submitted afresh carries over the frames already
+        sent that it still keeps, and the upload goes on under the new choices
+        and answers every request made for it, so no frame goes twice.
         """
         submission = review.submission or {}
         try:
@@ -910,18 +941,21 @@ class Engine:
             for frame in review.unsent():
                 frame_details = {"frame": frame["id"], "label": submission["labels"][frame["id"]], "kind": frame["kind"], "score": frame["score"], "ts": frame["ts"]}
                 taken = await self._send_frame(frame_key(review.id, frame["id"]), {**print_details, **frame_details})
-                if review.submission is not submission:
+                chosen = review.submission
+                if chosen is not None and frame["id"] in chosen["labels"]:
+                    if taken:
+                        chosen["sent"].append(frame["id"])
+                    else:
+                        del chosen["labels"][frame["id"]]
+                if chosen is not submission:
                     break
-                if taken:
-                    submission["sent"].append(frame["id"])
-                else:
-                    del submission["labels"][frame["id"]]
             else:
                 if submission["sent"]:
                     review.status = "sent"
                 else:
                     review.submission, review.status = None, "ready"
-                    self.emit({"event": "error", "message": "none of that print's frames could be sent", "req_id": req_id})
+                    for req_id in self._requesters(review):
+                        self.emit({"event": "error", "message": "none of that print's frames could be sent", "req_id": req_id})
         except Exception as exc:
             refused = exc if isinstance(exc, feedback.Refused) else None
             submission["code"] = refused.code if refused else "failed"
@@ -934,10 +968,21 @@ class Engine:
             if not refused:
                 self.report_failure("sending a reviewed print", exc)
         finally:
+            requesters = self._requesters(review)
             self._sends.pop(review.id, None)
+            del self._send_requests[review.id]
             self.save()
-        self.emit({"event": "review_sent", **review.public(), "ok": review.status == "sent", "req_id": req_id})
+        if review.status == "queued" and review.submission is not submission:
+            for req_id in requesters:
+                self._start_send(review, req_id)
+            return
+        for req_id in requesters:
+            self.emit({"event": "review_sent", **review.public(), "ok": review.status == "sent", "req_id": req_id})
         self.emit(self.state_event())
+
+    def _requesters(self, review: Review) -> list[Any]:
+        """The ``req_id`` of every request an upload answers, or one None when the clock started it."""
+        return [req_id for req_id in self._send_requests[review.id] if req_id is not None] or [None]
 
     async def _send_frame(self, key: str, details: dict[str, Any]) -> bool:
         """Uploads one kept frame, passing over one that can never be sent.
@@ -1035,12 +1080,13 @@ class Engine:
         """Registers a camera once it opens.
 
         Raises:
-            ValueError: If its device or stream is already registered, or is
+            ValueError: If its source is one the hub could not read back at its
+                next start, or its device or stream is already registered, or is
                 being registered by another command still waiting on it to open.
         """
-        source = dict(message["source"])
+        source = dict(sanitise_source(message["source"]))
         if source.get("url"):
-            source["url"] = tidy_stream_url(str(source["url"]))
+            source["url"] = tidy_stream_url(source["url"])
         reports.require_storable(source.values())
         address = _address(source)
         if self._stream_taken(source):
@@ -1277,19 +1323,25 @@ class Engine:
         return True
 
     def _schedule_reconcile(self, printer: Printer) -> None:
-        task = asyncio.create_task(self.reconcile_printer_cameras(printer))
-        self._reconcile_tasks.add(task)
-        task.add_done_callback(self._reconcile_tasks.discard)
+        self._hold(f"listing the cameras of '{printer.name}'", self.reconcile_printer_cameras(printer))
 
     async def _move_camera(self, camera: Camera, source: dict[str, Any]) -> None:
-        """Releases a camera's source and attaches it again at a new address."""
-        await self._cancel_attach(camera.id)
-        if camera.frame_source:
-            self.scheduler.cancel_camera(camera)
-            camera.frame_source.close()
-            camera.frame_source = None
-        await self.platform.release_camera(camera.id, camera.source)
-        camera.source = source
+        """Releases a camera's source and attaches it again at a new address.
+
+        The re-attach tick leaves the camera alone while it is taken down, so
+        it is never opened at the address it is leaving.
+        """
+        self._detaching.add(camera.id)
+        try:
+            await self._cancel_attach(camera.id)
+            if camera.frame_source:
+                self.scheduler.cancel_camera(camera)
+                camera.frame_source.close()
+                camera.frame_source = None
+            await self.platform.release_camera(camera.id, camera.source)
+            camera.source = source
+        finally:
+            self._detaching.discard(camera.id)
         self._schedule_attach(camera)
 
     async def _cmd_printer_add(self, message: dict[str, Any]) -> None:
@@ -1588,6 +1640,18 @@ class Engine:
         self._reply({"event": "review", **review.public(), "frames": review.frames, "req_id": message.get("req_id")})
 
     async def _cmd_review_send(self, message: dict[str, Any]) -> None:
+        """Records the frames a reviewer chose and starts uploading them.
+
+        A request for a print that is already uploading replaces the choices
+        and is answered when that upload ends, and a frame already sent is not
+        sent again.
+
+        Raises:
+            LookupError: If there is no such review.
+            ValueError: If feedback is switched off, the print is still running
+                or already sent, or no frame is left to send.
+        """
+        self._require_feedback_on()
         review = self.reviews.submit(
             message["id"],
             failures=set(message.get("failures") or []),
@@ -1597,6 +1661,7 @@ class Engine:
         self._start_send(review, message.get("req_id"))
 
     async def _cmd_review_retry(self, message: dict[str, Any]) -> None:
+        self._require_feedback_on()
         review = self.reviews.get(message["id"])
         if review is None or review.status != "queued":
             raise ValueError("only a queued print can be sent again")
@@ -1651,11 +1716,15 @@ class Engine:
         it keeps its login.
 
         Raises:
-            ValueError: If a value in the patch is not one the setting takes,
-                or an address changed while a stored secret was being kept.
+            ValueError: If the patch names a setting there is not, a value in it
+                is not one the setting takes, or an address changed while a
+                stored secret was being kept.
             RuntimeError: If the runtime could not be switched.
         """
-        patch = {k: v for k, v in message.get("patch", {}).items() if k in SETTINGS_DEFAULTS}
+        patch = dict(message.get("patch", {}))
+        unknown = sorted(set(patch) - set(SETTINGS_DEFAULTS))
+        if unknown:
+            raise ValueError(f"there is no {unknown[0]} setting")
         for provider in patch.get("notifiers", {}):
             if provider not in NOTIFIERS:
                 raise ValueError(f"unknown notifier {provider!r}")
@@ -1679,7 +1748,7 @@ class Engine:
             await self._switch_runtime(settings)
         self.settings = {**self.settings, **{key: settings[key] for key in patch}}
         if patch.get("feedback") == "off":
-            await self.reviews.stop_asking()
+            await self._tidy_up("delete the frames kept for review", self.reviews.stop_asking())
         logger.info("settings updated: %s", sorted(patch))
 
     async def _switch_runtime(self, settings: dict[str, Any]) -> None:
@@ -2244,8 +2313,8 @@ class Engine:
             return
         plugin.enabled = False
         plugin.failure = reason
-        asyncio.ensure_future(self.sockets.drop_for(plugin_id))
-        asyncio.ensure_future(self._reload_plugins())
+        self._hold(f"closing the sockets of plugin {plugin.manifest['name']}", self.sockets.drop_for(plugin_id))
+        self._hold(f"reloading the plugins after {plugin.manifest['name']} stopped", self._reload_plugins())
         self.emit({"event": "error", "message": f"plugin {plugin.manifest['name']} stopped: {reason}"})
         self._sync()
 
