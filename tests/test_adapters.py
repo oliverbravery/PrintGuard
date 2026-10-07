@@ -2161,3 +2161,53 @@ async def test_native_takes_urgent_and_ignores_it(monkeypatch) -> None:
 
     monkeypatch.setattr(NOTIFIERS["native"], "_deliver", deliver)
     await NOTIFIERS["native"].send(None, {}, "Title", "Body", None, urgent=False)
+
+
+LONG_NAME = "Printer " + "é" * 600
+
+
+def _field(multipart: bytes, name: str) -> str:
+    return multipart.split(f'name="{name}"\r\n\r\n'.encode())[1].split(b"\r\n--")[0].decode()
+
+
+def test_text_is_cut_to_a_limit_with_an_ellipsis_where_it_was_cut() -> None:
+    from printguard.engine.notifiers.base import truncated
+
+    assert truncated("short", 10) == "short" and truncated("x" * 10, 10) == "x" * 10
+    assert truncated("x" * 11, 10) == "x" * 9 + "…"
+    assert truncated("é" * 10, 10, utf8_bytes=True) == "é" * 3 + "…", "a byte limit never cuts a character in two"
+    assert len(truncated("é" * 3000, 4096, utf8_bytes=True).encode()) <= 4096
+
+
+async def test_pushover_cuts_a_long_title_and_message_to_what_it_takes() -> None:
+    from urllib.parse import parse_qs
+
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk"}, f"Defect on {LONG_NAME}", LONG_NAME * 3, None)
+    sent = {key: values[0] for key, values in parse_qs(http.last["data"].decode()).items()}
+    assert len(sent["title"]) == 250 and sent["title"].endswith("…")
+    assert len(sent["message"]) == 1024 and sent["message"].endswith("…")
+
+
+async def test_telegram_cuts_a_long_caption_and_a_long_text_to_what_it_takes() -> None:
+    http = RecordingHttp(body={"ok": True})
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "b", "chat_id": "7"}, f"Defect on {LONG_NAME}", LONG_NAME * 6, JPEG)
+    caption = _field(http.last["data"], "caption")
+    assert len(caption) == 1024 and caption.endswith("…")
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "b", "chat_id": "7"}, f"Defect on {LONG_NAME}", LONG_NAME * 6, None)
+    text = http.last["json"]["text"]
+    assert 1024 < len(text) == 4096 and text.endswith("…")
+
+
+async def test_discord_cuts_a_long_message_to_what_it_takes() -> None:
+    http = RecordingHttp()
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/x"}, f"Defect on {LONG_NAME}", LONG_NAME * 4, None)
+    assert len(http.last["json"]["content"]) == 2000 and http.last["json"]["content"].endswith("…")
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/x"}, "T", LONG_NAME * 4, JPEG)
+    assert len(jsonlib.loads(_field(http.last["data"], "payload_json"))["content"]) == 2000
+
+
+async def test_ntfy_cuts_a_long_message_to_the_bytes_it_takes() -> None:
+    http = RecordingHttp()
+    await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "Defect", LONG_NAME * 5, None)
+    assert len(http.last["data"]) <= 4096 and http.last["data"].decode().endswith("…")
