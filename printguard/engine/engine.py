@@ -162,7 +162,7 @@ class Engine:
         self.sockets = SocketBroker(platform.open_socket, self.emit)
         self.oauth = oauth.OAuthFlows(platform.http)
         self._plugin_calls: dict[str, list[float]] = {}
-        self._pending_calls: dict[str, tuple[str, str, str, float]] = {}
+        self._pending_calls: dict[str, tuple[str, str, str, float, str]] = {}
         self._answered_calls: dict[str, tuple[str, float]] = {}
         self._sign_in_refreshes: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
@@ -2205,7 +2205,7 @@ class Engine:
         call_id = uuid.uuid4().hex
         now = time.monotonic()
         self._pending_calls = {k: v for k, v in self._pending_calls.items() if now - v[3] < CALL_TTL_S}
-        self._pending_calls[call_id] = (caller.id, to, str(message.get("tag", "")), now)
+        self._pending_calls[call_id] = (caller.id, to, str(message.get("tag", "")), now, channel)
         self.emit({"event": "call", "id": to, "from": caller.id, "channel": channel, "body": body, "call_id": call_id})
 
     async def _cmd_plugin_answer(self, message: dict[str, Any]) -> None:
@@ -2213,6 +2213,8 @@ class Engine:
 
         Every open dashboard answers a call its plugin serves, so an answer to
         one that has just been answered by the same plugin is dropped quietly.
+        The answer is labelled with the channel the question was asked on,
+        whatever the answering plugin calls it.
         """
         call_id = str(message.get("call_id", ""))
         now = time.monotonic()
@@ -2222,10 +2224,10 @@ class Engine:
             return
         if waiting is None or waiting[1] != message["id"]:
             raise PermissionError("no question of that plugin is waiting for an answer")
-        caller, answering, tag, _ = waiting
+        caller, answering, tag, _, channel = waiting
         self._answered_calls[call_id] = (answering, now)
         body = plugins.sanitise_config({"body": message.get("body")})["body"]
-        self.emit({"event": "answer", "id": caller, "tag": tag, "from": answering, "channel": str(message.get("channel", "")), "body": body})
+        self.emit({"event": "answer", "id": caller, "tag": tag, "from": answering, "channel": channel, "body": body})
 
     async def _cmd_plugin_publish(self, message: dict[str, Any]) -> None:
         """Hands one plugin's message to everybody who asked to hear that channel."""
