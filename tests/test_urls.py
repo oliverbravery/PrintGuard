@@ -32,6 +32,8 @@ MATCHING = [
     ("https://example.com/*/jobs/*/cancel", "https://example.com/v1/jobs/7/jobs/8/cancel"),
     ("https://example.com/a*a", "https://example.com/aa"),
     ("https://example.com/*.json*", "https://example.com/feed.json?page=2"),
+    ("https://api.telegram.org/bot*/sendMessage", "https://api.telegram.org/bot1/sendMessage?chat_id=5"),
+    ("https://example.com/search?q=*", "https://example.com/search?q=benchy"),
 ]
 
 REFUSED = [
@@ -54,6 +56,9 @@ REFUSED = [
     ("https://example.com/a*a", "https://example.com/a"),
     ("https://example.com/*/jobs/*/cancel", "https://example.com/v1/jobs/cancel"),
     ("https://example.com/v1/*/a", "https://example.com/v1/b/ab"),
+    ("https://api.telegram.org/bot*/sendMessage", "https://api.telegram.org/bot1/getUpdates?x=/sendMessage"),
+    ("https://example.com/*/cancel", "https://example.com/v1/delete?then=/cancel"),
+    ("https://example.com/search?q=*", "https://example.com/search?page=2"),
 ]
 
 

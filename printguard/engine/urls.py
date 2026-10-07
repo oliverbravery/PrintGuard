@@ -139,10 +139,11 @@ def matches(pattern: str, url: str) -> bool:
         url: The URL a plugin asked for.
 
     Returns:
-        True when scheme, host, port and path all match. The query string is
-        matched as part of the path, as a browser does, so a pattern ending in
-        ``*`` covers a URL's parameters. A path with a ``.`` or ``..`` segment
-        matches nothing.
+        True when scheme, host, port and path all match. The path is matched
+        on its own, so a ``*`` in it is never satisfied by the query string. A
+        pattern with a ``?`` matches what follows it against the query, and one
+        without covers any query. A path with a ``.`` or ``..`` segment matches
+        nothing.
     """
     rule = parse(pattern)
     if rule is None:
@@ -158,7 +159,10 @@ def matches(pattern: str, url: str) -> bool:
     path = parsed.path or "/"
     if _climbs(path):
         return False
-    return _matches_host(rule["host"].strip("[]"), host) and _matches_path(rule["path"], f"{path}?{parsed.query}" if parsed.query else path)
+    path_rule, scoped, query_rule = rule["path"].partition("?")
+    if not _matches_host(rule["host"].strip("[]"), host) or not _matches_path(path_rule, path):
+        return False
+    return not scoped or _matches_path(query_rule, parsed.query)
 
 
 def allowed(url: str, patterns: list[str]) -> bool:

@@ -217,7 +217,12 @@ missing port means any port. An IPv6 address goes in brackets, as `http://[fd00:
 
 The scheme and host match in any case. The path matches as written, so
 `https://api.telegram.org/bot*/sendMessage` does not cover `/bot1/sendmessage`. A `*` in a path
-stands for any run of characters, `/` and the query string included.
+stands for any run of characters, `/` included.
+
+The query string is not part of the path. A pattern without a `?` covers its path with any
+query, so `https://api.telegram.org/bot*/sendMessage` covers `/bot1/sendMessage?chat_id=5` and
+not `/bot1/getUpdates?next=/sendMessage`. A pattern with a `?` matches what follows it against
+the query, as `https://example.com/search?q=*` does.
 
 A URL with a `.` or `..` segment in its path matches no pattern, percent-encoded or not.
 
