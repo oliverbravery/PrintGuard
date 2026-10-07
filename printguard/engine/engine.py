@@ -264,7 +264,7 @@ class Engine:
             "tokens": lambda record: self.tokens.add(Token(**stored_token(record))),
             "printers": self._restore_printer,
             "monitors": lambda record: self.monitors.update({record["id"]: stored_monitor(record)}),
-            "reviews": lambda record: self.reviews.restore(stored_review(record)),
+            "reviews": lambda record: self.reviews.restore([stored_review(record)]),
             "prints": lambda record: self.prints.add(PrintFile(**stored_print(record))),
             "plugins": lambda record: self.plugins.add(Plugin(**{**record, "manifest": plugins.sanitise_manifest(record["manifest"])})),
             "cameras": self._restore_camera,

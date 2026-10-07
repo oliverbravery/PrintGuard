@@ -94,19 +94,18 @@ class Review:
         }
 
 
-def stored_review(record: dict[str, Any]) -> Review:
-    """Reads a review back from the state store.
+def stored_review(record: dict[str, Any]) -> dict[str, Any]:
+    """Checks a review read back from the state store.
 
     Args:
         record: One review as ``ReviewLibrary.persisted`` wrote it.
 
     Returns:
-        The review, with every kept frame and choice checked to be of the kind
-        the rest of the engine reads it as.
+        The same record, with every kept frame and choice checked to be of the
+        kind the rest of the engine reads it as.
 
     Raises:
         KeyError: If the record has no status.
-        TypeError: If the record has a field a review does not, or lacks one.
         ValueError: If a value is not of the kind its field takes.
     """
     if not isinstance(record.get("monitor_id"), str):
@@ -142,7 +141,7 @@ def stored_review(record: dict[str, Any]) -> Review:
     clamp("spacing_s", record.get("spacing_s"), 0.0, sys.float_info.max)
     if record.get("ended") is not None:
         clamp("ended", record["ended"], 0.0, sys.float_info.max)
-    return Review(**record)
+    return record
 
 
 def _raise_first(outcomes: list[Any]) -> None:
@@ -165,9 +164,9 @@ class ReviewLibrary:
         self._reviews: dict[str, Review] = {}
         self._stops = 0
 
-    def restore(self, review: Review) -> None:
-        """Loads a review a previous run persisted, as ``stored_review`` read it."""
-        self._reviews[review.id] = review
+    def restore(self, records: list[dict[str, Any]]) -> None:
+        """Loads reviews a previous run persisted."""
+        self._reviews.update({record["id"]: Review(**record) for record in records})
 
     def persisted(self) -> list[dict[str, Any]]:
         """Serialises every review for the state store."""
