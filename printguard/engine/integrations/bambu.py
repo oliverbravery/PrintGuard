@@ -490,11 +490,11 @@ class BambuAdapter(IntegrationAdapter):
         """Sends a command on the printer's session, dropping the session if it fails.
 
         Raises:
-            RuntimeError: If connecting outlasted the deadline the caller
-                waits for, so a command reported as timed out is never sent
-                afterwards.
+            RuntimeError: If connecting left too little of the deadline the
+                caller waits for to hear the broker and the printer out, so a
+                command reported as timed out is never sent.
         """
-        give_up = time.monotonic() + _DEADLINE_S
+        give_up = time.monotonic() + _DEADLINE_S - 2 * _REPLY_TIMEOUT_S
         session = self._session(config)
         if time.monotonic() > give_up:
             raise RuntimeError("Bambu printer took too long to connect")

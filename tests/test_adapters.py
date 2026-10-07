@@ -921,6 +921,27 @@ async def test_bambu_command_is_not_sent_once_its_caller_has_stopped_waiting(bam
     await adapter.close()
 
 
+async def test_bambu_command_is_not_sent_without_time_left_to_hear_it_was_taken(bambu_printers, monkeypatch) -> None:
+    """A slow reconnect used to leave the two waits running past the caller, who saw a pause that happened time out."""
+
+    def connect(self, host: str, port: int, keepalive: int) -> None:
+        time.sleep(0.2)
+
+    def publish(self, topic: str, payload: str, qos: int = 0) -> Any:
+        self.requests.append(jsonlib.loads(payload))
+        return SimpleNamespace(wait_for_publish=time.sleep, is_published=lambda: True)
+
+    monkeypatch.setattr(FakeBambuPrinter, "connect", connect)
+    monkeypatch.setattr(FakeBambuPrinter, "publish", publish)
+    monkeypatch.setattr(bambu, "_REPLY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(bambu, "_DEADLINE_S", 0.5)
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="took too long to connect"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    assert "pause" not in _commands(bambu_printers[0]), "a pause that could only be reported as timed out was sent"
+    await adapter.close()
+
+
 async def test_bambu_caller_closes_only_the_session_it_was_using(bambu_printers, monkeypatch) -> None:
     """A poll that found its session lost used to close whichever one a command had opened since."""
     adapter = BambuAdapter()
