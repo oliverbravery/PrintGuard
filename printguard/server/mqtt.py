@@ -414,7 +414,8 @@ class MqttBridge:
         One command waiting on a slow printer must not hold up a button pressed
         for another, so up to COMMANDS_IN_FLIGHT run at once. A burst for one
         target still runs in the order it arrived, so pause then resume cannot
-        be reversed.
+        be reversed. A retained message is dropped: the broker replays it on
+        every connect, so a retained cancel would end a print at each restart.
 
         Raises:
             aiomqtt.MqttError: If the broker drops the session, as itself and not
@@ -425,6 +426,8 @@ class MqttBridge:
         try:
             async with asyncio.TaskGroup() as running:
                 async for message in client.messages:
+                    if message.retain:
+                        continue
                     command = route_command(str(message.topic), bytes(message.payload).decode("utf-8", "ignore"), self._state.get("monitors", []))
                     if command is None:
                         continue

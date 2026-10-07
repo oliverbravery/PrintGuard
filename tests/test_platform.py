@@ -28,6 +28,7 @@ import onnxruntime as ort
 import pytest
 import websockets
 from fakes import redirected_socket
+from test_state_file import needs_an_unprivileged_user
 
 from printguard.engine import reports, vision
 from printguard.server.inference import (
@@ -98,10 +99,16 @@ async def test_a_frame_in_flight_finishes_on_the_runtime_it_started_on_when_the_
 
 
 async def test_a_login_in_the_video_servers_addresses_is_one_the_engine_scrubs(tmp_path: Path) -> None:
-    platform = ServerPlatform(Path("models"), tmp_path, "http://pg:API-PASS-31@mediamtx:9997", "rtsp://hub:RTSP-PASS-77@mediamtx:8554")
+    platform = ServerPlatform(
+        Path("models"),
+        tmp_path,
+        "http://pg:API-PASS-31@mediamtx:9997",
+        "rtsp://hub:RTSP-PASS-77@mediamtx:8554",
+        mediamtx_hls="http://viewer:HLS-PASS-52@mediamtx:8888",
+    )
     await platform.close()
 
-    assert {"pg", "API-PASS-31", "hub", "RTSP-PASS-77"} <= platform.secrets
+    assert {"pg", "API-PASS-31", "hub", "RTSP-PASS-77", "viewer", "HLS-PASS-52"} <= platform.secrets
 
 
 async def test_the_login_the_bundled_server_is_given_is_one_the_engine_scrubs(tmp_path: Path) -> None:
@@ -1110,6 +1117,42 @@ def test_a_browser_camera_recording_slower_than_a_frame_a_second_is_still_pushed
 
         with pytest.raises(av.error.FFmpegError):
             remux(chunks, nobody_listening)
+
+
+def test_a_recording_that_ends_drops_what_was_still_queued() -> None:
+    """One sent faster than it plays went on publishing after its socket closed, and held a stopping hub for 15 s."""
+    from printguard.server.publish import ChunkStream
+
+    chunks = ChunkStream()
+    chunks.feed(b"\x1a\x45")
+    assert chunks.read(1) == b"\x1a"
+    for _ in range(3):
+        chunks.feed(b"\xdf\xa3")
+    chunks.end()
+
+    assert chunks.read(64) == b"\x45" and chunks.read(64) == b""
+
+
+@needs_an_unprivileged_user
+def test_a_print_store_the_hub_may_not_write_stops_the_hub_with_the_owner_named(tmp_path, monkeypatch) -> None:
+    """It started and then failed the first upload, where the data directory itself is checked at the start."""
+    monkeypatch.setenv("PRINTGUARD_PLUGINS", "off")
+    store = tmp_path / "prints"
+    store.mkdir(mode=0o500)
+    try:
+        with pytest.raises(RuntimeError, match=f"could not be created .*{store} belongs to .*belong to the user the hub runs as"):
+            ServerPlatform(Path("models"), tmp_path, "http://localhost:9997", "rtsp://localhost:8554")
+    finally:
+        store.chmod(0o700)
+
+
+def test_a_print_store_that_is_a_file_stops_the_hub_with_a_reason(tmp_path, monkeypatch) -> None:
+    """A bare FileExistsError said nothing of what the hub wanted there."""
+    monkeypatch.setenv("PRINTGUARD_PLUGINS", "off")
+    (tmp_path / "prints").write_text("")
+
+    with pytest.raises(RuntimeError, match="prints could not be created .*so the hub cannot start"):
+        ServerPlatform(Path("models"), tmp_path, "http://localhost:9997", "rtsp://localhost:8554")
 
 
 def test_a_browser_camera_push_to_a_listener_that_never_answers_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:

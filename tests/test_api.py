@@ -115,6 +115,26 @@ async def test_classify_stops_reading_a_frame_at_its_size_limit(monkeypatch) -> 
         assert list(body["content"]) == ["image/jpeg"]
 
 
+async def test_supplied_frames_are_classified_a_few_at_a_time(monkeypatch) -> None:
+    """Each one decodes to as much as 150 MB, and 48 sent at once took the hub to 8 GB."""
+    async with api() as (client, engine, *_):
+        running = most = 0
+
+        async def classify(data: bytes) -> dict:
+            nonlocal running, most
+            running += 1
+            most = max(most, running)
+            await asyncio.sleep(0.02)
+            running -= 1
+            return {"prediction": "success"}
+
+        monkeypatch.setattr(engine, "classify", classify)
+        answers = await asyncio.gather(*(client.post("/classify", content=b"\xff\xd8jpeg") for _ in range(8)))
+
+    assert [answer.status_code for answer in answers] == [200] * 8
+    assert most == api_module.CLASSIFY_IN_FLIGHT
+
+
 async def test_baseline_is_read_only_without_tokens() -> None:
     async with api() as (client, _engine, _platform, _monitor_id, printer_id, camera_id, _tokens):
         assert (await client.get("/state")).status_code == 200

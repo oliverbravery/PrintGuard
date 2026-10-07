@@ -237,7 +237,7 @@ class CommandedBroker(FakeBroker):
 
     def __init__(self, topics: list[str]) -> None:
         super().__init__()
-        self._waiting = [SimpleNamespace(topic=topic, payload=b"on") for topic in topics]
+        self._waiting = [SimpleNamespace(topic=topic, payload=b"on", retain=False) for topic in topics]
 
     async def __anext__(self) -> Any:
         if self._waiting:
@@ -278,6 +278,39 @@ async def test_commands_behind_a_slow_printer_run_side_by_side_and_in_order_for_
     assert took < 0.9, f"four commands took {took:.2f} s, one after the other"
     assert [step for step in steps if step[1] == left] == [("start", left), ("end", left)] * 2, "a monitor's presses overlapped"
     assert steps[:3] == [("start", left), ("start", middle), ("start", right)]
+
+
+async def test_a_retained_command_is_not_run(monkeypatch) -> None:
+    """The broker replays one on every connect, so a retained cancel ended the print after each restart."""
+    engine = Engine(FakePlatform())
+    await engine.start()
+    await engine.handle({"cmd": "camera.add", "name": "cam", "source": {"kind": "fake", "fps": 10.0}})
+    await engine.handle({"cmd": "printer.add", "printer": {"name": "P", "provider": "octoprint", "config": {"base_url": "http://op", "api_key": "k"}}})
+    camera_id, printer_id = next(iter(engine.cameras.items)), next(iter(engine.printers.items))
+    await engine.handle({"cmd": "monitor.add", "monitor": {"name": "M", "camera_id": camera_id, "printer_id": printer_id}})
+    monitor_id = next(iter(engine.monitors))
+    broker = CommandedBroker([])
+    broker._waiting = [
+        SimpleNamespace(topic=f"printguard/monitor/{monitor_id}/printer_action/set", payload=b"cancel", retain=True),
+        SimpleNamespace(topic=f"printguard/monitor/{monitor_id}/printer_action/set", payload=b"pause", retain=False),
+    ]
+    monkeypatch.setattr(mqtt.aiomqtt, "Client", broker.client)
+    ran: list[dict[str, Any]] = []
+
+    async def record(command: dict[str, Any]) -> list[dict[str, Any]]:
+        ran.append(command)
+        return []
+
+    monkeypatch.setattr(engine, "request", record)
+    bridge = mqtt.MqttBridge(engine, lambda: {"enabled": True, "host": "broker"})
+    bridge.start()
+    try:
+        await _until(lambda: ran)
+    finally:
+        await bridge.stop()
+        await engine.stop()
+
+    assert ran == [{"cmd": "printer.action", "id": printer_id, "action": "pause"}]
 
 
 async def test_a_bridge_that_stops_tells_home_assistant_the_hub_is_offline(monkeypatch) -> None:
@@ -456,7 +489,7 @@ async def test_a_command_that_times_out_says_what_failed(monkeypatch: pytest.Mon
                 await asyncio.Event().wait()
             self.sent = True
             await asyncio.sleep(0.2)
-            return SimpleNamespace(topic=f"printguard/monitor/{monitor_id}/enabled/set", payload=b"ON")
+            return SimpleNamespace(topic=f"printguard/monitor/{monitor_id}/enabled/set", payload=b"ON", retain=False)
 
     broker = Sends()
     monkeypatch.setattr(mqtt.aiomqtt, "Client", broker.client)

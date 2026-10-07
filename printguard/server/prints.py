@@ -143,7 +143,8 @@ async def sweep_orphans(engine: Engine, *, unnamed: bool) -> None:
         engine: The hub's engine, with its state loaded.
         unnamed: Whether a finished file no print or review names goes too.
             It stays while a damaged state file waits to be put back, since
-            that state may be the one naming it.
+            that state may be the one naming it, and on a start that found no
+            state file, since one restored later may name it too.
     """
     named = {key for record in engine.prints.values() for key in (record.file_key, record.thumbnail_key)}
     named |= {frame_key(review["id"], frame["id"]) for review in engine.reviews.persisted() for frame in review["frames"]}

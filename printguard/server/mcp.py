@@ -31,10 +31,10 @@ from starlette.applications import Starlette
 from starlette.datastructures import Headers
 from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..engine.engine import Engine
-from .api import MAX_FRAME_BYTES, ApiAuth, route_scope
+from .api import MAX_FRAME_BYTES, ApiAuth, classify, route_scope
 
 INSTRUCTIONS = (
     "Monitor and control 3D printers through PrintGuard. Read monitor, printer and "
@@ -112,18 +112,25 @@ def build_mcp(
         if len(image_base64) * 3 // 4 > MAX_FRAME_BYTES:
             raise ToolError(f"could not classify image: it is over {MAX_FRAME_BYTES // 1024 // 1024} MB")
         try:
-            return await get_engine().classify(base64.b64decode(image_base64))
+            return await classify(api_app, base64.b64decode(image_base64))
         except (ValueError, RuntimeError) as exc:
             raise ToolError(f"could not classify image: {exc}")
 
     return mcp
 
 
+MAX_BODY_BYTES = MAX_FRAME_BYTES * 4 // 3 + 64 * 1024
+"""The largest request the server reads: an image of ``MAX_FRAME_BYTES`` in base64, and the call around it."""
+
+
 class BearerGate:
-    """Answers 401 to a request with no valid bearer once tokens exist.
+    """Answers 401 to a request with no valid bearer once tokens exist, and 413 to a body over ``MAX_BODY_BYTES``.
 
     The tool filter alone lets such a caller open a session and read the
-    server's name, version and instructions, with an empty tool list.
+    server's name, version and instructions, with an empty tool list. The
+    transport reads a whole body before it looks at it, so the size is held
+    here, from the length a request declares and again as it arrives, since a
+    chunked one declares none.
     """
 
     def __init__(self, app: ASGIApp, auth: ApiAuth, get_engine: Callable[[], Engine]) -> None:
@@ -132,13 +139,36 @@ class BearerGate:
         self._get_engine = get_engine
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        """Passes a request on, or refuses one whose token resolves to nothing."""
+        """Passes a request on, or refuses one whose token resolves to nothing or whose body is too large."""
         if scope["type"] != "http":
             await self._app(scope, receive, send)
-        elif self._auth.resolve(Headers(scope=scope).get("authorization"), self._get_engine().token_scopes()) is None:
+            return
+        headers = Headers(scope=scope)
+        if self._auth.resolve(headers.get("authorization"), self._get_engine().token_scopes()) is None:
             await JSONResponse({"detail": "missing or invalid token"}, 401, {"WWW-Authenticate": "Bearer"})(scope, receive, send)
-        else:
-            await self._app(scope, receive, send)
+            return
+        too_large = JSONResponse({"detail": f"a request is at most {MAX_BODY_BYTES // 1024 // 1024} MB"}, 413)
+        declared = headers.get("content-length", "")
+        if declared.isdecimal() and int(declared) > MAX_BODY_BYTES:
+            await too_large(scope, receive, send)
+            return
+        body = bytearray()
+        message = await receive()
+        while message["type"] == "http.request":
+            body += message.get("body", b"")
+            if len(body) > MAX_BODY_BYTES:
+                await too_large(scope, receive, send)
+                return
+            if not message.get("more_body"):
+                message = {"type": "http.request", "body": bytes(body)}
+                break
+            message = await receive()
+        first: list[Message] = [message]
+
+        async def replay() -> Message:
+            return first.pop() if first else await receive()
+
+        await self._app(scope, replay, send)
 
 
 def build_mcp_app(

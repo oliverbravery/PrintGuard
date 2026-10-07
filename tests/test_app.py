@@ -1184,3 +1184,131 @@ async def test_a_plugin_route_answering_without_a_status_or_headers_is_served() 
         response = await client.get("/plugins/accounts/login")
 
     assert response.status_code == 200 and not failed
+
+
+async def test_a_start_that_finds_no_state_file_keeps_what_the_print_store_holds(tmp_path, monkeypatch) -> None:
+    """With state.json gone, nothing was named, so the library, the review frames and the alert pictures were all deleted."""
+    with socket.create_server(("127.0.0.1", 0)) as unused:
+        streaming_server = f"http://127.0.0.1:{unused.getsockname()[1]}"
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PRINTGUARD_PLUGINS", "off")
+    monkeypatch.setenv("MEDIAMTX_API", streaming_server)
+    store = tmp_path / "prints"
+    store.mkdir()
+    for name in ("0badf00d.gcode", "deadbeef.gcode.part"):
+        (store / name).write_bytes(b"x")
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        assert [path.name for path in store.iterdir()] == ["0badf00d.gcode"], "a state file put back later may name it"
+
+    (tmp_path / "state.json").write_text("{}")
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        assert not list(store.iterdir()), "a state that names no such file leaves it an orphan"
+
+
+@pytest.mark.parametrize("frame", ["[" * 100_000 + "]" * 100_000, '{"a":' * 1_100 + "1" + "}" * 1_100])
+def test_a_frame_nested_deeper_than_the_parser_goes_is_not_a_command(frame: str) -> None:
+    """The RecursionError ended the socket's handler, where any other malformed frame gets an error back."""
+    from printguard.server.app import parse_command
+
+    assert parse_command(frame) is None
+
+
+async def test_a_gate_answer_is_not_reused_for_another_client_address_or_browser() -> None:
+    """A gate is handed both headers, so one that decides by them approved others from the cache."""
+    runtime = StubRuntime(verdict=True)
+    app = app_with(runtime)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        for headers in (
+            {"x-forwarded-for": "192.168.1.5", "user-agent": "kiosk"},
+            {"x-forwarded-for": "203.0.113.9", "user-agent": "kiosk"},
+            {"x-forwarded-for": "192.168.1.5", "user-agent": "other"},
+            {"x-forwarded-for": "192.168.1.5", "user-agent": "kiosk"},
+        ):
+            await client.get("/", headers=headers)
+
+    assert [request["headers"]["x-forwarded-for"] for request in runtime.seen] == ["192.168.1.5", "203.0.113.9", "192.168.1.5"]
+
+
+async def test_a_failed_publish_closes_its_socket_without_the_streaming_servers_login(monkeypatch) -> None:
+    """PyAV quotes the address it could not reach, and the dashboard shows the reason."""
+
+    def refused(source, url: str) -> None:
+        raise OSError(f"[Errno 61] Connection refused: '{url}'")
+
+    monkeypatch.setenv("MEDIAMTX_RTSP", "rtsp://hub:RTSP-PASS-77@mediamtx:8554")
+    monkeypatch.setattr(app_module, "remux", refused)
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(plugin_runtime=None))
+    async with Tab(app, "/api/publish/cam") as camera:
+        await asyncio.sleep(0.05)
+        camera.send(bytes=b"\x1a\x45")
+        assert await camera.closed() == 1011
+        reason = next(message["reason"] for message in camera._sent if message["type"] == "websocket.close")
+
+    assert "Connection refused" in reason and "RTSP-PASS-77" not in reason
+
+
+@pytest.mark.parametrize("path", ["/hls/%00", "/hls/%ff%fe", "/hls/cam/%7f.m3u8"])
+async def test_a_stream_path_that_cannot_be_asked_for_is_a_404(path: str) -> None:
+    """These answered 500 with a traceback in the log, to anyone who could reach the hub."""
+    platform = SimpleNamespace(view_camera=AsyncMock(), plugin_runtime=None)
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=platform)
+    app.state.hls = httpx.AsyncClient(
+        base_url="http://mediamtx",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=AsyncContent(), request=request)),
+    )
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            answer = await client.get(path)
+    finally:
+        await app.state.hls.aclose()
+
+    assert answer.status_code == 404
+    platform.view_camera.assert_not_awaited()
+
+
+async def test_an_origin_entry_with_a_wildcard_is_ignored_and_frames_nothing(monkeypatch, tmp_path) -> None:
+    """It matched no host and went into frame-ancestors as it was written, with no warning."""
+    (tmp_path / "index.html").write_text("<html></html>")
+    monkeypatch.setenv("STATIC_DIR", str(tmp_path))
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", "https://*.wild.example, https://ok.example.com")
+    told: list[str] = []
+    monkeypatch.setattr("printguard.server.app.logger.warning", lambda message, *args: told.append(message % args))
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/api/health", headers={"host": "hub.wild.example"})).status_code == 403
+        policy = (await client.get("/")).headers["content-security-policy"]
+
+    assert policy == "frame-ancestors 'self' https://ok.example.com"
+    assert any("https://*.wild.example is ignored because a wildcard" in line for line in told)
+
+
+async def test_a_page_on_another_site_cannot_call_the_rest_api_or_the_mcp_server(monkeypatch) -> None:
+    """With no token issued both answer anyone, and a browser posts a plain body to them without asking first."""
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", "https://panel.example.com")
+    engine = Engine(FakePlatform())
+    await engine.start()
+    app = create_app()
+    mounted(app, "/api/v1").state.engine = app.state.engine = engine
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            elsewhere = {"origin": "https://evil.example"}
+            assert (await client.post("/api/v1/classify", content=b"\xff\xd8jpeg", headers=elsewhere)).status_code == 403
+            assert (await client.get("/api/v1/state", headers=elsewhere)).status_code == 403
+            assert (await client.post("/mcp", json={}, headers=elsewhere)).status_code == 403
+            assert (await client.post("/mcp/", json={}, headers={"origin": "null"})).status_code == 403
+            for allowed in ({}, {"origin": "http://test"}, {"origin": "https://panel.example.com"}):
+                assert (await client.post("/api/v1/classify", content=b"\xff\xd8jpeg", headers=allowed)).status_code == 200, allowed
+    finally:
+        await engine.stop()

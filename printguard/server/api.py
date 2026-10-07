@@ -8,6 +8,7 @@ the same tags drive both this API's bearer-scope guard and the MCP tool filter.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 from importlib.metadata import version as package_version
@@ -193,6 +194,8 @@ UPLOAD_BODY = {
     }
 }
 MAX_FRAME_BYTES = 32 * 1024 * 1024
+CLASSIFY_IN_FLIGHT = 2
+"""Supplied images decoded and scored at once. One decodes to as much as 150 MB, and the rest wait their turn."""
 FRAME_BODY = {
     "requestBody": {
         "required": True,
@@ -286,6 +289,23 @@ def public_state(engine: Engine) -> dict[str, Any]:
     return state
 
 
+async def classify(api: FastAPI, data: bytes) -> dict[str, Any]:
+    """Classifies a supplied image for the REST route and the MCP tool, ``CLASSIFY_IN_FLIGHT`` at a time.
+
+    Args:
+        api: The REST app, which holds the engine and the slots.
+        data: The image file's bytes.
+
+    Returns:
+        The model's verdict and defect score.
+
+    Raises:
+        RuntimeError: If the image cannot be decoded.
+    """
+    async with api.state.classifying:
+        return await api.state.engine.classify(data)
+
+
 def build_api_app(auth: ApiAuth) -> FastAPI:
     """Builds the /api/v1 sub-application, with the engine attached at startup."""
     api = FastAPI(
@@ -297,6 +317,7 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
     )
     api.router.route_class = ScopedRoute
     api.state.api_auth = auth
+    api.state.classifying = asyncio.Semaphore(CLASSIFY_IN_FLIGHT)
 
     @api.exception_handler(RuntimeError)
     async def command_failed(request: Request, exc: RuntimeError) -> JSONResponse:
@@ -498,9 +519,9 @@ def build_api_app(auth: ApiAuth) -> FastAPI:
         return Response(jpeg, media_type="image/jpeg")
 
     @api.post("/classify", operation_id="classify_frame", tags=["read"], openapi_extra=FRAME_BODY)
-    async def classify_frame(request: Request, engine: Engine = Depends(get_engine)) -> dict[str, Any]:
+    async def classify_frame(request: Request) -> dict[str, Any]:
         """Classifies a supplied JPEG frame - the model's verdict without a registered camera."""
-        return await engine.classify(b"".join([chunk async for chunk in capped(request.stream(), MAX_FRAME_BYTES)]))
+        return await classify(api, b"".join([chunk async for chunk in capped(request.stream(), MAX_FRAME_BYTES)]))
 
     @api.post("/cameras", operation_id="add_camera", tags=["manage"], response_model=list[CameraOut])
     async def add_camera(body: CameraCreate, engine: Engine = Depends(get_engine)) -> list[dict[str, Any]]:

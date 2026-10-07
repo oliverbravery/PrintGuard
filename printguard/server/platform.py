@@ -720,11 +720,13 @@ class ServerPlatform:
         mediamtx_rtsp: str,
         update_asset: str | None = None,
         mediamtx_login: tuple[str, str] | None = None,
+        mediamtx_hls: str = "",
     ) -> None:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
         self.host = deployment(update_asset is not None)
         prepare_data_directory(data_dir)
+        prepare_data_directory(data_dir / "prints")
         self.files = DiskFileStore(data_dir / "prints")
         self._model_dir = model_dir
         self._inference: Inference | None = None
@@ -737,7 +739,7 @@ class ServerPlatform:
         self._public_client = httpx.AsyncClient(transport=PublicOnlyTransport())
         self._mediamtx_client = httpx.AsyncClient(trust_env=False)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._mediamtx_client, mediamtx_login)
-        self.secrets = frozenset(url_secrets(mediamtx_api) | url_secrets(mediamtx_rtsp) | set((mediamtx_login or ())[1:]))
+        self.secrets = frozenset(url_secrets(mediamtx_api) | url_secrets(mediamtx_rtsp) | url_secrets(mediamtx_hls) | set((mediamtx_login or ())[1:]))
         self._sources: dict[str, AVSource] = {}
         self._closing: dict[str, AVSource] = {}
         self._notices: list[Notice] = []

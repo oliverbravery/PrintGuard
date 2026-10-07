@@ -140,6 +140,11 @@ A hub opened at a name it doesn't know, such as a public domain, answers `403` t
 request, this API included, until that name is in
 [`PRINTGUARD_ORIGINS`](deployment.md#host-and-origin-checking).
 
+A request to `/api/v1` or `/mcp` that carries an `Origin` header is a `403` unless the origin
+is the hub's own address or one listed in `PRINTGUARD_ORIGINS`, so a page on another site
+can't call either from a browser. curl, a script or an agent sends no `Origin` and is
+unaffected.
+
 <details open>
 <summary><b>Read</b></summary>
 
@@ -155,7 +160,7 @@ request, this API included, until that name is in
 | `GET` | `/cameras` | List cameras with rate, health and latest classification |
 | `GET` | `/cameras/{id}` | One camera |
 | `GET` | `/cameras/{id}/frame` | Freshest frame as `image/jpeg`. `404` while the camera is on standby or offline, since it has no current frame |
-| `POST` | `/classify` | Classify a supplied frame, a JPEG or PNG body of up to 32 MB and 50 megapixels. No registered camera needed. A file over 32 MB is a `413`, and one over 50 megapixels or that isn't a JPEG or PNG is a `400` |
+| `POST` | `/classify` | Classify a supplied frame, a JPEG or PNG body of up to 32 MB and 50 megapixels. No registered camera needed. A file over 32 MB is a `413`, and one over 50 megapixels or that isn't a JPEG or PNG is a `400`. Two are scored at a time, here and through the MCP tool together, and the rest wait |
 | `GET` | `/prints` | List the print library, each file with its format, size, tags and what the slicer wrote into it |
 | `GET` | `/prints/{id}` | One print file |
 | `GET` | `/prints/{id}/file` | Download a print file as the library keeps it |
@@ -169,7 +174,7 @@ request, this API included, until that name is in
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/printers/{id}/action` | `{"action": "pause" \| "resume" \| "cancel"}` |
-| `POST` | `/printers/{id}/heat` | `{"nozzle", "bed"}` in °C, at least one of them, 0 turning a heater off. A target above 350 for the nozzle or 150 for the bed, or one that isn't a number, is refused with a `400`, as is one for a service that cannot set targets |
+| `POST` | `/printers/{id}/heat` | `{"nozzle", "bed"}` in °C, at least one of them, 0 turning a heater off. A target above 350 for the nozzle or 150 for the bed is refused with a `400`, as is one for a service that cannot set targets. One that isn't a number is a `422` |
 | `POST` | `/prints/{id}/start` | `{"printer_id"}`, sends the file to that printer and starts it. Refused unless the printer is idle and prints the format. A file tagged for printers only starts on those, and one with no tags starts on any |
 
 </details>
@@ -246,7 +251,8 @@ Endpoint `https://<host>/mcp/`, transport **Streamable HTTP**, same bearer token
 without the slash answers the same. Tools mirror the REST operations one to one by
 `operation_id`, with the same bodies, answers and refusals, and the list a client sees is
 filtered to the scopes its token holds. With no tokens issued that is the `read` tools. Once
-any token exists, a request with no valid bearer is a `401` before a session opens.
+any token exists, a request with no valid bearer is a `401` before a session opens. A request
+body over 42 MB, which is room for a 32 MB image in base64, is a `413`.
 
 | Scope | Tools |
 |---|---|
@@ -340,6 +346,8 @@ It only subscribes to these two, at QoS 1, and publishes nothing on them:
 | `<base>/monitor/<monitor id>/printer_action/set` | `pause`, `resume` or `cancel` for the linked printer |
 
 Any other payload on a command topic is ignored, as is one for a monitor that doesn't exist. A
+retained message on a command topic is ignored too, since the broker would replay it each time
+the hub connects, so publish commands without the retain flag. A
 command the engine refuses shows as an error in the dashboard.
 
 Over REST the bridge is `mqtt` in `PATCH /settings`, an object of `enabled`, `host`, `port`,

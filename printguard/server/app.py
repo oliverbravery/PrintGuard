@@ -34,6 +34,7 @@ import printguard
 
 from ..engine import logs, oauth
 from ..engine.engine import Engine
+from ..engine.reports import MESSAGE_STANDALONE_BELOW, scrub, url_secrets
 from ..engine.urls import DEFAULT_PORTS, LOCAL_HOSTNAMES, LOCAL_SUFFIXES
 from .api import ApiAuth, build_api_app
 from .events import ConflatedEventQueue, encode_event, parse_json
@@ -154,11 +155,12 @@ def parse_command(text: str | None) -> dict[str, Any] | None:
         text: The frame's text, or None for a binary frame.
 
     Returns:
-        The command, or None when the frame is not a JSON object.
+        The command, or None when the frame is not a JSON object or is nested
+        deeper than the parser goes.
     """
     try:
         command = parse_json(text or "")
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     return command if isinstance(command, dict) else None
 
@@ -247,6 +249,29 @@ class HostGuard:
             await PlainTextResponse(message, status_code=403)(scope, receive, send)
 
 
+class OriginGuard:
+    """Refuses a request to the REST API or the MCP server that a page on another site made.
+
+    With no token issued both answer anyone, and a browser sends a page's POST
+    of a plain body without asking first, so the token check alone leaves them
+    open to any site the user has open. A script or an agent names no origin
+    and is let through.
+    """
+
+    def __init__(self, app: ASGIApp, allowed: set[str]) -> None:
+        self._app = app
+        self._allowed = allowed
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Passes a request on, or answers 403 to one for either surface from an origin the hub does not know."""
+        guarded = scope["type"] == "http" and scope["path"].startswith(ORIGIN_GUARDED_PREFIXES)
+        if guarded and not origin_allowed(HTTPConnection(scope), self._allowed):
+            await JSONResponse({"detail": "origin not allowed"}, 403)(scope, receive, send)
+        else:
+            await self._app(scope, receive, send)
+
+
+ORIGIN_GUARDED_PREFIXES = ("/api/v1/", "/mcp")
 REFUSED_HOSTS_LOGGED = 32
 GATE_EXEMPT_PREFIXES = ("/api/health",)
 GATE_CACHE_TTL_S = 10.0
@@ -325,8 +350,12 @@ def create_app() -> FastAPI:
     allowed_origins = set()
     for entry in listed_origins:
         try:
-            if not urlsplit(entry).hostname:
+            host = urlsplit(entry).hostname
+            if not host:
                 logger.warning("PRINTGUARD_ORIGINS entry %s is ignored because it has no scheme. Write it as https://%s", entry, entry)
+                continue
+            if "*" in host:
+                logger.warning("PRINTGUARD_ORIGINS entry %s is ignored because a wildcard matches no host. List each origin in full", entry)
                 continue
             allowed_origins.add(normalised_origin(entry))
         except ValueError as unreadable:
@@ -349,7 +378,7 @@ def create_app() -> FastAPI:
         async with AsyncExitStack() as resources:
             bundled = bool(mediamtx_binary) and Path(mediamtx_binary).exists()
             mediamtx_login = ("printguard", secrets.token_urlsafe(32)) if bundled else None
-            platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset, mediamtx_login)
+            platform = ServerPlatform(model_dir, data_dir, mediamtx_api, mediamtx_rtsp, update_asset, mediamtx_login, mediamtx_hls)
             resources.push_async_callback(platform.close)
             if bundled:
                 streamer = EmbeddedMediaMTX(
@@ -359,10 +388,11 @@ def create_app() -> FastAPI:
                 resources.push_async_callback(streamer.stop)
             else:
                 logger.warning("no bundled MediaMTX binary (%r), expecting an external MediaMTX at %s", mediamtx_binary, mediamtx_api)
+            state_saved = (data_dir / "state.json").is_file()
             engine = Engine(platform)
             await engine.start()
             resources.push_async_callback(engine.stop)
-            await sweep_orphans(engine, unnamed=not (data_dir / "state.json.corrupt").exists())
+            await sweep_orphans(engine, unnamed=state_saved and not (data_dir / "state.json.corrupt").exists())
             app.state.engine = engine
             api_app.state.engine = engine
             app.state.hls = httpx.AsyncClient(
@@ -377,30 +407,26 @@ def create_app() -> FastAPI:
             logger.info("hub shutting down")
 
     app = FastAPI(title="PrintGuard", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
-    gate_cache: TTLCache[tuple[str, ...], bool] = TTLCache(GATE_CACHE_ENTRIES, GATE_CACHE_TTL_S)
+    gate_cache: TTLCache[str, bool] = TTLCache(GATE_CACHE_ENTRIES, GATE_CACHE_TTL_S)
 
     async def gate_allows(request: Request) -> bool:
         """Asks a gating plugin whether a request may proceed.
 
-        Answers are cached per credential, path and query for a few seconds so a
-        dashboard polling HLS does not wake the sandbox on every segment.
-        Refusals are never cached, so signing in takes effect at once. The
-        cache holds a fixed number of answers, so a flood of made-up cookies
-        cannot grow it.
+        Answers are cached for a few seconds so a dashboard polling HLS does
+        not wake the sandbox on every segment. The key is everything the gate
+        is handed, so one that decides by client address or browser is never
+        answered for from another's approval. Refusals are never cached, so
+        signing in takes effect at once. The cache holds a fixed number of
+        answers, so a flood of made-up cookies cannot grow it.
         """
         runtime = app.state.engine.platform.plugin_runtime
         if runtime is None or request.url.path.startswith(GATE_EXEMPT_PREFIXES + runtime.gate_paths()):
             return True
-        key = (
-            request.headers.get("cookie", ""),
-            request.headers.get("authorization", ""),
-            request.method,
-            request.url.path,
-            request.url.query,
-        )
+        asked = plugin_request(request, request.method)
+        key = json.dumps(asked, sort_keys=True)
         if key in gate_cache:
             return True
-        verdict = await runtime.authorise(plugin_request(request, request.method))
+        verdict = await runtime.authorise(asked)
         if verdict is None or verdict:
             gate_cache[key] = True
             return True
@@ -430,6 +456,7 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=504, content={"detail": "the hub took too long to answer, try again"})
 
     app.add_middleware(McpSlash)
+    app.add_middleware(OriginGuard, allowed=allowed_origins)
     app.add_middleware(HostGuard, named={urlsplit(origin).hostname or "" for origin in allowed_origins})
 
     @app.api_route("/plugins/{plugin_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
@@ -575,9 +602,15 @@ def create_app() -> FastAPI:
         MediaMTX answers with are dropped, so a page elsewhere that knows the
         hub's address cannot read a feed. That covers the opaque origin plugin
         pages are served into, which sends ``Origin: null``.
+
+        A path with anything but printable ASCII in it is a 404 here, since no
+        stream has such a name and neither the request to MediaMTX nor the
+        redirect it answers with can carry one.
         """
         if not origin_allowed(request, allowed_origins):
             raise HTTPException(403, "origin not allowed")
+        if not (path.isascii() and path.isprintable()):
+            raise HTTPException(404, "no such stream")
         await app.state.engine.platform.view_camera(path.split("/", 1)[0])
         client: httpx.AsyncClient = app.state.hls
         try:
@@ -634,13 +667,14 @@ def create_app() -> FastAPI:
         except WebSocketDisconnect:
             connected = False
         finally:
-            source.feed(None)
+            source.end()
         try:
             await pusher
         except Exception as err:
             logger.warning("camera publish %s failed: %s", path, err)
             if connected:
-                await websocket.close(code=1011, reason=str(err)[:120])
+                reason = scrub(str(err), url_secrets(mediamtx_rtsp), standalone_below=MESSAGE_STANDALONE_BELOW)
+                await websocket.close(code=1011, reason=reason[:120])
         logger.info("camera publish ended: %s", path)
 
     app.mount("/api/v1", api_app)

@@ -56,7 +56,7 @@ flowchart LR
 Cameras that PrintGuard pulls from, and printers it talks to, need no published ports at
 all. The compose file publishes `8000` and `8554`, so add `"1935:1935"` for an RTMP push.
 
-Ports `8554` and `1935` take no login to publish, because cameras push to the hub that way, so anyone who can reach them can publish a stream of their own.
+Ports `8554` and `1935` take no login to publish, because cameras push to the hub that way, so anyone who can reach them can publish a stream of their own, or publish over the path of a camera that pushes one and take its place.
 Reading a stream from them needs a login the hub makes up each time it starts, so nobody else can watch a camera from there. Remove `"8554:8554"` from the compose file if no camera pushes to the hub.
 
 The desktop app listens on the same three ports on every interface of the computer it runs on,
@@ -178,21 +178,21 @@ is called DNS rebinding.
 ```
 
 Each entry needs its scheme, which is `http` or `https`. Capitals, a `:443` or `:80` and a trailing dot on the name make no
-difference, and the hub logs a warning at start for an entry it can't read. A name with letters outside ASCII, such as
+difference, and the hub logs a warning at start for an entry it can't read. There are no wildcards, so an entry such as `https://*.example.com` is ignored with a warning and each name has to be listed in full. A name with letters outside ASCII, such as
 `https://drucker.müller.example`, can be listed as written or in punycode.
 
-Every request for a name that isn't covered, or that sends no `Host` header, gets a `403` that says which line to add, and the
-hub logs the same line once for each of the first 32 names. A WebSocket is closed with no text,
+Every request for a name that isn't covered gets a `403` that says which line to add, and the
+hub logs the same line once for each of the first 32 names. A request with no `Host` header gets a `403` saying it names no host. A WebSocket is closed with no text,
 so look in the log. That includes the REST API, the MCP server and `/api/health`, so point an
 uptime check at the hub's address or list the name it uses.
 
 The check reads both `Host` and `X-Forwarded-Host`, so it works whether your proxy keeps the
 host or forwards it. Tailscale, Cloudflare and oauth2-proxy all do one or the other.
 
-The hub also rejects any WebSocket, print upload or camera stream request a browser sends from an
+The hub also rejects any WebSocket, print upload, camera stream, REST API or MCP request a browser sends from an
 `Origin` that is not the address the request was for, with the same scheme and port, or one listed in
-`PRINTGUARD_ORIGINS`. Behind a proxy that ends TLS, send `X-Forwarded-Proto` so the scheme matches. It can be `http`, `https`, `ws` or `wss`, and a value that is none of those only stops the hub matching its own address, so a listed origin still gets in. An upload or stream
-request with no `Origin`, which is what a script sends, is let through. A WebSocket with none is refused,
+`PRINTGUARD_ORIGINS`. Behind a proxy that ends TLS, send `X-Forwarded-Proto` so the scheme matches. It can be `http`, `https`, `ws` or `wss`, and a value that is none of those only stops the hub matching its own address, so a listed origin still gets in. An upload, stream, REST API or MCP
+request with no `Origin`, which is what a script or an agent sends, is let through. A WebSocket with none is refused,
 since every browser sends one and only the dashboard opens them. An `Origin` that isn't a valid
 address is refused too, with a `403` or by closing the WebSocket. An auth proxy checks the session cookie,
 and the browser attaches that cookie to sockets opened by other sites too, so this is what stops
@@ -209,7 +209,7 @@ like:
 | Permission | What it means for an exposed hub |
 |---|---|
 | **Serve its own pages** | The plugin answers requests under `/plugins/<id>/`. Those responses go out through your proxy like anything else, so whatever it serves is as exposed as the dashboard. It is served into a sandboxed origin, so it can never act as the dashboard |
-| **Authorise every request** | The plugin is asked about every request to the hub except `/api/health` and its own pages, with its cookie and authorisation headers, and can refuse it. A yes is reused for 10 seconds for the same cookie, authorisation header, method, path and query. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out. One that fails is disabled and every request is refused until you deal with it |
+| **Authorise every request** | The plugin is asked about every request to the hub except `/api/health` and its own pages, with its cookie and authorisation headers, and can refuse it. A yes is reused for 10 seconds for a request that is the same in everything the plugin is shown, which is the method, path, query and the cookie, authorisation, accept, content type, forwarded-for and user agent headers. That is how an accounts plugin can protect a hub, and it also means a broken one can lock you out. One that fails is disabled and every request is refused until you deal with it |
 
 To start the hub with every plugin switched off, add this and then remove the plugin or enable it
 again. The value has to be exactly `off`:
@@ -241,7 +241,7 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 
 | Host | When |
 |---|---|
-| `api.github.com` | At start and then once a day for the update check, 15 minutes after one that failed, when you press **Check now**, and to resolve a plugin's commit when you install or update it |
+| `api.github.com` | At start and then once a day for the update check, 15 minutes after one that failed, when you switch the check on or press **Check now**, and to resolve a plugin's commit when you install or update it |
 | `raw.githubusercontent.com` | The plugin catalogue and a plugin's files, when you browse the store or install one |
 | `*.ingest.de.sentry.io` | Only when you send a bug report |
 | `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
@@ -260,7 +260,7 @@ for themselves.
 | `PRINTGUARD_ORIGINS` | Unset | The addresses you open the hub at when they are not an IP address or a local name, comma-separated and each with its scheme, such as `https://hub.example.com`. See [host and origin checking](#host-and-origin-checking) |
 | `PRINTGUARD_PLUGINS` | On | `off`, written exactly so, starts the hub with every plugin switched off |
 | `PRINTGUARD_CAMERAS` | `auto` in the image | Anything else, such as `off`, leaves [cameras passed into the container](cameras.md#cameras-plugged-into-the-hub) to be added by hand |
-| `MEDIAMTX_API` | `http://localhost:9997` | Where the hub finds MediaMTX. The hub only gives a MediaMTX its camera paths again when it supervises that server, so after one you run yourself restarts, restart the hub too. [Architecture](architecture.md#configuration) has the rest |
+| `MEDIAMTX_API` | `http://localhost:9997` | Where the hub finds MediaMTX. The hub only gives a MediaMTX its camera paths again when it supervises that server, so after one you run yourself restarts, restart the hub too. One started from the shipped `mediamtx.yml` needs a login for its API and for reading, in `MEDIAMTX_API`, `MEDIAMTX_RTSP` and `MEDIAMTX_HLS`. [Architecture](architecture.md#configuration) has the rest |
 | `PORT` | `8000` | The port the hub listens on |
 | `DATA_DIR` | `/data` in the image | Where state and print files are kept |
 | `LOG_LEVEL` | `INFO` | `DEBUG` adds command traces, printer state changes and exception tracebacks |
@@ -282,7 +282,7 @@ and overwrites it each time.
 | `state.json` | Cameras, printers, monitors, settings, themes, layout, installed plugins, the print library's records and the record of each print's kept frames, with printer passwords, notifier keys, the MQTT broker password, camera addresses that carry a login and a Bambu camera's access code, plugin credentials, API token hashes and the token the hub sends training frames with. Written readable only by the account running the hub |
 | `state.tmp` | The next `state.json` while it is being written. It's only there for a moment |
 | `state.json.corrupt` | A `state.json` that would not parse at start, or held something the hub never saves, [kept so you can recover it](troubleshooting.md#starting-up). It's only there after that has happened. A later damaged file is kept beside it as `state.json.corrupt.1` up to `.4`, and the first is never replaced |
-| `prints/` | The files of the [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub). At start the hub deletes any upload there that never finished, and any file `state.json` doesn't name unless a `state.json.corrupt` is waiting to be recovered. It leaves folders alone, such as a NAS's `@eaDir`. Files are written readable only by the account running the hub, and ones from before 2.6.0 keep the mode they had |
+| `prints/` | The files of the [print library](printers.md#sending-prints), and the [frames kept from each print](feedback.md#whats-kept-on-your-hub). At start the hub deletes any upload there that never finished, and any file `state.json` doesn't name. Those are kept while a `state.json.corrupt` is waiting to be recovered and on a start that finds no `state.json`, so a backup you put back still finds its files. It leaves folders alone, such as a NAS's `@eaDir`. Files are written readable only by the account running the hub, and ones from before 2.6.0 keep the mode they had |
 
 | At start, a `state.json` that | Does |
 |---|---|
@@ -335,7 +335,7 @@ services:
 
 | Needs | Because |
 |---|---|
-| The data directory and everything in it owned by that user | The hub writes `state.json` and `prints/` there. It stops at start if it can't read `state.json` or write to the directory, naming the directory and its owner in the log. A disk that fills or goes read-only later raises a dashboard warning at the next save. Saves are written in the background, so a slow disk never holds up a camera |
+| The data directory and everything in it owned by that user | The hub writes `state.json` and `prints/` there. It stops at start if it can't read `state.json` or write to the directory or to `prints/`, naming the directory and its owner in the log. A disk that fills or goes read-only later raises a dashboard warning at the next save. Saves are written in the background, so a slow disk never holds up a camera |
 | The host's `video` group in `group_add` | A [passed-in camera](cameras.md#cameras-plugged-into-the-hub) is readable by that group only. `getent group video` gives the number |
 | The host's `render` group in `group_add` | The same for `/dev/dri` on the [Intel image](hardware.md#intel-gpu). `getent group render` gives the number |
 

@@ -3,6 +3,7 @@ hand-written camera frame tool returning native image content."""
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from unittest.mock import AsyncMock
 
@@ -13,7 +14,8 @@ from fastmcp import Client
 
 from fakes import FakePlatform
 from printguard.engine.engine import Engine
-from printguard.server.api import ApiAuth, build_api_app
+from printguard.server import mcp as mcp_module
+from printguard.server.api import CLASSIFY_IN_FLIGHT, ApiAuth, build_api_app
 from printguard.server.mcp import build_mcp, build_mcp_app
 
 READ_TOOLS = {
@@ -113,6 +115,66 @@ async def test_classify_tool_scores_a_supplied_image() -> None:
         assert "defect_score" in result.data
     finally:
         await engine.stop()
+
+
+async def test_the_classify_tool_waits_its_turn_with_the_rest_route(monkeypatch) -> None:
+    """The tool and the route share the slots, so neither is a way round the other's bound."""
+    engine, mcp, _ = await _server()
+    running = most = 0
+
+    async def classify(data: bytes) -> dict:
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.02)
+        running -= 1
+        return {"prediction": "success"}
+
+    monkeypatch.setattr(engine, "classify", classify)
+    try:
+        async with Client(mcp) as client:
+            await asyncio.gather(*(client.call_tool("classify_frame", {"image_base64": "/9g="}) for _ in range(6)))
+    finally:
+        await engine.stop()
+
+    assert most == CLASSIFY_IN_FLIGHT
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+async def test_a_request_body_over_the_cap_is_refused_before_it_is_held(monkeypatch, chunked: bool) -> None:
+    """The transport read a body of any size before anything looked at it, and 400 MB cost a token-less hub 1.5 GB."""
+    monkeypatch.setattr(mcp_module, "MAX_BODY_BYTES", 1024)
+    engine = Engine(FakePlatform())
+    await engine.start()
+    auth = ApiAuth(internal_token="INT")
+    api_app = build_api_app(auth)
+    api_app.state.engine = engine
+    app = build_mcp_app(api_app, lambda: engine, auth, "INT")
+    read = 0
+
+    async def endless():
+        nonlocal read
+        while True:
+            read += 256
+            yield b"x" * 256
+
+    headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+    handshake = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}},
+    }
+    try:
+        async with app.lifespan(app), httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+            async with asyncio.timeout(2):
+                refused = await client.post("/", content=endless() if chunked else b"x" * 2048, headers=headers)
+            held = await client.post("/", json=handshake, headers=headers)
+    finally:
+        await engine.stop()
+
+    assert refused.status_code == 413 and read <= 2048
+    assert held.status_code == 200 and "PrintGuard" in held.text
 
 
 async def test_unauthorised_control_call_is_denied() -> None:

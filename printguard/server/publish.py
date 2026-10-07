@@ -39,6 +39,8 @@ class ChunkStream:
     that is refused once ``MAX_QUEUED_BYTES`` wait to be read, rather than
     having the hub hold all of it. The socket's thread counts what it feeds
     and the remux's thread what it takes, so neither count is written twice.
+    ``end`` drops whatever is still queued, or a recording sent faster than it
+    plays would go on publishing after its camera left.
     """
 
     def __init__(self) -> None:
@@ -59,6 +61,11 @@ class ChunkStream:
                 raise OverflowError("the recording arrives faster than it plays")
             self._fed += len(chunk)
         self._chunks.put(chunk)
+
+    def end(self) -> None:
+        """Ends the stream at once, dropping whatever is still queued."""
+        self._eof = True
+        self._chunks.put(None)
 
     def read(self, size: int = -1) -> bytes:
         while not self._eof and (size < 0 or len(self._buffer) < size):
