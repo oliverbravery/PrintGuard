@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { acceptedTags, extOf, formatBytes, inspectPrint, isText, toolpathOf, type Inspection, type Temperatures } from "../prints";
 import { useStore, type StagedPrint } from "../store";
+import { useConfirm } from "./ConfirmButton";
 import { Sheet } from "./Dialog";
 import { HEATER_MAX, HEATERS, type HeaterName } from "./PrinterControls";
 import { PrinterTags } from "./PrinterTags";
@@ -166,18 +167,24 @@ export function UploadSheet() {
   const { staged, unstage } = useStore();
   const [tags, setTags] = useState<string[]>([]);
   const [current] = staged;
-  const close = () => staged.forEach((p) => unstage(p.id));
+  const closing = useConfirm(() => staged.forEach((p) => unstage(p.id)));
   return (
     <Sheet
       title={`Upload ${current.file.name}`}
-      onClose={close}
+      onClose={closing.press}
       closeLabel="Cancel uploads"
       width="sm:w-[680px]"
       meta={
-        <>
-          {staged.length > 1 && <span className="chip">{staged.length - 1} more</span>}
-          <span className="chip">{formatBytes(current.file.size)}</span>
-        </>
+        <span role="status" className="flex shrink-0 gap-2.5">
+          {closing.armed ? (
+            <span className="chip chip-bad">Close again to discard</span>
+          ) : (
+            <>
+              {staged.length > 1 && <span className="chip">{staged.length - 1} more</span>}
+              <span className="chip">{formatBytes(current.file.size)}</span>
+            </>
+          )}
+        </span>
       }
     >
       <StagedPrintForm

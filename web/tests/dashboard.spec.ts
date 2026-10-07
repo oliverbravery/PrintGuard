@@ -199,6 +199,7 @@ test("a command pressed while the hub is away says so and leaves its button free
   await expect(page.getByRole("status").getByText("reconnecting")).toBeVisible();
   const panel = page.getByRole("dialog", { name: "Prusa" });
   await panel.getByRole("button", { name: "Delete" }).click();
+  await panel.getByRole("button", { name: "Confirm" }).click();
 
   await expect(panel.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Delete" })).toBeEnabled();
@@ -221,6 +222,7 @@ test("deleting a monitor from its panel closes it and brings the other feeds bac
   await expect(panel).toBeVisible();
   const feedRestarted = page.waitForRequest(/\/hls\/c2\//);
   await panel.getByRole("button", { name: "Delete" }).click();
+  await panel.getByRole("button", { name: "Confirm" }).click();
 
   await expect(panel).toBeHidden();
   await feedRestarted;
@@ -284,7 +286,7 @@ test("a review answered before its frames arrive still marks the alert frames, a
     { id: "s2", ts: 180, score: 0.1, kind: "spaced", size: 1 },
   ];
   await emit(page, { event: "review", ...review(), frames });
-  await expect(sheet.getByText("Real failure")).toBeVisible();
+  await expect(sheet.getByText("Real failure", { exact: true })).toBeVisible();
   await expect(sheet.getByText("Good")).toHaveCount(2);
 
   await sheet.getByRole("button", { name: /^Don't send/ }).nth(1).click();
@@ -1151,6 +1153,9 @@ test("discarding or closing the sheet while a file uploads cancels the request",
   await upload.click();
   await expect.poll(sentCount).toBe(2);
   await page.getByRole("button", { name: "Cancel uploads" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Close again to discard" })).toBeVisible();
+  expect(await aborts()).toBe(1);
+  await page.getByRole("button", { name: "Cancel uploads" }).click();
   await expect.poll(aborts).toBe(2);
   expect(await page.evaluate(() => (window as any).__pg.getState().uploads)).toEqual([]);
   await expect(page.getByRole("alert")).toHaveCount(0);
@@ -1317,6 +1322,7 @@ test("removing or sending one file leaves the other rows' buttons alone", async 
   await expect(page.getByText("2h 0m")).toBeVisible();
   await page.getByRole("button", { name: "Print", exact: true }).first().click();
   await page.getByRole("button", { name: "Remove", exact: true }).first().click();
+  await page.getByRole("button", { name: "Confirm" }).click();
 
   await expect(page.getByRole("button", { name: "Sending…" })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Removing…" })).toHaveCount(1);
@@ -1425,8 +1431,32 @@ test("a saved theme stays on screen through a state sent before the hub has answ
 
   const saved = await page.evaluate(() => (window as any).__pg.getState().engine.settings);
   await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm" }).click();
   await emit(page, { event: "state", ...engine({ settings: saved }) });
   expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--color-on-accent"))).toBe("");
+});
+
+test("a state that leaves the theme as it is restyles nothing, and one that changes it does", async ({ page }) => {
+  await dashboard(page);
+  await emit(page, { event: "state", ...engine() });
+  await page.evaluate(() => {
+    const win = window as any;
+    win.__restyled = 0;
+    const store = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === "pg.theme") win.__restyled += 1;
+      store.call(this, key, value);
+    };
+  });
+  const restyled = () => page.evaluate(() => (window as any).__restyled);
+
+  await emit(page, { event: "state", ...engine() });
+  await emit(page, { event: "state", ...engine() });
+  expect(await restyled()).toBe(0);
+
+  await emit(page, { event: "state", ...engine({ settings: { ...engine().settings, theme: "light" } }) });
+  expect(await restyled()).toBe(1);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
 
 test("a theme started from dark keeps dark text on its accent", async ({ page }) => {
@@ -1739,6 +1769,7 @@ test("a token revoke greys out only its own button, and a token name stays until
   await dashboard(page, { engine: engine({ tokens }), dialog: "settings", settingsTab: "api" });
   await page.getByRole("tab", { name: "API" }).click();
   await page.getByRole("button", { name: "Revoke" }).first().click();
+  await page.getByRole("button", { name: "Confirm" }).click();
   await expect(page.getByRole("button", { name: "Revoke" }).first()).toBeDisabled();
   await expect(page.getByRole("button", { name: "Revoke" }).last()).toBeEnabled();
 
@@ -1839,8 +1870,61 @@ test("removing a camera the hub never hears about leaves it publishing and remem
     win.__pg.setState({ link: { send: () => false, close() {} } });
   });
   await page.getByRole("button", { name: "Remove" }).click();
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
 
   expect(await page.evaluate(() => (window as any).__stopped)).toBeUndefined();
+  expect(await page.evaluate(() => localStorage.getItem("pg-publishers"))).toContain("dev-bench-1");
+});
+
+const fakeWebcam = (opens: boolean) => {
+  const win = window as any;
+  win.__opened = 0;
+  const open = async () => {
+    win.__opened += 1;
+    if (!opens) throw new DOMException("Requested device not found", "NotFoundError");
+    return { getTracks: () => [{ stop() {} }], getVideoTracks: () => [{ addEventListener() {} }] };
+  };
+  Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: open }, configurable: true });
+  win.MediaRecorder = class {
+    static isTypeSupported = () => true;
+    state = "inactive";
+    start() {}
+    stop() {}
+  };
+};
+
+test("a camera published from one tab is left alone by a second tab on the same device until the first lets go", async ({ page, context }) => {
+  const second = await context.newPage();
+  for (const tab of [page, second]) {
+    await tab.addInitScript(fakeWebcam, true);
+    await tab.routeWebSocket(/\/api\/publish\//, () => {});
+    await dashboard(tab);
+  }
+  await page.evaluate(async () => {
+    const { publishStream } = await import("/src/stream.ts" as string);
+    await publishStream("dev-bench-1", "usb");
+  });
+  const resume = () =>
+    second.evaluate(async () => {
+      const win = window as any;
+      const { resumePublishers, published } = await import("/src/stream.ts" as string);
+      win.__down = [];
+      await resumePublishers([{ source: { kind: "path", path: "dev-bench-1" } }], (reason: string) => win.__down.push(reason));
+      return { opened: win.__opened, publishing: published.has("dev-bench-1"), down: win.__down };
+    });
+  expect(await resume()).toEqual({ opened: 0, publishing: false, down: [] });
+
+  await page.evaluate(async () => (await import("/src/stream.ts" as string)).published.get("dev-bench-1")());
+  await expect.poll(resume).toEqual({ opened: 1, publishing: true, down: [] });
+});
+
+test("a published camera that cannot be opened again after a reload says so", async ({ page }) => {
+  await page.addInitScript(fakeWebcam, false);
+  await page.addInitScript(() => localStorage.setItem("pg-publishers", JSON.stringify({ "dev-bench-1": "usb" })));
+  await hub(page, () => {}, engine({ cameras: [camera(), camera({ id: "c2", name: "Bench", source: { kind: "path", path: "dev-bench-1" } })] }));
+
+  await expect(page.getByText("publishing stopped: Requested device not found")).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("pg-publishers"))).toContain("dev-bench-1");
 });
 
@@ -1923,7 +2007,7 @@ test("pause, resume and cancel are each enabled only when the printer's state al
     id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
     device_state: { status, progress: 40, job: "benchy", remaining_s: 60, nozzle: heater, bed: heater },
   });
-  const expected: Record<string, boolean[]> = { idle: [true, false, false], printing: [true, false, true], paused: [false, true, true] };
+  const expected: Record<string, boolean[]> = { idle: [false, false, false], offline: [false, false, false], printing: [true, false, true], paused: [false, true, true] };
   for (const [status, [pause, resume, cancel]] of Object.entries(expected)) {
     await dashboard(page, { engine: engine({ printers: [printer(status)], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
     const panel = page.getByRole("dialog", { name: "Prusa" });
@@ -2078,6 +2162,394 @@ test("a stored file is drawn from what arrives, and one over the limit is cut of
   await page.evaluate(() => (window as any).__pg.setState({ printId: "f1" }));
   await expect(page.getByText("files over 32 MB are not drawn")).toBeVisible();
   expect(await page.evaluate(() => (window as any).__cancelledAt)).toBeLessThan(36);
+});
+
+const jobPrinter = (status = "printing") => ({
+  id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
+  device_state: { status, progress: 40, job: "benchy", remaining_s: 60, nozzle: { actual: 21, target: 0 }, bed: { actual: 21, target: 0 } },
+});
+
+const withLayout = (monitors: Record<string, string[]>, over = {}) =>
+  engine({ settings: { ...engine().settings, layout: { monitors: { order: [], pinned: [], hidden: [], ...monitors } } }, ...over });
+
+const hubAway = (page: Page, away: boolean) =>
+  page.evaluate((away) => {
+    const win = window as any;
+    win.__link ??= win.__pg.getState().link;
+    win.__pg.setState({ link: away ? { send: () => false, close() {} } : win.__link });
+  }, away);
+
+const allSent = (page: Page, cmd: string) => page.evaluate((cmd) => (window as any).__sent.filter((c: any) => c.cmd === cmd), cmd);
+
+test("cancelling a print takes a second press, and the button stands down on Escape, a press elsewhere or a few seconds", async ({ page }) => {
+  await page.clock.install();
+  await dashboard(page, { engine: engine({ printers: [jobPrinter()], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
+  const panel = page.getByRole("dialog", { name: "Prusa" });
+  const cancel = panel.getByRole("button", { name: "cancel", exact: true });
+  const confirm = panel.getByRole("button", { name: "Confirm", exact: true });
+  const { width, height } = (await cancel.boundingBox())!;
+
+  await cancel.click();
+  await expect(confirm).toBeFocused();
+  await expect(panel.getByRole("status").filter({ hasText: "Press again to confirm" })).toHaveCount(1);
+  expect(await confirm.boundingBox()).toMatchObject({ width, height });
+  expect(await sent(page, "printer.action")).toBeUndefined();
+
+  await page.keyboard.press("Escape");
+  await expect(cancel).toBeVisible();
+  await expect(panel).toBeVisible();
+
+  await cancel.click();
+  await panel.getByRole("heading", { name: "Live risk" }).click();
+  await expect(confirm).toBeHidden();
+
+  await cancel.click();
+  await page.keyboard.press("Tab");
+  await expect(confirm).toBeHidden();
+
+  await cancel.click();
+  await expect(confirm).toBeVisible();
+  await page.clock.fastForward(4500);
+  await expect(confirm).toBeHidden();
+  expect(await sent(page, "printer.action")).toBeUndefined();
+
+  await cancel.click();
+  await confirm.click();
+  expect(await sent(page, "printer.action")).toMatchObject({ id: "p1", action: "cancel" });
+});
+
+test("resetting the layout and removing a printer or a plugin each take a confirming press", async ({ page }) => {
+  const plugin = demoPlugin({ enabled: false });
+  await dashboard(page, { engine: { ...withPlugins([plugin]), ...withLayout({ pinned: ["m1"] }, { printers: [jobPrinter()], plugins: [plugin] }) }, customising: true });
+  const confirm = page.getByRole("button", { name: "Confirm", exact: true });
+  const pinned = () => page.evaluate(() => (window as any).__pg.getState().engine.settings.layout.monitors?.pinned);
+
+  await page.getByRole("button", { name: "Reset layout" }).click();
+  expect(await pinned()).toEqual(["m1"]);
+  await confirm.click();
+  expect(await pinned()).toBeUndefined();
+
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("printers"));
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+  expect(await sent(page, "printer.remove")).toBeUndefined();
+  await confirm.click();
+  expect(await sent(page, "printer.remove")).toMatchObject({ id: "p1" });
+
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await page.getByRole("button", { name: "Demo", exact: true }).click();
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+  expect(await sent(page, "plugin.remove")).toBeUndefined();
+  await confirm.click();
+  expect(await sent(page, "plugin.remove")).toMatchObject({ id: "demo" });
+});
+
+test("Escape closes the upload sheet only when pressed twice", async ({ page }) => {
+  await stagePrint(page);
+  const sheet = page.getByRole("dialog", { name: "Upload cube.gcode" });
+  await expect(sheet).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(sheet.getByRole("status").filter({ hasText: "Close again to discard" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+});
+
+test("switching the review off says what it deletes, and asks twice while a print is waiting", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }), dialog: "settings", settingsTab: "advanced" });
+  const toggle = page.getByRole("switch", { name: "Ask me to review frames after a print" });
+  await expect(page.getByText("Turning this off deletes the frames kept so far.")).toBeVisible();
+
+  await toggle.click();
+  await expect(page.getByRole("status").filter({ hasText: "1 print waiting for review will be dismissed" })).toBeVisible();
+  await expect(toggle).toBeChecked();
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  await expect(page.getByText("keeps only alert frames while this is off")).toBeVisible();
+  await expect.poll(() => sent(page, "settings.update")).toMatchObject({ patch: { feedback: "off" } });
+
+  await dashboard(page, { dialog: "settings", settingsTab: "advanced" });
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+});
+
+test("the toolpath leaves room to reach the fields on a phone held sideways, and is exposed as an image", async ({ page }) => {
+  await page.setViewportSize({ width: 740, height: 360 });
+  await stagePrint(page);
+  const box = (await page.getByRole("img", { name: "Toolpath of cube.gcode" }).boundingBox())!;
+
+  expect(box.height).toBeLessThanOrEqual(181);
+  expect(box.width / box.height).toBeCloseTo(4 / 3, 1);
+});
+
+test("the plugins tab lists what is installed before the catalogue arrives, and asks again for what a dropped hub never answered", async ({ page }) => {
+  const zipped = demoPlugin({ enabled: false, granted: [], source: { kind: "file", filename: "demo.zip" } });
+  await dashboard(page, { engine: withPlugins([zipped]), reconnecting: true });
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await expect(page.getByText("Loading the catalogue…")).toBeVisible();
+  await page.getByRole("switch", { name: "Enable Demo" }).click();
+  await expect(page.getByText("Reading its code…")).toBeVisible();
+  expect(await sent(page, "plugin.catalogue")).toBeUndefined();
+  expect(await sent(page, "plugin.code")).toBeUndefined();
+
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: false }));
+  await expect.poll(() => sent(page, "plugin.catalogue")).toBeDefined();
+  await expect.poll(() => sent(page, "plugin.code")).toMatchObject({ id: "demo" });
+
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: true }));
+  await page.getByRole("button", { name: "Demo", exact: true }).click();
+  await expect(page.getByText("Reading its page…")).toBeVisible();
+  expect(await sent(page, "plugin.page")).toBeUndefined();
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: false }));
+  await expect.poll(() => sent(page, "plugin.page")).toMatchObject({ id: "demo" });
+});
+
+test("a dashboard with every monitor hidden says so and opens customise", async ({ page }) => {
+  await dashboard(page, { engine: withLayout({ hidden: ["m1"] }) });
+  await expect(page.getByText("1 monitor hidden")).toBeVisible();
+
+  await page.getByRole("main").getByRole("button", { name: "Customise" }).click();
+  await expect(page.getByRole("button", { name: "Prusa · show" })).toBeVisible();
+});
+
+test("an unpinned tile dragged onto a pinned one is dropped among the unpinned", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const monitors = [monitor(), monitor({ id: "m2", name: "Voron" }), monitor({ id: "m3", name: "Ender" })];
+  await dashboard(page, { engine: withLayout({ order: ["m1", "m2", "m3"], pinned: ["m1"] }, { monitors }), customising: true });
+  const from = (await page.getByRole("button", { name: "Drag Ender to reorder" }).boundingBox())!;
+  const onto = (await page.getByRole("button", { name: "Drag Prusa to reorder" }).boundingBox())!;
+
+  await page.mouse.move(from.x + 5, from.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(onto.x + 5, onto.y + 5, { steps: 12 });
+  await page.mouse.up();
+
+  await expect.poll(() => page.evaluate(() => (window as any).__pg.getState().engine.settings.layout.monitors.order)).toEqual(["m1", "m3", "m2"]);
+  await expect(page.getByRole("main").getByRole("heading", { level: 3 })).toHaveText(["Prusa", "Ender", "Voron"]);
+});
+
+test("a file rename the hub refuses goes back to the old name", async ({ page }) => {
+  const { commands, sockets } = await hub(page, undefined, library([printFile()]).engine);
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("prints"));
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  const name = page.getByRole("textbox", { name: "Name" });
+  await name.fill("Boat");
+  await name.blur();
+  const renames = () => commands.filter((c) => c.cmd === "print.update");
+  await expect.poll(() => renames()[0]).toMatchObject({ id: "f1", patch: { name: "Boat" } });
+  await expect(page.getByText("Boat", { exact: true })).toBeVisible();
+
+  sockets[0].send(JSON.stringify({ event: "error", message: "no", req_id: renames()[0].req_id }));
+  await expect(name).toHaveValue("Benchy");
+});
+
+test("a heater target or a plugin secret typed while the hub is away is not shown as saved", async ({ page }) => {
+  const keyed = demoPlugin({ manifest: { ...demoPlugin().manifest, secrets: { api_key: "Your key" } } });
+  await dashboard(page, { engine: { ...withPlugins([keyed]), printers: [jobPrinter("idle")], monitors: [monitor({ printer_id: "p1" })] }, detailId: "m1" });
+  await hubAway(page, true);
+  const target = page.getByRole("spinbutton", { name: "nozzle target" });
+  await target.fill("250");
+  await target.blur();
+  await expect(target).toHaveValue("0");
+  await expect(target).toBeEnabled();
+
+  await page.evaluate(() => (window as any).__pg.getState().openDetail(null));
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await page.getByRole("button", { name: "Demo", exact: true }).click();
+  const secret = page.getByPlaceholder("Not set");
+  await secret.fill("s3cret");
+  await secret.blur();
+  await expect(secret).toHaveValue("s3cret");
+
+  await hubAway(page, false);
+  await secret.focus();
+  await secret.blur();
+  await expect(secret).toHaveValue("");
+  expect(await sent(page, "plugin.secrets")).toMatchObject({ secrets: { api_key: "s3cret" } });
+});
+
+test("the install box sends once, keeps what was typed when it could not be sent, and Update shows it is working", async ({ page }) => {
+  await dashboard(page, { engine: withPlugins([demoPlugin()]) });
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  const box = page.getByRole("textbox", { name: "GitHub repository" });
+
+  await hubAway(page, true);
+  await box.fill("someone/thing");
+  await box.press("Enter");
+  await expect(box).toHaveValue("someone/thing");
+
+  await hubAway(page, false);
+  await box.press("Enter");
+  await expect(box).toHaveValue("");
+  await box.fill("someone/other");
+  await box.press("Enter");
+  expect(await allSent(page, "plugin.install")).toHaveLength(1);
+
+  await emit(page, { event: "state", ...withPlugins([demoPlugin()]), req_id: (await sent(page, "plugin.install")).req_id });
+  await page.getByRole("button", { name: "Demo", exact: true }).click();
+  await page.getByRole("button", { name: "Update", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Updating…" })).toBeDisabled();
+  expect(await allSent(page, "plugin.install")).toHaveLength(2);
+});
+
+test("a review says its frames are loading, and cannot be sent while the review is switched off", async ({ page }) => {
+  const dismissed = review({ status: "dismissed" });
+  await dashboard(page, { engine: engine({ reviews: [dismissed], settings: { ...engine().settings, feedback: "off" } }), reviewId: "r1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  const loading = sheet.getByRole("status").filter({ hasText: "loading the frames" });
+  await sheet.getByRole("button", { name: "No, it failed" }).click();
+  await expect(loading).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Send 3 frames" })).toBeDisabled();
+  await expect(sheet.getByText("Alert frames are marked as real failures. Press a frame to change its label.")).toBeVisible();
+
+  const frames = [
+    { id: "a1", ts: 60, score: 0.9, kind: "alert", action: "pause", size: 1 },
+    { id: "s1", ts: 120, score: 0.1, kind: "spaced", size: 1 },
+    { id: "s2", ts: 180, score: 0.1, kind: "spaced", size: 1 },
+  ];
+  await emit(page, { event: "review", ...dismissed, frames });
+  await expect(loading).toHaveCount(0);
+  await expect(sheet.getByText("switched off in Settings, so nothing can be sent")).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Send 3 frames" })).toBeDisabled();
+
+  await sheet.getByRole("button", { name: /^Enlarge/ }).first().click();
+  await expect(page.getByText("loading picture")).toBeVisible();
+});
+
+test("Enter adds a monitor, generates a token and registers a printer, and a printer missing a required field cannot be registered", async ({ page }) => {
+  await dashboard(page, { engine: engine({ integrations: keyedIntegrations }), dialog: "monitor" });
+  await page.getByRole("combobox", { name: "Camera" }).selectOption("c1");
+  await page.getByRole("textbox", { name: "Monitor name" }).fill("Bench");
+  await page.keyboard.press("Enter");
+  expect(await sent(page, "monitor.add")).toMatchObject({ monitor: { name: "Bench", camera_id: "c1" } });
+
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("api"));
+  await page.getByRole("textbox", { name: "Token name" }).fill("ci");
+  await page.keyboard.press("Enter");
+  expect(await sent(page, "token.create")).toMatchObject({ name: "ci", scope: "read" });
+
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("printers"));
+  await page.getByRole("combobox", { name: "Printer service" }).selectOption("octoprint");
+  const register = page.getByRole("button", { name: "Register printer" });
+  await expect(register).toBeDisabled();
+  await page.getByLabel("API key").fill("abc");
+  await expect(page.getByLabel("API key")).toHaveAttribute("autocomplete", "new-password");
+  await page.getByLabel("Address").fill("http://mk4");
+  await expect(register).toBeEnabled();
+  await page.keyboard.press("Enter");
+  expect(await sent(page, "printer.add")).toMatchObject({ printer: { provider: "octoprint", config: { url: "http://mk4", api_key: "abc" } } });
+});
+
+test("the broker port only takes a whole port number", async ({ page }) => {
+  await dashboard(page, { dialog: "settings", settingsTab: "mqtt" });
+  await page.getByRole("switch", { name: "Publish to an MQTT broker" }).click();
+  const port = page.getByRole("spinbutton", { name: "Broker port" });
+
+  await expect(port).toHaveAttribute("min", "1");
+  await expect(port).toHaveAttribute("max", "65535");
+  await expect(port).toHaveAttribute("step", "1");
+});
+
+test("a printer's light, the chosen theme and links that leave the dashboard are named, and a focused camera is not scrolled to smoothly when motion is reduced", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__scrolls = [];
+    Element.prototype.scrollIntoView = function (options) {
+      win.__scrolls.push(options);
+    };
+  });
+  const update = { current: "1.0.0", latest: "2.0.0", available: true, download: "https://example.com/app.dmg", checked_at: 0, releases_url: "https://example.com" };
+  await dashboard(page, { engine: engine({ printers: [jobPrinter()], update }), dialog: "printers" });
+  await expect(page.getByRole("img", { name: "online", exact: true })).toBeVisible();
+
+  const newTab = (link: string | RegExp) => page.getByRole("link", { name: link }).getByRole("img", { name: "opens in a new tab" });
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("update"));
+  await expect(newTab(/Download v2\.0\.0/)).toBeVisible();
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("advanced"));
+  await expect(newTab(/What's sent/)).toBeVisible();
+
+  await page.getByRole("tab", { name: "Appearance" }).click();
+  await page.getByRole("button", { name: "+ New" }).click();
+  await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
+  await page.getByRole("button", { name: "Save theme" }).click();
+  await expect(page.getByRole("button", { name: "Workshop dark" })).toHaveAttribute("aria-pressed", "true");
+
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("cameras", "c1"));
+  await expect.poll(() => page.evaluate(() => (window as any).__scrolls.find((options: any) => options?.block === "center")?.behavior)).toBe("auto");
+});
+
+test("a plugin whose sign-in address cannot be read still opens, showing the address as written", async ({ page }) => {
+  const oauth = { label: "Thing", authorize_url: "https://256.256.256.256/a", token_url: "https://256.256.256.256/t", register_url: "", scopes: [] };
+  const state = withPlugins([demoPlugin({ enabled: false, manifest: { ...demoPlugin().manifest, permissions: ["oauth"], oauth } })]);
+  await dashboard(page, { engine: { ...state, plugin_permissions: [{ id: "oauth", label: "Sign in", description: "" }] } });
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("plugins"));
+  await page.getByRole("button", { name: "Demo", exact: true }).click();
+
+  await expect(page.getByText("Sign in at https://256.256.256.256/a")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeVisible();
+});
+
+test("a toast raised over a dialog on a phone sits at the top, clear of the dialog's buttons", async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 852 });
+  await dashboard(page, { dialog: "settings" });
+  await page.evaluate(() => (window as any).__pg.getState().toast("info", "Diagnostics saved"));
+  const box = (await page.getByRole("dialog").getByRole("status").filter({ hasText: "Diagnostics saved" }).boundingBox())!;
+  const save = (await page.getByRole("button", { name: "Save channels" }).boundingBox())!;
+
+  expect(box.y + box.height).toBeLessThan(852 / 4);
+  expect(box.y + box.height).toBeLessThan(save.y);
+});
+
+test("settings copy says things plainly", async ({ page }) => {
+  await dashboard(page, { engine: engine({ monitors: [] }), dialog: "settings" });
+  await expect(page.getByText("Channels hold credentials, so they apply when you press Save.")).toBeVisible();
+  await page.getByRole("tab", { name: "Home Assistant" }).click();
+  await expect(page.getByText("Broker settings open a live connection, so they apply when you press Save.")).toBeVisible();
+  await page.getByRole("tab", { name: "API" }).click();
+  await expect(page.getByText("Control includes read, and manage includes both.")).toBeVisible();
+
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("report"));
+  await expect(page.getByText("Describe what went wrong and it goes straight to me")).toBeVisible();
+  await page.evaluate(() => (window as any).__pg.getState().openDialog(null));
+  await expect(page.getByRole("button", { name: "How PrintGuard works", exact: true })).toBeVisible();
+});
+
+test("buttons, tabs, the close button and the small controls are 44 pixels to a finger", async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 375, height: 812 } });
+  const page = await context.newPage();
+  const shortSide = async (target: ReturnType<Page["locator"]>) => {
+    const box = (await target.boundingBox())!;
+    return Math.min(box.width, box.height);
+  };
+  const fitsAFinger = (target: ReturnType<Page["locator"]>) => expect.poll(() => shortSide(target)).toBeGreaterThanOrEqual(44);
+  await dashboard(page, { engine: engine({ reviews: [review()] }), dialog: "settings", settingsTab: "appearance" });
+
+  await fitsAFinger(page.getByRole("tab", { name: "Appearance" }));
+  await fitsAFinger(page.getByRole("button", { name: "+ New" }));
+  await fitsAFinger(page.getByRole("button", { name: "Close dialog" }));
+  await page.getByRole("button", { name: "+ New" }).click();
+  await fitsAFinger(page.getByLabel(/ colour$/).first());
+
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("report"));
+  await fitsAFinger(page.getByText("What's sent with your report"));
+
+  await page.evaluate(() => (window as any).__pg.getState().openDialog("prints"));
+  const browseHits = async () => {
+    const browse = (await page.getByRole("button", { name: "browse" }).boundingBox())!;
+    const centre = [browse.x + browse.width / 2, browse.y + browse.height / 2];
+    return page.evaluate(
+      (points) => points.map(([x, y]) => document.elementFromPoint(x, y)?.closest("button")?.textContent),
+      [[centre[0] - 21, centre[1]], [centre[0] + 21, centre[1]], [centre[0], centre[1] - 21], [centre[0], centre[1] + 21]],
+    );
+  };
+  await expect.poll(browseHits).toEqual(["browse", "browse", "browse", "browse"]);
+
+  await page.evaluate(() => (window as any).__pg.setState({ dialog: null, reviewId: "r1" }));
+  await page.getByRole("button", { name: "Yes", exact: true }).click();
+  await fitsAFinger(page.getByText("What's sent", { exact: true }));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await context.close();
 });
 
 const KEPT_HINT = "Saved. Leave blank to keep it";

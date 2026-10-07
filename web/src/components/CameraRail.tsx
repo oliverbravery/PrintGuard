@@ -124,6 +124,7 @@ export function CameraRail() {
       ) : (
         <Sortable
           ids={visible.map((c) => c.id)}
+          pinned={section(engine?.settings.layout, "cameras").pinned}
           strategy={horizontalListSortingStrategy}
           disabled={!customising}
           onReorder={(ids) => mutateLayout("cameras", (s) => withOrder(s, ids))}

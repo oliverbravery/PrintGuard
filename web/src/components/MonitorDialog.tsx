@@ -27,7 +27,14 @@ export function MonitorDialog() {
 
   return (
     <Dialog title="Add monitor" onClose={close}>
-      <div className="space-y-3">
+      <form
+        className="space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          monitorsWhenSent.current = monitors;
+          send({ cmd: "monitor.add", monitor: { name: name.trim(), camera_id: boundCameraId, printer_id: boundPrinterId } });
+        }}
+      >
         <input className="field" aria-label="Monitor name" placeholder="Monitor name" value={name} onChange={(e) => setName(e.target.value)} />
         <select className="field" aria-label="Camera" value={boundCameraId} onChange={(e) => setCameraId(e.target.value)}>
           <option value="">Bind a camera…</option>
@@ -48,17 +55,10 @@ export function MonitorDialog() {
             </option>
           ))}
         </select>
-        <button
-          className="btn btn-primary w-full"
-          disabled={!name.trim() || !boundCameraId || saving}
-          onClick={() => {
-            monitorsWhenSent.current = monitors;
-            send({ cmd: "monitor.add", monitor: { name: name.trim(), camera_id: boundCameraId, printer_id: boundPrinterId } });
-          }}
-        >
+        <button type="submit" className="btn btn-primary w-full" disabled={!name.trim() || !boundCameraId || saving}>
           {saving ? "Adding…" : "Add monitor"}
         </button>
-      </div>
+      </form>
     </Dialog>
   );
 }

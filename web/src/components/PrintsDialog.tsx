@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ACCEPT, acceptedTags, ago, formatBytes, summary } from "../prints";
 import { useStore } from "../store";
 import type { PrintFile } from "../types";
+import { ConfirmButton } from "./ConfirmButton";
 import { Dialog } from "./Dialog";
 import { NameField } from "./NameField";
 import { PrinterTags } from "./PrinterTags";
@@ -45,16 +46,12 @@ function PrintRow({ print }: { print: PrintFile }) {
           <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setEditing((v) => !v)}>
             {editing ? "Hide" : "Edit"}
           </button>
-          <button
-            className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
-            disabled={removing}
-            onClick={() => send({ cmd: "print.remove", id: print.id })}
-          >
+          <ConfirmButton className="!py-1 !px-2.5 !text-[0.62rem]" disabled={removing} onConfirm={() => send({ cmd: "print.remove", id: print.id })}>
             {removing ? "Removing…" : "Remove"}
-          </button>
+          </ConfirmButton>
         </div>
       </div>
-      {editing && <NameField name={print.name} onRename={(name) => send({ cmd: "print.update", id: print.id, patch: { name } })} />}
+      {editing && <NameField name={print.name} onRename={(name) => updatePrint(print.id, { name })} />}
       <PrinterTags selected={print.printer_ids} ext={print.ext} onToggle={toggleTag} />
       <SendToPrinter print={print} />
     </div>
@@ -103,7 +100,7 @@ function DropZone() {
       />
       <p className="text-sm text-text-0">
         Drop sliced files here, or{" "}
-        <button type="button" className="text-accent underline hover:opacity-80" onClick={() => input.current?.click()}>
+        <button type="button" className="tap-target text-accent underline hover:opacity-80" onClick={() => input.current?.click()}>
           browse
         </button>
       </p>

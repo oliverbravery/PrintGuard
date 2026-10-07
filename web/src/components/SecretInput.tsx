@@ -30,7 +30,7 @@ export function SecretInput({
         ref={field}
         className={`field min-w-0 flex-1 ${className}`}
         type="password"
-        autoComplete="off"
+        autoComplete="new-password"
         placeholder={hint ?? placeholder}
         aria-describedby={hint ? hintId : undefined}
         value={value ?? ""}

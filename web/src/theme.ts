@@ -264,6 +264,7 @@ function readableOn(hex: string): string {
 
 let current: { themeId: string; themes: CustomTheme[]; glass: Glass } = { themeId: "system", themes: [], glass: GLASS_DEFAULT };
 let previewing = false;
+let applied = "";
 
 export function beginPreview(): void {
   previewing = true;
@@ -275,6 +276,9 @@ export function endPreview(): void {
 export function applyTheme(themeId: string, themes: CustomTheme[], given?: Partial<Glass>, force = false): void {
   if (previewing && !force) return;
   const glass = { ...GLASS_DEFAULT, ...given };
+  const asked = JSON.stringify([themeId, themes, glass, cover, window.matchMedia(MEDIA).matches, previewing]);
+  if (asked === applied && !force) return;
+  applied = asked;
   current = { themeId, themes, glass };
   const { base, colors } = resolveTheme(themeId, themes, glass);
   const material = glassMaterial(glass).vars;

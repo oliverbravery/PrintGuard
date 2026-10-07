@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import type { Camera, CameraSource } from "../types";
 import { publishStream, published } from "../stream";
 import { cameraStatus, sourceLabel } from "./CameraRail";
+import { ConfirmButton } from "./ConfirmButton";
 import { CropEditor } from "./CropEditor";
 import { Dialog } from "./Dialog";
 import { NameField } from "./NameField";
@@ -44,7 +45,7 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
   useEffect(() => {
     if (focus) {
       setOpen(true);
-      ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      ref.current?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
     }
   }, [focus]);
 
@@ -68,13 +69,13 @@ function CameraRow({ camera, focus }: { camera: Camera; focus: boolean }) {
             {open ? "Hide" : "Edit"}
           </button>
           {!managed && (
-            <button
-              className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
+            <ConfirmButton
+              className="!py-1 !px-2.5 !text-[0.62rem]"
               disabled={isPending("camera.remove", camera.id)}
-              onClick={() => send({ cmd: "camera.remove", id: camera.id })}
+              onConfirm={() => send({ cmd: "camera.remove", id: camera.id })}
             >
               {isPending("camera.remove", camera.id) ? "Removing…" : "Remove"}
-            </button>
+            </ConfirmButton>
           )}
         </div>
         {removalHint && <p className="basis-full text-[0.66rem] text-text-2">{removalHint}</p>}

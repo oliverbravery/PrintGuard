@@ -75,6 +75,7 @@ export function SchemaForm({
               id={formId + key}
               name={prop.title}
               saved={saved.includes(key)}
+              aria-required={required.includes(key) && !saved.includes(key)}
               retype={moved}
               value={value[key]}
               placeholder={prop.placeholder}
@@ -88,6 +89,7 @@ export function SchemaForm({
               id={formId + key}
               className="field"
               type="text"
+              aria-required={required.includes(key)}
               placeholder={prop.placeholder}
               value={value[key] ?? ""}
               autoComplete="off"

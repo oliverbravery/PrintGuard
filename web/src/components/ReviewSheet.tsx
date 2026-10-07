@@ -120,13 +120,15 @@ function Progress({ review, onClose }: { review: ReviewSummary; onClose: () => v
 }
 
 export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monitor: Monitor }) {
-  const { send, isPending, openReview, fetchReview, reviewData, reconnecting } = useStore();
+  const { engine, send, isPending, openReview, fetchReview, reviewData, reconnecting } = useStore();
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [relabelled, setRelabelled] = useState<Set<string>>(new Set());
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [printer, setPrinter] = useState("");
   const [enlarged, setEnlarged] = useState<ReviewFrame | null>(null);
-  const frames = reviewData[review.id]?.frames ?? [];
+  const loaded = reviewData[review.id]?.frames;
+  const frames = loaded ?? [];
+  const switchedOff = engine?.settings.feedback === "off";
   const kept = frames.filter((frame) => !removed.has(frame.id));
   const showsFailure = (frame: ReviewFrame) => (outcome === "failed" && frame.kind === "alert") !== relabelled.has(frame.id);
   const close = () => openReview(null);
@@ -176,9 +178,14 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
             <>
               <p className="text-[0.7rem] leading-relaxed text-text-2">
                 {outcome === "failed"
-                  ? "Press every frame where you can see the failure. Use the × to leave a frame out, and Undo to put it back."
+                  ? "Alert frames are marked as real failures. Press a frame to change its label. Use the × to leave one out, and Undo to put it back."
                   : "Every frame is marked good. Press one to change it, or use the × to leave it out and Undo to put it back."}
               </p>
+              {!loaded && (
+                <p role="status" className="mono text-[0.7rem] text-text-2">
+                  loading the frames
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {frames.map((frame, index) => (
                   <FrameCard
@@ -203,7 +210,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
                 onChange={(event) => setPrinter(event.target.value)}
               />
               <details className="text-[0.7rem] text-text-2">
-                <summary className="cursor-pointer hover:text-text-1">What's sent</summary>
+                <summary className="cursor-pointer pointer-coarse:py-3.5 hover:text-text-1">What's sent</summary>
                 <p className="mt-1.5 leading-relaxed">
                   The frames shown here with the labels you gave them, each frame's risk score, time and whether it was an
                   alert, a near miss or an ordinary frame, a random ID for the print and for each frame, this monitor's alert
@@ -215,14 +222,15 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
               </details>
             </>
           )}
+          {switchedOff && <p className="text-[0.7rem] leading-relaxed text-text-2">The end-of-print review is switched off in Settings, so nothing can be sent.</p>}
           <div className="flex gap-2">
             {review.status === "ready" && (
               <button className="btn flex-1" onClick={() => (send({ cmd: "review.dismiss", id: review.id }), close())}>
                 Not this print
               </button>
             )}
-            <button className="btn btn-primary flex-1" disabled={!outcome || kept.length === 0 || isPending("review.send")} onClick={submit}>
-              Send {framesLabel(kept.length)}
+            <button className="btn btn-primary flex-1" disabled={switchedOff || !outcome || kept.length === 0 || isPending("review.send")} onClick={submit}>
+              Send {framesLabel(loaded ? kept.length : review.frames)}
             </button>
           </div>
         </div>

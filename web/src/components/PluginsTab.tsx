@@ -3,6 +3,7 @@ import { fromBase64, renderMarkdown } from "../markdown";
 import { pluginFile, repositoryFiles, runsHere } from "../plugins";
 import { useStore } from "../store";
 import type { CatalogueEntry, PluginManifest, PluginRecord } from "../types";
+import { ConfirmButton } from "./ConfirmButton";
 import { ConsentDialog, PermissionList } from "./PluginConsent";
 import { PluginSecrets } from "./PluginSecrets";
 import { useSettingsFooter } from "./SettingsFooter";
@@ -139,10 +140,11 @@ function PluginCard({ item, onOpen }: { item: StoreItem; onOpen: () => void }) {
   const name = plugin?.manifest.name ?? entry?.name ?? item.id;
   const description = plugin?.manifest.description || entry?.description || "";
   const attention = plugin && (plugin.failure || !plugin.manifest.permissions.every((p) => plugin.granted.includes(p)));
+  const reconnecting = useStore((s) => s.reconnecting);
 
   useEffect(() => {
-    if (plugin && plugin.source.kind !== "github" && plugin.manifest.icon) fetchPluginPage(plugin.id);
-  }, [plugin?.id]);
+    if (plugin && plugin.source.kind !== "github" && plugin.manifest.icon && !reconnecting) fetchPluginPage(plugin.id);
+  }, [plugin?.id, reconnecting]);
 
   return (
     <div className="relative flex items-center gap-3 rounded border border-line-0 bg-ink-1 p-3 text-left transition-colors hover:border-accent has-[:focus-visible]:border-accent">
@@ -267,14 +269,17 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
   const send = useStore((s) => s.send);
   const page = useStore((s) => s.pluginPages[plugin.id]);
   const fetchPluginPage = useStore((s) => s.fetchPluginPage);
+  const installPlugin = useStore((s) => s.installPlugin);
   const [fetched, setFetched] = useState<string | null | undefined>(undefined);
   const fromRepo = plugin.source.kind === "github";
   const manifest = plugin.manifest;
   const accepted = manifest.permissions.every((p) => plugin.granted.includes(p));
+  const reconnecting = useStore((s) => s.reconnecting);
+  const updating = useStore((s) => s.isPending("plugin.install"));
 
   useEffect(() => {
-    if (!fromRepo) fetchPluginPage(plugin.id);
-  }, [plugin.id]);
+    if (!fromRepo && !reconnecting) fetchPluginPage(plugin.id);
+  }, [plugin.id, reconnecting]);
 
   useEffect(() => {
     if (!fromRepo) return;
@@ -326,23 +331,22 @@ function InstalledDetail({ plugin, onBack }: { plugin: PluginRecord; onBack: () 
       origin={origin}
       onBack={onBack}
       extra={
-        <button
-          className="btn btn-danger"
-          onClick={() => {
+        <ConfirmButton
+          onConfirm={() => {
             send({ cmd: "plugin.remove", id: plugin.id });
             onBack();
           }}
         >
           Remove
-        </button>
+        </ConfirmButton>
       }
       meta={
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`chip ${plugin.verified ? "chip-ok" : ""}`}>{plugin.verified ? "verified" : "third party"}</span>
             {fromRepo && (
-              <button className="btn" onClick={() => send({ cmd: "plugin.install", source: { ...plugin.source, ref: plugin.source.branch ?? "HEAD" } })}>
-                Update
+              <button className="btn" disabled={updating} onClick={() => installPlugin({ ...plugin.source, ref: plugin.source.branch ?? "HEAD" })}>
+                {updating ? "Updating…" : "Update"}
               </button>
             )}
           </div>
@@ -457,7 +461,7 @@ function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; inst
 }
 
 export function PluginsTab() {
-  const { engine, catalogue, fetchCatalogue, installPlugin, isPending, toast } = useStore();
+  const { engine, catalogue, reconnecting, fetchCatalogue, installPlugin, isPending, toast } = useStore();
   const [repo, setRepo] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string | null>(null);
@@ -468,8 +472,8 @@ export function PluginsTab() {
   const host = engine?.host ?? "";
 
   useEffect(() => {
-    if (catalogue === null) fetchCatalogue();
-  }, []);
+    if (catalogue === null && !reconnecting) fetchCatalogue();
+  }, [reconnecting]);
 
   const items: StoreItem[] = [
     ...(catalogue ?? []).map((entry) => ({ id: entry.id, entry, plugin: plugins.find((p) => p.id === entry.id) })),
@@ -502,8 +506,7 @@ export function PluginsTab() {
   const installFromRepo = () => {
     const source = parseRepo(repo);
     if (!source) return toast("error", `${REPO_HINT}, that did not look like either`);
-    installPlugin(source);
-    setRepo("");
+    if (installPlugin(source)) setRepo("");
   };
 
   return (
@@ -555,19 +558,20 @@ export function PluginsTab() {
         onChange={(event) => setQuery(event.target.value)}
       />
 
-      {catalogue === null ? (
-        <span className="block text-[0.7rem] text-text-2">Loading the catalogue…</span>
-      ) : listed.length === 0 ? (
+      {(catalogue === null || listed.length === 0) && (
         <span className="block text-[0.7rem] text-text-2">
-          {items.length === 0
-            ? "Nothing listed, or the catalogue is unreachable."
-            : needle
-              ? `Nothing matches "${query.trim()}".`
-              : chosen === "installed"
-                ? "Nothing installed yet."
-                : `Nothing listed for ${labels[chosen] ?? chosen}.`}
+          {catalogue === null
+            ? "Loading the catalogue…"
+            : items.length === 0
+              ? "Nothing listed, or the catalogue is unreachable."
+              : needle
+                ? `Nothing matches "${query.trim()}".`
+                : chosen === "installed"
+                  ? "Nothing installed yet."
+                  : `Nothing listed for ${labels[chosen] ?? chosen}.`}
         </span>
-      ) : (
+      )}
+      {listed.length > 0 && (
         <div className="space-y-2">
           {listed.map((item) => (
             <PluginCard key={item.id} item={item} onOpen={() => setOpenId(item.id)} />
@@ -576,19 +580,18 @@ export function PluginsTab() {
       )}
 
       <span className="label block">Install from anywhere</span>
-      <div className="flex gap-2">
-        <input
-          className="field flex-1"
-          placeholder={REPO_HINT}
-          aria-label="GitHub repository"
-          value={repo}
-          onChange={(event) => setRepo(event.target.value)}
-          onKeyDown={(event) => event.key === "Enter" && installFromRepo()}
-        />
-        <button className="btn whitespace-nowrap" disabled={!repo.trim() || isPending("plugin.install")} onClick={installFromRepo}>
+      <form
+        className="flex gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          installFromRepo();
+        }}
+      >
+        <input className="field flex-1" placeholder={REPO_HINT} aria-label="GitHub repository" value={repo} onChange={(event) => setRepo(event.target.value)} />
+        <button type="submit" className="btn whitespace-nowrap" disabled={!repo.trim() || isPending("plugin.install")}>
           {isPending("plugin.install") ? "…" : "Install"}
         </button>
-      </div>
+      </form>
       <div className="flex items-center gap-2">
         <button className="btn" onClick={() => file.current?.click()}>
           Import a .zip

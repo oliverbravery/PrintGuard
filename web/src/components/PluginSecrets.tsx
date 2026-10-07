@@ -48,8 +48,7 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
             onChange={(event) => setDraft({ ...draft, [name]: event.target.value })}
             onBlur={() => {
               if (!draft[name]) return;
-              send({ cmd: "plugin.secrets", id: plugin.id, secrets: { ...draft } });
-              setDraft({});
+              if (send({ cmd: "plugin.secrets", id: plugin.id, secrets: { ...draft } }) !== null) setDraft({});
             }}
           />
         </label>

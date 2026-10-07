@@ -87,7 +87,7 @@ export function UpdateDialog() {
             {update!.download ? (
               <>
                 <a className="btn btn-primary inline-block" href={update!.download} target="_blank" rel="noreferrer">
-                  Download v{update!.latest}
+                  Download v{update!.latest} <NewTab />
                 </a>
                 <p className="text-[0.7rem] text-text-2">
                   Quit PrintGuard from the tray, replace the app with the downloaded one, and open it again.

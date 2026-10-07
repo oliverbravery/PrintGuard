@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { useSubmit } from "../submit";
 import type { AdapterConfig, AdapterMeta, Printer } from "../types";
+import { ConfirmButton } from "./ConfirmButton";
 import { Dialog } from "./Dialog";
 import { DeviceChip } from "./MonitorTile";
 import { retypeReason, SchemaForm, savedSecretTitles } from "./SchemaForm";
@@ -53,7 +54,7 @@ function PrinterRow({ printer }: { printer: Printer }) {
   return (
     <div className="panel overflow-hidden">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
-        <span className={`led ${printer.online ? "led-on" : "led-off"}`} />
+        <span role="img" aria-label={printer.online ? "online" : "offline"} className={`led ${printer.online ? "led-on" : "led-off"}`} title={printer.online ? "online" : "offline"} />
         <div className="min-w-0 grow basis-40 leading-tight">
           <div className="text-sm font-medium truncate">{printer.name}</div>
           <div className="mono text-[0.62rem] text-text-2 truncate">{providerLabel(integrations, printer.provider)}</div>
@@ -63,13 +64,13 @@ function PrinterRow({ printer }: { printer: Printer }) {
           <button className="btn !py-1 !px-2.5 !text-[0.62rem]" onClick={() => setOpen((v) => !v)}>
             {open ? "Hide" : "Edit"}
           </button>
-          <button
-            className="btn btn-danger !py-1 !px-2.5 !text-[0.62rem]"
+          <ConfirmButton
+            className="!py-1 !px-2.5 !text-[0.62rem]"
             disabled={isPending("printer.remove", printer.id)}
-            onClick={() => send({ cmd: "printer.remove", id: printer.id })}
+            onConfirm={() => send({ cmd: "printer.remove", id: printer.id })}
           >
             {isPending("printer.remove", printer.id) ? "Removing…" : "Remove"}
-          </button>
+          </ConfirmButton>
         </div>
       </div>
       {open && meta && (
@@ -117,8 +118,18 @@ function RegisterPrinter() {
     printersWhenSent.current = null;
   }, [busy]);
 
+  const required = meta?.schema.required ?? [];
+  const incomplete = required.some((key) => !String(config[key] ?? meta?.schema.properties[key]?.default ?? "").trim());
+
   return (
-    <div className="space-y-3">
+    <form
+      className="space-y-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        printersWhenSent.current = printers;
+        send({ cmd: "printer.add", printer: { name: name.trim(), provider, config } });
+      }}
+    >
       <select
         className="field"
         aria-label="Printer service"
@@ -140,19 +151,12 @@ function RegisterPrinter() {
           <input className="field" aria-label="Name" placeholder={`Name (e.g. ${meta.label} Ender 3)`} value={name} onChange={(e) => setName(e.target.value)} />
           <SchemaForm meta={meta} value={config} onChange={setConfig} />
           <PrinterTest id={NEW_PRINTER} provider={provider} config={config} />
-          <button
-            className="btn btn-primary w-full"
-            disabled={busy}
-            onClick={() => {
-              printersWhenSent.current = printers;
-              send({ cmd: "printer.add", printer: { name: name.trim(), provider, config } });
-            }}
-          >
+          <button type="submit" className="btn btn-primary w-full" disabled={busy || incomplete}>
             {busy ? "Registering…" : "Register printer"}
           </button>
         </>
       )}
-    </div>
+    </form>
   );
 }
 

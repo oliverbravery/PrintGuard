@@ -15,7 +15,7 @@ export function TestRow({
 }) {
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <button className="btn shrink-0" disabled={disabled} onClick={onTest}>
+      <button type="button" className="btn shrink-0" disabled={disabled} onClick={onTest}>
         {busy ? busyLabel : label}
       </button>
       {result && <span className={`chip chip-message ${result.ok ? "chip-ok" : "chip-bad"}`}>{result.message}</span>}

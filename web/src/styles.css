@@ -53,7 +53,7 @@ html {
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(1100px 700px at 75% -10%, rgba(255, 77, 0, 0.06), transparent 60%),
     radial-gradient(900px 600px at -10% 110%, rgba(138, 201, 38, 0.04), transparent 55%),
@@ -284,6 +284,14 @@ body {
 .btn-danger:hover {
   border-color: var(--color-bad);
   color: var(--color-bad);
+}
+
+.btn-armed,
+.btn-armed:hover,
+:root[data-glass] .btn-armed {
+  background: var(--color-bad) !important;
+  border-color: var(--color-bad);
+  color: var(--color-on-bad);
 }
 
 .btn:disabled {
@@ -954,7 +962,7 @@ video {
 
 @media (pointer: coarse) {
   .btn {
-    min-height: 2.5rem;
+    min-height: 2.75rem;
   }
 
   .field {

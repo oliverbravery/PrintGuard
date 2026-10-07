@@ -2,11 +2,13 @@ import { useEffect } from "react";
 import type { Finding } from "../lint";
 import { useStore } from "../store";
 import type { Permission, PluginManifest, PluginRecord } from "../types";
-import { phrase, reachesLocal } from "../urls";
+import { phrase, reachesLocal, webUrl } from "../urls";
 import { Dialog } from "./Dialog";
 
 const address = (url: string) => {
-  const { host, pathname } = new URL(url);
+  const parsed = webUrl(url);
+  if (parsed === null) return url;
+  const { host, pathname } = new URL(parsed);
   return `${host}${pathname}`;
 };
 
@@ -85,10 +87,11 @@ function phraseFinding(finding: Finding): string {
 function Findings({ plugin }: { plugin: PluginRecord }) {
   const findings = useStore((s) => s.pluginFindings[plugin.id]);
   const checkPlugin = useStore((s) => s.checkPlugin);
+  const reconnecting = useStore((s) => s.reconnecting);
 
   useEffect(() => {
-    checkPlugin(plugin.id);
-  }, [plugin.id, findings === undefined]);
+    if (!reconnecting) checkPlugin(plugin.id);
+  }, [plugin.id, findings === undefined, reconnecting]);
 
   if (findings === undefined) return <span className="block text-[0.7rem] text-text-2">Reading its code…</span>;
   if (findings.length === 0) {

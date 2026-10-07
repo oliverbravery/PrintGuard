@@ -1,6 +1,7 @@
 import { alertOutcome } from "../history";
 import { useStore } from "../store";
 import type { Monitor } from "../types";
+import { ConfirmButton } from "./ConfirmButton";
 import { Sheet } from "./Dialog";
 import { Feed } from "./Feed";
 import { DeviceChip } from "./MonitorTile";
@@ -166,13 +167,9 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
       <div className="flex items-center gap-2.5 px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
         <SaveStatus scope={`monitor:${monitor.id}`} />
         <div className="flex-1" />
-        <button
-          className="btn btn-danger"
-          disabled={removing}
-          onClick={() => send({ cmd: "monitor.remove", id: monitor.id })}
-        >
+        <ConfirmButton disabled={removing} onConfirm={() => send({ cmd: "monitor.remove", id: monitor.id })}>
           {removing ? "Deleting…" : "Delete"}
-        </button>
+        </ConfirmButton>
       </div>
     </Sheet>
   );

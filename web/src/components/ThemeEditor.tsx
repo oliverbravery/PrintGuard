@@ -15,7 +15,7 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
         type="color"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-7 w-8 cursor-pointer rounded border border-line-1 bg-transparent p-0"
+        className="h-7 w-8 pointer-coarse:h-11 pointer-coarse:w-11 cursor-pointer rounded border border-line-1 bg-transparent p-0"
         aria-label={`${label} colour`}
       />
       <input className="field mono" aria-label={`${label} hex`} style={{ width: "5.5rem" }} value={text} spellCheck={false} onChange={(e) => commit(e.target.value)} />

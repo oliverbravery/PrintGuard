@@ -57,7 +57,7 @@ export const INTRO: GuideSection[] = [
     shot: "cameras",
     body: (
       <>
-        A camera is any video source PrintGuard can read, so a USB device or an RTSP, RTMP, MJPEG or WebRTC
+        A camera is any video source PrintGuard can read, so a USB device or an RTSP, RTMP, MJPEG or WebRTC (WHEP)
         stream. A printer is optional, and connecting one lets PrintGuard read whether it is printing
         and stop it when something goes wrong.
       </>
@@ -155,7 +155,7 @@ export const GUIDE: GuideSection[] = [
       <>
         Connect a printer, whether <strong>OctoPrint</strong>, <strong>Klipper (Moonraker)</strong>, <strong>Elegoo</strong>,{" "}
         <strong>Prusa (PrusaLink)</strong> or <strong>Bambu Lab</strong>, and PrintGuard can read its status, progress and temperatures,
-        preheat it and pause or cancel a print on a defect. It's optional: without one, a monitor still watches and alerts.{" "}
+        preheat it and pause or cancel a print on a defect. It's optional. Without one, a monitor still watches and alerts.{" "}
         <a className={link} href={docs("printers.md")} target="_blank" rel="noreferrer">
           Setup guides <NewTab />
         </a>
@@ -213,7 +213,7 @@ export const GUIDE: GuideSection[] = [
     body: (
       <>
         Add a notification channel, whether <strong>ntfy</strong>, <strong>Pushover</strong>,{" "}
-        <strong>Telegram</strong>, <strong>Discord</strong>, or <strong>Desktop notification</strong>{" "}
+        <strong>Telegram</strong>, <strong>Discord</strong> or <strong>Desktop notification</strong>{" "}
         in the desktop app, and PrintGuard sends a snapshot the moment a defect holds. Turn
         notifications on per monitor in its detail panel.
       </>
@@ -229,7 +229,7 @@ export const GUIDE: GuideSection[] = [
       <>
         A watchdog warns when a camera drops, a feed freezes or a printer stops answering for
         longer than the grace period, two minutes by default. Watching only stands down on a positive "not printing" signal, so a
-        lost feed keeps watching rather than going blind.
+        lost feed keeps the monitor watching.
       </>
     ),
   },
@@ -299,7 +299,7 @@ export const GUIDE: GuideSection[] = [
   {
     id: "report",
     led: "led-warn",
-    title: "Something broken?",
+    title: "Report a bug",
     body: (
       <>
         Report a bug from the <Bug className="inline h-[1.15em] w-[1.15em] align-[-0.2em]" aria-hidden /> chip in the header, or from More on a phone,

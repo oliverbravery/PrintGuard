@@ -84,7 +84,7 @@ export function CloseButton({ label, onClick }: { label: string; onClick: () => 
   return (
     <button
       type="button"
-      className="-my-2 -mr-2.5 grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded text-text-2 transition-colors hover:text-accent"
+      className="-my-2 -mr-2.5 grid h-10 w-10 pointer-coarse:h-11 pointer-coarse:w-11 shrink-0 cursor-pointer place-items-center rounded text-text-2 transition-colors hover:text-accent"
       onClick={() => {
         commitFocusedEdit();
         onClick();

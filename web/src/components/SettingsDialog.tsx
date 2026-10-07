@@ -3,8 +3,10 @@ import { savedChannels, type SettingsTabId, useStore } from "../store";
 import { useSubmit } from "../submit";
 import { applyTheme, beginPreview, endPreview, GLASS_DEFAULT, PALETTES } from "../theme";
 import type { AdapterConfig, AdapterMeta, ApiToken, CustomTheme, MqttConfig, ThemeBase, ThemeTokenKey } from "../types";
+import { ConfirmButton, useConfirm } from "./ConfirmButton";
 import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
+import { NewTab } from "./NewTab";
 import { PluginsTab } from "./PluginsTab";
 import { SettingsFooter } from "./SettingsFooter";
 import { SaveStatus } from "./SaveStatus";
@@ -63,6 +65,10 @@ export function SettingsDialog() {
   const [tab, setTab] = useState<SettingsTabId>(settingsTab ?? "alerts");
   const close = () => openDialog(null);
   const tokens = engine?.tokens ?? [];
+  const reviewing = engine?.settings.feedback !== "off";
+  const waitingReviews = (engine?.reviews ?? []).filter((review) => review.status === "ready" || review.status === "queued").length;
+  const setReviewing = (on: boolean) => updateSettings({ feedback: on ? "ask" : "off" }, "advanced");
+  const stopReviewing = useConfirm(() => setReviewing(false));
 
   const theme = engine?.settings.theme ?? "system";
   const themes = engine?.settings.themes ?? [];
@@ -171,6 +177,7 @@ export function SettingsDialog() {
                   <div key={t.id} className="flex items-center gap-2">
                     <button
                       onClick={() => selectTheme(t.id)}
+                      aria-pressed={theme === t.id}
                       className={`flex flex-1 items-center gap-2 overflow-hidden rounded border px-3 py-2 text-left transition-colors cursor-pointer ${
                         theme === t.id ? "border-accent bg-accent/5" : "border-line-0 hover:border-line-1"
                       }`}
@@ -182,9 +189,7 @@ export function SettingsDialog() {
                     <button className="btn" onClick={() => setEditing({ ...t, colors: { ...t.colors } })}>
                       Edit
                     </button>
-                    <button className="btn btn-danger" onClick={() => deleteTheme(t.id)}>
-                      Delete
-                    </button>
+                    <ConfirmButton onConfirm={() => deleteTheme(t.id)}>Delete</ConfirmButton>
                   </div>
                 ))}
               </div>
@@ -268,7 +273,7 @@ export function SettingsDialog() {
               </span>
             )}
             <span className="text-[0.7rem] text-text-2 block">
-              Channels hold credentials, so they apply on Save rather than automatically.
+              Channels hold credentials, so they apply when you press Save.
             </span>
           </TabPanel>
         )}
@@ -300,6 +305,10 @@ export function SettingsDialog() {
                     className="field shrink-0"
                     style={{ width: "5rem" }}
                     type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={65535}
+                    step={1}
                     aria-label="Broker port"
                     placeholder={mqtt.tls ? "8883" : "1883"}
                     value={mqtt.port ?? ""}
@@ -367,7 +376,7 @@ export function SettingsDialog() {
               </span>
             )}
             <span className="text-[0.7rem] text-text-2 block">
-              Broker settings open a live connection, so they apply on Save rather than automatically.
+              Broker settings open a live connection, so they apply when you press Save.
             </span>
           </TabPanel>
         )}
@@ -409,7 +418,7 @@ export function SettingsDialog() {
             <div>
               <span className="label block">API &amp; MCP access</span>
               <span className="text-[0.7rem] text-text-2 block mt-1">
-                Bearer tokens for the REST API and MCP server. Scopes are cumulative: read ⊂ control ⊂ manage.
+                Bearer tokens for the REST API and MCP server. Control includes read, and manage includes both.
               </span>
             </div>
 
@@ -445,19 +454,21 @@ export function SettingsDialog() {
                       </div>
                       <span className="mono text-[0.65rem] text-text-2 block truncate">{t.hint}</span>
                     </div>
-                    <button
-                      className="btn btn-danger"
-                      disabled={isPending("token.remove", t.id)}
-                      onClick={() => send({ cmd: "token.remove", id: t.id })}
-                    >
+                    <ConfirmButton disabled={isPending("token.remove", t.id)} onConfirm={() => send({ cmd: "token.remove", id: t.id })}>
                       Revoke
-                    </button>
+                    </ConfirmButton>
                   </div>
                 ))}
               </div>
             )}
 
-            <div className="space-y-2">
+            <form
+              className="space-y-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                createToken.submit({ cmd: "token.create", name: tokenName.trim(), scope: tokenScope });
+              }}
+            >
               <input
                 className="field"
                 aria-label="Token name"
@@ -471,11 +482,7 @@ export function SettingsDialog() {
                   <option value="control">control</option>
                   <option value="manage">manage</option>
                 </select>
-                <button
-                  className="btn btn-primary whitespace-nowrap"
-                  disabled={!tokenName.trim() || isPending("token.create")}
-                  onClick={() => createToken.submit({ cmd: "token.create", name: tokenName.trim(), scope: tokenScope })}
-                >
+                <button type="submit" className="btn btn-primary whitespace-nowrap" disabled={!tokenName.trim() || isPending("token.create")}>
                   {isPending("token.create") ? "…" : "Generate"}
                 </button>
               </div>
@@ -484,7 +491,7 @@ export function SettingsDialog() {
                   {createToken.error}
                 </span>
               )}
-            </div>
+            </form>
           </TabPanel>
         )}
 
@@ -514,14 +521,19 @@ export function SettingsDialog() {
             <span className="label block pt-2">Training frames</span>
             <Toggle
               label="Ask me to review frames after a print"
-              on={engine?.settings.feedback !== "off"}
-              onChange={(on) => updateSettings({ feedback: on ? "ask" : "off" }, "advanced")}
+              on={reviewing}
+              onChange={(on) => (on || waitingReviews === 0 ? setReviewing(on) : stopReviewing.press())}
             />
             <span className="block text-[0.7rem] leading-relaxed text-text-2">
-              PrintGuard keeps a few frames from each print on this hub so you can label them and send them to help
-              train the detection model. Nothing is sent unless you review a print and press Send.{" "}
+              <span role="status" className="block text-warn">
+                {stopReviewing.armed &&
+                  `Press the switch again to turn it off. ${waitingReviews} ${waitingReviews === 1 ? "print" : "prints"} waiting for review will be dismissed.`}
+              </span>
+              {reviewing
+                ? "PrintGuard keeps a few frames from each print on this hub so you can label them and send them to help train the detection model. Nothing is sent unless you review a print and press Send. Turning this off deletes the frames kept so far."
+                : "PrintGuard keeps only alert frames while this is off, for the risk history. It doesn't ask you to review a print and nothing is sent."}{" "}
               <a className="text-accent underline hover:opacity-80" href="https://github.com/oliverbravery/PrintGuard/blob/main/docs/feedback.md" target="_blank" rel="noreferrer">
-                What's sent
+                What's sent <NewTab />
               </a>
             </span>
             {engine?.feedback_hub && (

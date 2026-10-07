@@ -54,7 +54,7 @@ export function Tabs<T extends string>({
           aria-controls={`${prefix}-panel-${t.id}`}
           tabIndex={value === t.id ? 0 : -1}
           onClick={() => onChange(t.id)}
-          className={`-mb-px shrink-0 cursor-pointer whitespace-nowrap border-b-2 px-3 py-2.5 text-xs transition-colors ${
+          className={`-mb-px shrink-0 cursor-pointer whitespace-nowrap border-b-2 px-3 py-2.5 pointer-coarse:min-h-11 text-xs transition-colors ${
             value === t.id ? "border-accent text-text-0" : "border-transparent text-text-2 hover:text-text-1"
           }`}
         >

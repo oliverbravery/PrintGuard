@@ -12,6 +12,7 @@ const RECORDER_MIMES = [
 
 const PUBLISH_RECONNECT_MS = 2000;
 const PUBLISHERS_KEY = "pg-publishers";
+const PUBLISHED_ELSEWHERE = "another tab on this device is already publishing this camera";
 const LIVE_RESYNC_S = 2;
 const HLS_RETRY_MS = 3000;
 
@@ -29,6 +30,14 @@ function forgetPublisher(path: string): void {
   const all = loadPublishers();
   delete all[path];
   writeStored(PUBLISHERS_KEY, JSON.stringify(all));
+}
+
+function holdPublisherLock(path: string): Promise<(() => void) | null> {
+  return new Promise((held) => {
+    void navigator.locks.request(`pg-publish-${path}`, { ifAvailable: true }, (lock) =>
+      lock ? new Promise<void>((release) => held(release)) : held(null),
+    );
+  });
 }
 
 export function hlsUrl(path: string): string {
@@ -91,10 +100,18 @@ export async function publishStream(
 ): Promise<{ stop: () => void; hlsPlayable: boolean }> {
   const mime = RECORDER_MIMES.find((m) => MediaRecorder.isTypeSupported(m));
   if (!mime) throw new Error("this browser cannot record video");
-  const stream = await cameraApi().getUserMedia({
-    video: { deviceId: { exact: deviceId }, frameRate: { ideal: 30, max: 30 } },
-    audio: false,
-  });
+  const devices = cameraApi();
+  const release = await holdPublisherLock(path);
+  if (!release) throw new Error(PUBLISHED_ELSEWHERE);
+  const stream = await devices
+    .getUserMedia({
+      video: { deviceId: { exact: deviceId }, frameRate: { ideal: 30, max: 30 } },
+      audio: false,
+    })
+    .catch((refusal: Error) => {
+      release();
+      throw refusal;
+    });
   persistPublisher(path, deviceId);
 
   let stopped = false;
@@ -136,6 +153,7 @@ export async function publishStream(
     stream.getTracks().forEach((t) => t.stop());
     socket?.close();
     published.delete(path);
+    release();
   };
   published.set(path, stop);
   stream.getVideoTracks()[0].addEventListener("ended", () => {
@@ -155,6 +173,8 @@ export async function resumePublishers(cameras: Camera[], onDown?: (reason: stri
   for (const camera of cameras) {
     const path = camera.source.path;
     if (!path || !(path in want) || published.has(path)) continue;
-    await publishStream(path, want[path], onDown).catch(() => undefined);
+    await publishStream(path, want[path], onDown).catch((failure: Error) => {
+      if (failure.message !== PUBLISHED_ELSEWHERE) onDown?.(failure.message);
+    });
   }
 }

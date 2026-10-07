@@ -89,7 +89,7 @@ export function ReportDialog() {
     <Dialog title="Report a bug" onClose={close}>
       <div className="space-y-3">
         <p className="text-sm text-text-1">
-          Something broken? Describe it and it goes straight to me, anonymously and with no account needed.
+          Describe what went wrong and it goes straight to me, anonymously and with no account needed.
         </p>
         <textarea
           className="field min-h-28"
@@ -136,7 +136,7 @@ export function ReportDialog() {
           ))}
         </div>
         <details className="text-[0.7rem] text-text-2">
-          <summary className="cursor-pointer hover:text-text-1">What's sent with your report</summary>
+          <summary className="cursor-pointer pointer-coarse:py-3.5 hover:text-text-1">What's sent with your report</summary>
           <p className="mt-1.5 leading-relaxed">
             Your description, any files you attach, the address this dashboard is open at, your browser's
             user agent and window size, and a diagnostics bundle: the app version and platform, your

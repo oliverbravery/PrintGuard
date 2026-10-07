@@ -162,7 +162,7 @@ interface PgStore {
   mountPanel(id: string, container: HTMLElement | null): void;
   fetchCatalogue(): void;
   fetchPluginPage(id: string): void;
-  installPlugin(source: Record<string, unknown>, zip?: string): void;
+  installPlugin(source: Record<string, unknown>, zip?: string): boolean;
   setCustomising(on: boolean): void;
   mutateLayout(key: keyof Layout, fn: (section: LayoutSection) => LayoutSection): void;
   resetLayout(): void;
@@ -821,7 +821,7 @@ export const useStore = create<PgStore>((set, get) => {
     },
 
     installPlugin(source, zip) {
-      get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}) });
+      return get().send({ cmd: "plugin.install", source, ...(zip ? { zip } : {}) }) !== null;
     },
 
     mountPanel(id, container) {

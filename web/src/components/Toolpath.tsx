@@ -78,8 +78,8 @@ export function Toolpath({
 
   return (
     <>
-      <div className="relative aspect-[4/3] w-full bg-ink-0">
-        <canvas ref={canvasRef} className="h-full w-full touch-none" aria-label={`Toolpath of ${label}`} />
+      <div className="relative mx-auto aspect-[4/3] w-full max-w-[calc(50dvh*4/3)] bg-ink-0">
+        <canvas ref={canvasRef} role="img" className="h-full w-full touch-none" aria-label={`Toolpath of ${label}`} />
         {status !== "ready" && (
           <div className="absolute inset-0 grid place-items-center">
             <span className={`mono text-[0.68rem] uppercase tracking-[0.2em] text-text-2 ${status === "loading" ? "boot-cursor" : ""}`}>

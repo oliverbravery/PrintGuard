@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { formatDuration } from "../prints";
 import { useStore } from "../store";
 import type { DeviceState, Heater, PreheatPreset, Printer } from "../types";
+import { ConfirmButton } from "./ConfirmButton";
 
 export const HEATERS = ["nozzle", "bed"] as const;
 export type HeaterName = (typeof HEATERS)[number];
@@ -36,7 +37,7 @@ export function ProgressBar({ state, className = "" }: { state: DeviceState; cla
   );
 }
 
-function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heater: Heater; busy: boolean; onCommit: (target: number) => void }) {
+function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heater: Heater; busy: boolean; onCommit: (target: number) => boolean }) {
   const [draft, setDraft] = useState(String(Math.round(heater.target)));
   useEffect(() => {
     if (!busy) setDraft(String(Math.round(heater.target)));
@@ -44,8 +45,8 @@ function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heate
   const commit = () => {
     const target = clampTarget(name, Number(draft));
     if (draft.trim() === "" || Number.isNaN(target)) return setDraft(String(Math.round(heater.target)));
-    setDraft(String(target));
-    if (target !== Math.round(heater.target)) onCommit(target);
+    const sent = target === Math.round(heater.target) || onCommit(target);
+    setDraft(String(sent ? target : Math.round(heater.target)));
   };
   return (
     <label className="flex items-center gap-1.5">
@@ -67,7 +68,7 @@ function TargetField({ name, heater, busy, onCommit }: { name: HeaterName; heate
   );
 }
 
-function HeaterCard({ name, heater, control, busy, onTarget }: { name: HeaterName; heater: Heater; control: boolean; busy: boolean; onTarget: (target: number) => void }) {
+function HeaterCard({ name, heater, control, busy, onTarget }: { name: HeaterName; heater: Heater; control: boolean; busy: boolean; onTarget: (target: number) => boolean }) {
   const heating = heater.target > 0;
   return (
     <div className="panel flex items-center gap-3 px-3 py-2">
@@ -200,7 +201,11 @@ export function PrinterControls({ printer }: { printer: Printer }) {
   const [committed, setCommitted] = useState<HeaterName[]>([]);
   const heat = (targets: Partial<Record<HeaterName, number>>) => send({ cmd: "printer.heat", id: printer.id, ...targets });
   const heaters = HEATERS.filter((name) => state?.[name]);
-  const permitted = { pause: state?.status !== "paused", resume: state?.status === "paused", cancel: activeJob(state) };
+  const permitted = { pause: state?.status === "printing", resume: state?.status === "paused", cancel: activeJob(state) };
+  const act = (name: keyof typeof permitted) => {
+    setAction(name);
+    send({ cmd: "printer.action", id: printer.id, action: name });
+  };
 
   return (
     <div className="space-y-4">
@@ -216,19 +221,14 @@ export function PrinterControls({ printer }: { printer: Printer }) {
         </div>
       )}
       <div className="grid grid-cols-3 gap-2">
-        {(["pause", "resume", "cancel"] as const).map((name) => (
-          <button
-            key={name}
-            className={`btn ${name === "cancel" ? "btn-danger" : ""}`}
-            disabled={acting || !permitted[name]}
-            onClick={() => {
-              setAction(name);
-              send({ cmd: "printer.action", id: printer.id, action: name });
-            }}
-          >
+        {(["pause", "resume"] as const).map((name) => (
+          <button key={name} className="btn" disabled={acting || !permitted[name]} onClick={() => act(name)}>
             {acting && action === name ? `${name}…` : name}
           </button>
         ))}
+        <ConfirmButton disabled={acting || !permitted.cancel} onConfirm={() => act("cancel")}>
+          {acting && action === "cancel" ? "cancel…" : "cancel"}
+        </ConfirmButton>
       </div>
       {heaters.length > 0 && (
         <div className="grid gap-2 sm:grid-cols-2">
@@ -241,7 +241,7 @@ export function PrinterControls({ printer }: { printer: Printer }) {
               busy={heating && committed.includes(name)}
               onTarget={(target) => {
                 setCommitted(heating ? [...committed, name] : [name]);
-                heat({ [name]: target });
+                return heat({ [name]: target }) !== null;
               }}
             />
           ))}

@@ -30,7 +30,10 @@
     <link rel="apple-touch-icon" href="../public/apple-touch-icon.png" />
     <link rel="preload" as="image" href="../../docs/assets/dashboard.png" fetchpriority="high" />
     <script>
-      document.documentElement.dataset.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      const prefersDark = matchMedia("(prefers-color-scheme: dark)");
+      const followScheme = () => (document.documentElement.dataset.theme = prefersDark.matches ? "dark" : "light");
+      followScheme();
+      prefersDark.addEventListener("change", followScheme);
     </script>
   </head>
   <body>

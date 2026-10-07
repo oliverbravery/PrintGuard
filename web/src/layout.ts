@@ -49,6 +49,10 @@ export function withOrder(sec: LayoutSection, ids: string[]): LayoutSection {
   return { ...sec, order: ids };
 }
 
+export function sharesPinning(pinned: string[], a: string, b: string): boolean {
+  return pinned.includes(a) === pinned.includes(b);
+}
+
 export function togglePinned(sec: LayoutSection, id: string): LayoutSection {
   return { ...sec, pinned: toggle(sec.pinned, id) };
 }
