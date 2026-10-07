@@ -2073,14 +2073,19 @@ class Engine:
         the request fails. A plugin without ``net:local`` passes ``public_only``,
         so the connection itself is refused an address on this network, which a
         name that resolves there would otherwise get past the check made here.
+        A ``Host`` header is refused, since a server holding several sites
+        would answer as the one it names, not the one the address did.
         """
         url = str(message.get("url", ""))
         if plugins.addresses_a_secret(url):
             raise PermissionError(f"plugin {message['id']} may only use a secret in the path of its address")
         plugin = self._network_allows(message["id"], url)
+        headers = dict(message.get("headers") or {})
+        if any(str(name).lower() == "host" for name in headers):
+            raise PermissionError(f"plugin {plugin.id} may not set the Host header")
         self._spend_request(plugin)
         await self._refresh_sign_in(plugin)
-        request = {"url": url, "headers": message.get("headers") or None, "json": message.get("json")}
+        request = {"url": url, "headers": headers or None, "json": message.get("json")}
         usable = plugins.fillable(plugin.secrets)
         blank = plugins.missing_secrets(request, usable)
         if blank:

@@ -238,6 +238,17 @@ async def test_a_secret_cannot_move_a_request_off_the_address_that_was_checked()
     assert platform.http_calls == [], "a request left for an address a secret chose"
 
 
+@pytest.mark.parametrize("headers", [{"Host": "other.example"}, {"hOsT": "other.example"}, [["host", "other.example"]]])
+async def test_a_request_cannot_name_a_host_its_address_did_not(headers: object) -> None:
+    platform = FakePlatform()
+    async with engine_with(platform, manifest("net", urls=[f"{API}/v1/*"])) as engine:
+        with pytest.raises(RuntimeError, match="may not set the Host header"):
+            await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "headers": headers})
+        await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "headers": {"X-Forwarded-Host": "kept"}})
+
+    assert [sent["headers"] for sent in platform.http_requests if sent["url"].startswith(API)] == [{"X-Forwarded-Host": "kept"}]
+
+
 async def test_the_address_is_checked_again_with_its_secrets_filled_in() -> None:
     platform = FakePlatform()
     async with engine_with(platform, manifest("net", urls=[f"{API}/v1/*"], secrets={"key": "An API key"})) as engine:

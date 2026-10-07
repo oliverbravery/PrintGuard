@@ -563,6 +563,8 @@ it base64 encoded. The manifest needs `http` in `events`, or the answer never re
 A redirect is not followed. Its 3xx status arrives as the answer, so ask for the address the
 service finally answers on.
 
+A request with a `Host` header is refused. The host is the one in `url`.
+
 A body over 256 KB fails the request, whether it is JSON, text or `binary`. The size is counted
 after decompression and before base64. PrintGuard asks for gzip or nothing, and an answer in any
 other encoding fails the same way. Nothing is cut short, so no `http` event arrives. The error shows in the

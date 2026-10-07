@@ -206,7 +206,7 @@ declare global {
     /**
      * Makes an HTTP request for you. Needs `net` and a URL your patterns cover.
      * The answer arrives as an `http` event under the same `tag`. A redirect is
-     * not followed, so its 3xx status is the answer.
+     * not followed, so its 3xx status is the answer. A `Host` header is refused.
      */
     http(request: { method?: string; url: string; headers?: Record<string, string>; json?: unknown; tag?: string }): void;
     /** Opens a WebSocket PrintGuard holds for you, answering on `tag`. Needs `net` and a `ws` or `wss` pattern covering the URL. */
