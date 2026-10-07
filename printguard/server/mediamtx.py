@@ -255,7 +255,10 @@ class EmbeddedMediaMTX:
             if self._stop_requested.is_set():
                 await self._terminate()
                 return
-            self._bind_lifetime(self._process.pid)
+            try:
+                self._bind_lifetime(self._process.pid)
+            except Exception as exc:
+                logger.error("MediaMTX could not be tied to the hub's lifetime (%s), so it would outlive a hub that is killed", exc)
             restoring = asyncio.ensure_future(self._restore()) if replacement else None
             try:
                 code = await self._process.wait()
