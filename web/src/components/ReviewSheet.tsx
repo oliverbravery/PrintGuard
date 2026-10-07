@@ -1,5 +1,5 @@
 import { Maximize2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { clock, framesLabel, isDailyLimit, LIMIT_REASON, sending, waitingMessage } from "../review";
 import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
@@ -130,6 +130,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
   const kept = frames.filter((frame) => !removed.has(frame.id));
   const showsFailure = (frame: ReviewFrame) => (outcome === "failed" && frame.kind === "alert") !== relabelled.has(frame.id);
   const close = () => openReview(null);
+  const outcomeLabelId = useId();
 
   useEffect(() => {
     if (!reconnecting) fetchReview(review.id);
@@ -159,8 +160,10 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
             PrintGuard kept {framesLabel(review.frames)} from this print. Label them and send them to me, and I'll use them to train the detection model.
           </p>
           <div>
-            <span className="label mb-2 block">Did this print finish fine?</span>
-            <div className="flex gap-2">
+            <span id={outcomeLabelId} className="label mb-2 block">
+              Did this print finish fine?
+            </span>
+            <div role="group" aria-labelledby={outcomeLabelId} className="flex gap-2">
               <button className={`btn flex-1 ${outcome === "fine" ? "!border-accent !text-accent" : ""}`} aria-pressed={outcome === "fine"} onClick={() => answer("fine")}>
                 Yes
               </button>
@@ -193,6 +196,7 @@ export function ReviewSheet({ review, monitor }: { review: ReviewSummary; monito
               </div>
               <input
                 className="field"
+                aria-label="Printer model"
                 placeholder="Printer model (optional), such as Prusa MK4"
                 maxLength={80}
                 value={printer}
