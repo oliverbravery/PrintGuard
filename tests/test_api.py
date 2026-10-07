@@ -541,6 +541,29 @@ async def test_a_number_that_is_not_finite_is_refused_at_the_boundary(literal: b
         assert preset.status_code == 422
 
 
+@pytest.mark.parametrize(
+    ("patch", "wrong"),
+    [
+        ({"fault_grace_s": "soon"}, True),
+        ({"fault_grace_s": True}, True),
+        ({"update_check": "yes"}, True),
+        ({"feedback": "sometimes"}, True),
+        ({"inference_runtime": "cuda"}, True),
+        ({"fault_grace_s": 300, "update_check": False, "feedback": "off"}, False),
+    ],
+)
+async def test_every_setting_a_token_may_change_is_typed_and_a_wrong_type_is_a_422(patch: dict, wrong: bool) -> None:
+    """A key the body model lacked was dropped with a 200, whatever it held."""
+    async with api(("manage",)) as (client, engine, _platform, _monitor_id, _printer_id, _camera_id, tokens):
+        answer = await client.patch("/settings", json=patch, headers={"Authorization": f"Bearer {tokens['manage']}"})
+
+    if wrong:
+        assert answer.status_code == 422, answer.text
+        assert engine.settings["fault_grace_s"] == 120.0
+    else:
+        assert answer.status_code == 200 and (engine.settings["fault_grace_s"], engine.settings["update_check"], engine.settings["feedback"]) == (300.0, False, "off")
+
+
 QUERY_CAMERA = "http://192.168.1.50/videostream.cgi?user=admin&pwd=QUERYPASS"
 BASIC_PRINTER = {"base_url": "http://opuser:BASICPASS@octopi.local", "api_key": "octo-secret"}
 BASIC_NTFY = {"url": "https://ntfyuser:NTFYPASS@ntfy.example/topic", "token": "tk_secret"}

@@ -157,11 +157,14 @@ class ProviderTest(BaseModel):
     config: FiniteObject = {}
 
 
-class SettingsPatch(BaseModel):
+class SettingsPatch(_FiniteNumbers):
     notifiers: dict[str, FiniteObject] | None = None
     mqtt: FiniteObject | None = None
     inference_runtime: Literal["auto", "litert", "onnx"] | None = None
     preheat: list[FiniteObject] | None = None
+    fault_grace_s: float | None = None
+    update_check: bool | None = None
+    feedback: Literal["ask", "off"] | None = None
 
 
 class ActionBody(BaseModel):

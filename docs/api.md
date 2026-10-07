@@ -191,7 +191,7 @@ request, this API included, until that name is in
 | `POST` | `/prints?filename=` | Upload a sliced file of up to 512 MB as the raw request body. `name`, a comma-separated `printer_ids` and first layer `nozzle` and `bed` temperatures are optional. A file with nothing in it, or a 3mf holding a member compressed with anything but stored or deflate, is refused |
 | `PATCH` | `/prints/{id}` | Rename a print file or change the printers it is tagged for |
 | `DELETE` | `/prints/{id}` | Remove a print file |
-| `PATCH` | `/settings` | Update `notifiers`, `mqtt`, `inference_runtime` or `preheat`. Each one you send replaces the stored one, [keeping the secrets a read left out](#the-resource-model). No other setting can be changed here |
+| `PATCH` | `/settings` | Update `notifiers`, `mqtt`, `inference_runtime`, `preheat`, `fault_grace_s`, `update_check` or `feedback`. Each one you send replaces the stored one, [keeping the secrets a read left out](#the-resource-model). A value of the wrong type is a `422`. The theme, layout and plugin catalogue are the dashboard's own and can't be changed here |
 | `POST` | `/notifiers/test` | `{"provider", "config"}`, sends a test alert. A secret left out or blank is filled in from the saved channel, [for the address it was saved with](#the-resource-model) |
 
 </details>
@@ -205,7 +205,7 @@ The bodies the manage routes take. Every field is optional on a `PATCH`.
 | Camera update | `name`, `brightness`, `contrast`, `sharpness`, `rotation` of 0, 90, 180 or 270, `detect_fps`, and `crop` as `{"x", "y", "w", "h"}` in shares of the frame, where the whole frame clears it |
 | Printer | `name`, `provider`, `config` |
 | Print file update | `name`, `printer_ids` |
-| Settings | `notifiers` keyed by channel id, [`mqtt`](#home-assistant), `inference_runtime` of `auto`, `litert` or `onnx`, and `preheat` as a list of `{"name", "nozzle", "bed"}` |
+| Settings | `notifiers` keyed by channel id, [`mqtt`](#home-assistant), `inference_runtime` of `auto`, `litert` or `onnx`, `preheat` as a list of `{"name", "nozzle", "bed"}`, `fault_grace_s` in seconds (30 to 900, a number outside that is moved to the nearest end), `update_check` as true or false and `feedback` as `ask` or `off` |
 
 `GET /state` lists each printer service and alert channel under `integrations` and `notifiers`,
 with the config fields it takes.
