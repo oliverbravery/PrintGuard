@@ -2116,7 +2116,7 @@ async def test_flapping_camera_warns_once_per_outage(monkeypatch) -> None:
         assert len(warnings(True)) == 2, "recovery was never announced after the longer settled period"
 
 
-async def test_protocol_surfaces_errors_and_filters_settings() -> None:
+async def test_protocol_surfaces_errors_and_refuses_unknown_settings() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[]) as (engine, events):
         await engine.handle({"cmd": "nope", "req_id": 7})
@@ -2135,13 +2135,11 @@ async def test_protocol_surfaces_errors_and_filters_settings() -> None:
             "monitors": {"order": ["m2", "m1"], "pinned": ["m2"], "hidden": ["m3"]},
             "cameras": {"order": [], "pinned": [], "hidden": ["c1"]},
         }
-        await engine.handle(
-            {
-                "cmd": "settings.update",
-                "patch": {"bogus": 1, "notifiers": {"ntfy": {"url": "u"}}, "theme": "light", "themes": [custom], "layout": layout},
-            }
-        )
-        assert "bogus" not in engine.settings
+        patch = {"notifiers": {"ntfy": {"url": "u"}}, "theme": "light", "themes": [custom], "layout": layout}
+        await engine.handle({"cmd": "settings.update", "patch": {"bogus": 1, **patch}, "req_id": 9})
+        assert any(e["event"] == "error" and e["message"] == "there is no bogus setting" and e.get("req_id") == 9 for e in events)
+        assert "bogus" not in engine.settings and engine.settings["theme"] == "system", "a patch with an unknown setting changes nothing"
+        await engine.handle({"cmd": "settings.update", "patch": patch})
         assert engine.settings["notifiers"] == {"ntfy": {"url": "u"}}
         assert engine.settings["theme"] == "light"
         assert engine.settings["themes"] == [custom]
@@ -5711,6 +5709,8 @@ async def test_a_value_a_setting_does_not_take_is_refused_rather_than_rewritten(
             ({"cmd": "camera.update", "id": camera_id, "patch": {"crop": [0, 0, 1, 1]}}, "a crop holds x, y, w and h"),
             ({"cmd": "camera.update", "id": camera_id, "patch": {"name": None}}, "name is text"),
             ({"cmd": "camera.update", "id": camera_id, "patch": {"source": {"kind": "url"}}}, "a camera has no source setting"),
+            ({"cmd": "settings.update", "patch": {"volume": 3}}, "there is no volume setting"),
+            ({"cmd": "settings.update", "patch": {"theme": "dark", "volume": 3}}, "there is no volume setting"),
             ({"cmd": "settings.update", "patch": {"mqtt": {"port": True}}}, "MQTT port"),
             ({"cmd": "settings.update", "patch": {"update_check": "banana"}}, "update_check is true or false"),
             ({"cmd": "settings.update", "patch": {"catalogue_url": 5}}, "catalogue_url is an address"),

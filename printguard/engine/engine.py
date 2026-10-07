@@ -1716,11 +1716,15 @@ class Engine:
         it keeps its login.
 
         Raises:
-            ValueError: If a value in the patch is not one the setting takes,
-                or an address changed while a stored secret was being kept.
+            ValueError: If the patch names a setting there is not, a value in it
+                is not one the setting takes, or an address changed while a
+                stored secret was being kept.
             RuntimeError: If the runtime could not be switched.
         """
-        patch = {k: v for k, v in message.get("patch", {}).items() if k in SETTINGS_DEFAULTS}
+        patch = dict(message.get("patch", {}))
+        unknown = sorted(set(patch) - set(SETTINGS_DEFAULTS))
+        if unknown:
+            raise ValueError(f"there is no {unknown[0]} setting")
         for provider in patch.get("notifiers", {}):
             if provider not in NOTIFIERS:
                 raise ValueError(f"unknown notifier {provider!r}")
