@@ -5813,7 +5813,11 @@ async def test_a_value_a_setting_does_not_take_is_refused_rather_than_rewritten(
             ({"cmd": "settings.update", "patch": {"mqtt": {"host": "broker", "port": 0}}}, "MQTT port"),
             ({"cmd": "settings.update", "patch": {"mqtt": {"enabled": True, "host": "  "}}}, "MQTT needs the broker's host"),
             ({"cmd": "settings.update", "patch": {"mqtt": {"enabled": True}}}, "MQTT needs the broker's host"),
-            ({"cmd": "settings.update", "patch": {"mqtt": {"host": 5}}}, "MQTT host is the broker's address"),
+            ({"cmd": "settings.update", "patch": {"mqtt": {"host": 5}}}, "MQTT host is text"),
+            ({"cmd": "settings.update", "patch": {"mqtt": {"host": "broker", "enabled": "yes"}}}, "MQTT enabled is true or false"),
+            ({"cmd": "settings.update", "patch": {"mqtt": {"host": "broker", "keepalive": 5}}}, "mqtt has no keepalive setting"),
+            ({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": 5}}}}, "Topic URL is text"),
+            ({"cmd": "printer.add", "printer": {"provider": "octoprint", "config": {"base_url": 5, "api_key": ["k"]}}}, "Base URL is text"),
             ({"cmd": "camera.update", "id": camera_id, "patch": {"rotation": False}}, "rotation is 0, 90, 180 or 270"),
             ({"cmd": "settings.update", "patch": {"fault_grace_s": "120"}}, "fault_grace_s must be a number"),
             ({"cmd": "settings.update", "patch": {"fault_grace_s": True}}, "fault_grace_s must be a number"),
@@ -5832,6 +5836,7 @@ async def test_a_value_a_setting_does_not_take_is_refused_rather_than_rewritten(
             with pytest.raises(RuntimeError, match=reason):
                 await engine.request(command)
         assert (dict(engine.monitors[monitor_id]), engine.cameras.get(camera_id).persisted(), dict(engine.settings)) == before
+        assert not engine.printers.values()
 
 
 async def test_a_command_whose_name_is_not_text_is_an_unknown_command() -> None:

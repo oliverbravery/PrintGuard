@@ -14,6 +14,27 @@ from typing import Any, AsyncIterator, Awaitable, Callable
 import httpx
 
 HttpFn = Callable[..., Awaitable[tuple[int, Any]]]
+KINDS: dict[str, tuple[type, str]] = {"string": (str, "text"), "boolean": (bool, "true or false")}
+"""The Python type a schema property's JSON type holds, and how a refusal words it."""
+
+
+def require_typed(config: dict[str, Any], properties: dict[str, dict[str, Any]]) -> None:
+    """Refuses a config value that is not of the type its schema property declares.
+
+    A value left out or sent as null is not there to be checked.
+
+    Args:
+        config: The values supplied.
+        properties: The schema properties they are held to, each with a
+            ``title`` and a ``type`` that ``KINDS`` knows.
+
+    Raises:
+        ValueError: If a value is of another type, naming the first.
+    """
+    for key, prop in properties.items():
+        kind, wording = KINDS[prop["type"]]
+        if config.get(key) is not None and type(config[key]) is not kind:
+            raise ValueError(f"{prop['title']} is {wording}")
 
 
 class Adapter(ABC):
@@ -72,14 +93,16 @@ class Adapter(ABC):
         return set(self.secret_fields())
 
     def require(self, config: dict[str, Any]) -> None:
-        """Refuses a configuration that leaves a field the service needs blank.
+        """Refuses a configuration with a value of the wrong type, or a field the service needs left blank.
 
         Args:
             config: The values supplied for the schema.
 
         Raises:
-            ValueError: If a field the schema marks required is blank, naming each.
+            ValueError: If a value is not of the type its field declares, or a
+                field the schema marks required is blank, naming each.
         """
+        require_typed(config, self.schema.get("properties", {}))
         blank = [
             self.schema["properties"][key]["title"]
             for key in self.schema.get("required", [])
