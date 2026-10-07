@@ -1456,6 +1456,34 @@ async def test_elegoo_centauri_reconnects_after_failure(monkeypatch) -> None:
     await adapter.close()
 
 
+async def test_elegoo_centauri_reconnects_with_the_id_of_the_printer_now_at_the_address(monkeypatch) -> None:
+    """pycentauri keeps an id it is given, so the last printer's id left a replacement at its address unanswered."""
+    adapter = ElegooAdapter()
+
+    class FailingCentauri(FakeCentauri):
+        async def status(self) -> Any:
+            raise RuntimeError("connection lost")
+
+    discovered = ["first-id", "second-id", None]
+    seeded: list[str | None] = []
+
+    async def discover_mainboard_id(host: str) -> str | None:
+        return discovered.pop(0)
+
+    async def connect_auto(host: str, **kwargs: Any) -> FakeCentauri:
+        seeded.append(kwargs["mainboard_id"])
+        client = FailingCentauri()
+        client.mainboard_id = kwargs["mainboard_id"]
+        return client
+
+    monkeypatch.setattr(adapter, "_discover_mainboard_id", discover_mainboard_id)
+    monkeypatch.setattr("pycentauri.connect_auto", connect_auto)
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match="connection lost"):
+            await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    assert seeded == ["first-id", "second-id", "second-id"], "a printer discovery does not reach keeps the id it last had"
+
+
 async def test_elegoo_moonraker_reuses_klipper_protocol() -> None:
     body = {
         "result": {

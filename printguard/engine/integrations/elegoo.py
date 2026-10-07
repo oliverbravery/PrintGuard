@@ -229,6 +229,13 @@ class ElegooAdapter(IntegrationAdapter):
             raise
 
     async def _connect_centauri(self, config: dict[str, Any]) -> Any:
+        """Returns the printer's connection, opening one when there is none or it has closed.
+
+        The mainboard id a discovery answers with is used before the one the
+        last connection had, which pycentauri would keep for a different
+        printer now at the address. The last one is for a printer discovery
+        does not reach, which gives none of its own while paused.
+        """
         key = self.connection_key(config)
         printer = self._connections.get(key)
         if printer is not None and not printer._closed:
@@ -239,7 +246,7 @@ class ElegooAdapter(IntegrationAdapter):
                 return printer
             if printer is not None and printer.mainboard_id:
                 self._mainboard_ids[key[0]] = printer.mainboard_id
-            mainboard_id = self._mainboard_ids.get(key[0]) or await self._discover_mainboard_id(key[0])
+            mainboard_id = await self._discover_mainboard_id(key[0]) or self._mainboard_ids.get(key[0])
             printer = await self._open_centauri(key, mainboard_id)
             self._connections[key] = printer
             return printer
