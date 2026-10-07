@@ -109,6 +109,16 @@ test("an imported plugin README draws only the pictures it carries", async ({ pa
   expect([...html.matchAll(/src="([^"]*)"/g)].map((match) => match[1])).toEqual(["data:image/png;base64,AAAA"]);
 });
 
+test("a README picture named after an Object property is not a carried one", async ({ page }) => {
+  const names = ["constructor", "toString", "__proto__", "hasOwnProperty"];
+  const markdown = names.map((name) => `![x](${name})`).join(" ");
+  const carried = { sources: { "shot.png": "data:image/png;base64,AAAA" }, imagePrefixes: [] };
+  const withMedia = await rendered(page, markdown, { ...carried, skip: ["shot.png"] });
+  const withoutMedia = await rendered(page, markdown, { sources: {}, imagePrefixes: [] });
+  expect(withMedia.html).not.toContain("<img");
+  expect(withoutMedia.html).not.toContain("<img");
+});
+
 test("release notes open their relative links on GitHub at that release", async ({ page }) => {
   const release = {
     version: "2.5.1",

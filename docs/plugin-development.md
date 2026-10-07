@@ -62,7 +62,8 @@ plugin.render((ctx) => ({
 ```
 
 Zip the folder and install it with **Import a .zip** in the Plugins tab in Settings, then
-enable it. While you work, point PrintGuard at your repo instead and press **Update** as you
+enable it. The zip holds one `plugin.json` with the plugin's files beside it, at the root or in
+the one folder that holds it. A second `plugin.json` or a file listed twice is refused. While you work, point PrintGuard at your repo instead and press **Update** as you
 push.
 
 ## The manifest
@@ -224,9 +225,12 @@ A pattern on this machine or the network around it needs `net:local` as well as 
 any address that is not a public one, `localhost`, or a name ending `.local`, `.lan`,
 `.home`, `.home.arpa`, `.internal` or `.localhost`. A wildcard host counts, since it covers
 both, and so does a wildcard over one of those suffixes, such as `*.local`. An address in any
-spelling a browser takes counts too, such as `127.1` or `2130706433`. When a request leaves,
-PrintGuard resolves the name and checks the address it resolves to, so a public name pointing
-somewhere private is caught.
+spelling a browser takes counts too, such as `127.1` or `2130706433`, and so does an IPv4 address
+written inside an IPv6 one, such as `[64:ff9b::c0a8:101]`. Without `net:local`, PrintGuard
+resolves a name once when a request or socket connects, refuses it if any address it resolves to
+is on this network and connects to an address it checked, so a public name pointing somewhere
+private gets nowhere, however often its answer changes. That connection never goes through a
+proxy named in the environment.
 
 ## The three halves
 
@@ -434,7 +438,7 @@ manifest's `events` names it. `tick` is the exception. It is the worker's own ti
 | `alert` | A defect held long enough to act on | `monitor_id`, `score`, `action`, `ts` | `state:read` |
 | `warning` | A watchdog condition, and its recovery | `monitor_id`, `message`, `recovered` | `state:read` |
 | `device` | A printer's status changed | `printer_id`, `status`, `progress`, `job`, `remaining_s`, `nozzle`, `bed` | `state:read` |
-| `error` | Anything that failed | `message` | `state:read` |
+| `error` | Anything the hub itself failed at, such as a missed alert. A command's failure is not passed on, since it can quote what its sender chose | `message` | `state:read` |
 | `state` | The full snapshot, once a second. `plugin.js` and `panel.html` also hear the one a command ends with | Everything your permissions allow | `state:read` |
 | `tick` | Your worker's own timer | Nothing | A `tick_s` |
 
@@ -556,8 +560,12 @@ service finally answers on.
 
 A body over 256 KB fails the request, whether it is JSON, text or `binary`. The size is counted
 after decompression and before base64. PrintGuard asks for gzip or nothing, and an answer in any
-other encoding fails the same way. Nothing is cut short, so no `http` event arrives. The error names the host and shows in the
+other encoding fails the same way. Nothing is cut short, so no `http` event arrives. The error shows in the
 dashboard that sent the request, so one from a worker goes to the log and not the dashboard.
+
+An error from a request, a socket or a link to another plugin never repeats an address, a header or
+a name your plugin sent, since every plugin holding `state:read` hears it. A failed request says
+what kind of failure it was, such as `ConnectTimeout`, and the log has the rest.
 
 ### Sockets
 
@@ -630,7 +638,8 @@ filled in.
 
 For a service with a sign-in, declare `oauth` and PrintGuard runs the authorisation code flow
 with PKCE and no client secret. The access token arrives as `{{secret.oauth}}` and is refreshed
-before it expires. When the provider refuses the refresh token the plugin is signed out, so
+before it expires. It is the only part of a sign-in a request can refer to, so `{{secret.oauth_refresh}}`
+and `{{secret.oauth_client_id}}` are refused. When the provider refuses the refresh token the plugin is signed out, so
 `pg.secrets` stops listing `oauth` and its requests fail until the user signs in again.
 
 ```json
@@ -649,11 +658,14 @@ app shared by everyone who installs the plugin, which is what providers hand out
 against. Whoever installs it [registers their own](plugins.md#credentials), and PrintGuard shows
 them the redirect URI to give the provider and links `register_url`.
 
-`authorize_url` and `token_url` are each one `https` address with no wildcards. An
-`authorize_url` may carry a query of its own, which is kept. A `token_url`
+`authorize_url` and `token_url` are each one `https` address with no wildcards and a plain host,
+which leaves out a login, a backslash and a percent-encoded or non-ASCII host, since a browser and
+the hub read those differently. An `authorize_url` may carry a query of its own, which is kept. A `token_url`
 on this machine or the network around it needs `net:local`. The consent dialog lists both
 addresses, and an update that changes either one signs its users out and has to be accepted
-again.
+again. A sign-in left open while an update changes `token_url`, or takes the permission away, is
+refused when the user comes back. A token endpoint that can't be reached, or answers with more than
+64 KB, fails the sign-in with a page saying so.
 
 ## Talking to other plugins
 
@@ -775,7 +787,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | Node text | `label` 80 characters, `action` 60, `placeholder` 60 |
 | `select` options | 60 |
 | `panel.html` height | 900px |
-| `ctx.http` | 60 requests a minute per plugin, 10 seconds each. A refused request gets no `http` event |
+| `ctx.http` | 60 requests a minute per plugin, counting each socket it opens, 10 seconds each. A refused request gets no `http` event, and only a request that goes out counts towards the 60 |
 | `ctx.http` answer | 256 KB once decompressed, whatever its type. A larger one fails the request and no `http` event arrives |
 | Sockets | 4 open per plugin, 64 KB per text frame sent, 256 KB per frame received, 10 seconds to open |
 | Sandbox start | 8 seconds for `plugin.js` or `panel.html` to load |

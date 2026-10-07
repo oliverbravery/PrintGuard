@@ -100,8 +100,8 @@ for the hub:
 | `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list |
 | `open_camera(id, source)` | A `FrameSource`, once it has given a frame, which it gets `OPEN_WAIT_S` for, 25 s. MediaMTX pulls every URL that is not plain HTTP, so RTSP, RTMP and WHEP, and PyAV reads HTTP MJPEG and capture devices directly. A `path` source reads a stream already on MediaMTX, and a `bambu` source the A1 and P1 chamber camera. A stream FFmpeg can demux but has no decoder for, such as an SVG, fails with `no decoder for this stream`, and an address MediaMTX refuses with `PrintGuard can't use that address`. An error names the address as the user wrote it, with credentials removed |
 | `release_camera(id, source)` | Closes the source and removes its MediaMTX pull path. A reader that is stuck inside a device read cannot be stopped, so `open_camera` refuses to start another for that camera while it lasts |
-| `http(...)` | httpx. A printer's or a notifier's request refuses any redirect and names where it points, a plugin's gets the redirect back as the answer, and any other follows it, though one that would replay the request under another method, such as a POST answered with 301 or 302, raises. So does a body over `max_bytes`, which a plugin's request, a plugin install, the catalogue and the update check pass, counted as it is decompressed, and an answer to one of those in any encoding but gzip |
-| `open_socket(url, arrived)` | A `Socket`, a `websockets` client connection held for a plugin, which refuses a redirect |
+| `http(...)` | httpx. A printer's or a notifier's request refuses any redirect and names where it points, a plugin's gets the redirect back as the answer, and any other follows it, though one that would replay the request under another method, such as a POST answered with 301 or 302, raises. So does a body over `max_bytes`, which a plugin's request, a plugin install, the catalogue and the update check pass, counted as it is decompressed, and an answer to one of those in any encoding but gzip. A request with `public_only`, which a plugin without `net:local` and a sign-in's token endpoint pass, goes through a client that resolves the name once when it connects and connects to an address it checked, and `open_socket` does the same ([`server/public_network.py`](../printguard/server/public_network.py)) |
+| `open_socket(url, arrived, public_only)` | A `Socket`, a `websockets` client connection held for a plugin, which refuses a redirect |
 | `encode_jpeg(rgb)` / `decode_jpeg(data)` | PyAV. `encode_jpeg` logs a warning and returns `None` when a frame cannot be encoded, and `decode_jpeg` refuses an image over `CLASSIFY_MAX_PIXELS`, 50 megapixels, or one with no decoder |
 | `load_state()` / `save_state(state)` | `data/state.json`, written atomically and readable only by its owner. `save_state` returns at once: the state is serialised on the caller's thread and written and synced on a writer thread, where a save made while one waits replaces it, and `close()` writes the last one. A write that fails is a `Notice`, once per outage. A file that will not parse, or parses to something the engine never saves, such as a top-level list or a section of the wrong type, is kept as `state.json.corrupt` and the hub starts empty, and a later one as `.corrupt.1` up to `.4`. One the hub may not read or move aside stops it with the data directory and its owner named |
 
@@ -137,7 +137,6 @@ built on a vendor's client library open their own connections:
 | [`integrations/elegoo.py`](../printguard/engine/integrations/elegoo.py) | pycentauri, which holds its own connection, a DNS lookup and a temporary file for an upload |
 | [`integrations/prusa.py`](../printguard/engine/integrations/prusa.py) | pyprusalink with its own httpx client |
 | [`notifiers/native.py`](../printguard/engine/notifiers/native.py) | desktop-notifier and a temporary snapshot file |
-| [`urls.py`](../printguard/engine/urls.py) | A DNS lookup, to tell whether a plugin's URL lands on a private address |
 | [`logs.py`](../printguard/engine/logs.py) | The rotating log file |
 
 The tests cover those adapters by monkeypatching their private seams, such as Bambu's
@@ -834,6 +833,7 @@ printguard/
   server/            hub platform: FastAPI, bundled MediaMTX (child process), LiteRT / ONNX Runtime, PyAV
     app.py           the FastAPI app: engine socket, publish socket, HLS proxy, plugin routes and gate
     platform.py      the hub's Platform: capture, MediaMTX, httpx, the state file and the file store
+    public_network.py the connection a plugin without net:local gets, which resolves a name once, checks every address and connects to one that passed
     inference.py     LiteRT and ONNX Runtime selection and the worker benchmark
     events.py        the per-socket queue that conflates state and result events
     publish.py       pushes browser recordings, MJPEG sources, capture devices and the Bambu chamber camera into MediaMTX over RTSP, a live view from a thread of its own

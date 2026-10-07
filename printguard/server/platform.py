@@ -21,6 +21,7 @@ from functools import partial
 from importlib import metadata
 from pathlib import Path
 from typing import Any, AsyncIterable, Callable
+from urllib.parse import urlsplit
 
 import av
 import httpx
@@ -36,6 +37,7 @@ from .events import parse_json, require_finite
 from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
 from .plugins import WasmPluginRuntime
+from .public_network import PublicOnlyTransport, connect_to_public
 from .publish import H264Push
 from .state_file import StateFile, prepare_data_directory
 
@@ -587,13 +589,13 @@ async def _read_within(resp: httpx.Response, max_bytes: int) -> bytes:
     """
     encoding = resp.headers.get("Content-Encoding", "identity").lower()
     if encoding not in ("gzip", "identity"):
-        raise RuntimeError(f"{resp.url.host} answered in {encoding}, which was not asked for")
+        raise RuntimeError("the answer is in an encoding that was not asked for")
     inflate = zlib.decompressobj(zlib.MAX_WBITS | 16) if encoding == "gzip" else None
     body = bytearray()
     async for chunk in resp.aiter_raw():
         body += inflate.decompress(chunk, max_bytes + 1 - len(body)) if inflate else chunk
         if len(body) > max_bytes:
-            raise RuntimeError(f"{resp.url.host} answered with more than {max_bytes // 1024} KB")
+            raise RuntimeError(f"the answer is larger than {max_bytes // 1024} KB")
     return bytes(body)
 
 
@@ -732,6 +734,7 @@ class ServerPlatform:
         protos = json.loads((model_dir / "prototypes.json").read_text())["prototypes"]
         self.assets = vision.assets_from_dicts(meta, protos)
         self._client = httpx.AsyncClient(follow_redirects=True)
+        self._public_client = httpx.AsyncClient(transport=PublicOnlyTransport())
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client, mediamtx_login)
         self.secrets = frozenset(url_secrets(mediamtx_api) | url_secrets(mediamtx_rtsp) | set(mediamtx_login or ()))
         self._sources: dict[str, AVSource] = {}
@@ -770,9 +773,10 @@ class ServerPlatform:
         )
 
     async def close(self) -> None:
-        """Writes any state still queued, then releases the HTTP client and the inference workers once a runtime is up."""
+        """Writes any state still queued, then releases the HTTP clients and the inference workers once a runtime is up."""
         await asyncio.to_thread(self._state_file.flush)
         await self._client.aclose()
+        await self._public_client.aclose()
         if self._inference is not None:
             self._inference.close()
 
@@ -934,13 +938,18 @@ class ServerPlatform:
         timeout: float = 10.0,
         redirects: Redirects = "follow",
         max_bytes: int | None = None,
+        public_only: bool = False,
     ) -> tuple[int, Any]:
         """Performs an HTTP request with httpx, base64 encoding a binary reply.
 
         A capped request asks for gzip or nothing and is inflated here as it
         arrives, since httpx inflates a whole chunk before anyone can count it.
+        A ``public_only`` request goes through a client that resolves and checks
+        the name when it connects, and ignores any proxy in the environment.
 
         Raises:
+            PermissionError: If ``public_only`` is set and the host is on this
+                network.
             RuntimeError: If ``redirects`` is ``"refuse"`` and the server
                 redirects, or a followed redirect made httpx replay the request
                 under another method, as it does a POST answered with 301 or
@@ -950,7 +959,8 @@ class ServerPlatform:
         if max_bytes is not None:
             headers = httpx.Headers(headers)
             headers["Accept-Encoding"] = "gzip"
-        async with self._client.stream(
+        client = self._public_client if public_only else self._client
+        async with client.stream(
             method, url, headers=headers, json=json, content=data, timeout=timeout, follow_redirects=redirects == "follow"
         ) as resp:
             if redirects == "refuse" and resp.is_redirect:
@@ -963,14 +973,27 @@ class ServerPlatform:
             content = await resp.aread() if max_bytes is None else await _read_within(resp, max_bytes)
         return resp.status_code, _parsed(content, resp.encoding, binary)
 
-    async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> WebSocket:
+    async def open_socket(self, url: str, arrived: Callable[[str, str], None], public_only: bool = False) -> WebSocket:
         """Connects a WebSocket and reads it on a task of its own.
 
+        A ``public_only`` connection is made to an address checked as
+        ``http`` checks it, and not through a proxy named in the environment.
+
         Raises:
+            PermissionError: If ``public_only`` is set and the host is on this
+                network.
             websockets.InvalidStatus: If the server answers with anything but
                 the upgrade, a redirect included.
         """
-        connection = await ConnectWithoutRedirects(url, open_timeout=SOCKET_TIMEOUT_S, max_size=SOCKET_MAX_BYTES)
+        options: dict[str, Any] = {"open_timeout": SOCKET_TIMEOUT_S, "max_size": SOCKET_MAX_BYTES}
+        if public_only:
+            target = urlsplit(url)
+            port = target.port or (443 if target.scheme == "wss" else 80)
+            connection = await connect_to_public(
+                target.hostname or "", port, lambda address: ConnectWithoutRedirects(url, host=address, port=port, proxy=None, **options)
+            )
+        else:
+            connection = await ConnectWithoutRedirects(url, **options)
         socket = WebSocket(connection)
         socket.read(arrived)
         return socket

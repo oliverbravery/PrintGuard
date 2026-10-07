@@ -7,6 +7,7 @@ import base64
 import gzip
 import io
 import json
+import socket
 import zipfile
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -16,9 +17,11 @@ import httpx
 import pytest
 from fakes import FakePlatform, FakeSocket, redirected_socket
 
-from printguard.engine import oauth, plugins, sockets
+from printguard.engine import engine as engine_module
+from printguard.engine import oauth, plugins, sockets, urls
 from printguard.engine.engine import MAX_PLUGIN_BODY, Engine
 from printguard.server.platform import ServerPlatform
+from printguard.server.public_network import PublicOnlyTransport
 
 API = "https://93.184.216.34"
 ROUTER = "https://192.168.1.1"
@@ -60,6 +63,15 @@ async def engine_with(platform: FakePlatform, declared: dict, granted: list[str]
         await engine.stop()
 
 
+async def install(engine: Engine, declared: dict) -> None:
+    """Installs a zip over the demo plugin."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("plugin.json", json.dumps(declared))
+        archive.writestr("plugin.js", "plugin.render(() => null);")
+    await engine.request({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": base64.b64encode(buffer.getvalue()).decode()})
+
+
 async def start_sign_in(engine: Engine, origin: str = "http://hub.example.com:8000") -> dict[str, list[str]]:
     """Starts the demo plugin's sign-in and returns the query the provider would get."""
     await engine.request({"cmd": "plugin.secrets", "id": "demo", "secrets": {oauth.CLIENT_ID: "my-client"}})
@@ -78,7 +90,8 @@ def over_httpx(platform: FakePlatform, handler) -> None:
         answer = handler(request)
         return httpx.Response(answer.status_code, headers=answer.headers, stream=answer.stream)
 
-    hub = SimpleNamespace(_client=httpx.AsyncClient(follow_redirects=True, transport=httpx.MockTransport(streamed)))
+    client = httpx.AsyncClient(follow_redirects=True, transport=httpx.MockTransport(streamed))
+    hub = SimpleNamespace(_client=client, _public_client=client)
     platform.http = lambda method, url, **kwargs: ServerPlatform.http(hub, method, url, **kwargs)
 
 
@@ -119,7 +132,7 @@ async def test_an_answer_over_the_cap_fails_the_request_whatever_it_holds(kind: 
     platform = FakePlatform()
     over_httpx(platform, serve)
     async with engine_with(platform, manifest("net", urls=[f"{API}/v1/*"])) as engine:
-        with pytest.raises(RuntimeError, match=f"93.184.216.34 answered with more than {MAX_PLUGIN_BODY // 1024} KB"):
+        with pytest.raises(RuntimeError, match=f"the answer is larger than {MAX_PLUGIN_BODY // 1024} KB"):
             await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/feed", "binary": kind.endswith("stream")})
 
 
@@ -169,7 +182,7 @@ async def test_a_compressed_answer_is_refused_while_it_inflates() -> None:
         _client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, headers={"Content-Encoding": "gzip"}, stream=Counted())))
     )
 
-    with pytest.raises(RuntimeError, match="answered with more than 256 KB"):
+    with pytest.raises(RuntimeError, match="the answer is larger than 256 KB"):
         await ServerPlatform.http(hub, "GET", f"{API}/v1/feed", max_bytes=MAX_PLUGIN_BODY)
     assert len(handed_over) == 1, "the answer was read on after it had passed the cap"
     assert (await ServerPlatform.http(hub, "GET", f"{API}/v1/feed", binary=True))[1] == base64.b64encode(bytes(48 * 1024 * 1024)).decode(), (
@@ -183,16 +196,16 @@ async def test_an_answer_in_an_encoding_nobody_asked_for_is_refused_rather_than_
         _client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, headers={"Content-Encoding": encoding}, stream=httpx.ByteStream(b"\x1b\x03"))))
     )
 
-    with pytest.raises(RuntimeError, match=f"93.184.216.34 answered in {encoding}, which was not asked for"):
+    with pytest.raises(RuntimeError, match="the answer is in an encoding that was not asked for"):
         await ServerPlatform.http(hub, "GET", f"{API}/v1/feed", max_bytes=MAX_PLUGIN_BODY)
 
 
 async def test_a_socket_redirected_off_its_declared_address_is_refused() -> None:
     platform = FakePlatform()
-    platform.open_socket = lambda url, arrived: ServerPlatform.open_socket(None, url, arrived)
+    platform.open_socket = lambda url, arrived, public_only=False: ServerPlatform.open_socket(None, url, arrived, public_only)
     async with redirected_socket() as (declared, reached):
         async with engine_with(platform, manifest("net", "net:local", urls=[f"{declared}/*"])) as engine:
-            with pytest.raises(RuntimeError, match="HTTP 302"):
+            with pytest.raises(RuntimeError, match="InvalidStatus"):
                 await engine.request({"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "hop", "url": f"{declared}/feed"})
             with pytest.raises(RuntimeError):
                 await engine.request({"cmd": "plugin.socket", "id": "demo", "action": "send", "tag": "hop", "text": '{"cmd":"token.create"}'})
@@ -208,7 +221,8 @@ async def test_a_sign_in_never_follows_a_redirect_from_the_token_endpoint() -> N
         await engine.finish_sign_in(state, "code-1")
 
     exchange = next(r for r in platform.http_requests if r["url"] == f"{API}/token")
-    assert exchange["follow_redirects"] is False
+    assert exchange["redirects"] == "answer", "the token endpoint was followed"
+    assert exchange["max_bytes"] == oauth.MAX_TOKEN_RESPONSE_BYTES and exchange["public_only"] is True
 
 
 async def test_a_secret_cannot_move_a_request_off_the_address_that_was_checked() -> None:
@@ -235,6 +249,12 @@ async def test_the_address_is_checked_again_with_its_secrets_filled_in() -> None
             await engine.request({"cmd": "plugin.http", "id": "demo", "url": API + "/v1/{{secret.key}}/files"})
 
     assert platform.http_calls == [] and "admin" not in str(refusal.value), "the refusal read the secret back to the plugin"
+
+
+def test_an_error_that_answers_a_command_is_never_handed_to_a_plugin() -> None:
+    """A command's error quotes what its sender chose, with each stored credential in it redacted."""
+    assert plugins.project_event({"event": "error", "message": "no monitor [redacted]", "req_id": "r1"}, ["state:read"]) is None
+    assert plugins.project_event({"event": "error", "message": "ntfy notification failed"}, ["state:read"]) is not None
 
 
 def test_scores_printer_status_and_errors_need_the_grant_that_reads_the_dashboard() -> None:
@@ -366,9 +386,9 @@ class SlowPlatform(FakePlatform):
         super().__init__()
         self.connect = asyncio.Event()
 
-    async def open_socket(self, url: str, arrived) -> FakeSocket:
+    async def open_socket(self, url: str, arrived, public_only: bool = False) -> FakeSocket:
         await self.connect.wait()
-        return await super().open_socket(url, arrived)
+        return await super().open_socket(url, arrived, public_only)
 
 
 async def test_sockets_opening_at_once_count_towards_the_cap_and_share_a_tag() -> None:
@@ -507,3 +527,272 @@ async def test_a_plugin_that_fails_is_handed_back_to_its_runtime_without_it() ->
         await asyncio.sleep(0.05)
 
     assert reloads[-1] == []
+
+
+TOKEN_PAGE = {"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600}
+
+
+async def test_a_sign_in_and_a_refresh_go_through_the_hub_http_method() -> None:
+    """The fake platform once took any keyword, so a renamed parameter broke every sign-in on a real hub."""
+    forms: list[dict[str, list[str]]] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/token":
+            return httpx.Response(200, json={})
+        forms.append(parse_qs(request.content.decode()))
+        return httpx.Response(200, json=TOKEN_PAGE if forms[-1]["grant_type"] == ["authorization_code"] else {"access_token": "at-2", "expires_in": 3600})
+
+    platform = FakePlatform()
+    over_httpx(platform, serve)
+    async with engine_with(platform, SIGNS_IN) as engine:
+        assert await engine.finish_sign_in((await start_sign_in(engine))["state"][0], "code-1") == "demo"
+        plugin = engine.plugins.get("demo")
+        assert plugin.secrets[oauth.ACCESS] == "at-1" and plugin.secrets[oauth.REFRESH] == "rt-1"
+
+        plugin.secrets[oauth.EXPIRES] = "0"
+        await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "headers": {"Authorization": "Bearer {{secret.oauth}}"}})
+
+    assert [form["grant_type"] for form in forms] == [["authorization_code"], ["refresh_token"]]
+    assert plugin.secrets[oauth.ACCESS] == "at-2" and plugin.secrets[oauth.REFRESH] == "rt-1"
+
+
+def failing(error: Exception):
+    def serve(request: httpx.Request) -> httpx.Response:
+        raise error
+
+    return serve
+
+
+@pytest.mark.parametrize(
+    ("answer", "complaint"),
+    [
+        (failing(httpx.ConnectTimeout("timed out")), r"Example sign-in failed \(ConnectTimeout\)"),
+        (failing(httpx.ConnectError("refused")), r"Example sign-in failed \(ConnectError\)"),
+        (lambda request: httpx.Response(200, content=b'{"access_token": "' + b"a" * oauth.MAX_TOKEN_RESPONSE_BYTES + b'"}'), "the answer is larger than 64 KB"),
+        (lambda request: httpx.Response(302, headers={"Location": "https://elsewhere.example/token"}), r"refused the sign-in \(302\)"),
+    ],
+)
+async def test_a_token_endpoint_that_fails_or_overruns_is_a_failed_sign_in(answer, complaint: str) -> None:
+    """The callback answers a RuntimeError with the reason and anything else with a bare 500."""
+    platform = FakePlatform()
+    over_httpx(platform, answer)
+    async with engine_with(platform, SIGNS_IN) as engine:
+        with pytest.raises(RuntimeError, match=complaint):
+            await engine.finish_sign_in((await start_sign_in(engine))["state"][0], "code-1")
+
+        assert oauth.ACCESS not in engine.plugins.get("demo").secrets
+
+
+async def test_a_name_that_resolves_to_this_network_gets_no_request_from_a_plugin_without_the_grant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The name is looked up again to connect, and a resolver the plugin's author runs answers differently the second time."""
+    received: list[bytes] = []
+
+    async def serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        received.append(await reader.readuntil(b"\r\n\r\n"))
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nsecret")
+        await writer.drain()
+        writer.close()
+
+    lookups: list[str] = []
+    real = socket.getaddrinfo
+
+    def getaddrinfo(host, port, *args, **kwargs):
+        host = host.decode() if isinstance(host, bytes) else host
+        if not host.endswith(".attacker.example"):
+            return real(host, port, *args, **kwargs)
+        lookups.append(host)
+        answers = ["93.184.216.34", "127.0.0.1"] if len(lookups) == 1 else ["127.0.0.1"]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port)) for address in answers]
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    platform = FakePlatform()
+    hub = SimpleNamespace(_client=httpx.AsyncClient(), _public_client=httpx.AsyncClient(transport=PublicOnlyTransport()))
+    platform.http = lambda method, url, **kwargs: ServerPlatform.http(hub, method, url, **kwargs)
+    async with await asyncio.start_server(serve, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        async with engine_with(platform, manifest("net", urls=[f"http://*.attacker.example:{port}/*"])) as engine:
+            for _ in range(3):
+                with pytest.raises(RuntimeError, match="may not reach this network"):
+                    await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"http://page.attacker.example:{port}/admin"})
+
+    assert received == [], "a plugin without Reach your own network read a page on this machine"
+
+
+SECRET = "hunter2pass"
+
+
+def probes(candidate: str) -> list[dict]:
+    """Every command a plugin sends, with the plugin's own text put in each field it may choose."""
+    return [
+        {"cmd": "plugin.http", "url": f"https://{candidate}.attacker.example/x"},
+        {"cmd": "plugin.http", "url": f"{API}:{candidate}/v1/x"},
+        {"cmd": "plugin.http", "url": f"{API}/v1/x", "headers": {"X": f"{{{{secret.{candidate}}}}}"}},
+        {"cmd": "plugin.http", "url": f"{API}/v1/x", "headers": {"X": "{{secret.oauth_refresh}}"}},
+        {"cmd": "plugin.http", "url": f"{API}/v1/echo", "headers": {"X": candidate}},
+        {"cmd": "plugin.http", "url": f"{{{{secret.{candidate}}}}}.example/v1/x"},
+        {"cmd": "plugin.socket", "action": "send", "tag": candidate, "text": "x"},
+        {"cmd": "plugin.socket", "action": "open", "tag": "t", "url": f"wss://{candidate}.attacker.example/"},
+        {"cmd": "plugin.socket", "action": "open", "tag": candidate, "url": "wss://93.184.216.34/echo"},
+        {"cmd": "plugin.call", "to": candidate, "channel": candidate},
+        {"cmd": "plugin.call", "to": "other", "channel": "feed", "tag": candidate},
+        {"cmd": "plugin.publish", "channel": candidate},
+        {"cmd": "plugin.answer", "call_id": candidate},
+        {"cmd": "plugin.effect", "effect": {"kind": candidate}},
+    ]
+
+
+class EchoingPlatform(FakePlatform):
+    """Fails the way a library does, with the address or header it was handed in the message."""
+
+    async def http(self, method, url, **kwargs):
+        if url.endswith("/echo"):
+            raise httpx.LocalProtocolError(f"Illegal header value {kwargs['headers']!r}")
+        return await super().http(method, url, **kwargs)
+
+    async def open_socket(self, url, arrived, public_only=False):
+        if url.endswith("/echo"):
+            raise ValueError(f"invalid frame from {url}")
+        return await super().open_socket(url, arrived, public_only)
+
+
+@pytest.mark.parametrize("candidate", [SECRET, "plainword"])
+async def test_no_plugin_command_answers_with_text_the_plugin_chose(candidate: str) -> None:
+    """Every error reaches plugins holding state:read with each stored credential replaced, so an echo is a way to test guesses against them."""
+    declared = manifest(
+        "net", "link:provide", "link:consume", "notify",
+        urls=[f"{API}/v1/*", "wss://93.184.216.34/*"], secrets={"key": "A key"}, provides={"feed": "what it knows"}, consumes=["other:feed"],
+    )
+    platform = EchoingPlatform()
+    async with engine_with(platform, declared) as engine:
+        await engine.request({"cmd": "plugin.secrets", "id": "demo", "secrets": {"key": SECRET}})
+        heard: list[str] = []
+        engine.add_sink(lambda event: heard.append(event["message"]) if event["event"] == "error" else None)
+        for probe in probes(candidate):
+            with pytest.raises(Exception) as refusal:
+                await engine.request({**probe, "id": "demo"})
+            assert candidate not in str(refusal.value) and "[redacted]" not in str(refusal.value), f"{probe['cmd']} answered {refusal.value}"
+        engine.plugin_failed("demo", f"Error: {candidate}")
+
+    assert len(heard) >= len(probes(candidate)) + 1
+    assert not [message for message in heard if candidate in message or "[redacted]" in message]
+
+
+async def test_a_plugin_held_at_its_rate_limit_is_let_through_once_its_earlier_requests_age_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refused attempts used to count, so a plugin polling faster than its limit was shut out for good."""
+    monkeypatch.setattr(engine_module, "PLUGIN_RATE_LIMIT", 3)
+    monkeypatch.setattr(engine_module, "PLUGIN_RATE_WINDOW_S", 1.0)
+    async with engine_with(FakePlatform(), manifest("net", urls=[f"{API}/v1/*"])) as engine:
+        outcomes = []
+        for _ in range(25):
+            try:
+                await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now"})
+                outcomes.append(True)
+            except RuntimeError as refusal:
+                assert "faster than 3 a minute" in str(refusal)
+                outcomes.append(False)
+            await asyncio.sleep(0.1)
+
+    assert outcomes[:3] == [True] * 3 and outcomes[3] is False
+    assert True in outcomes[4:], "a plugin that kept asking was never let through again"
+
+
+async def test_a_plugin_opening_sockets_counts_against_the_same_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(engine_module, "PLUGIN_RATE_LIMIT", 3)
+    platform = FakePlatform()
+    async with engine_with(platform, manifest("net", urls=["wss://93.184.216.34/*"])) as engine:
+        feed = {"cmd": "plugin.socket", "id": "demo", "tag": "feed", "url": "wss://93.184.216.34/feed"}
+        for _ in range(3):
+            await engine.request({**feed, "action": "open"})
+            await engine.request({**feed, "action": "close"})
+        with pytest.raises(RuntimeError, match="faster than 3 a minute"):
+            await engine.request({**feed, "action": "open"})
+
+    assert len(platform.sockets) == 3
+
+
+async def test_a_sign_in_to_an_endpoint_the_manifest_has_since_changed_sends_the_code_nowhere() -> None:
+    platform = FakePlatform()
+    platform.responses[f"{API}/token"] = (200, TOKEN_PAGE)
+    async with engine_with(platform, SIGNS_IN) as engine:
+        state = (await start_sign_in(engine))["state"][0]
+        moved = {**SIGNS_IN, "oauth": {**SIGNS_IN["oauth"], "token_url": "https://203.0.113.9/token"}}
+        await install(engine, moved)
+        await engine.request({"cmd": "plugin.secrets", "id": "demo", "secrets": {oauth.CLIENT_ID: "my-client"}})
+        await engine.request({"cmd": "plugin.update", "id": "demo", "patch": {"granted": moved["permissions"], "enabled": True}})
+
+        with pytest.raises(PermissionError, match="signs in somewhere new"):
+            await engine.finish_sign_in(state, "code-1")
+
+    assert not [call for call in platform.http_calls if call[0] == "POST"], "the code went to an endpoint the user never accepted"
+
+
+async def test_a_sign_in_cannot_finish_once_the_plugin_may_no_longer_connect_an_account() -> None:
+    platform = FakePlatform()
+    platform.responses[f"{API}/token"] = (200, TOKEN_PAGE)
+    async with engine_with(platform, SIGNS_IN) as engine:
+        state = (await start_sign_in(engine))["state"][0]
+        await engine.request({"cmd": "plugin.update", "id": "demo", "patch": {"granted": ["net"]}})
+
+        with pytest.raises(PermissionError, match="may not connect an account"):
+            await engine.finish_sign_in(state, "code-1")
+
+    assert not [call for call in platform.http_calls if call[0] == "POST"]
+
+
+@pytest.mark.parametrize("name", ["oauth_refresh", "oauth_expires", "oauth_client_id"])
+async def test_a_request_carries_the_access_token_and_nothing_else_of_a_sign_in(name: str) -> None:
+    platform = FakePlatform()
+    platform.responses[f"{API}/token"] = (200, TOKEN_PAGE)
+    async with engine_with(platform, SIGNS_IN) as engine:
+        await engine.finish_sign_in((await start_sign_in(engine))["state"][0], "code-1")
+        platform.http_requests.clear()
+        await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "headers": {"A": "Bearer {{secret.oauth}}"}})
+        with pytest.raises(RuntimeError, match="refers to a secret it does not hold"):
+            await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "headers": {"A": f"{{{{secret.{name}}}}}"}})
+
+    assert [r["headers"] for r in platform.http_requests] == [{"A": "Bearer at-1"}]
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://accounts.spotify.com\\@evil.example/api/token",
+        "https://accounts.spotify.com%2eevil.example/api/token",
+        "https://user@accounts.spotify.com/api/token",
+        "https://accounts.spotify.com:443@evil.example/api/token",
+        "https://accounts.spotify.com\t.evil.example/api/token",
+        "https://accounts.spotify.com:99999/api/token",
+        "https://ａccounts.example/api/token",
+    ],
+)
+def test_a_sign_in_endpoint_names_the_same_host_to_python_and_a_browser(endpoint: str) -> None:
+    good = "https://auth.example.com/authorize"
+    for block in ({"authorize_url": good, "token_url": endpoint}, {"authorize_url": endpoint, "token_url": good}):
+        with pytest.raises(ValueError, match="plain host"):
+            plugins.sanitise_sign_in(block)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.example.com\\@evil.example/v1/x",
+        "https://api.example.com%2eevil.example/v1/x",
+        "https://api.example.com:443@evil.example/v1/x",
+        "https://api.example.com\t.evil.example/v1/x",
+        " https://api.example.com/v1/x",
+    ],
+)
+def test_a_request_address_that_two_parsers_read_differently_matches_no_pattern(url: str) -> None:
+    assert not urls.matches("https://api.example.com/*", url)
+    assert not urls.matches("https://*/*", url)
+
+
+@pytest.mark.parametrize(("permissions", "public_only"), [(["net"], True), (["net", "net:local"], False)])
+async def test_a_plugin_is_connected_to_public_addresses_only_unless_it_holds_net_local(permissions: list[str], public_only: bool) -> None:
+    platform = FakePlatform()
+    async with engine_with(platform, manifest(*permissions, urls=[f"{API}/*", "wss://93.184.216.34/*"])) as engine:
+        await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now"})
+        await engine.request({"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "feed", "url": "wss://93.184.216.34/feed"})
+
+    assert platform.http_requests[-1]["public_only"] is public_only
+    assert platform.sockets[0].public_only is public_only

@@ -35,10 +35,11 @@ export function renderMarkdown(
   if (dropTitle) box.content.querySelector("h1")?.remove();
   for (const image of box.content.querySelectorAll("img")) {
     const raw = image.getAttribute("src") ?? "";
-    const src = sources[raw] ?? resolved(raw, base);
+    const shipped = Object.hasOwn(sources, raw);
+    const src = (shipped ? sources[raw] : null) ?? resolved(raw, base);
     if (skip.includes(raw) || (src && skip.some((known) => src.endsWith(`/${known}`)))) {
       image.remove();
-    } else if (src && (raw in sources || !imagePrefixes || src.startsWith("data:") || imagePrefixes.some((prefix) => src.startsWith(prefix)))) {
+    } else if (src && (shipped || !imagePrefixes || src.startsWith("data:") || imagePrefixes.some((prefix) => src.startsWith(prefix)))) {
       image.setAttribute("src", src);
       image.setAttribute("loading", "lazy");
     } else {

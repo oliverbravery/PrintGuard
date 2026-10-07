@@ -38,6 +38,7 @@ from printguard.server.inference import (
     _measure_concurrency,
     _register_library,
 )
+from printguard.server.public_network import PublicOnlyTransport, connect_to_public
 from printguard.server.platform import (
     V4L2_CAP_DEVICE_CAPS,
     V4L2_CAP_VIDEO_CAPTURE,
@@ -672,6 +673,120 @@ async def test_a_plugin_socket_refuses_a_redirect_instead_of_following_it() -> N
             await ServerPlatform.open_socket(None, f"{declared}/feed", lambda state, text: None)
 
     assert reached == [], "the handshake went on to an address nobody checked"
+
+
+def answering_with(monkeypatch: pytest.MonkeyPatch, **names: list[str]) -> list[str]:
+    """Makes the resolver answer the names given, and records every name it was asked."""
+    asked: list[str] = []
+    real = socket.getaddrinfo
+
+    def getaddrinfo(host: str | bytes, port: int, *args: object, **kwargs: object):
+        host = host.decode() if isinstance(host, bytes) else host
+        asked.append(host)
+        if host in names:
+            return [(socket.AF_INET6 if ":" in address else socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port)) for address in names[host]]
+        return real(host, port, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    return asked
+
+
+async def local_server() -> tuple[asyncio.Server, list[bytes]]:
+    """A loopback HTTP server that answers every request and keeps what it was sent."""
+    received: list[bytes] = []
+
+    async def serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        received.append(await reader.readuntil(b"\r\n\r\n"))
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi")
+        await writer.drain()
+        writer.close()
+
+    return await asyncio.start_server(serve, "127.0.0.1", 0), received
+
+
+@pytest.mark.parametrize("answers", [["127.0.0.1"], ["93.184.216.34", "127.0.0.1"], ["127.0.0.1", "93.184.216.34"], ["10.0.0.5"], ["::1"], ["64:ff9b::c0a8:101"]])
+async def test_a_name_that_resolves_anywhere_on_this_network_is_refused_at_the_connection(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> None:
+    """A resolver the attacker runs answers a public address to the first lookup and loopback to the second."""
+    server, received = await local_server()
+    answering_with(monkeypatch, **{"rebind.example": answers})
+    port = server.sockets[0].getsockname()[1]
+    hub = SimpleNamespace(_public_client=httpx.AsyncClient(transport=PublicOnlyTransport()))
+    async with server:
+        with pytest.raises(PermissionError, match="on this network"):
+            await ServerPlatform.http(hub, "GET", f"http://rebind.example:{port}/admin", public_only=True)
+
+    assert received == [], "a request reached this machine through a name that resolves to it"
+
+
+async def test_a_literal_address_on_this_network_is_refused_at_the_connection() -> None:
+    server, received = await local_server()
+    port = server.sockets[0].getsockname()[1]
+    hub = SimpleNamespace(_public_client=httpx.AsyncClient(transport=PublicOnlyTransport()))
+    async with server:
+        with pytest.raises(PermissionError):
+            await ServerPlatform.http(hub, "GET", f"http://127.0.0.1:{port}/", public_only=True)
+
+    assert received == []
+
+
+async def test_a_name_is_resolved_once_and_the_connection_goes_to_what_was_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second lookup is what a rebinding resolver answers differently, so there is none."""
+    lookups: list[str] = []
+
+    def getaddrinfo(host: str, *args: object, **kwargs: object):
+        lookups.append(host)
+        address = "93.184.216.34" if len(lookups) == 1 else "127.0.0.1"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    connected: list[str] = []
+
+    async def connect(address: str) -> str:
+        connected.append(address)
+        return address
+
+    assert await connect_to_public("rebind.example", 443, connect) == "93.184.216.34"
+    assert connected == ["93.184.216.34"] and lookups == ["rebind.example"]
+
+
+async def test_a_name_that_will_not_connect_on_its_first_address_is_tried_on_the_next(monkeypatch: pytest.MonkeyPatch) -> None:
+    answering_with(monkeypatch, **{"dual.example": ["93.184.216.34", "93.184.216.35"]})
+
+    async def connect(address: str) -> str:
+        if address.endswith(".34"):
+            raise ConnectionRefusedError
+        return address
+
+    assert await connect_to_public("dual.example", 80, connect) == "93.184.216.35"
+
+
+async def test_a_request_without_the_public_only_limit_connects_to_the_resolved_address_and_names_the_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    server, received = await local_server()
+    answering_with(monkeypatch, **{"printer.example": ["127.0.0.1"]})
+    port = server.sockets[0].getsockname()[1]
+    async with server, httpx.AsyncClient() as client:
+        status, body = await ServerPlatform.http(SimpleNamespace(_client=client), "GET", f"http://printer.example:{port}/api")
+
+    assert (status, body) == (200, "hi")
+    assert f"Host: printer.example:{port}".encode() in received[0]
+
+
+async def test_a_plugin_socket_to_a_name_on_this_network_is_refused_at_the_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    reached: list[str] = []
+
+    async def hold(connection: websockets.ServerConnection) -> None:
+        reached.append(connection.request.headers["Host"])
+
+    answering_with(monkeypatch, **{"rebind.example": ["93.184.216.34", "127.0.0.1"], "printer.example": ["127.0.0.1"]})
+    async with websockets.serve(hold, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        with pytest.raises(PermissionError, match="on this network"):
+            await ServerPlatform.open_socket(None, f"ws://rebind.example:{port}/feed", lambda state, text: None, public_only=True)
+        assert reached == []
+
+        opened = await ServerPlatform.open_socket(None, f"ws://printer.example:{port}/feed", lambda state, text: None)
+        await opened.close()
+        assert reached == [f"printer.example:{port}"]
 
 
 def _capability(card: bytes, device_caps: int) -> bytes:

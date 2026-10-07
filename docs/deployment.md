@@ -246,7 +246,7 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | `printguard-feedback.oliverbravery.uk` | Only when you [send a print's frames](feedback.md) |
 | Your printers, cameras, notification services and MQTT broker | As you configure them |
 | Microsoft, through Windows ML | Only in the Windows desktop app on Windows 11 24H2 or newer, when the provider for your GPU isn't installed yet. Windows does the download, at the first start |
-| The addresses a plugin's manifest lists, and the service it signs you in to | Only for a plugin you granted [`net`, `net:local` or `oauth`](plugins.md#permissions). A redirect from one of them is not followed |
+| The addresses a plugin's manifest lists, and the service it signs you in to | Only for a plugin you granted [`net`, `net:local` or `oauth`](plugins.md#permissions). A redirect from one of them is not followed, and a plugin without `net:local` is never connected to an address on your network, however its name resolves |
 
 ## Environment variables
 

@@ -10,7 +10,6 @@ token is kept.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import logging
@@ -23,6 +22,7 @@ from urllib.parse import urlencode, urlsplit
 from . import urls
 from .adapters import HttpFn
 from .bounds import clamp
+from .platform import plain_failure
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +41,18 @@ which is what providers hand out quota and terms against. Whoever installs it
 registers their own and types it in, and it is held like any other credential.
 """
 
+WITHHELD = (REFRESH, EXPIRES, CLIENT_ID)
+"""What PrintGuard holds for a sign-in that no request may carry. A plugin
+references the access token and nothing else of it, so a second host it declares
+never receives the means to sign in again."""
+
 CALLBACK_PATH = "/oauth/callback"
 PENDING_TTL_S = 600.0
 REFRESH_MARGIN_S = 60.0
 DEFAULT_LIFETIME_S = 3600.0
 MAX_LIFETIME_S = 366 * 86400.0
+MAX_TOKEN_RESPONSE_BYTES = 64 * 1024
+TOKEN_TIMEOUT_S = 10.0
 
 
 class SignInRefused(RuntimeError):
@@ -68,6 +75,7 @@ class Pending:
     plugin_id: str
     verifier: str
     redirect_uri: str
+    token_url: str
     started: float = field(default_factory=time.monotonic)
 
 
@@ -99,7 +107,7 @@ class OAuthFlows:
         if hub.hostname == "localhost":
             hub = hub._replace(netloc=hub.netloc.replace("localhost", "127.0.0.1"))
         redirect_uri = f"{hub.geturl()}{CALLBACK_PATH}"
-        self._pending[state] = Pending(plugin_id, verifier, redirect_uri)
+        self._pending[state] = Pending(plugin_id, verifier, redirect_uri, provider["token_url"])
         query = {
             "response_type": "code",
             "client_id": provider["client_id"],
@@ -137,15 +145,19 @@ class OAuthFlows:
 
         Raises:
             PermissionError: If the state is unknown or has expired, which is
-                what stands in the way of a callback nobody asked for, or the
-                token endpoint is on this network and the plugin may not reach it.
-            RuntimeError: If the provider refused the exchange, or answered with
-                a lifetime that is not a number.
+                what stands in the way of a callback nobody asked for, the
+                manifest now signs in somewhere other than where the user was
+                sent, or the token endpoint is on this network and the plugin
+                may not reach it.
+            RuntimeError: If the provider refused the exchange, could not be
+                reached, or answered with a lifetime that is not a number.
         """
         self._forget_stale()
         pending = self._pending.pop(state, None)
         if pending is None:
             raise PermissionError("no sign-in is waiting for that answer")
+        if pending.token_url != provider["token_url"]:
+            raise PermissionError(f"{provider['label']} signs in somewhere new since you started, so start again")
         return await self._tokens(provider, {
             "grant_type": "authorization_code",
             "code": code,
@@ -178,23 +190,32 @@ class OAuthFlows:
         return {**held, **renewed}
 
     async def _tokens(self, provider: dict[str, Any], form: dict[str, str]) -> dict[str, str]:
-        if not provider["local"] and await asyncio.to_thread(urls.resolves_local, provider["token_url"]):
+        if not provider["local"] and urls.is_local_url(provider["token_url"]):
             raise PermissionError(f"{provider['label']} signs in on this network, which needs the net:local permission")
-        status, body = await self._http(
-            "POST",
-            provider["token_url"],
-            headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
-            data=urlencode(form).encode(),
-            follow_redirects=False,
-        )
+        try:
+            status, body = await self._http(
+                "POST",
+                provider["token_url"],
+                headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+                data=urlencode(form).encode(),
+                timeout=TOKEN_TIMEOUT_S,
+                redirects="answer",
+                max_bytes=MAX_TOKEN_RESPONSE_BYTES,
+                public_only=not provider["local"],
+            )
+        except PermissionError:
+            raise PermissionError(f"{provider['label']} signs in on this network, which needs the net:local permission") from None
+        except Exception as exc:
+            logger.warning("%s sign-in endpoint failed: %s", provider["label"], exc)
+            raise plain_failure(exc, f"{provider['label']} sign-in") from None
         if status in (400, 401):
             raise SignInRefused(f"{provider['label']} refused the sign-in ({status})")
         if status >= 400 or not isinstance(body, dict) or not body.get("access_token"):
             raise RuntimeError(f"{provider['label']} refused the sign-in ({status})")
         try:
             lifetime = clamp("expires_in", float(body.get("expires_in") or DEFAULT_LIFETIME_S), 0.0, MAX_LIFETIME_S)
-        except (TypeError, ValueError) as exc:
-            raise RuntimeError(f"{provider['label']} answered with a sign-in that cannot be read: {exc}") from exc
+        except (TypeError, ValueError):
+            raise RuntimeError(f"{provider['label']} answered with a sign-in that cannot be read") from None
         held = {ACCESS: str(body["access_token"]), EXPIRES: str(time.time() + lifetime)}
         if body.get("refresh_token"):
             held[REFRESH] = str(body["refresh_token"])

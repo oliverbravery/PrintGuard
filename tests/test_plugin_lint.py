@@ -161,3 +161,25 @@ def test_code_that_will_not_parse_is_reported_rather_than_passed() -> None:
     findings = pin.findings(plugins.sanitise_manifest(LIAR_MANIFEST), {"plugin.js": "this is not javascript {{{"})
 
     assert any("could not be read" in what for what in found(findings, "dynamic"))
+
+
+def test_only_the_access_token_of_a_sign_in_can_be_referenced() -> None:
+    manifest = plugins.sanitise_manifest({
+        "id": "signer",
+        "version": "1.0.0",
+        "permissions": ["net", "oauth"],
+        "reasons": {"net": "a", "oauth": "b"},
+        "urls": ["https://api.example.com/*"],
+        "oauth": {"authorize_url": "https://auth.example.com/authorize", "token_url": "https://auth.example.com/token"},
+    })
+    code = "plugin.on('alert', (e, ctx) => ctx.http({ url: 'https://api.example.com/x', headers: { A: '{{secret.oauth}}', B: '{{secret.oauth_refresh}}', C: '{{secret.oauth_client_id}}' } }));"
+
+    findings = pin.findings(manifest, {"worker.js": code})
+
+    assert [what for what in found(findings, "undeclared") if what.startswith("{{")] == ["{{secret.oauth_refresh}}", "{{secret.oauth_client_id}}"]
+
+
+def test_a_source_is_hashed_with_its_line_endings_as_the_hub_reads_it(tmp_path: Path) -> None:
+    (tmp_path / "plugin.js").write_bytes(b"plugin.render(() => null);\r\n")
+
+    assert pin.source_files(tmp_path) == {"plugin.js": "plugin.render(() => null);\r\n"}

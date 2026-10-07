@@ -12,7 +12,7 @@ const LOCAL_V6 = [
   "::1/128", "::/128", "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32", "2002::/16", "3fff::/20", "fc00::/7", "fe80::/10",
 ].map(prefix);
 const GLOBAL_V6 = ["2001:1::1/128", "2001:1::2/128", "2001:3::/32", "2001:4:112::/48", "2001:20::/28", "2001:30::/28"].map(prefix);
-const MAPPED_V4 = prefix("::ffff:0:0/96");
+const EMBEDDING_V4 = ["::/96", "::ffff:0:0/96", "::ffff:0:0:0/96", "64:ff9b::/96"].map(prefix);
 
 const PATTERN = new RegExp(
   `^(\\*|${SCHEMES.join("|")})://` +
@@ -104,7 +104,7 @@ function literalAddress(host: string): string | null {
 export function isLocalAddress(host: string): boolean {
   const address = literalAddress(host);
   if (address === null) return LOCAL_HOSTNAMES.includes(host) || LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix));
-  if (address.length === 128 && !address.startsWith(MAPPED_V4)) return within(address, LOCAL_V6) && !within(address, GLOBAL_V6);
+  if (address.length === 128 && !within(address, EMBEDDING_V4)) return within(address, LOCAL_V6) && !within(address, GLOBAL_V6);
   return within(address.slice(-32), LOCAL_V4) && !within(address.slice(-32), GLOBAL_V4);
 }
 
@@ -113,7 +113,7 @@ export function reachesLocal(pattern: string): boolean {
   return rule !== null && (rule.host === "*" || isLocalAddress(rule.host.replace(/^\*\./, "any.")));
 }
 
-function webUrl(raw: string): string | null {
+export function webUrl(raw: string): string | null {
   try {
     const url = new URL(String(raw));
     return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;

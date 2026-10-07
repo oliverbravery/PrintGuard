@@ -53,7 +53,7 @@ The Plugins tab in Settings lists what you have installed and what the catalogue
 |---|---|
 | The catalogue | Open a plugin's page for its screenshots, README and the permissions it will ask for, then install from there |
 | A GitHub repository | Paste `owner/repo`, or `owner/repo/path@branch` for one inside a larger repo. A full `https://github.com/owner/repo` URL works too, and so does `@tag` or `@sha` in place of a branch |
-| A file | Import a `.zip` of the plugin's folder, up to 12 MB |
+| A file | Import a `.zip` of the plugin's folder, up to 12 MB, holding one `plugin.json` and the files beside it |
 
 An install or update from a repository fails with GitHub's status if a plugin file can't be read,
 and only a 404 means the plugin has no such file.
@@ -110,6 +110,11 @@ out.
 | A zip over the zip it replaces | Stored data and credentials carry across when it asks for nothing more, and the permissions are asked again |
 | Anywhere else | Start from scratch |
 
+A plugin saved before 2.6.0 that lists an address on your own network without **Reach your own
+network** stays installed with its data and credentials, off, and the hub warns at start that it now needs
+that permission. Accept it on the plugin's page to turn it back on. One whose sign-in is plain
+`http` is removed at start, since that sign-in can't be read any more, and the warning names it.
+
 ## Permissions
 
 | Permission | Lets the plugin |
@@ -122,7 +127,7 @@ out.
 | `notify` | Raise a message in the dashboard |
 | `alert:send` | Send through whichever of your ntfy, Pushover, Telegram, Discord and desktop notification channels are set up |
 | `net` | Reach the addresses its manifest lists |
-| `net:local` | Reach addresses on this machine and the network around it, which covers private addresses, `localhost`, names ending `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost`, and a wildcard over one of those such as `*.local` |
+| `net:local` | Reach addresses on this machine and the network around it, which covers private addresses, `localhost`, names ending `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost`, a wildcard over one of those such as `*.local`, and an IPv4 address written inside an IPv6 one |
 | `monitor:manage` | Add monitors and delete them |
 | `camera:control` | Rename any camera and change its brightness, contrast, sharpness, crop, rotation and frame rate |
 | `camera:manage` | Register cameras and delete them, and scan for ones not yet registered |
@@ -174,7 +179,7 @@ time, so a plugin that sends its frame elsewhere is stopped with "sandbox naviga
 
 | Attack | What stops it |
 |---|---|
-| Take your credentials somewhere | Neither sandbox has sockets. The browser files' policy is `connect-src 'none'` and lets no script load from an address, WebRTC is removed from their frames, and the hub file has no WASI network and no filesystem. The only request out is one through PrintGuard, to addresses the plugin declared, apart from the three permissions listed under the table. A redirect is never followed, by a request or by a WebSocket. [What a browser still allows](#what-a-browser-still-allows) is below |
+| Take your credentials somewhere | Neither sandbox has sockets. The browser files' policy is `connect-src 'none'` and lets no script load from an address, WebRTC is removed from their frames, and the hub file has no WASI network and no filesystem. The only request out is one through PrintGuard, to addresses the plugin declared, apart from the three permissions listed under the table. A redirect is never followed, by a request or by a WebSocket, and without **Reach your own network** a name is resolved once and only connected to if every address it resolves to is a public one. [What a browser still allows](#what-a-browser-still-allows) is below |
 | Read your credentials at all | State is cut down to the fields a permission names. Printer configuration, notifier settings, MQTT credentials and API tokens are in no permission. The exceptions are `routes` and `gate`, which see the cookie and authorisation headers of the requests they answer |
 | Read your camera frames | A camera in a plugin's panel is a placeholder PrintGuard fills with its own player, and the video never enters the sandbox. Reading the picture itself is `camera:frames`, which is its own thing to agree to, and a plugin's own pages are refused the live stream |
 | Hang or exhaust the hub | The worker runs each call against a memory cap and a CPU budget, and a call that waits more than 5 seconds to start is dropped. A plugin that fails, or answers with anything but its data and a list of effects, is disabled and reported |

@@ -31,6 +31,11 @@ PATTERN = re.compile(
     r"(?P<path>/[^\s]*)$"
 )
 
+EMBEDDING_IPV4 = tuple(ipaddress.ip_network(network) for network in ("::/96", "::ffff:0:0/96", "::ffff:0:0:0/96", "64:ff9b::/96"))
+"""The IPv6 ranges that carry an IPv4 address in their last 32 bits, which a network may deliver as that address."""
+
+PLAIN_URL = re.compile(r"^[a-z][a-z0-9+.-]*://(?:[a-z0-9.-]+|\[[0-9a-f:]+\])(?::(?P<port>\d{1,5}))?(?:[/?#]|$)", re.IGNORECASE)
+
 LOCAL_HOSTNAMES = ("localhost",)
 LOCAL_SUFFIXES = (".local", ".localhost", ".internal", ".home", ".lan", ".home.arpa")
 """Names that resolve inside a network by convention rather than by address."""
@@ -98,6 +103,25 @@ def _matches_path(pattern: str, path: str) -> bool:
     return True
 
 
+def is_plain(url: str) -> bool:
+    """Whether a URL names one host to Python, an HTTP client and a browser alike.
+
+    A backslash is a slash to a browser and part of a login to Python, so
+    ``https://good.example\\@evil.example/`` is two different hosts. The same
+    goes for a percent-encoded host, non-ASCII, a space or a control character
+    in it.
+
+    Args:
+        url: The address as it would be requested.
+
+    Returns:
+        True when its authority is a plain host and an optional port, with no
+        userinfo.
+    """
+    match = PLAIN_URL.match(url)
+    return match is not None and int(match["port"] or 0) < 65536
+
+
 def _climbs(path: str) -> bool:
     """Whether a path has a ``.`` or ``..`` segment, written out or percent-encoded.
 
@@ -123,7 +147,9 @@ def matches(pattern: str, url: str) -> bool:
     rule = parse(pattern)
     if rule is None:
         return False
-    parsed = urlsplit(url.strip())
+    if not is_plain(url):
+        return False
+    parsed = urlsplit(url)
     scheme, host = parsed.scheme.lower(), (parsed.hostname or "").lower()
     if not host or scheme not in (WILDCARD_SCHEMES if rule["scheme"] == "*" else (rule["scheme"],)):
         return False
@@ -155,7 +181,8 @@ def is_local_address(host: str) -> bool:
             address = ipaddress.ip_address(socket.inet_aton(host))
         except OSError:
             return host in LOCAL_HOSTNAMES or host.endswith(LOCAL_SUFFIXES)
-    address = getattr(address, "ipv4_mapped", None) or address
+    if address.version == 6 and any(address in network for network in EMBEDDING_IPV4):
+        address = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
     return not address.is_global or address.is_private or address.is_loopback
 
 
@@ -169,27 +196,14 @@ def reaches_local(pattern: str) -> bool:
     return rule is not None and (rule["host"] == "*" or is_local_address(rule["host"].replace("*.", "any.", 1)))
 
 
-def resolves_local(url: str) -> bool:
-    """Whether a URL's host resolves to an address on this network.
+def is_local_url(url: str) -> bool:
+    """Whether a URL's host is written as an address or a name that is on this network.
 
-    A literal address needs no lookup. Otherwise the name is resolved and every
-    answer checked, since a public name can point somewhere private. A name that
-    will not resolve is not local.
-
-    The name could be re-resolved between this check and the connection, which no
-    allowlist closes, so this decides which permission a request needs. It is not
-    the only thing in its way.
+    A name that merely resolves to one is for the connection to catch, since the
+    answer can change between a lookup here and the one that connects.
     """
-    host = (urlsplit(url.strip()).hostname or "").lower()
-    if not host:
-        return True
-    if is_local_address(host):
-        return True
-    try:
-        answers = socket.getaddrinfo(host, None)
-    except OSError:
-        return False
-    return any(is_local_address(answer[4][0]) for answer in answers)
+    host = (urlsplit(url).hostname or "").lower()
+    return not host or is_local_address(host)
 
 
 def phrase(pattern: str) -> str:

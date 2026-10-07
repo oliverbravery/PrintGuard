@@ -7,6 +7,7 @@ import { ConsentDialog, PermissionList } from "./PluginConsent";
 import { PluginSecrets } from "./PluginSecrets";
 import { useSettingsFooter } from "./SettingsFooter";
 import { Toggle } from "./Toggle";
+import { webUrl } from "../urls";
 
 const REPO_HINT = "owner/repo, or owner/repo/path@branch";
 const MAX_ZIP_BYTES = 12 * 1024 * 1024;
@@ -379,6 +380,33 @@ function bareManifest(entry: CatalogueEntry): PluginManifest {
   };
 }
 
+const listOfText = (value: unknown) => (Array.isArray(value) && value.every((item) => typeof item === "string") ? (value as string[]) : undefined);
+
+const mapOfText = (value: unknown) =>
+  typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every((item) => typeof item === "string")
+    ? (value as Record<string, string>)
+    : undefined;
+
+function readableSignIn(value: unknown): PluginManifest["oauth"] | undefined {
+  const block = (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
+  const addresses = [block.authorize_url, block.token_url];
+  if (!addresses.every((url) => typeof url === "string" && webUrl(url) !== null) || typeof block.label !== "string") return undefined;
+  return { authorize_url: block.authorize_url as string, token_url: block.token_url as string, register_url: "", scopes: [], label: block.label };
+}
+
+function readableManifest(entry: CatalogueEntry, raw: Record<string, unknown>): PluginManifest {
+  const bare = bareManifest(entry);
+  return {
+    ...bare,
+    permissions: listOfText(raw.permissions) ?? bare.permissions,
+    reasons: mapOfText(raw.reasons) ?? bare.reasons,
+    urls: listOfText(raw.urls) ?? bare.urls,
+    provides: mapOfText(raw.provides) ?? bare.provides,
+    consumes: listOfText(raw.consumes) ?? bare.consumes,
+    oauth: readableSignIn(raw.oauth) ?? bare.oauth,
+  };
+}
+
 function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; installed: boolean; onBack: () => void }) {
   const [readme, setReadme] = useState<string | null | undefined>(undefined);
   const [manifest, setManifest] = useState<PluginManifest>(bareManifest(entry));
@@ -397,7 +425,7 @@ function StoreDetail({ entry, installed, onBack }: { entry: CatalogueEntry; inst
     grab("plugin.json")
       .then(async (answer) => {
         const raw = answer ? await answer.json() : null;
-        if (raw) setManifest({ ...bareManifest(entry), ...raw });
+        if (raw && typeof raw === "object") setManifest(readableManifest(entry, raw));
       })
       .catch(() => {});
     return () => stop.abort();
