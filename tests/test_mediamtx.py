@@ -77,6 +77,39 @@ async def test_control_api_calls_carry_the_login() -> None:
     assert [request.headers["authorization"] for request in requests] == [expected] * 3
 
 
+@pytest.mark.parametrize(
+    ("base", "login", "url"),
+    [
+        ("rtsp://localhost:8554", None, "rtsp://localhost:8554/cam"),
+        ("rtsp://localhost:8554/", ("printguard", "s3-cr_et"), "rtsp://printguard:s3-cr_et@localhost:8554/cam"),
+        ("rtsp://old:login@mediamtx:8554", ("printguard", "s3-cr_et"), "rtsp://printguard:s3-cr_et@mediamtx:8554/cam"),
+    ],
+)
+def test_the_stream_the_hub_reads_frames_from_carries_the_login_the_server_asks_readers_for(
+    base: str, login: tuple[str, str] | None, url: str
+) -> None:
+    assert MediaMTX("http://mediamtx", base, httpx.AsyncClient(), login).rtsp_url("cam") == url
+
+
+async def test_a_path_the_hub_never_added_is_not_asked_for_again_on_removal() -> None:
+    """MediaMTX logs an error for each path it is told to delete and does not have, as on every direct camera at shutdown."""
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        mediamtx = MediaMTX("http://mediamtx", "rtsp://mediamtx", client)
+        await mediamtx.remove_path("direct")
+        await mediamtx.ensure_path("pulled", "rtsp://camera/live")
+        requests.clear()
+        await mediamtx.remove_path("pulled")
+        await mediamtx.remove_path("pulled")
+
+    assert [(request.method, request.url.path) for request in requests] == [("DELETE", "/v3/config/paths/delete/pulled")]
+
+
 async def test_an_existing_path_is_patched() -> None:
     requests: list[httpx.Request] = []
 
@@ -233,12 +266,13 @@ async def test_a_server_ended_by_a_signal_while_the_hub_runs_on_is_still_restart
     assert "MediaMTX exited (code -15); restarting" in logged
 
 
-def test_the_shipped_config_grants_the_control_api_to_nobody() -> None:
+def test_the_shipped_config_grants_the_control_api_and_reading_to_nobody() -> None:
     """A web page in a browser on the same computer can reach the loopback listeners.
 
     The control API reads camera URLs with their passwords and can add a path
-    that runs a command, so nobody may hold it until the hub adds its own login,
-    and neither listener may answer a page from another origin.
+    that runs a command, and a rebinding page could read a feed from the HLS
+    muxer, so nobody may hold either until the hub adds its own login, and
+    neither listener may answer a page from another origin.
     """
     config = SHIPPED_CONFIG.read_text()
     users = config.split("authInternalUsers:\n")[1].split("\n\n")[0]
@@ -247,10 +281,9 @@ def test_the_shipped_config_grants_the_control_api_to_nobody() -> None:
         "  - user: any\n"
         "    permissions:\n"
         "      - action: publish\n"
-        "      - action: read\n"
         "      - action: playback"
     )
-    assert "action: api" not in config
+    assert "action: api" not in config and "action: read" not in config
     assert "\napiAllowOrigins: []\n" in config
     assert "\nhlsAllowOrigins: []\n" in config
 
@@ -277,6 +310,7 @@ async def test_the_bundled_server_is_handed_the_api_login_in_its_environment(tmp
         "MTX_AUTHINTERNALUSERS_1_USER": "printguard",
         "MTX_AUTHINTERNALUSERS_1_PASS": "secret",
         "MTX_AUTHINTERNALUSERS_1_PERMISSIONS_0_ACTION": "api",
+        "MTX_AUTHINTERNALUSERS_1_PERMISSIONS_1_ACTION": "read",
     }
 
 

@@ -75,6 +75,15 @@ async def test_a_login_in_the_video_servers_addresses_is_one_the_engine_scrubs(t
     assert {"pg", "API-PASS-31", "hub", "RTSP-PASS-77"} <= platform.secrets
 
 
+async def test_the_login_the_bundled_server_is_given_is_one_the_engine_scrubs(tmp_path: Path) -> None:
+    """Frames are read from an RTSP address that carries it, and an error from the reader can quote that."""
+    platform = ServerPlatform(Path("models"), tmp_path, "http://mediamtx:9997", "rtsp://mediamtx:8554", None, ("printguard", "per-launch-pass"))
+    await platform.close()
+
+    assert {"printguard", "per-launch-pass"} <= platform.secrets
+    assert platform.mediamtx.rtsp_url("cam") == "rtsp://printguard:per-launch-pass@mediamtx:8554/cam"
+
+
 async def test_runtimes_agree_on_classification() -> None:
     """Both runtimes carry the same model, so they must classify a frame the same way.
 

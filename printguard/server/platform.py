@@ -733,7 +733,7 @@ class ServerPlatform:
         self.assets = vision.assets_from_dicts(meta, protos)
         self._client = httpx.AsyncClient(follow_redirects=True)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client, mediamtx_login)
-        self.secrets = frozenset(url_secrets(mediamtx_api) | url_secrets(mediamtx_rtsp))
+        self.secrets = frozenset(url_secrets(mediamtx_api) | url_secrets(mediamtx_rtsp) | set(mediamtx_login or ()))
         self._sources: dict[str, AVSource] = {}
         self._closing: dict[str, AVSource] = {}
         self._notices: list[Notice] = []
@@ -905,6 +905,7 @@ class ServerPlatform:
         The path is removed for every URL camera without asking how its address
         would be opened today: a printer can change its webcam to one that can
         no longer be pulled, and the path was added for the address before.
+        ``remove_path`` knows whether it ever added one.
         """
         av_source = self._sources.pop(camera_id, None)
         if av_source:

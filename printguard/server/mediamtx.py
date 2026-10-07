@@ -28,7 +28,7 @@ SIGNALLED_GRACE_S = 5.0
 """How long a server that was ended by SIGINT or SIGTERM is given before it is
 treated as a failure: a Ctrl+C or a stop sent to the hub's process group reaches
 the server first, ahead of the hub saying it is stopping."""
-API_USER_ENV = "MTX_AUTHINTERNALUSERS_1"
+HUB_USER_ENV = "MTX_AUTHINTERNALUSERS_1"
 
 
 def pull_source(url: str) -> str | None:
@@ -61,17 +61,19 @@ class MediaMTX:
             api_base: Where its control API listens.
             rtsp_base: Where its RTSP listener is.
             client: The HTTP client the API calls go through.
-            login: The user and password its control API asks for. The bundled
-                server only answers the one this hub started it with.
+            login: The user and password its control API and readers ask for.
+                The bundled server only answers the one this hub started it with.
         """
         self._api = api_base.rstrip("/")
-        self._rtsp = rtsp_base.rstrip("/")
+        rtsp = urlsplit(rtsp_base)
+        host = rtsp.netloc.rpartition("@")[2]
+        self._rtsp = urlunsplit(rtsp._replace(netloc=f"{':'.join(login)}@{host}" if login else rtsp.netloc)).rstrip("/")
         self._client = client
         self._login = login
         self._pulled: dict[str, dict[str, Any]] = {}
 
     def rtsp_url(self, path: str) -> str:
-        """Internal RTSP URL the server reads frames from."""
+        """Internal RTSP URL the server reads frames from, with the login a bundled server asks readers for."""
         return f"{self._rtsp}/{path}"
 
     async def list_paths(self) -> list[str]:
@@ -127,8 +129,13 @@ class MediaMTX:
         resp.raise_for_status()
 
     async def remove_path(self, name: str) -> None:
-        """Deletes a managed path, ignoring paths that no longer exist."""
-        self._pulled.pop(name, None)
+        """Deletes a path this hub added, and does nothing for any other name.
+
+        The server logs an error for a path it does not have, and a camera it
+        reads directly never had one.
+        """
+        if self._pulled.pop(name, None) is None:
+            return
         await self._client.delete(f"{self._api}/v3/config/paths/delete/{name}", auth=self._login, timeout=5.0)
 
     async def restore_paths(self) -> None:
@@ -159,9 +166,11 @@ class EmbeddedMediaMTX:
 
     The control API can read every camera's source URL and add a path that runs
     a command, and on the desktop app it listens on the computer's own loopback,
-    where any web page in a browser can reach it. The shipped config grants the
-    API to nobody, so the one login that can use it is handed to the server in
-    its environment and never written to disk.
+    where any web page in a browser can reach it, as can the HLS muxer a page
+    could read a feed from. The shipped config grants the API and reading to
+    nobody, so the one login that can use them is handed to the server in its
+    environment and never written to disk. Publishing stays open, since cameras
+    push to the hub.
     """
 
     def __init__(
@@ -178,7 +187,7 @@ class EmbeddedMediaMTX:
             binary: The MediaMTX executable.
             config: The config file it starts with.
             api_base: Where its control API will listen.
-            api_login: The user and password to grant the control API to.
+            api_login: The user and password to grant the control API and reading to.
             restarted: Awaited each time a server started in place of one that
                 exited is accepting connections.
         """
@@ -188,9 +197,10 @@ class EmbeddedMediaMTX:
         user, password = api_login
         self._env = {
             **os.environ,
-            f"{API_USER_ENV}_USER": user,
-            f"{API_USER_ENV}_PASS": password,
-            f"{API_USER_ENV}_PERMISSIONS_0_ACTION": "api",
+            f"{HUB_USER_ENV}_USER": user,
+            f"{HUB_USER_ENV}_PASS": password,
+            f"{HUB_USER_ENV}_PERMISSIONS_0_ACTION": "api",
+            f"{HUB_USER_ENV}_PERMISSIONS_1_ACTION": "read",
         }
         self._restarted = restarted
         self._process: asyncio.subprocess.Process | None = None
