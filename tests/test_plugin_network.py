@@ -680,10 +680,10 @@ async def test_no_plugin_command_answers_with_text_the_plugin_chose(candidate: s
 async def test_a_plugin_held_at_its_rate_limit_is_let_through_once_its_earlier_requests_age_out(monkeypatch: pytest.MonkeyPatch) -> None:
     """Refused attempts used to count, so a plugin polling faster than its limit was shut out for good."""
     monkeypatch.setattr(engine_module, "PLUGIN_RATE_LIMIT", 3)
-    monkeypatch.setattr(engine_module, "PLUGIN_RATE_WINDOW_S", 0.5)
+    monkeypatch.setattr(engine_module, "PLUGIN_RATE_WINDOW_S", 1.0)
     async with engine_with(FakePlatform(), manifest("net", urls=[f"{API}/v1/*"])) as engine:
         outcomes = []
-        for _ in range(20):
+        for _ in range(25):
             try:
                 await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now"})
                 outcomes.append(True)
@@ -785,3 +785,14 @@ def test_a_sign_in_endpoint_names_the_same_host_to_python_and_a_browser(endpoint
 def test_a_request_address_that_two_parsers_read_differently_matches_no_pattern(url: str) -> None:
     assert not urls.matches("https://api.example.com/*", url)
     assert not urls.matches("https://*/*", url)
+
+
+@pytest.mark.parametrize(("permissions", "public_only"), [(["net"], True), (["net", "net:local"], False)])
+async def test_a_plugin_is_connected_to_public_addresses_only_unless_it_holds_net_local(permissions: list[str], public_only: bool) -> None:
+    platform = FakePlatform()
+    async with engine_with(platform, manifest(*permissions, urls=[f"{API}/*", "wss://93.184.216.34/*"])) as engine:
+        await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now"})
+        await engine.request({"cmd": "plugin.socket", "id": "demo", "action": "open", "tag": "feed", "url": "wss://93.184.216.34/feed"})
+
+    assert platform.http_requests[-1]["public_only"] is public_only
+    assert platform.sockets[0].public_only is public_only
