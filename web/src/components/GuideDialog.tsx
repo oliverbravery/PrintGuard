@@ -1,4 +1,4 @@
-import { GUIDE, type GuideSection } from "../guide";
+import { GUIDE, SHOT_SIZES, type GuideSection } from "../guide";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
 import { NewTab } from "./NewTab";
@@ -10,6 +10,7 @@ export function GuideEntry({ section, lead, fill }: { section: GuideSection; lea
   const openDialog = useStore((s) => s.openDialog);
   const openSettings = useStore((s) => s.openSettings);
   const { action } = section;
+  const [shotWidth, shotHeight] = section.shot ? SHOT_SIZES[section.shot] : [];
   return (
     <section className={`reveal ${fill ? "flex h-full min-h-0 flex-col" : ""}`}>
       <div className="mb-1.5 flex shrink-0 items-center gap-2.5">
@@ -21,8 +22,8 @@ export function GuideEntry({ section, lead, fill }: { section: GuideSection; lea
       <p className={`shrink-0 leading-relaxed text-text-1 ${lead ? "text-sm" : "text-[0.84rem]"}`}>{section.body}</p>
       {section.shot && (
         <figure className={`shot ${fill ? "shot-fill" : ""}`}>
-          <img className="shot-dark" src={`guide/${section.shot}-dark.jpg`} alt="" loading="lazy" />
-          <img className="shot-light" src={`guide/${section.shot}-light.jpg`} alt="" loading="lazy" />
+          <img className="shot-dark" src={`guide/${section.shot}-dark.jpg`} alt="" loading="lazy" width={shotWidth} height={shotHeight} />
+          <img className="shot-light" src={`guide/${section.shot}-light.jpg`} alt="" loading="lazy" width={shotWidth} height={shotHeight} />
         </figure>
       )}
       {section.visual && <div className="mt-3">{section.visual}</div>}

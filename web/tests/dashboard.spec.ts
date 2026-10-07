@@ -1595,6 +1595,14 @@ test("a guide action opens the settings tab it names, and no dash or arrow glyph
   }
 });
 
+test("the guide holds the space for a picture before it has loaded, so nothing moves under a press", async ({ page }) => {
+  await page.route("**/guide/*.jpg", () => {});
+  await dashboard(page, { dialog: "guide" });
+  const heights = await page.getByRole("dialog").locator("figure").evaluateAll((figures) => figures.map((figure) => figure.clientHeight));
+  expect(Math.min(...heights)).toBeGreaterThan(40);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 test("each getting started step has its own button name", async ({ page }) => {
   await dashboard(page, { engine: engine({ cameras: [], monitors: [] }) });
   for (const step of ["Register a camera", "Frame the print", "Connect a printer", "Set up alerts", "Add a monitor"]) {

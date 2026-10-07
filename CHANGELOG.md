@@ -532,6 +532,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   it.
 - Glass is tinted for the background picture on show when a plugin changes or clears it quickly.
 - Saving or deleting a custom theme no longer flashes the old theme.
+- The guide holds the space for each picture, so it no longer jumps as they load.
 - Setting the nozzle target no longer locks the bed target while the printer answers.
 - The update dialog loads its changelog once the hub is back if it was opened while reconnecting.
 - The history chart shows the date at each end when it spans more than a day, and a single minute

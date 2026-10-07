@@ -7,12 +7,25 @@ const REPO = "https://github.com/oliverbravery/PrintGuard";
 const docs = (page: string) => `${REPO}/blob/main/docs/${page}`;
 const link = "text-accent underline hover:opacity-80";
 
+export const SHOT_SIZES = {
+  alert: [860, 758],
+  alerts: [980, 1420],
+  cameras: [868, 146],
+  checklist: [1192, 1172],
+  customise: [860, 768],
+  plugins: [980, 1284],
+  printers: [1024, 576],
+  prints: [1344, 1472],
+  standby: [860, 278],
+  tuning: [938, 904],
+} as const;
+
 export interface GuideSection {
   id: string;
   led: string;
   title: string;
   body: ReactNode;
-  shot?: string;
+  shot?: keyof typeof SHOT_SIZES;
   visual?: ReactNode;
   action?: { label: string; dialog: DialogKind; tab?: SettingsTabId };
 }
