@@ -24,7 +24,9 @@ Printer-side setup (LAN Only Mode, Developer Mode): https://wiki.bambulab.com/en
 Protocol reference: https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md
 TLS and command shapes mirror the bambulabs_api client:
 https://github.com/acse-ci223/bambulabs_api/blob/main/bambulabs_api/mqtt_client.py
-Connection handling, the silence limit and the H2 file URL mirror ha-bambulab:
+Connection handling and the silence limit mirror ha-bambulab, which also hands
+the H2 series its file as an FTP URL and lists the X1, P1 and A1 series as the
+ones that take a path on the SD card:
 https://github.com/greghesp/ha-bambulab/tree/main/custom_components/bambu_lab
 """
 
@@ -79,7 +81,8 @@ _HEATER_GCODE = {"nozzle": "M104", "bed": "M140"}
 
 _PUSHALL = {"pushing": {"sequence_id": "0", "command": "pushall", "version": 1, "push_target": 1}}
 _GET_VERSION = {"info": {"sequence_id": "0", "command": "get_version"}}
-_FTP_URL_PRODUCTS = {"Bambu Lab H2C", "Bambu Lab H2D", "Bambu Lab H2S"}
+_SDCARD_URL_SERIES = ("Bambu Lab X1", "Bambu Lab P1", "Bambu Lab A1")
+"""The models handed a file as a path on the SD card. Every later one is handed an FTP URL."""
 _PROJECT_FILE = {
     "sequence_id": "0",
     "command": "project_file",
@@ -212,24 +215,29 @@ class _Session:
         self._full.clear()
 
     def _on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
+        """Reads a report, ignoring one that is not the shape a printer sends.
+
+        paho raises what a callback raises on its network thread, which ends
+        the thread and leaves the connection looking live with nothing read.
+        """
         try:
             payload = json.loads(message.payload)
-        except ValueError:
+            self._heard_at = time.monotonic()
+            for body in payload.values():
+                if not isinstance(body, dict):
+                    continue
+                command = body.get("command")
+                if command == "push_status":
+                    self._report.update(body)
+                    if "gcode_state" in self._report:
+                        self._full.set()
+                elif command == "get_version":
+                    self._product = next((m["product_name"] for m in body.get("module") or [] if m.get("product_name")), "")
+                    self._versioned.set()
+                elif echoes := self._echoes.get((command, body.get("sequence_id"))):
+                    echoes.put(body)
+        except (ValueError, TypeError, AttributeError):
             return
-        self._heard_at = time.monotonic()
-        for body in payload.values():
-            if not isinstance(body, dict):
-                continue
-            command = body.get("command")
-            if command == "push_status":
-                self._report.update(body)
-                if "gcode_state" in self._report:
-                    self._full.set()
-            elif command == "get_version":
-                self._product = next((m["product_name"] for m in body.get("module") or [] if m.get("product_name")), "")
-                self._versioned.set()
-            elif echoes := self._echoes.get((command, body.get("sequence_id"))):
-                echoes.put(body)
 
 
 class BambuAdapter(IntegrationAdapter):
@@ -313,8 +321,9 @@ class BambuAdapter(IntegrationAdapter):
         The print carries the settings sliced into the file. Bed levelling is
         left on and the flow and vibration calibrations off, and the filament
         comes from the external spool, since a file says nothing about the AMS
-        it was sliced against. The H2 series is handed the file as an FTP URL
-        and every other model as a path on the SD card. The upload has no
+        it was sliced against. The X1, P1 and A1 series, and a printer that
+        does not name its model, are handed the file as a path on the SD card
+        and every other model as an FTP URL. The upload has no
         deadline of its own, since a large file to a slow printer takes as
         long as it takes and each step of it times out on its socket.
         """
@@ -325,7 +334,7 @@ class BambuAdapter(IntegrationAdapter):
             "print": {
                 **_PROJECT_FILE,
                 "param": plate,
-                "url": f"ftp:///{filename}" if product in _FTP_URL_PRODUCTS else f"file:///sdcard/{filename}",
+                "url": f"file:///sdcard/{filename}" if not product or product.startswith(_SDCARD_URL_SERIES) else f"ftp:///{filename}",
                 "subtask_name": filename.rsplit(".", 1)[0],
             }
         }
@@ -490,11 +499,11 @@ class BambuAdapter(IntegrationAdapter):
         """Sends a command on the printer's session, dropping the session if it fails.
 
         Raises:
-            RuntimeError: If connecting outlasted the deadline the caller
-                waits for, so a command reported as timed out is never sent
-                afterwards.
+            RuntimeError: If connecting left too little of the deadline the
+                caller waits for to hear the broker and the printer out, so a
+                command reported as timed out is never sent.
         """
-        give_up = time.monotonic() + _DEADLINE_S
+        give_up = time.monotonic() + _DEADLINE_S - 2 * _REPLY_TIMEOUT_S
         session = self._session(config)
         if time.monotonic() > give_up:
             raise RuntimeError("Bambu printer took too long to connect")

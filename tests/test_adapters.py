@@ -552,6 +552,28 @@ async def test_klipper_webrtc_without_snapshot_derives_mjpeg_from_stream_path() 
     assert cams[0]["source"]["url"] == "http://kl/webcam/stream", "absent a snapshot URL the MJPEG path is derived from the WebRTC path"
 
 
+async def test_klipper_derives_mjpeg_without_renaming_the_host() -> None:
+    body = {"result": {"webcams": [
+        {"name": "Still", "uid": "u1", "service": "webrtc-camerastreamer", "stream_url": "http://snapshot-cam.local/webrtc",
+         "snapshot_url": "http://snapshot-cam.local/snapshot"},
+        {"name": "Rtc", "uid": "u2", "service": "webrtc-camerastreamer", "stream_url": "http://webrtc-cam.local/webcam/webrtc"},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl"})
+    assert [cam["source"]["url"] for cam in cams] == ["http://snapshot-cam.local/stream", "http://webrtc-cam.local/webcam/stream"]
+
+
+async def test_klipper_leaves_out_a_webcam_it_cannot_read() -> None:
+    """Each was registered with its signalling address or its page as the stream, which never opens."""
+    body = {"result": {"webcams": [
+        {"name": "janus", "uid": "u1", "service": "webrtc-janus", "stream_url": "http://pi.lan/janus"},
+        {"name": "page", "uid": "u2", "service": "iframe", "stream_url": "http://pi.lan/camera.html"},
+        {"name": "jmuxer", "uid": "u3", "service": "jmuxer-stream", "stream_url": "ws://pi.lan:8080/stream"},
+        {"name": "mjpeg", "uid": "u4", "service": "mjpegstreamer", "stream_url": "/webcam/?action=stream"},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl"})
+    assert [cam["name"] for cam in cams] == ["mjpeg"]
+
+
 async def test_klipper_preserves_whep_endpoint() -> None:
     body = {"result": {"webcams": [
         {"name": "WHEP", "uid": "u1", "stream_url": "/webcam/whep", "enabled": True},
@@ -777,6 +799,27 @@ async def test_bambu_holds_one_connection_and_merges_what_changed(bambu_printers
     assert not printer.connected
 
 
+@pytest.mark.parametrize(
+    "report",
+    [
+        b"[1, 2]",
+        b"null",
+        b'{"info": {"command": "get_version", "module": [1]}}',
+        b'{"info": {"command": "get_version", "module": 1}}',
+        b'{"print": {"command": "pause", "sequence_id": [1]}}',
+    ],
+)
+async def test_bambu_report_of_another_shape_is_ignored(bambu_printers, report: bytes) -> None:
+    """paho ends its network thread on what on_message raises, and the connection still says it is live."""
+    adapter = BambuAdapter()
+    await adapter.fetch_state(None, BAMBU_CONFIG)
+    (printer,) = bambu_printers
+    printer.on_message(printer, None, SimpleNamespace(payload=report))
+    printer.report({"print": {"command": "push_status", "mc_percent": 50}})
+    assert (await adapter.fetch_state(None, BAMBU_CONFIG)).progress == 50.0
+    await adapter.close()
+
+
 async def test_bambu_printer_that_goes_silent_is_reconnected_not_believed(bambu_printers, monkeypatch) -> None:
     adapter = BambuAdapter()
     assert (await adapter.fetch_state(None, BAMBU_CONFIG)).status is DeviceStatus.PRINTING
@@ -921,6 +964,27 @@ async def test_bambu_command_is_not_sent_once_its_caller_has_stopped_waiting(bam
     await adapter.close()
 
 
+async def test_bambu_command_is_not_sent_without_time_left_to_hear_it_was_taken(bambu_printers, monkeypatch) -> None:
+    """A slow reconnect used to leave the two waits running past the caller, who saw a pause that happened time out."""
+
+    def connect(self, host: str, port: int, keepalive: int) -> None:
+        time.sleep(0.2)
+
+    def publish(self, topic: str, payload: str, qos: int = 0) -> Any:
+        self.requests.append(jsonlib.loads(payload))
+        return SimpleNamespace(wait_for_publish=time.sleep, is_published=lambda: True)
+
+    monkeypatch.setattr(FakeBambuPrinter, "connect", connect)
+    monkeypatch.setattr(FakeBambuPrinter, "publish", publish)
+    monkeypatch.setattr(bambu, "_REPLY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(bambu, "_DEADLINE_S", 0.5)
+    adapter = BambuAdapter()
+    with pytest.raises(RuntimeError, match="took too long to connect"):
+        await adapter.send(None, BAMBU_CONFIG, DeviceAction.PAUSE)
+    assert "pause" not in _commands(bambu_printers[0]), "a pause that could only be reported as timed out was sent"
+    await adapter.close()
+
+
 async def test_bambu_caller_closes_only_the_session_it_was_using(bambu_printers, monkeypatch) -> None:
     """A poll that found its session lost used to close whichever one a command had opened since."""
     adapter = BambuAdapter()
@@ -995,13 +1059,17 @@ def test_bambu_upload_does_not_wait_on_the_data_channels_tls_shutdown(monkeypatc
     ("product", "url"),
     [
         ("Bambu Lab P1S", "file:///sdcard/benchy.3mf"),
+        ("Bambu Lab A1 mini", "file:///sdcard/benchy.3mf"),
         ("Bambu Lab H2D", "ftp:///benchy.3mf"),
+        ("Bambu Lab H2D Pro", "ftp:///benchy.3mf"),
+        ("Bambu Lab P2S", "ftp:///benchy.3mf"),
+        ("Bambu Lab X2D", "ftp:///benchy.3mf"),
         ("Bambu Lab H2S", "ftp:///benchy.3mf"),
         ("Bambu Lab H2C", "ftp:///benchy.3mf"),
         ("", "file:///sdcard/benchy.3mf"),
     ],
 )
-async def test_bambu_hands_the_h2_series_an_ftp_url(bambu_printers, monkeypatch, product: str, url: str) -> None:
+async def test_bambu_hands_only_the_x1_p1_and_a1_series_a_path_on_the_sd_card(bambu_printers, monkeypatch, product: str, url: str) -> None:
     from test_gcode import sliced_3mf
 
     monkeypatch.setattr(FakeBambuPrinter, "version_modules", [{"name": "esp32", "product_name": ""}, {"name": "ota", "product_name": product}])
@@ -1392,6 +1460,34 @@ async def test_elegoo_centauri_reconnects_after_failure(monkeypatch) -> None:
     await adapter.close()
 
 
+async def test_elegoo_centauri_reconnects_with_the_id_of_the_printer_now_at_the_address(monkeypatch) -> None:
+    """pycentauri keeps an id it is given, so the last printer's id left a replacement at its address unanswered."""
+    adapter = ElegooAdapter()
+
+    class FailingCentauri(FakeCentauri):
+        async def status(self) -> Any:
+            raise RuntimeError("connection lost")
+
+    discovered = ["first-id", "second-id", None]
+    seeded: list[str | None] = []
+
+    async def discover_mainboard_id(host: str) -> str | None:
+        return discovered.pop(0)
+
+    async def connect_auto(host: str, **kwargs: Any) -> FakeCentauri:
+        seeded.append(kwargs["mainboard_id"])
+        client = FailingCentauri()
+        client.mainboard_id = kwargs["mainboard_id"]
+        return client
+
+    monkeypatch.setattr(adapter, "_discover_mainboard_id", discover_mainboard_id)
+    monkeypatch.setattr("pycentauri.connect_auto", connect_auto)
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match="connection lost"):
+            await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    assert seeded == ["first-id", "second-id", "second-id"], "a printer discovery does not reach keeps the id it last had"
+
+
 async def test_elegoo_moonraker_reuses_klipper_protocol() -> None:
     body = {
         "result": {
@@ -1508,6 +1604,13 @@ async def test_prusa_upload_behind_a_redirect_names_where_it_went() -> None:
     server, config = await _prusa_answering("301 Moved Permanently", "Location: https://printer.local/\r\n")
     async with server:
         with pytest.raises(RuntimeError, match=r"redirects to https://printer\.local"):
+            await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G28")
+
+
+async def test_prusa_upload_to_something_that_lists_no_storage_says_it_is_not_prusalink() -> None:
+    server, config = await _prusa_answering("200 OK")
+    async with server:
+        with pytest.raises(RuntimeError, match="PrusaLink did not answer like its API$"):
             await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G28")
 
 

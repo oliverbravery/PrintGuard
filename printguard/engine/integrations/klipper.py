@@ -155,16 +155,18 @@ class KlipperAdapter(IntegrationAdapter):
         go2rtc is pulled from that server's WHEP endpoint, which the hub's
         MediaMTX client reads. camera-streamer, the Crowsnest V5 default,
         signals WebRTC its own way, so it is redirected to its MJPEG endpoint.
+        A webcam on any other WebRTC service with no MJPEG endpoint to derive,
+        or one that is a web page or an H.264 stream on a WebSocket, is left out.
         """
         status, body = await http("GET", f"{config['base_url'].rstrip('/')}/server/webcams/list", headers=self._headers(config))
         if status != 200 or not isinstance(body, dict):
             return []
         found: list[dict[str, Any]] = []
         for webcam in (body.get("result") or {}).get("webcams") or []:
-            if not webcam.get("enabled", True):
-                continue
             stream = str(webcam.get("stream_url") or "")
             service = str(webcam.get("service") or "").lower()
+            if not webcam.get("enabled", True) or service in _UNREADABLE_SERVICES:
+                continue
             if stream and service in _WHEP_ENDPOINTS and not whep_endpoint(stream):
                 stream = _WHEP_ENDPOINTS[service](webcam_url(config["base_url"], stream, _API_PORTS))
             elif ("webrtc" in service or webrtc_endpoint(stream)) and not whep_endpoint(stream):
@@ -191,8 +193,17 @@ def _mjpeg_endpoint(webcam: dict[str, Any]) -> str:
     """
     snapshot = str(webcam.get("snapshot_url") or "")
     if snapshot:
-        return snapshot.replace("snapshot", "stream")
-    return str(webcam.get("stream_url") or "").replace("webrtc", "stream")
+        return _stream_sibling(snapshot, "snapshot")
+    stream = str(webcam.get("stream_url") or "")
+    mjpeg = _stream_sibling(stream, "webrtc")
+    return "" if mjpeg == stream else mjpeg
+
+
+def _stream_sibling(url: str, named: str) -> str:
+    """Swaps a name for ``stream`` in the last part of a URL's path and in its query, never in its host."""
+    parts = urlsplit(url)
+    path = re.sub(rf"{named}(?=[^/]*/?$)", "stream", parts.path)
+    return urlunsplit(parts._replace(path=path, query=parts.query.replace(named, "stream")))
 
 
 def _mediamtx_whep(stream: str) -> str:
@@ -218,5 +229,7 @@ Mainsail's player builds the same MediaMTX address, and go2rtc's is the WHEP
 route beside the socket Mainsail's player opens:
 https://github.com/mainsail-crew/mainsail/tree/develop/src/components/webcams/streamers
 """
+_UNREADABLE_SERVICES = {"iframe", "jmuxer-stream"}
+"""Moonraker's webcam services that are a web page and raw H.264 on a WebSocket, neither of which the hub reads."""
 _UNSAFE_IN_A_KEY = re.compile(r"[^\w.~-]", re.ASCII)
 """A camera's key ends up in its id, which is also its MediaMTX path."""
