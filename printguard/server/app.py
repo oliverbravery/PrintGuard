@@ -22,7 +22,7 @@ import httpx
 import uvicorn
 from cachetools import TTLCache
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from starlette.datastructures import Headers
@@ -50,17 +50,35 @@ REPO_ROOT = PACKAGE_ROOT.parent
 HLS_WARN_THROTTLE_S = 30.0
 REVALIDATE_CACHE_CONTROL = "no-cache"
 ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
-DASHBOARD_FRAME_HEADERS = {"X-Frame-Options": "SAMEORIGIN", "Content-Security-Policy": "frame-ancestors 'self'"}
 WEB_SCHEMES = ("http", "https")
 SOCKET_SCHEMES = {"ws": "http", "wss": "https"}
 
 
+def dashboard_frame_headers(framing_origins: set[str]) -> dict[str, str]:
+    """The headers that say who may frame the dashboard.
+
+    Args:
+        framing_origins: The origins listed in ``PRINTGUARD_ORIGINS``, normalised.
+
+    Returns:
+        The hub's own pages and those origins may frame it. With none listed
+        the legacy header goes along with the policy. With some it is left off,
+        since it has no way to name more than the hub's own origin.
+    """
+    policy = " ".join(["frame-ancestors 'self'", *sorted(framing_origins)])
+    return {"Content-Security-Policy": policy} if framing_origins else {"X-Frame-Options": "SAMEORIGIN", "Content-Security-Policy": policy}
+
+
 class WebStaticFiles(StaticFiles):
-    """Serves the Vite shell with update-safe caching, framed only by the hub's own pages."""
+    """Serves the Vite shell with update-safe caching, framed only by the hub's own pages and the origins it is told of."""
+
+    def __init__(self, *args: Any, framing_origins: set[str] = frozenset(), **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._frame_headers = dashboard_frame_headers(framing_origins)
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         response = await super().get_response(path, scope)
-        response.headers.update(DASHBOARD_FRAME_HEADERS)
+        response.headers.update(self._frame_headers)
         response.headers["Cache-Control"] = ASSET_CACHE_CONTROL if path.startswith("assets/") else REVALIDATE_CACHE_CONTROL
         return response
 
@@ -399,6 +417,11 @@ def create_app() -> FastAPI:
             return await call_next(request)
         return Response("refused by a plugin", status_code=403)
 
+    @app.exception_handler(TimeoutError)
+    async def command_timeout(request: Request, exc: TimeoutError) -> JSONResponse:
+        """Answers an engine command that outran its deadline, such as a print the engine was too busy to add, with a 504."""
+        return JSONResponse(status_code=504, content={"detail": "the hub took too long to answer, try again"})
+
     app.add_middleware(McpSlash)
     app.add_middleware(HostGuard, named={urlsplit(origin).hostname or "" for origin in allowed_origins})
 
@@ -616,7 +639,7 @@ def create_app() -> FastAPI:
     app.mount("/api/v1", api_app)
     app.mount("/mcp", mcp_app)
     if static_dir.is_dir():
-        app.mount("/", WebStaticFiles(directory=static_dir, html=True), name="ui")
+        app.mount("/", WebStaticFiles(directory=static_dir, html=True, framing_origins=allowed_origins), name="ui")
     return app
 
 

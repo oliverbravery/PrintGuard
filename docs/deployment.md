@@ -197,7 +197,7 @@ address is refused too, with a `403` or by closing the WebSocket. An auth proxy 
 and the browser attaches that cookie to sockets opened by other sites too, so this is what stops
 a signed-in user's other tabs from driving the engine.
 
-The dashboard and its files carry `X-Frame-Options: SAMEORIGIN` and a `frame-ancestors 'self'` policy, so no other site can frame the hub and click through it.
+The dashboard and its files carry `X-Frame-Options: SAMEORIGIN` and a `frame-ancestors 'self'` policy, so no other site can frame the hub and click through it. An origin listed in `PRINTGUARD_ORIGINS` can frame it too, such as a Home Assistant panel, and with one listed the hub sends the `frame-ancestors` policy alone, since `X-Frame-Options` can't name more than one origin.
 
 ## Plugins
 

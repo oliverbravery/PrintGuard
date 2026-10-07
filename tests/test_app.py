@@ -41,21 +41,31 @@ async def test_web_static_files_revalidate_html_and_cache_hashed_assets(tmp_path
     assert "etag" in html.headers and "etag" in asset.headers
 
 
-async def test_the_dashboard_and_its_files_cannot_be_framed_by_another_site(tmp_path, monkeypatch) -> None:
-    """The dashboard frames its own sandbox pages, so the hub's own origin stays allowed."""
+@pytest.mark.parametrize(
+    ("listed", "policy", "legacy_header"),
+    [
+        ("", "frame-ancestors 'self'", "SAMEORIGIN"),
+        ("https://ha.example.com:443, http://hass.local:8123", "frame-ancestors 'self' http://hass.local:8123 https://ha.example.com", None),
+    ],
+)
+async def test_the_dashboard_and_its_files_are_framed_only_by_the_hub_and_the_origins_listed(
+    tmp_path, monkeypatch, listed: str, policy: str, legacy_header: str | None
+) -> None:
+    """The dashboard frames its own sandbox pages, and X-Frame-Options cannot name a second origin, so it goes when one is listed."""
     (tmp_path / "assets").mkdir()
     (tmp_path / "index.html").write_text("<html></html>")
     (tmp_path / "plugin-sandbox.html").write_text("<html></html>")
     (tmp_path / "assets" / "index-abc123.js").write_text("export {}")
     monkeypatch.setenv("STATIC_DIR", str(tmp_path))
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", listed)
     app = create_app()
     app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         for path in ("/", "/assets/index-abc123.js", "/plugin-sandbox.html"):
             response = await client.get(path)
-            assert response.headers["x-frame-options"] == "SAMEORIGIN", path
-            assert response.headers["content-security-policy"] == "frame-ancestors 'self'", path
+            assert response.headers.get("x-frame-options") == legacy_header, path
+            assert response.headers["content-security-policy"] == policy, path
 
 
 async def test_the_hub_serves_no_interactive_api_pages_and_no_root_schema(monkeypatch) -> None:
@@ -697,8 +707,8 @@ async def test_an_upload_the_engine_never_finishes_adding_leaves_no_file(tmp_pat
     app.state.engine = engine
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            with pytest.raises(TimeoutError):
-                await client.post("/api/prints?filename=benchy.gcode", content=PRUSA, headers={"origin": "http://test"})
+            late = await client.post("/api/prints?filename=benchy.gcode", content=PRUSA, headers={"origin": "http://test"})
+            assert late.status_code == 504 and "took too long" in late.json()["detail"]
         assert not engine.prints.values() and not list(tmp_path.iterdir())
     finally:
         await engine.stop()
