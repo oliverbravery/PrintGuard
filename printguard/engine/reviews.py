@@ -274,12 +274,16 @@ class ReviewLibrary:
         """Opens a review, dropping the oldest finished ones to stay within the caps.
 
         Prints still running are not counted, so a hub with many monitors keeps finished ones too.
+        A print queued to send is never dropped, since it leaves when it is sent or dismissed.
         """
-        finished = sorted((review for review in self._reviews.values() if review.ended is not None), key=lambda review: review.started)
+        finished = [review for review in self._reviews.values() if review.ended is not None]
+        droppable = sorted((review for review in finished if review.status != "queued"), key=lambda review: review.started)
         review = Review(id=uuid.uuid4().hex[:12], monitor_id=monitor_id, started=ts, spacing_s=SPACED_START_S)
         self._reviews[review.id] = review
-        while finished and (len(finished) >= REVIEW_MAX or self._stored_bytes() > BYTES_MAX):
-            await self._discard(finished.pop(0))
+        kept = len(finished)
+        while droppable and (kept >= REVIEW_MAX or self._stored_bytes() > BYTES_MAX):
+            await self._discard(droppable.pop(0))
+            kept -= 1
         return review
 
     def _stored_bytes(self) -> int:

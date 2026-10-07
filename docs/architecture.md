@@ -170,7 +170,9 @@ no text of its own, as a timeout does, is reported by its type.
 
 `printer.test`, `notify.test` and `report.send` succeed as commands whatever they find, and
 carry the outcome as `ok` in their own event. `review.send` and `review.retry` only start the
-upload, so their `review_sent` follows the closing `state` under the same `req_id`.
+upload, so their `review_sent` follows the closing `state` under the same `req_id`. Both are refused while
+`settings.feedback` is `off`, and a request for a print that is already uploading joins that
+upload, so it is answered by it and no frame goes twice.
 
 Events, engine to UI:
 

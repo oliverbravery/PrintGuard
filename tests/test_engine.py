@@ -3201,6 +3201,60 @@ async def test_a_print_dismissed_before_its_upload_begins_sends_nothing_and_leav
     assert not _of(events, "error")
 
 
+async def test_a_print_queued_to_send_is_never_pushed_out_by_newer_ones(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "REVIEW_MAX", 2)
+    platform = FakePlatform(infer_s=0.02)
+    _inbox(platform, monkeypatch, lambda uploads: (429, {"code": "hub_daily", "retry_at": time.time() + 3600}))
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        monitor_id = next(iter(engine.monitors))
+        await asyncio.sleep(0.3)
+        await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        queued_id = engine.state_event()["reviews"][0]["id"]
+        await engine.handle({"cmd": "review.send", "id": queued_id})
+        await _sent(events)
+        for _ in range(3):
+            await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": True}})
+            await asyncio.sleep(0.3)
+            await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        kept = {review["id"]: review["status"] for review in engine.state_event()["reviews"]}
+
+    assert kept[queued_id] == "queued", "a print waiting for the inbox was deleted with its frames, unsent"
+    assert any(f"review-{queued_id}-" in key for key in platform.files.blobs)
+    assert len(kept) == 2, "the other prints still make room for each other"
+
+
+@pytest.mark.parametrize("command", ["review.send", "review.retry"])
+async def test_a_print_is_not_sent_while_the_review_switch_is_off(monkeypatch, command: str) -> None:
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    uploads = _inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
+        review = await _finished_review(engine)
+        with pytest.raises(RuntimeError, match="switched off"):
+            await engine.request({"cmd": command, "id": review["id"]})
+        await asyncio.sleep(0.2)
+
+    assert not uploads and ("POST", f"{feedback.ENDPOINT}/register") not in platform.http_calls, "frames reached the inbox with feedback off"
+
+
+async def test_a_second_send_for_a_print_that_is_uploading_joins_it(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
+    platform = FakePlatform(infer_s=0.02, failing=True)
+    uploads = _slow_inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine)
+        frames = [frame["id"] for frame in review["frames"]]
+        await engine.handle({"cmd": "review.send", "id": review["id"], "req_id": "first"})
+        await asyncio.sleep(0.15)
+        await engine.handle({"cmd": "review.send", "id": review["id"], "failures": frames, "req_id": "second"})
+        await asyncio.sleep(0.2 * len(frames) + 0.5)
+
+    answers = {event["req_id"]: (event["ok"], event["sent"]) for event in _of(events, "review_sent") if event.get("req_id")}
+    assert answers == {"first": (True, len(frames)), "second": (True, len(frames))}, "the second request was not answered by the upload in flight"
+    assert sorted(upload["frame"] for upload in uploads) == sorted(frames), "a frame was uploaded twice"
+    assert not _of(events, "error")
+
+
 async def test_a_print_whose_monitor_is_gone_is_dropped_with_a_message_and_not_left_sending(monkeypatch) -> None:
     monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
     platform = FakePlatform(infer_s=0.02, failing=True)

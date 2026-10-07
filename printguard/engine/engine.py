@@ -150,6 +150,7 @@ class Engine:
         self.reviews = ReviewLibrary(platform)
         self.feedback_token: str | None = None
         self._sends: dict[str, asyncio.Task[None]] = {}
+        self._send_requests: dict[str, list[Any]] = {}
         self._results: dict[str, dict[str, float]] = {}
         self._result_emitted_at: dict[str, float] = {}
         self.tokens = TokenRegistry()
@@ -756,8 +757,9 @@ class Engine:
                 camera.max_fps = camera.frame_source.fps
         if self.settle_reviews():
             self.save()
-        for review in self.reviews.due(time.time()):
-            self._start_send(review)
+        if self.settings["feedback"] == "ask":
+            for review in self.reviews.due(time.time()):
+                self._start_send(review)
         for notice in self.platform.take_notices():
             camera = self.cameras.get(notice.camera_id) if notice.camera_id else None
             subject = f"'{camera.name}' " if camera else ""
@@ -868,10 +870,23 @@ class Engine:
         return self.reviews.settle(self.monitors, self.printers, self.watchdog.responding, self.settings["feedback"] == "ask")
 
     def _start_send(self, review: Review, req_id: Any = None) -> None:
-        if review.id not in self._sends:
-            self._sends[review.id] = asyncio.create_task(self._send_review(review, req_id))
+        """Starts uploading a review, or has the upload already under way answer this request too."""
+        if review.id in self._sends:
+            self._send_requests[review.id].append(req_id)
+            return
+        self._send_requests[review.id] = [req_id]
+        self._sends[review.id] = asyncio.create_task(self._send_review(review))
 
-    async def _send_review(self, review: Review, req_id: Any) -> None:
+    def _require_feedback_on(self) -> None:
+        """Refuses to send frames for training while the review switch is off.
+
+        Raises:
+            ValueError: If feedback is switched off.
+        """
+        if self.settings["feedback"] != "ask":
+            raise ValueError("Training frames are switched off in Settings, under Advanced, so nothing is sent")
+
+    async def _send_review(self, review: Review) -> None:
         """Uploads the frames a reviewer kept, stopping when the inbox turns the print away.
 
         A print the inbox has no room for stays queued with the reason and a
@@ -888,7 +903,8 @@ class Engine:
         after the frame in flight, since those choices are no longer the ones
         to send, and one dismissed before its turn is not sent at all. A print
         whose monitor was removed meanwhile is deleted with the rest of that
-        monitor's.
+        monitor's. A request for a print already uploading joins the upload, so
+        every one of them is answered by it.
         """
         submission = review.submission or {}
         try:
@@ -921,7 +937,8 @@ class Engine:
                     review.status = "sent"
                 else:
                     review.submission, review.status = None, "ready"
-                    self.emit({"event": "error", "message": "none of that print's frames could be sent", "req_id": req_id})
+                    for req_id in self._requesters(review):
+                        self.emit({"event": "error", "message": "none of that print's frames could be sent", "req_id": req_id})
         except Exception as exc:
             refused = exc if isinstance(exc, feedback.Refused) else None
             submission["code"] = refused.code if refused else "failed"
@@ -934,10 +951,17 @@ class Engine:
             if not refused:
                 self.report_failure("sending a reviewed print", exc)
         finally:
+            requesters = self._requesters(review)
             self._sends.pop(review.id, None)
+            del self._send_requests[review.id]
             self.save()
-        self.emit({"event": "review_sent", **review.public(), "ok": review.status == "sent", "req_id": req_id})
+        for req_id in requesters:
+            self.emit({"event": "review_sent", **review.public(), "ok": review.status == "sent", "req_id": req_id})
         self.emit(self.state_event())
+
+    def _requesters(self, review: Review) -> list[Any]:
+        """The ``req_id`` of every request an upload answers, or one None when the clock started it."""
+        return [req_id for req_id in self._send_requests[review.id] if req_id is not None] or [None]
 
     async def _send_frame(self, key: str, details: dict[str, Any]) -> bool:
         """Uploads one kept frame, passing over one that can never be sent.
@@ -1588,6 +1612,21 @@ class Engine:
         self._reply({"event": "review", **review.public(), "frames": review.frames, "req_id": message.get("req_id")})
 
     async def _cmd_review_send(self, message: dict[str, Any]) -> None:
+        """Sends the frames a reviewer chose, or joins the upload of a print already being sent.
+
+        A second request for a print that is uploading keeps the first one's
+        choices, so no frame goes twice, and is answered when that upload ends.
+
+        Raises:
+            LookupError: If there is no such review.
+            ValueError: If feedback is switched off, the print is still running
+                or already sent, or no frame is left to send.
+        """
+        self._require_feedback_on()
+        review = self.reviews.get(message["id"])
+        if review is not None and review.id in self._sends and review.status == "queued":
+            self._start_send(review, message.get("req_id"))
+            return
         review = self.reviews.submit(
             message["id"],
             failures=set(message.get("failures") or []),
@@ -1597,6 +1636,7 @@ class Engine:
         self._start_send(review, message.get("req_id"))
 
     async def _cmd_review_retry(self, message: dict[str, Any]) -> None:
+        self._require_feedback_on()
         review = self.reviews.get(message["id"])
         if review is None or review.status != "queued":
             raise ValueError("only a queued print can be sent again")
