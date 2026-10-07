@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import aiomqtt
 
 from ..engine import logs
+from ..engine.credentials import port_in_effect
 from ..engine.integrations import HEATERS
 from .events import ConflatedEventQueue
 
@@ -364,7 +365,7 @@ class MqttBridge:
         tls_context = ssl.create_default_context() if config.get("tls") else None
         async with aiomqtt.Client(
             hostname=str(config["host"]).strip(),
-            port=int(config.get("port") or (8883 if config.get("tls") else 1883)),
+            port=port_in_effect(config),
             username=str(config.get("username") or "") or None,
             password=str(config.get("password") or "") or None,
             identifier=self._client_id,

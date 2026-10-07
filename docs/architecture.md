@@ -237,7 +237,7 @@ No stored secret is in the snapshot, so no transport is sent one.
 | A secret field left out or blank | Keeps the stored value |
 | A secret field as `null` | Clears it |
 | An address as the snapshot shows it | Keeps the stored address with its login |
-| A changed `base_url`, `host`, `port` or `url` while a secret is being kept | Refuses with `send <field label> again, since a stored secret is only kept for the address it was saved with` |
+| A changed `base_url`, `host`, `port` or `url` while a secret is being kept. A blank broker port is the one in effect, `8883` with TLS and `1883` without, so typing it or switching TLS with the port blank isn't a change | Refuses with `send <field label> again, since a stored secret is only kept for the address it was saved with` |
 | A printer with a different `provider` | Keeps nothing of the old config, so the patch carries the new one whole. A config field the provider does not declare is dropped |
 | An address holding `[redacted]` | Refuses with `the address has a hidden part, type it in full` |
 

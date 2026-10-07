@@ -384,7 +384,7 @@ forms save under the same rules:
 | A secret field left out or blank | Keeps the stored value |
 | An address unchanged from how you read it | Keeps the stored address, credentials included |
 | A secret field as `null` | Clears it, which is how to remove the MQTT password |
-| A changed `base_url`, `host`, `port` or `url` without the secrets | Answers `400` with `send API key again, since a stored secret is only kept for the address it was saved with`, naming the fields as the dashboard labels them. The ntfy topic URL and the Discord webhook are themselves the secret, so a new one replaces the old |
+| A changed `base_url`, `host`, `port` or `url` without the secrets. A blank broker port is `8883` with TLS and `1883` without, so typing that one isn't a change | Answers `400` with `send API key again, since a stored secret is only kept for the address it was saved with`, naming the fields as the dashboard labels them. The ntfy topic URL and the Discord webhook are themselves the secret, so a new one replaces the old |
 | A printer with a different `provider` | Keeps nothing of the old config, so send the new one whole. A config field the provider does not declare is dropped |
 | An address holding `[redacted]` | Answers `400` with `the address has a hidden part, type it in full` |
 | An address that isn't a valid URL | Answers `400`, since it could not be redacted afterwards |

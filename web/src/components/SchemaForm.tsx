@@ -9,8 +9,14 @@ const REDACTED = "[redacted]";
 
 const shown = (config: object, key: string) => String((config as Record<string, unknown>)[key] ?? "");
 
+const portInEffect = (config: object) => Number(shown(config, "port") || (shown(config, "tls") === "true" ? 8883 : 1883));
+
 export function addressMoved(value: object, stored: object): boolean {
-  return ADDRESS_FIELDS.some((key) => shown(value, key) !== shown(stored, key));
+  const portNamed = shown(value, "port") !== "" || shown(stored, "port") !== "";
+  return (
+    ADDRESS_FIELDS.some((key) => key !== "port" && shown(value, key) !== shown(stored, key)) ||
+    (portNamed && portInEffect(value) !== portInEffect(stored))
+  );
 }
 
 export function savedSecretTitles(meta: AdapterMeta, saved: string[]): Record<string, string> {
