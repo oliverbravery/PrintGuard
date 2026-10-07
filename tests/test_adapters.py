@@ -1321,6 +1321,50 @@ async def test_a_cancelled_centauri_connect_closes_what_it_went_on_to_open(monke
     assert client.closed and not adapter._connections
 
 
+async def test_closing_a_centauri_carbon_2_that_is_slow_to_stop_does_not_stop_the_loop(monkeypatch) -> None:
+    """paho's loop_stop joins a network thread that a printer which is off keeps in a reconnect for up to about 5 s."""
+    adapter = ElegooAdapter()
+    stopped: list[str] = []
+
+    class SlowMqtt:
+        running = True
+
+        def disconnect(self) -> None:
+            stopped.append("disconnect")
+            time.sleep(0.4 if self.running else 0)
+
+        def loop_stop(self) -> None:
+            stopped.append("loop_stop")
+            time.sleep(0.4 if self.running else 0)
+            self.running = False
+
+    class SlowCentauri(FakeCentauri):
+        _mqtt = SlowMqtt()
+
+        async def close(self) -> None:
+            self._mqtt.disconnect()
+            self._mqtt.loop_stop()
+            await super().close()
+
+    client = SlowCentauri()
+    monkeypatch.setattr(adapter, "_connect_centauri", _fake_centauri(client))
+    await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    adapter._connections[adapter.connection_key(ELEGOO_CENTAURI_CONFIG)] = client
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    ticking = asyncio.create_task(tick())
+    await adapter.close()
+    ticking.cancel()
+    assert client.closed and stopped[:2] == ["disconnect", "loop_stop"]
+    assert ticks > 50, f"the loop ran {ticks} times in the 0.8 s it took to stop the connection"
+
+
 async def test_elegoo_centauri_reconnects_after_failure(monkeypatch) -> None:
     adapter = ElegooAdapter()
 

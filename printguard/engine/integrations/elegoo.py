@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import aclosing, asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -45,6 +46,8 @@ _ACTIONS = {
     DeviceAction.CANCEL: "stop",
 }
 _FRESH_STATUS_TIMEOUT_S = 10.0
+_MQTT_STOPPERS = ThreadPoolExecutor(max_workers=4, thread_name_prefix="elegoo-mqtt")
+"""Where a Centauri Carbon 2's MQTT client is stopped. Stopping joins its network thread, which a printer that is switched off keeps in a blocking reconnect for seconds."""
 
 
 class ElegooAdapter(IntegrationAdapter):
@@ -203,7 +206,7 @@ class ElegooAdapter(IntegrationAdapter):
             mainboard_id = printer.mainboard_id
             if mainboard_id:
                 self._mainboard_ids[key[0]] = mainboard_id
-            await printer.close()
+            await _close(printer)
 
     @asynccontextmanager
     async def _centauri(self, config: dict[str, Any]) -> AsyncIterator[Any]:
@@ -258,7 +261,7 @@ class ElegooAdapter(IntegrationAdapter):
     def _close_abandoned(self, opening: asyncio.Future[Any]) -> None:
         if opening.cancelled() or opening.exception():
             return
-        closing = asyncio.ensure_future(opening.result().close())
+        closing = asyncio.ensure_future(_close(opening.result()))
         self._abandoned.add(closing)
         closing.add_done_callback(self._abandoned.discard)
 
@@ -321,6 +324,28 @@ class ElegooAdapter(IntegrationAdapter):
         if status in _ERROR:
             return DeviceStatus.ERROR
         return DeviceStatus.UNKNOWN
+
+
+async def _close(printer: Any) -> None:
+    """Closes a pycentauri connection without blocking the event loop.
+
+    ``CC2Printer.close()`` is a coroutine that stops its paho client with two
+    blocking calls, one of which joins the client's network thread. They run
+    here on a pool of their own first, so what the coroutine then repeats
+    returns at once.
+
+    Args:
+        printer: The connection, of either Centauri Carbon generation.
+    """
+    client = getattr(printer, "_mqtt", None)
+    if client is not None:
+        await asyncio.get_running_loop().run_in_executor(_MQTT_STOPPERS, _stop_mqtt, client)
+    await printer.close()
+
+
+def _stop_mqtt(client: Any) -> None:
+    client.disconnect()
+    client.loop_stop()
 
 
 def _require_ack(response: Any, command: str) -> None:
