@@ -216,7 +216,7 @@ class Platform(Protocol):
         *,
         headers: dict[str, str] | None = None,
         json: dict[str, Any] | None = None,
-        data: bytes | None = None,
+        data: bytes | AsyncIterable[bytes] | None = None,
         binary: bool = False,
         timeout: float = 10.0,
         redirects: Redirects = "follow",

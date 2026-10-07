@@ -44,6 +44,8 @@ class RecordingHttp:
         self.calls: list[dict[str, Any]] = []
 
     async def __call__(self, method, url, *, headers=None, json=None, data=None, timeout=10.0):
+        if hasattr(data, "__aiter__"):
+            data = b"".join([chunk async for chunk in data])
         self.calls.append({"method": method, "url": url, "headers": headers or {}, "json": json, "data": data})
         return self.status, self.body
 
@@ -70,8 +72,10 @@ OCTOPRINT_UPLOADED = {"files": {"local": {"name": "benchy.gcode"}}, "done": True
 OCTOPRINT_HEATERS = {"temperature": {"tool0": {"actual": 209.6, "target": 210.0, "offset": 0}, "bed": {"actual": 60.2, "target": 60.0, "offset": 0}}}
 
 
-def test_multipart_form_builds_a_well_formed_body() -> None:
-    headers, body = multipart_form({"chat_id": "7", "caption": "T\nB"}, "photo", "snap.jpg", JPEG)
+async def test_multipart_form_builds_a_well_formed_body() -> None:
+    headers, chunks = multipart_form({"chat_id": "7", "caption": "T\nB"}, "photo", "snap.jpg", JPEG)
+    body = b"".join([chunk async for chunk in chunks])
+    assert headers["Content-Length"] == str(len(body))
     content_type = headers["Content-Type"]
     assert content_type.startswith("multipart/form-data; boundary=")
     boundary = content_type.split("boundary=")[1].encode()
@@ -82,6 +86,44 @@ def test_multipart_form_builds_a_well_formed_body() -> None:
     assert b'name="photo"; filename="snap.jpg"' in body
     assert b"Content-Type: image/jpeg" in body
     assert JPEG in body
+
+
+async def test_a_multipart_upload_holds_no_more_than_the_file_while_it_is_sent() -> None:
+    """A 64 MB upload held 137 MB beside the file when the body was built as one buffer."""
+    import tracemalloc
+
+    size, announced = 64 * 1024 * 1024, []
+
+    async def receive(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        head = (await reader.readuntil(b"\r\n\r\n")).decode().lower()
+        length = int(head.split("content-length: ")[1].split("\r\n")[0])
+        announced.append("transfer-encoding" in head)
+        while length > 0:
+            length -= len(await reader.read(min(length, 65536)))
+        writer.write(b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(receive, "127.0.0.1", 0)
+    file = bytes(size)
+    headers, body = multipart_form({"print": "true"}, "file", "big.gcode", file, "application/octet-stream")
+    tracemalloc.start()
+    try:
+        async with httpx.AsyncClient() as client:
+            sent = await client.post(f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}/", headers=headers, content=body, timeout=60)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+        server.close()
+    assert sent.status_code == 201 and announced == [False]
+    assert peak < size // 4, f"{peak // 1024 // 1024} MB was held beside a {size // 1024 // 1024} MB file"
+
+
+async def test_multipart_form_sends_the_file_itself_and_never_a_copy_of_it() -> None:
+    file = bytes(8 * 1024 * 1024)
+    _, chunks = multipart_form({"print": "true"}, "file", "big.gcode", file, "application/octet-stream")
+    sent = [chunk async for chunk in chunks]
+    assert any(chunk is file for chunk in sent), "joining the parts into one body would hold the file twice more"
 
 
 async def test_ntfy_attaches_snapshot_with_token() -> None:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC
-from typing import Any, Awaitable, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable
 
 import httpx
 
@@ -104,8 +104,11 @@ def redirect_message(response: httpx.Response) -> str:
 
 def multipart_form(
     fields: dict[str, str], file_field: str, filename: str, file_bytes: bytes, content_type: str = "image/jpeg"
-) -> tuple[dict[str, str], bytes]:
+) -> tuple[dict[str, str], AsyncIterator[bytes]]:
     """Encodes text fields plus one file as a multipart/form-data request.
+
+    The body is streamed with its length declared, so the file is sent from
+    where it is held and never copied into a second buffer.
 
     Args:
         fields: Plain form fields.
@@ -118,13 +121,21 @@ def multipart_form(
         (headers, body) ready for the platform HTTP function.
     """
     boundary = uuid.uuid4().hex
-    parts = [
+    head = b"".join(
         f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
         for name, value in fields.items()
-    ]
-    parts.append(
+    ) + (
         f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
-        f"Content-Type: {content_type}\r\n\r\n".encode() + file_bytes + b"\r\n"
-    )
-    parts.append(f"--{boundary}--\r\n".encode())
-    return {"Content-Type": f"multipart/form-data; boundary={boundary}"}, b"".join(parts)
+        f"Content-Type: {content_type}\r\n\r\n"
+    ).encode()
+    tail = f"\r\n--{boundary}--\r\n".encode()
+
+    async def body() -> AsyncIterator[bytes]:
+        yield head
+        yield file_bytes
+        yield tail
+
+    return {
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+        "Content-Length": str(len(head) + len(file_bytes) + len(tail)),
+    }, body()

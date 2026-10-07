@@ -191,6 +191,8 @@ class FakePlatform:
         return socket
 
     async def http(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+        if hasattr(kwargs.get("data"), "__aiter__"):
+            kwargs["data"] = b"".join([chunk async for chunk in kwargs["data"]])
         self.http_calls.append((method, url))
         self.http_requests.append({"method": method, "url": url, **kwargs})
         hostname = urlparse(url).hostname or ""
