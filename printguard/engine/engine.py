@@ -292,7 +292,7 @@ class Engine:
                     label = record.get("name") or record.get("id") if isinstance(record, dict) else None
                     if isinstance(record, dict) and record.get("id"):
                         self.dropped_ids.add(str(record["id"]))
-                    kept = " (its file was kept in the data directory)" if kind in ("prints", "reviews") else ""
+                    kept = " (its file stays in the data directory until the hub next starts)" if kind in ("prints", "reviews") else ""
                     self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}{kept}")
         for monitor in self.monitors.values():
             if monitor["printer_id"] and self.printers.get(monitor["printer_id"]) is None:

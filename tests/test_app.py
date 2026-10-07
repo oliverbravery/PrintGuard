@@ -764,9 +764,17 @@ async def test_a_starting_hub_keeps_the_files_of_a_record_it_could_not_read(tmp_
     try:
         await prints.sweep_orphans(engine, unnamed=True)
         assert sorted(path.name for path in tmp_path.iterdir()) == ["abcd1234.gcode", "abcd1234.thumb"]
-        assert "its file was kept" in engine.startup_warnings[0]
+        assert "its file stays in the data directory until the hub next starts" in engine.startup_warnings[0]
+        engine.save()
     finally:
         await engine.stop()
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        await prints.sweep_orphans(restarted, unnamed=True)
+        assert not list(tmp_path.iterdir()), "the warning says the file goes at the next start"
+    finally:
+        await restarted.stop()
 
 
 async def test_an_upload_with_an_absurd_estimate_is_refused_and_leaves_nothing(tmp_path) -> None:

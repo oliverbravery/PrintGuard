@@ -5945,12 +5945,12 @@ async def test_a_monitor_bound_to_a_printer_dropped_at_start_is_unlinked_with_a_
         await restarted.stop()
 
 
-async def test_a_print_record_dropped_at_start_says_its_file_is_kept() -> None:
+async def test_a_print_record_dropped_at_start_says_how_long_its_file_is_kept() -> None:
     platform = FakePlatform()
     platform.state = {"prints": [{"id": "abcd1234", "filename": "benchy.gcode"}], "reviews": [{"id": "a1b2c3"}]}
     async with running_engine(platform, camera_fps=[]) as (engine, _):
         assert engine.dropped_ids == {"abcd1234", "a1b2c3"}
-        assert all("its file was kept in the data directory" in warning for warning in engine.startup_warnings) and len(engine.startup_warnings) == 2
+        assert all("its file stays in the data directory until the hub next starts" in warning for warning in engine.startup_warnings) and len(engine.startup_warnings) == 2
 
 
 _FAKE_CAMERA = {"id": "c1", "name": "n", "source": {"kind": "fake"}, "max_fps": 15.0}
