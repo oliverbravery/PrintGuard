@@ -321,6 +321,13 @@ test("opening the history asks only for the snapshots near the screen", async ({
   await expect.poll(asked).toContain("s89");
 });
 
+test("after a hub restart the alerts tile still counts the snapshots that were kept", async ({ page }) => {
+  await dashboard(page, { statsMonitorId: "m1" });
+  const snaps = [1, 2, 3].map((index) => ({ id: `s${index}`, ts: 1_700_000_000 - index, score: 0.9, action: "failed" }));
+  await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_100, buckets: [], snaps, alerts: [], stats: { alerts: 0, snaps: 3 } });
+  await expect(page.getByText("alerts", { exact: true }).locator("xpath=preceding-sibling::div")).toHaveText("3");
+});
+
 test("a failure card at the narrowest phone keeps its time and score inside the card", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 700 });
   await dashboard(page, { engine: engine({ reviews: [review({ frames: 1 })] }), reviewId: "r1" });

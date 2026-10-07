@@ -113,7 +113,7 @@ Watch time is how long the readings spanned, in whole minutes. A gap of more tha
 between two readings, such as the monitor standing down or losing its camera, isn't counted.
 
 The chart is kept in memory as one-minute buckets covering the last 24 hours of watching, with
-the last 50 alerts, so restarting the hub clears it. The alert snapshots are kept on disk with
+the last 50 alerts, so restarting the hub clears it, and the alerts tile then counts the snapshots kept instead. The alert snapshots are kept on disk with
 the other [frames kept from each print](feedback.md#whats-kept-on-your-hub), up to 40 a print,
 and survive a restart. Deleting a monitor deletes every print kept from it, including ones still waiting for a
 review. The [REST API](api.md#rest-api)
