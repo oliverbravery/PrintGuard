@@ -1872,9 +1872,16 @@ class Engine:
         await asyncio.gather(*(deliver(notifier_id, config) for notifier_id, config in configured.items()))
 
     async def _cmd_notify_send(self, message: dict[str, Any]) -> None:
-        """Sends a caller's own message through the configured channels."""
-        title = str(message.get("title") or "PrintGuard").strip()[:80].strip()
-        body = str(message.get("text", "")).strip()[:400]
+        """Sends a caller's own message through the configured channels.
+
+        Raises:
+            ValueError: If the title or text is not text, or there is no text.
+        """
+        title, text = message.get("title") or "PrintGuard", message.get("text", "")
+        if not isinstance(title, str) or not isinstance(text, str):
+            raise ValueError("a notification's title and text are text")
+        title = title.strip()[:80].strip()
+        body = text.strip()[:400]
         if not body:
             raise ValueError("a notification needs something to say")
         await self.send_alerts(title, body, None, urgent=False)

@@ -249,6 +249,16 @@ async def test_a_long_notice_title_is_cut_without_ending_in_a_space() -> None:
     assert sent == title[:79], "a trailing space reaches the header, which h11 refuses"
 
 
+@pytest.mark.parametrize("notice", [{"text": None}, {"text": ["a"]}, {"text": 0}, {"title": ["a"], "text": "x"}])
+async def test_a_notice_that_is_not_text_is_refused(notice: dict) -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, _events):
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": "http://ntfy/topic"}}}})
+        with pytest.raises(RuntimeError, match="title and text are text"):
+            await engine.request({"cmd": "notify.send", **notice})
+    assert not _pushes(platform)
+
+
 async def test_a_printer_and_a_notifier_never_follow_a_redirect() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[]) as (engine, _events):
