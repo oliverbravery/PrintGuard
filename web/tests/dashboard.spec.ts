@@ -658,6 +658,38 @@ test("the store page of a plugin that signs in draws before its manifest has arr
   await expect(page.getByText("hit an error")).toBeHidden();
 });
 
+for (const [shape, manifest] of [
+  ["null lists", { permissions: null, urls: null, consumes: null, reasons: null, provides: null, oauth: null }],
+  ["numbers", { permissions: 5, urls: 7, consumes: 1, reasons: 2, provides: 3, oauth: 4 }],
+  ["a sign-in with no address", { permissions: ["net", "oauth"], reasons: { net: "a", oauth: "b" }, oauth: { authorize_url: "nonsense", token_url: "x", label: "Player" } }],
+] as const) {
+  test(`a store page whose plugin.json holds ${shape} still draws`, async ({ page }) => {
+    await withCatalogue(page);
+    await page.route("https://raw.githubusercontent.com/**/plugin.json", (route) => route.fulfill({ json: manifest }));
+    await page.getByRole("button", { name: "Player", exact: true }).click();
+
+    await expect(page.getByRole("heading", { name: "Player" })).toBeVisible();
+    await expect(page.getByText("Reach the internet")).toBeVisible();
+    await expect(page.getByText("hit an error")).toBeHidden();
+  });
+}
+
+test("an error that answers a command never reaches a plugin", async ({ page }) => {
+  await page.goto("/");
+  const seen = await page.evaluate(async () => {
+    const path = "/src/plugins.ts";
+    const { projectEvent } = await import(/* @vite-ignore */ path);
+    const hooked = { error: ["message"] };
+    const needs = { error: "state:read" };
+    return [
+      projectEvent({ event: "error", message: "no monitor [redacted]", req_id: "r1" }, hooked, ["state:read"], [], needs),
+      projectEvent({ event: "error", message: "ntfy failed" }, hooked, ["state:read"], [], needs),
+    ];
+  });
+
+  expect(seen).toEqual([null, { event: "error", message: "ntfy failed" }]);
+});
+
 test("a plugin in the store is opened by its name and installed by its own button", async ({ page }) => {
   await withCatalogue(page);
   const card = page.locator("div", { has: page.getByRole("button", { name: "Install" }) }).filter({ hasText: "Shows what is playing." }).last();
