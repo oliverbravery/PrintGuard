@@ -245,6 +245,16 @@ test("one kept frame is not called frames on the tile or in the review sheet", a
   await expect(page.getByRole("dialog", { name: "Prusa · review" }).getByText("PrintGuard kept 1 frame from this print.")).toBeVisible();
 });
 
+test("the review's answer buttons sit in a group named by their question and the printer model has a name", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  const question = sheet.getByRole("group", { name: "Did this print finish fine?" });
+  await expect(question.getByRole("button")).toHaveText(["Yes", "No, it failed"]);
+
+  await question.getByRole("button", { name: "Yes" }).click();
+  await expect(sheet.getByRole("textbox", { name: "Printer model" })).toBeVisible();
+});
+
 test("a review answered before its frames arrive still marks the alert frames, and a frame left out can be put back", async ({ page }) => {
   const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "review.get").length);
   const picture = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
@@ -1051,6 +1061,21 @@ test("discarding or closing the sheet while a file uploads cancels the request",
   await expect.poll(aborts).toBe(2);
   expect(await page.evaluate(() => (window as any).__pg.getState().uploads)).toEqual([]);
   await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("a sliced temperature cleared in the upload sheet says why Upload is off", async ({ page }) => {
+  await stagePrint(page);
+  const upload = page.getByRole("button", { name: "Upload", exact: true });
+  const nozzle = page.getByRole("spinbutton", { name: "nozzle" });
+  await expect(upload).toBeEnabled();
+  await nozzle.fill("");
+  await expect(page.getByText("Upload needs nozzle between 1 and 350 °C")).toBeVisible();
+  await expect(upload).toBeDisabled();
+  await expect(nozzle).not.toHaveAttribute("placeholder", "none");
+
+  await nozzle.fill("215");
+  await expect(page.getByText("Upload needs")).toBeHidden();
+  await expect(upload).toBeEnabled();
 });
 
 test("a preview that fails to draw on upload leaves nothing behind, and the file is read once", async ({ page }) => {
