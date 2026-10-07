@@ -173,6 +173,7 @@ class Engine:
         self._tasks: list[asyncio.Task[None]] = []
         self._finishing: set[asyncio.Task[None]] = set()
         self._attach_tasks: dict[str, asyncio.Task[None]] = {}
+        self._detaching: set[str] = set()
         self._reconciles: dict[str, asyncio.Lock] = {}
         self._reconcile_tasks: set[asyncio.Task[None]] = set()
         self._starting: set[str] = set()
@@ -684,7 +685,8 @@ class Engine:
         logger.info("camera '%s' (%s) attached at %.1f fps", camera.name, camera.id, source.fps)
 
     def _schedule_attach(self, camera: Camera) -> None:
-        if camera.id in self._attach_tasks:
+        """Starts attaching a camera, unless it is attached, being attached or being taken down to be attached afresh."""
+        if camera.frame_source is not None or camera.id in self._attach_tasks or camera.id in self._detaching:
             return
         task = asyncio.create_task(self._attach(camera))
         self._attach_tasks[camera.id] = task
@@ -700,10 +702,14 @@ class Engine:
         source = camera.frame_source
         if source is None:
             return
-        self.scheduler.cancel_camera(camera)
-        camera.frame_source = None
-        source.close()
-        await self.platform.release_camera(camera.id, camera.source)
+        self._detaching.add(camera.id)
+        try:
+            self.scheduler.cancel_camera(camera)
+            camera.frame_source = None
+            source.close()
+            await self.platform.release_camera(camera.id, camera.source)
+        finally:
+            self._detaching.discard(camera.id)
         if self.cameras.get(camera.id) is camera:
             self._schedule_attach(camera)
 
@@ -1298,14 +1304,22 @@ class Engine:
         task.add_done_callback(self._reconcile_tasks.discard)
 
     async def _move_camera(self, camera: Camera, source: dict[str, Any]) -> None:
-        """Releases a camera's source and attaches it again at a new address."""
-        await self._cancel_attach(camera.id)
-        if camera.frame_source:
-            self.scheduler.cancel_camera(camera)
-            camera.frame_source.close()
-            camera.frame_source = None
-        await self.platform.release_camera(camera.id, camera.source)
-        camera.source = source
+        """Releases a camera's source and attaches it again at a new address.
+
+        The re-attach tick leaves the camera alone while it is taken down, so
+        it is never opened at the address it is leaving.
+        """
+        self._detaching.add(camera.id)
+        try:
+            await self._cancel_attach(camera.id)
+            if camera.frame_source:
+                self.scheduler.cancel_camera(camera)
+                camera.frame_source.close()
+                camera.frame_source = None
+            await self.platform.release_camera(camera.id, camera.source)
+            camera.source = source
+        finally:
+            self._detaching.discard(camera.id)
         self._schedule_attach(camera)
 
     async def _cmd_printer_add(self, message: dict[str, Any]) -> None:

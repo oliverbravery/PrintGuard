@@ -1096,6 +1096,45 @@ async def test_a_printer_camera_follows_its_printers_new_address(monkeypatch) ->
         assert camera.frame_source not in (None, first_source), "the camera is attached again at the new address"
 
 
+@pytest.mark.parametrize("taken_down_by", ["a move to a new address", "a restart"])
+async def test_the_reattach_tick_leaves_a_camera_alone_while_it_is_taken_down(monkeypatch, taken_down_by: str) -> None:
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    monkeypatch.setattr(engine_module, "REATTACH_EVERY_TICKS", 1)
+
+    async def webcam(http, config):
+        return [{"key": "webcam", "name": "Shop cam", "source": {"kind": "fake", "fps": 20.0, "url": f"{config['base_url']}/stream"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", webcam)
+
+    class SlowRelease(FakePlatform):
+        opened: list[str] = []
+        release_s = 0.0
+
+        async def open_camera(self, camera_id, source):
+            self.opened.append(source["url"])
+            return await super().open_camera(camera_id, source)
+
+        async def release_camera(self, camera_id, source):
+            await asyncio.sleep(self.release_s)
+            await super().release_camera(camera_id, source)
+
+    platform = SlowRelease()
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.2)
+        camera = engine.cameras.values()[0]
+        platform.opened.clear()
+        platform.release_s = 0.4
+        if taken_down_by == "a restart":
+            await engine.restart_camera(camera)
+        else:
+            await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": {"base_url": "http://moved", "api_key": "k"}}})
+        await asyncio.sleep(1.0)
+
+    expected = "http://op/stream" if taken_down_by == "a restart" else "http://moved/stream"
+    assert platform.opened == [expected], "the camera was opened more than once, or at the address it was leaving"
+
+
 async def test_refresh_keeps_a_printer_camera_that_works_and_moves_one_that_does_not(monkeypatch) -> None:
     monkeypatch.setattr(engine_module, "CAMERA_SETTLE_S", 0.3)
 
