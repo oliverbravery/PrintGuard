@@ -126,8 +126,8 @@ essentials a change must respect:
   `test_plugin_schema.py` beside it; `tests/test_app.py` and `tests/test_platform.py` cover the
   hub's routes and its `Platform`; `tests/test_desktop.py` holds the desktop app's launch
   decisions and `tests/test_feedback_pull.py` the training inbox's pull script; the REST API, MCP
-  server, MQTT bridge, tokens, update check, gcode reader, MediaMTX client and plugin linter each
-  have a `tests/test_<name>.py`.
+  server, MQTT bridge, tokens, update check, gcode reader, MediaMTX client, plugin linter, plugin
+  install, state file and feedback each have a `tests/test_<name>.py`.
   `web/launch/launch.spec.ts` drives a running build from camera to alert, and CI runs it on
   the container and both desktop apps before a release merges. New
   scheduler/monitor/watchdog/protocol behaviour extends the former; a new adapter is tested

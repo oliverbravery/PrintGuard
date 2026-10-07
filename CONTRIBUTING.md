@@ -55,8 +55,8 @@ holds where a plugin's requests, sockets and sign-in may go, `tests/test_urls.py
 patterns its grant is written in and `tests/test_plugin_schema.py` the manifest schema. The hub
 has `tests/test_app.py` for its routes and `tests/test_platform.py` for capture, inference and
 storage, and the desktop app's launch decisions are in `tests/test_desktop.py`. The training
-inbox's pull script has `tests/test_feedback_pull.py`. The REST API, MCP server, MQTT bridge, tokens, update check, gcode reader and MediaMTX
-client each have a `tests/test_<name>.py` of their own.
+inbox's pull script has `tests/test_feedback_pull.py`. The REST API, MCP server, MQTT bridge, tokens, update check, gcode reader, MediaMTX
+client, plugin install, state file and feedback each have a `tests/test_<name>.py` of their own.
 
 `npm run test:sandbox` runs everything in `web/tests`. `sandbox.spec.ts` holds the browser
 plugin sandbox, `dashboard.spec.ts` drives the dashboard against a faked hub and
