@@ -580,6 +580,7 @@ export function PluginsTab() {
         <input
           className="field flex-1"
           placeholder={REPO_HINT}
+          aria-label="GitHub repository"
           value={repo}
           onChange={(event) => setRepo(event.target.value)}
           onKeyDown={(event) => event.key === "Enter" && installFromRepo()}
