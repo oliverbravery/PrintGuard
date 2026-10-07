@@ -722,6 +722,68 @@ test("a plugin takes input and shows the files it shipped", async ({ page }) => 
   await expect(panel.getByAltText("Logo")).toHaveJSProperty("naturalWidth", 1);
 });
 
+const storeWrites = (page: import("@playwright/test").Page) =>
+  page.evaluate(() => (window as any).__sent.filter((cmd: any) => cmd.cmd === "plugin.update").map((cmd: any) => ({ req_id: cmd.req_id, store: cmd.patch.store })));
+
+const hubStores = (page: import("@playwright/test").Page, config: Record<string, unknown>, req_id?: string) =>
+  page.evaluate(
+    ({ config, req_id }) => {
+      const win = window as any;
+      const engine = win.__pg.getState().engine;
+      win.__pgEvent({ event: "state", ...engine, plugins: engine.plugins.map((plugin: any) => ({ ...plugin, config })), req_id });
+    },
+    { config, req_id },
+  );
+
+test("a plugin's store write keeps a key its worker saved in the meantime", async ({ page }) => {
+  await dashboardWithPlugin(page, FIELDS, ["state:read"]);
+  const panel = page.locator("section", { hasText: "Picture in picture" });
+
+  await panel.getByLabel("Webhook").fill("https://hooks.example.com/x");
+  await panel.getByLabel("Webhook").blur();
+  await expect.poll(async () => (await storeWrites(page)).map((write: { store: unknown }) => write.store)).toEqual([{ written: { url: "https://hooks.example.com/x" }, removed: [] }]);
+
+  await hubStores(page, { beat: 7 });
+  await panel.getByLabel("Loud").click();
+  const written = { url: "https://hooks.example.com/x", loud: true };
+  await expect.poll(async () => (await storeWrites(page)).at(-1)?.store).toEqual({ written, removed: [] });
+  const saved = { beat: 7, ...written };
+
+  await hubStores(page, saved, (await storeWrites(page)).at(-1)!.req_id);
+  await expect(panel.getByText("url:https://hooks.example.com/x loud:true")).toBeVisible();
+  expect(await storeWrites(page)).toHaveLength(2);
+});
+
+test("a plugin that writes its store on every render is not drawn again by the hub's answer to the write", async ({ page }) => {
+  const counting = `plugin.render((ctx) => { ctx.store.renders = (ctx.store.renders || 0) + 1; return { type: "text", value: "drawn " + ctx.store.renders }; });`;
+  await dashboardWithPlugin(page, counting, ["state:read"]);
+  await expect.poll(() => storeWrites(page)).toHaveLength(1);
+  await page.evaluate(() => {
+    const win = window as any;
+    const answer = (cmd: any) => {
+      win.__sent.push(cmd);
+      if (cmd.cmd !== "plugin.update") return;
+      const engine = win.__pg.getState().engine;
+      const plugins = engine.plugins.map((plugin: any) => ({ ...plugin, config: { ...plugin.config, ...cmd.patch.store.written } }));
+      setTimeout(() => win.__pgEvent({ event: "state", ...engine, plugins, req_id: cmd.req_id }));
+    };
+    win.__pg.setState({ link: { send: answer, close() {} } });
+  });
+
+  await hubStores(page, { renders: 1 }, (await storeWrites(page))[0].req_id);
+  await page.waitForTimeout(500);
+  expect(await storeWrites(page)).toHaveLength(1);
+
+  await page.evaluate(() => {
+    const win = window as any;
+    const engine = win.__pg.getState().engine;
+    win.__pgEvent({ event: "state", ...engine, monitors: engine.monitors.map((monitor: any) => ({ ...monitor, name: "Renamed" })) });
+  });
+  await expect.poll(async () => (await storeWrites(page)).at(-1)?.store).toEqual({ written: { renders: 2 }, removed: [] });
+  await page.waitForTimeout(500);
+  expect(await storeWrites(page)).toHaveLength(2);
+});
+
 test("a plugin panel rearranges with the monitors", async ({ page }) => {
   await dashboardWithPlugin(page, PIP);
   await page.evaluate(() => (window as any).__pg.setState({ customising: true }));

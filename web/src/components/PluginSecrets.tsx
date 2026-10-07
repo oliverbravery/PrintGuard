@@ -12,7 +12,9 @@ export function PluginSecrets({ plugin }: { plugin: PluginRecord }) {
   const names = Object.keys(plugin.manifest.secrets);
   const provider = plugin.manifest.oauth.label;
   const connected = plugin.secrets_set.includes("oauth");
-  const redirect = `${window.location.origin.replace("//localhost", "//127.0.0.1")}${callback}`;
+  const hub = new URL(window.location.origin);
+  if (hub.hostname === "localhost") hub.hostname = "127.0.0.1";
+  const redirect = `${hub.origin}${callback}`;
 
   if (names.length === 0 && !provider) return null;
 

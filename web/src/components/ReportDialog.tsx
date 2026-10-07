@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useFocusKept } from "../a11y";
 import { recentLogs } from "../log";
 import { useStore } from "../store";
 import { Dialog } from "./Dialog";
@@ -33,6 +34,7 @@ export function ReportDialog() {
   const [email, setEmail] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const filePicker = useRef<HTMLInputElement>(null);
+  const attached = useFocusKept<HTMLDivElement>();
   const sending = isPending("report.send");
   const bundling = isPending("report.bundle");
   const close = () => openDialog(null);
@@ -106,7 +108,7 @@ export function ReportDialog() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <div className="flex flex-wrap items-center gap-2">
+        <div ref={attached} className="flex flex-wrap items-center gap-2">
           <button type="button" className="btn" onClick={() => filePicker.current?.click()}>
             Attach screenshots
           </button>

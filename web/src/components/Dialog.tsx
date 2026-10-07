@@ -45,26 +45,35 @@ export function Modal({
     if (!dialog.open) dialog.showModal();
     setOpenModals(() => openModals.push(dialog));
 
-    const onCancel = (event: Event) => {
-      event.preventDefault();
+    const requestClose = () => {
       commitFocusedEdit();
       onCloseRef.current();
+    };
+    const onCancel = (event: Event) => {
+      if (!event.cancelable) return;
+      event.preventDefault();
+      requestClose();
+    };
+    const onClosedByBrowser = () => {
+      if (dialog.open) return;
+      dialog.showModal();
+      requestClose();
     };
     let pressedBackdrop = false;
     const onPress = (event: PointerEvent) => {
       pressedBackdrop = event.target === dialog;
     };
     const onLightDismiss = (event: MouseEvent) => {
-      if (!pressedBackdrop || event.target !== dialog) return;
-      commitFocusedEdit();
-      onCloseRef.current();
+      if (pressedBackdrop && event.target === dialog) requestClose();
     };
     dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("close", onClosedByBrowser);
     dialog.addEventListener("pointerdown", onPress);
     dialog.addEventListener("click", onLightDismiss);
 
     return () => {
       dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("close", onClosedByBrowser);
       dialog.removeEventListener("pointerdown", onPress);
       dialog.removeEventListener("click", onLightDismiss);
       setOpenModals(() => openModals.splice(openModals.indexOf(dialog), 1));

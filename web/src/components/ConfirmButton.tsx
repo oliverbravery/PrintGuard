@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes } from "react";
 
 const CONFIRM_WINDOW_MS = 4000;
+const DOUBLE_PRESS_MS = 400;
 
 export function useConfirm(onConfirm: () => void) {
   const [armed, setArmed] = useState(false);
+  const armedAt = useRef(0);
 
   useEffect(() => {
     if (!armed) return;
@@ -15,6 +17,8 @@ export function useConfirm(onConfirm: () => void) {
     armed,
     disarm: () => setArmed(false),
     press: () => {
+      if (armed && performance.now() - armedAt.current < DOUBLE_PRESS_MS) return;
+      armedAt.current = performance.now();
       setArmed(!armed);
       if (armed) onConfirm();
     },

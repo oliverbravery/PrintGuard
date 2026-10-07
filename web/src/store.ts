@@ -4,7 +4,7 @@ import { currentLayout } from "./layout";
 import { log } from "./log";
 import type { Finding } from "./lint";
 import { PluginPanelHost } from "./panel";
-import { commandAllowed, LINK_ACTIONS, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget } from "./plugins";
+import { commandAllowed, LINK_ACTIONS, outboundLink, outboundRequest, outboundSocket, PluginHost, projectEvent, projectState, type PluginTarget, type StoreChanges } from "./plugins";
 import { play, playFile } from "./sound";
 import { readStored, writeStored } from "./storage";
 import { published, resumePublishers, stopPublishing } from "./stream";
@@ -360,15 +360,14 @@ export const useStore = create<PgStore>((set, get) => {
       clearTimeout(updateTimers[key]);
       flushKey(key);
     }
-    for (const id of writingConfigs.keys()) writeConfig(id);
+    for (const id of unsavedStores.keys()) writeStore(id);
   };
-  const savedConfigs = new Map<string, string>();
-  const writingConfigs = new Map<string, string>();
+  const unsavedStores = new Map<string, StoreChanges>();
   const configWrites = new Map<string, string>();
   const codeDigests = new Map<string, string>();
 
-  const writeConfig = (id: string) => {
-    configWrites.set(sendSilent({ cmd: "plugin.update", id, patch: { config: JSON.parse(writingConfigs.get(id)!) } }), id);
+  const writeStore = (id: string) => {
+    configWrites.set(sendSilent({ cmd: "plugin.update", id, patch: { store: unsavedStores.get(id) } }), id);
   };
 
   const panels = new Map<string, PluginPanelHost>();
@@ -423,12 +422,14 @@ export const useStore = create<PgStore>((set, get) => {
     onView: (id: string, tree: PluginNode | null, targets: Record<string, PluginNode | null>) =>
       set((s) => ({ pluginTrees: { ...s.pluginTrees, [id]: tree }, pluginViews: { ...s.pluginViews, [id]: targets } })),
     onEffects: perform,
-    onStore: (id: string, config: Record<string, unknown>) => {
-      const serialised = JSON.stringify(config);
-      if (savedConfigs.get(id) === serialised) return;
-      savedConfigs.set(id, serialised);
-      writingConfigs.set(id, serialised);
-      writeConfig(id);
+    onStore: (id: string, { written, removed }: StoreChanges) => {
+      if (!removed.length && !Object.keys(written).length) return;
+      const unsaved = unsavedStores.get(id) ?? { written: {}, removed: [] };
+      unsavedStores.set(id, {
+        written: { ...withoutKeys(unsaved.written, removed), ...written },
+        removed: [...unsaved.removed.filter((key) => !(key in written)), ...removed],
+      });
+      writeStore(id);
     },
     onFailure: (id: string, failure: string) => {
       dropHosts((hosted) => hosted === id);
@@ -469,8 +470,7 @@ export const useStore = create<PgStore>((set, get) => {
       const plugin = engine.plugins.find((p) => p.id === id);
       if (!plugin) {
         forgetPlugin(id, false);
-        writingConfigs.delete(id);
-        savedConfigs.delete(id);
+        unsavedStores.delete(id);
       } else if (codeDigests.has(id) && codeDigests.get(id) !== JSON.stringify(plugin.digests)) forgetPlugin(id, true);
     }
     const wanted = new Set(engine.plugins.filter((p) => p.enabled && p.files.includes("plugin.js")).map((p) => p.id));
@@ -500,11 +500,7 @@ export const useStore = create<PgStore>((set, get) => {
     for (const [id, host] of hosts) {
       const plugin = engine.plugins.find((p) => p.id === id);
       if (!plugin) continue;
-      const landed = JSON.stringify(plugin.config);
-      if (writingConfigs.get(plugin.id) === landed) writingConfigs.delete(plugin.id);
-      const moved = !writingConfigs.has(plugin.id) && savedConfigs.get(plugin.id) !== landed;
-      if (moved) savedConfigs.set(plugin.id, landed);
-      void host.update(pluginState(plugin), pluginTargets(plugin), moved ? plugin.config : undefined);
+      void host.update(pluginState(plugin), pluginTargets(plugin), unsavedStores.has(plugin.id) ? undefined : plugin.config);
     }
     for (const [id, panel] of panels) {
       const plugin = engine.plugins.find((p) => p.id === id);
@@ -549,7 +545,6 @@ export const useStore = create<PgStore>((set, get) => {
     }
     for (const url of Object.values(get().pluginAssets[id] ?? {})) URL.revokeObjectURL(url);
     set((s) => ({ pluginAssets: { ...s.pluginAssets, [id]: files } }));
-    savedConfigs.set(id, JSON.stringify(plugin.config));
     set((s) => {
       const { [id]: _dropped, ...rest } = s.pluginFailures;
       return { pluginFailures: rest };
@@ -573,7 +568,9 @@ export const useStore = create<PgStore>((set, get) => {
       case "state": {
         clearPending(event.req_id);
         publishRequests.delete(event.req_id);
+        const answeredWrite = configWrites.get(event.req_id);
         configWrites.delete(event.req_id);
+        if (answeredWrite && ![...configWrites.values()].includes(answeredWrite)) unsavedStores.delete(answeredWrite);
         const server = event as EngineState;
         if (get().engine && get().engine!.version !== server.version) {
           location.reload();
@@ -725,7 +722,7 @@ export const useStore = create<PgStore>((set, get) => {
         }
         signInTabs.get(event.req_id)?.close();
         signInTabs.delete(event.req_id);
-        writingConfigs.delete(configWrites.get(event.req_id) ?? "");
+        unsavedStores.delete(configWrites.get(event.req_id) ?? "");
         configWrites.delete(event.req_id);
         const optimistic = event.req_id != null ? settle(get().optimistic, event.req_id) : get().optimistic;
         const engine = lastSnapshot ? applyOptimistic(lastSnapshot, optimistic) : get().engine;

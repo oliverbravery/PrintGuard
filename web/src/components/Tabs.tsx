@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, useEffect, useRef } from "react";
+import { type KeyboardEvent, type ReactNode, type Ref, useEffect, useRef } from "react";
 import { useScrollEdges } from "../scroll";
 
 export interface Tab<T extends string> {
@@ -65,9 +65,21 @@ export function Tabs<T extends string>({
   );
 }
 
-export function TabPanel({ prefix, id, className, children }: { prefix: string; id: string; className?: string; children: ReactNode }) {
+export function TabPanel({
+  prefix,
+  id,
+  className,
+  ref,
+  children,
+}: {
+  prefix: string;
+  id: string;
+  className?: string;
+  ref?: Ref<HTMLDivElement>;
+  children: ReactNode;
+}) {
   return (
-    <div role="tabpanel" id={`${prefix}-panel-${id}`} aria-labelledby={`${prefix}-tab-${id}`} tabIndex={0} className={className}>
+    <div ref={ref} role="tabpanel" id={`${prefix}-panel-${id}`} aria-labelledby={`${prefix}-tab-${id}`} tabIndex={0} className={className}>
       {children}
     </div>
   );

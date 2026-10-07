@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useFocusKept } from "../a11y";
 import { formatDuration } from "../prints";
 import { useStore } from "../store";
 import type { DeviceState, Heater, PreheatPreset, Printer } from "../types";
@@ -132,6 +133,7 @@ function PresetRow({ preset, onChange, onRemove }: { preset: PreheatPreset; onCh
 function Presets({ presets, busy, onApply }: { presets: PreheatPreset[]; busy: boolean; onApply: (nozzle: number, bed: number) => void }) {
   const updateSettings = useStore((s) => s.updateSettings);
   const [editing, setEditing] = useState(false);
+  const rows = useFocusKept<HTMLDivElement>();
   const save = (next: PreheatPreset[]) => updateSettings({ preheat: next });
   return (
     <div className="space-y-2">
@@ -143,8 +145,8 @@ function Presets({ presets, busy, onApply }: { presets: PreheatPreset[]; busy: b
         </button>
       </div>
       {editing ? (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 pr-9">
+        <div ref={rows} className="space-y-2">
+          <div className="flex items-center gap-2 pr-9 pointer-coarse:pr-[3.25rem]">
             <span className="label flex-1">Name</span>
             {HEATERS.map((name) => (
               <span key={name} className="label w-16 text-right">

@@ -962,6 +962,7 @@ video {
 
 @media (pointer: coarse) {
   .btn {
+    min-width: 2.75rem;
     min-height: 2.75rem;
   }
 
@@ -995,11 +996,11 @@ video {
   button.tap-target::before {
     content: "";
     position: absolute;
-    inset: -0.6rem -0.25rem;
-  }
-
-  button.tap-target::before {
-    inset: -0.8rem;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 2.75rem);
+    height: max(100%, 2.75rem);
+    translate: -50% -50%;
   }
 }
 

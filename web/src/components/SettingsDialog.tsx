@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useFocusKept } from "../a11y";
 import { savedChannels, type SettingsTabId, useStore } from "../store";
 import { useSubmit } from "../submit";
 import { applyTheme, beginPreview, endPreview, GLASS_DEFAULT, PALETTES } from "../theme";
@@ -57,6 +58,7 @@ export function SettingsDialog() {
   });
   const saveBroker = useSubmit(() => setMqtt(engine?.settings.mqtt ?? {}));
   const createToken = useSubmit(() => setTokenName(""));
+  const tokenArea = useFocusKept<HTMLDivElement>();
   const updateCheck = engine?.settings.update_check ?? true;
   const [mqtt, setMqtt] = useState<MqttConfig>(engine?.settings.mqtt ?? {});
   const setMqttField = (key: keyof MqttConfig, value: MqttConfig[keyof MqttConfig]) => setMqtt({ ...mqtt, [key]: value });
@@ -414,7 +416,7 @@ export function SettingsDialog() {
         )}
 
         {tab === "api" && (
-          <TabPanel prefix="settings" id="api" className="space-y-3">
+          <TabPanel ref={tokenArea} prefix="settings" id="api" className="space-y-3">
             <div>
               <span className="label block">API &amp; MCP access</span>
               <span className="text-[0.7rem] text-text-2 block mt-1">

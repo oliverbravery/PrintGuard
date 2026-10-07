@@ -70,8 +70,8 @@ export const INTRO: GuideSection[] = [
     shot: "tuning",
     body: (
       <>
-        A monitor binds one camera to one printer and carries the alert threshold, how many detections
-        in a row count as a defect, and what happens when one holds. Everything is set per monitor
+        A monitor binds one camera, and optionally one printer, and carries the alert threshold, how
+        many detections in a row count as a defect, and what happens when one holds. Everything is set per monitor
         from its detail panel.
       </>
     ),

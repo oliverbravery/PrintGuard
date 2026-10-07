@@ -1,5 +1,5 @@
 import { log } from "./log";
-import { sandboxFrame } from "./plugins";
+import { sandboxFrame, storeChanges, type StoreChanges } from "./plugins";
 import type { PluginEffect, PluginRecord } from "./types";
 
 const PANEL_SANDBOX_URL = "plugin-panel.html";
@@ -15,7 +15,7 @@ const THEME_TOKENS = [
 
 export interface PanelHandlers {
   onEffects(id: string, effects: PluginEffect[]): void;
-  onStore(id: string, store: Record<string, unknown>): void;
+  onStore(id: string, changes: StoreChanges): void;
   onFailure(id: string, reason: string): void;
 }
 
@@ -32,6 +32,7 @@ export class PluginPanelHost {
   private frame: HTMLIFrameElement;
   private port: MessagePort;
   private dead = false;
+  private store: Record<string, unknown>;
 
   constructor(
     record: PluginRecord,
@@ -42,6 +43,7 @@ export class PluginPanelHost {
     private handlers: PanelHandlers,
   ) {
     this.id = record.id;
+    this.store = record.config;
     const sandbox = sandboxFrame(PANEL_SANDBOX_URL, `${record.manifest.name} panel`, this.receive, (reason) => this.fail(reason));
     this.frame = sandbox.frame;
     this.port = sandbox.port;
@@ -56,7 +58,9 @@ export class PluginPanelHost {
     } else if (data?.t === "size") {
       this.frame.style.height = `${Math.min(Number(data.height) || 0, MAX_HEIGHT_PX)}px`;
     } else if (data?.t === "store") {
-      this.handlers.onStore(this.id, data.store ?? {});
+      const held = this.store;
+      this.store = data.store ?? {};
+      this.handlers.onStore(this.id, storeChanges(held, this.store));
     } else if (data?.t === "failed") {
       this.fail(String(data.message));
     }

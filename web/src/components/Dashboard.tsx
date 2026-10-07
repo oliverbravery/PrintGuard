@@ -27,6 +27,10 @@ import { StatsPage } from "./StatsPage";
 import { UpdateDialog } from "./UpdateDialog";
 import { UploadSheet } from "./UploadSheet";
 
+function counted(count: number, noun: string): string {
+  return count ? `${count} ${noun}${count === 1 ? "" : "s"}` : "";
+}
+
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
   const ref = useRef<HTMLDivElement>(null);
@@ -103,7 +107,10 @@ export function Dashboard() {
         {visible.length === 0 && hidden.length > 0 && !customising && (
           <div className="plate flex flex-wrap items-center gap-3 py-2">
             <p className="mono text-[0.7rem] text-text-2">
-              {hidden.length} {hidden.length === 1 ? "monitor" : "monitors"} hidden
+              {[counted(hidden.filter((tile) => tile.monitor).length, "monitor"), counted(hidden.filter((tile) => tile.plugin).length, "plugin panel")]
+                .filter(Boolean)
+                .join(" and ")}{" "}
+              hidden
             </p>
             <button className="btn !py-1.5 !px-3 !text-[0.68rem]" onClick={() => setCustomising(true)}>
               Customise

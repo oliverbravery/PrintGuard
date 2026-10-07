@@ -16,7 +16,7 @@ export interface PluginTarget {
 export interface HostHandlers {
   onView(id: string, tree: PluginNode | null, targets: Record<string, PluginNode | null>): void;
   onEffects(id: string, effects: PluginEffect[]): void;
-  onStore(id: string, store: Record<string, unknown>): void;
+  onStore(id: string, changes: StoreChanges): void;
   onFailure(id: string, reason: string): void;
 }
 
@@ -137,8 +137,22 @@ export function sandboxFrame(
   return { frame, port: port1, started };
 }
 
+export interface StoreChanges {
+  written: Record<string, unknown>;
+  removed: string[];
+}
+
+export function storeChanges(before: Record<string, unknown>, after: Record<string, unknown>): StoreChanges {
+  return {
+    written: Object.fromEntries(Object.entries(after).filter(([key, value]) => JSON.stringify(before[key]) !== JSON.stringify(value))),
+    removed: Object.keys(before).filter((key) => !(key in after)),
+  };
+}
+
 export class PluginHost {
   readonly id: string;
+  private store: Record<string, unknown>;
+  private lastUpdate = "";
   private frame: HTMLIFrameElement;
   private port: MessagePort;
   private pending = new Map<number, { resolve: (value: any) => void; reject: (reason: Error) => void; timer: number }>();
@@ -152,6 +166,7 @@ export class PluginHost {
     private handlers: HostHandlers,
   ) {
     this.id = record.id;
+    this.store = record.config;
     const sandbox = sandboxFrame(SANDBOX_URL, `${record.manifest.name} sandbox`, this.receive, (reason) => this.fail(reason));
     this.frame = sandbox.frame;
     this.port = sandbox.port;
@@ -194,14 +209,20 @@ export class PluginHost {
         );
         this.handlers.onView(this.id, normalise(result.tree), targets);
       }
-      this.handlers.onStore(this.id, result.store ?? {});
+      const held = (payload.store as Record<string, unknown> | undefined) ?? this.store;
+      this.store = result.store ?? {};
+      this.handlers.onStore(this.id, storeChanges(held, this.store));
       this.handlers.onEffects(this.id, (result.effects ?? []).slice(0, MAX_EFFECTS));
     } catch (err) {
       this.fail(err instanceof Error ? err.message : String(err));
     }
   }
 
-  update(state: Record<string, unknown>, targets: PluginTarget[], store?: Record<string, unknown>): Promise<void> {
+  update(state: Record<string, unknown>, targets: PluginTarget[], saved?: Record<string, unknown>): Promise<void> {
+    const store = saved && JSON.stringify(saved) !== JSON.stringify(this.store) ? saved : undefined;
+    const update = JSON.stringify({ state, targets, store });
+    if (update === this.lastUpdate) return Promise.resolve();
+    this.lastUpdate = update;
     return this.call({ t: "state", state, targets, store });
   }
 

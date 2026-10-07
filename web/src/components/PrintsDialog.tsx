@@ -111,9 +111,10 @@ function DropZone() {
 
 export function PrintsDialog() {
   const { engine, openDialog, uploads } = useStore();
-  const [filter, setFilter] = useState("");
+  const [chosenPrinter, setFilter] = useState("");
   const close = () => openDialog(null);
   const printers = engine?.printers ?? [];
+  const filter = printers.some((p) => p.id === chosenPrinter) ? chosenPrinter : "";
   const library = engine?.prints ?? [];
   const prints = library.filter((p) => !filter || p.printer_ids.includes(filter)).sort((a, b) => b.uploaded - a.uploaded);
   return (

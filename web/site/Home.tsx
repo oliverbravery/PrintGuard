@@ -160,7 +160,7 @@ function DocLink({ title, page, body }: { title: string; page: string; body: str
 
 export function Home() {
   const os = detectOS();
-  const download = os === "mac" ? { label: "macOS", href: MAC_DOWNLOAD } : os === "windows" ? { label: "Windows", href: WIN_DOWNLOAD } : null;
+  const download = os === "mac" ? { label: "macOS (Apple silicon)", href: MAC_DOWNLOAD } : os === "windows" ? { label: "Windows", href: WIN_DOWNLOAD } : null;
   const mac = <DownloadButton label="macOS" href={MAC_DOWNLOAD} icon={<AppleIcon />} primary={os === "mac"} />;
   const win = <DownloadButton label="Windows" href={WIN_DOWNLOAD} icon={<WindowsIcon />} primary={os === "windows"} />;
 

@@ -1,4 +1,5 @@
-import { useId, useRef, type InputHTMLAttributes } from "react";
+import { useId, type InputHTMLAttributes } from "react";
+import { useFocusKept } from "../a11y";
 
 const KEPT = "Saved. Leave blank to keep it";
 const CLEARED = "Will be removed on Save";
@@ -21,13 +22,12 @@ export function SecretInput({
   onChange: (next: string | null | undefined) => void;
 } & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type">) {
   const hintId = useId();
-  const field = useRef<HTMLInputElement>(null);
+  const group = useFocusKept<HTMLDivElement>();
   const hint = !saved || value ? null : value === null ? CLEARED : retype ? RETYPE : KEPT;
   return (
-    <div className="flex min-w-0 flex-1 basis-56 items-center gap-2">
+    <div ref={group} className="flex min-w-0 flex-1 basis-56 items-center gap-2">
       <input
         {...input}
-        ref={field}
         className={`field min-w-0 flex-1 ${className}`}
         type="password"
         autoComplete="new-password"
@@ -46,10 +46,7 @@ export function SecretInput({
           type="button"
           className="btn tap-target shrink-0"
           aria-label={`Remove the stored ${name}`}
-          onClick={() => {
-            onChange(null);
-            field.current?.focus();
-          }}
+          onClick={() => onChange(null)}
         >
           Clear
         </button>
