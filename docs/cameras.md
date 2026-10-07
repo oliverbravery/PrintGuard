@@ -29,7 +29,7 @@ the other three.
 
 A device or a stream URL registers once. Adding one that's already a camera, including a
 printer's own webcam, is refused, and a printer's webcam you registered by hand isn't added a
-second time. An address is the same camera however it's written, so its case, a port that is the
+second time. An address is the same camera however it's written, so capitals in its scheme or host, a port that is the
 scheme's own, a trailing slash, the order of its query, its credentials and spellings of the
 same host such as `127.1` make no difference. A device you registered by hand and later declared
 in the compose file stays that one camera, and you can still remove it.

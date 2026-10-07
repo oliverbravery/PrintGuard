@@ -123,7 +123,7 @@ as a camera for you.
 |---|---|
 | Print services | OctoPrint, Klipper (Moonraker), Elegoo, Prusa (PrusaLink), Bambu Lab |
 | Cameras | Printer webcams, USB cameras plugged into the hub, RTSP, RTMP, HTTP/MJPEG, WHEP and a phone's or laptop's own camera |
-| Alerts | ntfy, Pushover, Telegram, Discord, and Desktop notification in the desktop app |
+| Alerts | ntfy, Pushover, Telegram, Discord and Desktop notification in the desktop app |
 
 Bambu, Elegoo and Prusa printers are reached over their local APIs and never their clouds. [docs/printers.md](docs/printers.md) has the setup for each service,
 [docs/cameras.md](docs/cameras.md) each camera source and

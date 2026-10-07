@@ -459,8 +459,9 @@ printer has not been read yet, as after its connection is edited, is watched but
 | `spaced` | Up to 19 | One per interval, and every other one is dropped and the interval doubled at 20, so a long print keeps no more than a short one |
 
 The hub holds the last 20 prints or 200 MB and drops the oldest finished print first, so
-prints still running never push out every finished one. A print that ends with no frames kept
-is `dismissed`, since there is nothing to review. The
+prints still running never push out every finished one. A `queued` print is never dropped and
+isn't counted in the 20. A print that ends with no frames kept
+is `dismissed`, since there is nothing to review, and is dropped before any print that has frames. The
 `state` snapshot carries only a count per print, and `review.get` returns one print's frames.
 
 A finished print can be [sent as training data](feedback.md). `review.send` records which
@@ -706,8 +707,8 @@ The hub mounts `/plugins/<id>/` onto a plugin's route handler. A route that answ
 outside 100 to 599, or headers that are not text, stops its plugin and the request is a `502`. A
 plugin holding the `gate`
 permission is asked about every other HTTP request except `/api/health` and its own routes,
-and about both WebSocket handshakes. An allowed HTTP answer is cached for 10 s per credential,
-method, path and query. A refusal is never cached. A plugin its runtime cannot keep running is
+and about both WebSocket handshakes. An allowed HTTP answer is cached for 10 s, keyed on the method,
+path, query and headers the gate is handed. A refusal is never cached. A plugin its runtime cannot keep running is
 disabled with the reason, dropped from the runtime and has its sockets closed.
 
 `PRINTGUARD_PLUGINS=off` starts with every plugin off, and the state snapshot reports each as
@@ -722,7 +723,7 @@ them and [what each permission grants](plugins.md#permissions), and
 ([`engine/updates.py`](../printguard/engine/updates.py)) and `update.releases` serves the
 changelog history the update dialog browses, each release with the `files_url` its notes'
 relative links resolve against. The engine also checks at boot and every 24
-hours after it while `settings.update_check` is on, and 15 minutes after a check that failed. With it off, `update.releases` serves an
+hours after it while `settings.update_check` is on, 15 minutes after a check that failed, and as soon as the setting is switched on. With it off, `update.releases` serves an
 empty history until `update.check` is sent. The `state` snapshot carries only the status,
 because every release's notes together dwarf the rest of the snapshot and the history is wanted
 only while that dialog is open.
@@ -784,14 +785,15 @@ for development and packaging.
 | `STATIC_DIR` | The built dashboard the hub serves | `web/dist` |
 | `MEDIAMTX_BINARY` | The MediaMTX binary the hub supervises, 1.19.0 or newer. The hub starts it with a random login for its control API and for reading streams, which `mediamtx.yml` grants to nobody. Unset, the hub expects one already running | Unset |
 | `MEDIAMTX_CONFIG` | The config that binary starts with. The hub adds its login as the second entry of `authInternalUsers`, so a config of your own has to declare exactly one user there, as `mediamtx.yml` does. A second one would be overwritten | `mediamtx.yml` |
-| `MEDIAMTX_API`, `MEDIAMTX_RTSP`, `MEDIAMTX_HLS` | Where MediaMTX's control API, RTSP and HLS listeners are. If a MediaMTX you run yourself wants a login for its API, put it in the URL as `http://user:pass@host:9997`, and a login in `MEDIAMTX_RTSP` is scrubbed the same way | `http://localhost:9997`, `rtsp://localhost:8554`, `http://localhost:8888` |
+| `MEDIAMTX_API`, `MEDIAMTX_RTSP`, `MEDIAMTX_HLS` | Where MediaMTX's control API, RTSP and HLS listeners are. A MediaMTX you run yourself from `mediamtx.yml` grants its API and reading to nobody, so give it a user with the `api` and `read` actions and put that login in each of the three URLs, as `http://user:pass@host:9997`. The login in each is scrubbed from messages and reports | `http://localhost:9997`, `rtsp://localhost:8554`, `http://localhost:8888` |
 | `UPDATE_ASSET` | The release asset this deployment updates with. Setting it marks the hub as the desktop app | Unset, and the platform's installer in the desktop app |
 | `PRINTGUARD_VARIANT` | The image variant suffix reported in `host`, set from the image build arg | Empty |
 | `APP_ICON` | The icon on native notifications, set by the Windows desktop app | Unset |
 | `PRINTGUARD_DEBUG_PORT` | Opens the Windows desktop window to the DevTools protocol, which is how CI drives it | Unset |
 | `MEDIAMTX_BUNDLE`, `PRINTGUARD_ICON` | The binary and icon `printguard.spec` bundles, exported by `build.sh` | Set by the build |
-| `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` | Sign and notarise the macOS build. With the identity set, the build fails if the key is empty | Unset, giving an unsigned build |
+| `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` | Sign and notarise the macOS build. `packaging/build.sh` signs with the identity, and `packaging/notarise.sh` takes the three key variables and fails if the key is empty | Unset, giving an unsigned build |
 | `PRINTGUARD_URL` | The running hub the launch tests drive. Unset, Playwright starts the Vite dev server | Unset |
+| `PW_PORT` | The port Playwright starts that dev server on | `4180` |
 | `PRINTGUARD_CAMERA_HOST` | The host the hub under test reaches the launch tests' fake camera on | `127.0.0.1` |
 | `PRINTGUARD_CDP`, `PRINTGUARD_LOG` | The desktop window's DevTools endpoint and the app's log file, for the launch tests | Unset |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | The R2 token `feedback-worker/pull.py` empties the training inbox with | Unset, and the script needs all three |
@@ -868,6 +870,8 @@ Dockerfile           the image, with MediaMTX and the built dashboard inside
 docker-compose.yaml  the compose file the README installs with
 mediamtx.yml         the config the bundled MediaMTX starts with
 pyproject.toml       the package, its dependencies and the one place the version lives
+LICENSE.md           the GPL-2.0 licence
+THIRD_PARTY_NOTICES.md the notices for what the image and desktop apps bundle
 ```
 
 ## The website
