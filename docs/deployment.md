@@ -289,6 +289,7 @@ and overwrites it each time.
 | Isn't there | Starts an empty hub |
 | Was saved with a UTF-8 byte order mark, as Notepad does | Is read as it is |
 | Won't parse, isn't a JSON object, or has a section of the wrong type, such as `monitors` holding text | Is moved to `state.json.corrupt` and the hub starts empty |
+| Is a folder, which Docker makes when you mount a `state.json` that isn't there | [Stops the hub](troubleshooting.md#starting-up) with a log line saying it is a directory |
 | The hub's user may not read, or may not move aside when it is damaged | [Stops the hub](troubleshooting.md#starting-up) with a log line naming the data directory and its owner, which has to be that user |
 | Holds a camera, printer, monitor, print, review, plugin or API token record of the wrong shape | Loads without that record, which is logged and shown as a startup warning, `A saved camera (name) could not be read and was dropped`, and gone from the file at the next save. A monitor bound to a printer that was dropped loses that link, with a warning |
 | Holds a number that is NaN or infinite, which a 2.5 hub could be sent over REST | Loads without that number, which is logged, and the file is kept as it is until the next save |

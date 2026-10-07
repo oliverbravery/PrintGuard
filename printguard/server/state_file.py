@@ -136,8 +136,9 @@ class StateFile:
             overwrite what is left of it.
 
         Raises:
-            RuntimeError: If the hub may not read the file or move a damaged
-                one aside, saying whose the data directory has to be.
+            RuntimeError: If the hub may not read the file, it is a directory
+                or a damaged one cannot be moved aside, saying whose the data
+                directory has to be.
         """
         try:
             state = json.loads(self._path.read_text(encoding="utf-8-sig"))
@@ -153,7 +154,7 @@ class StateFile:
             return state
         except FileNotFoundError:
             return {}
-        except PermissionError as exc:
+        except (PermissionError, IsADirectoryError) as exc:
             raise data_directory_refused(self._path.parent, f"{self._path} could not be read", exc) from None
         except ValueError as exc:
             kept = self._free_name_for_damaged_copy()
