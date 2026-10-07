@@ -29,7 +29,7 @@ import pytest
 import websockets
 from fakes import redirected_socket
 
-from printguard.engine import vision
+from printguard.engine import reports, vision
 from printguard.server.inference import (
     Inference,
     OnnxInference,
@@ -109,8 +109,18 @@ async def test_the_login_the_bundled_server_is_given_is_one_the_engine_scrubs(tm
     platform = ServerPlatform(Path("models"), tmp_path, "http://mediamtx:9997", "rtsp://mediamtx:8554", None, ("printguard", "per-launch-pass"))
     await platform.close()
 
-    assert {"printguard", "per-launch-pass"} <= platform.secrets
+    assert "per-launch-pass" in platform.secrets
     assert platform.mediamtx.rtsp_url("cam") == "rtsp://printguard:per-launch-pass@mediamtx:8554/cam"
+
+
+async def test_the_bundled_servers_user_name_is_not_scrubbed_from_a_log_line_naming_a_printguard_logger(tmp_path: Path) -> None:
+    platform = ServerPlatform(Path("models"), tmp_path, "http://mediamtx:9997", "rtsp://mediamtx:8554", None, ("printguard", "per-launch-pass"))
+    await platform.close()
+    line = "INFO printguard.server.platform: rtsp://printguard:per-launch-pass@mediamtx:8554/cam"
+
+    scrubbed = reports.scrub(line, set(platform.secrets), standalone_below=reports.MESSAGE_STANDALONE_BELOW)
+
+    assert scrubbed == f"INFO printguard.server.platform: rtsp://printguard:{reports.REDACTED}@mediamtx:8554/cam"
 
 
 async def test_runtimes_agree_on_classification() -> None:

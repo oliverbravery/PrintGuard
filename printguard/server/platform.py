@@ -736,7 +736,7 @@ class ServerPlatform:
         self._client = httpx.AsyncClient(follow_redirects=True)
         self._public_client = httpx.AsyncClient(transport=PublicOnlyTransport())
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client, mediamtx_login)
-        self.secrets = frozenset(url_secrets(mediamtx_api) | url_secrets(mediamtx_rtsp) | set(mediamtx_login or ()))
+        self.secrets = frozenset(url_secrets(mediamtx_api) | url_secrets(mediamtx_rtsp) | set((mediamtx_login or ())[1:]))
         self._sources: dict[str, AVSource] = {}
         self._closing: dict[str, AVSource] = {}
         self._notices: list[Notice] = []
