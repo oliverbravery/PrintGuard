@@ -905,6 +905,13 @@ def test_bambu_upload_does_not_wait_on_the_data_channels_tls_shutdown(monkeypatc
 
         def __init__(self) -> None:
             self._closed = False
+            self._timeout: float | None = None
+
+        def settimeout(self, value: float | None) -> None:
+            self._timeout = value
+
+        def gettimeout(self) -> float | None:
+            return self._timeout
 
         def sendall(self, data: bytes) -> None:
             sent.append(data)
@@ -916,6 +923,7 @@ def test_bambu_upload_does_not_wait_on_the_data_channels_tls_shutdown(monkeypatc
             self._closed = True
 
     channels: list[DataChannel] = []
+    confirmed_within: list[float | None] = []
 
     class Context:
         def wrap_socket(self, sock: Any, **kwargs: Any) -> DataChannel:
@@ -931,11 +939,14 @@ def test_bambu_upload_does_not_wait_on_the_data_channels_tls_shutdown(monkeypatc
     monkeypatch.setattr(ftplib.FTP_TLS, "prot_p", lambda self: commands.append("PROT P"))
     monkeypatch.setattr(ftplib.FTP, "voidcmd", lambda self, cmd: commands.append(cmd))
     monkeypatch.setattr(ftplib.FTP, "ntransfercmd", lambda self, cmd, rest=None: (commands.append(cmd) or object(), None))
-    monkeypatch.setattr(ftplib.FTP, "voidresp", lambda self: "226 Transfer complete")
+    monkeypatch.setattr(ftplib.FTP, "voidresp", lambda self: confirmed_within.append(self.sock.gettimeout()) or "226 Transfer complete")
     monkeypatch.setattr(ftplib.FTP, "close", lambda self: None)
     BambuAdapter()._upload(BAMBU_CONFIG, "benchy.3mf", b"3mf bytes")
     assert commands == ["USER bblp", "PROT P", "TYPE I", "STOR benchy.3mf"]
     assert sent == [b"3mf bytes"] and channels[-1]._closed
+    assert confirmed_within == [bambu._STORED_REPLY_TIMEOUT_S] and bambu._STORED_REPLY_TIMEOUT_S > bambu._CONNECT_TIMEOUT_S, (
+        "a printer confirms a large file only after writing it, which the control socket's own timeout must not cut short"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1798,7 +1809,7 @@ async def test_bambu_uploads_over_ftps_then_prints_the_plate(monkeypatch) -> Non
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_upload", lambda config, filename, data: steps.append(("upload", filename, data)))
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_publish", lambda config, payload: steps.append(("publish", payload)))
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_product", lambda config: "Bambu Lab P1S")
-    data = sliced_3mf(plate=3)
+    data = sliced_3mf(plate="03")
     await INTEGRATIONS["bambu"].print_file(None, BAMBU_CONFIG, "benchy.3mf", data)
     assert steps[0] == ("upload", "benchy.3mf", data), "the file is on the SD card before the print is asked for"
     assert steps[1] == (
@@ -1807,7 +1818,7 @@ async def test_bambu_uploads_over_ftps_then_prints_the_plate(monkeypatch) -> Non
             "print": {
                 "sequence_id": "0",
                 "command": "project_file",
-                "param": "Metadata/plate_3.gcode",
+                "param": "Metadata/plate_03.gcode",
                 "url": "file:///sdcard/benchy.3mf",
                 "subtask_name": "benchy",
                 "bed_type": "auto",

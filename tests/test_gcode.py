@@ -126,7 +126,7 @@ PRUSA_SECOND_EXTRUDER = (
 ).encode()
 
 
-def sliced_3mf(plate: int = 1, image: bytes | None = PNG, gcode_text: bytes = BAMBU_PLATE, checksum: bool = False) -> bytes:
+def sliced_3mf(plate: int | str = 1, image: bytes | None = PNG, gcode_text: bytes = BAMBU_PLATE, checksum: bool = False) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("3D/3dmodel.model", "<model/>")
@@ -138,8 +138,9 @@ def sliced_3mf(plate: int = 1, image: bytes | None = PNG, gcode_text: bytes = BA
     return buffer.getvalue()
 
 
-def bgcode(*blocks: bytes, checksum: int = 1) -> bytes:
-    return b"GCDE" + struct.pack("<IH", 1, checksum) + b"".join(blocks)
+def bgcode(*blocks: bytes, checksum: int = 1, gcode: bool = True) -> bytes:
+    printed = [block(1, struct.pack("<H", 0), b"G1 X1\n", checksum=bool(checksum))] if gcode else []
+    return b"GCDE" + struct.pack("<IH", 1, checksum) + b"".join([*blocks, *printed])
 
 
 def block(kind: int, params: bytes, body: bytes, compression: int = 0, checksum: bool = True) -> bytes:
@@ -198,7 +199,7 @@ def test_sliced_3mf_reads_its_plate_and_falls_back_to_the_plate_image() -> None:
         "bed": None,
     }
     assert sliced.thumbnail == PNG and sliced.thumbnail_type == "image/png"
-    assert gcode.plate_gcode(sliced_3mf(plate=2)) == (2, BAMBU_PLATE)
+    assert gcode.plate_gcode(sliced_3mf(plate=2)) == ("Metadata/plate_2.gcode", BAMBU_PLATE)
 
 
 def test_a_thumbnail_inside_the_plate_gcode_beats_the_plate_image() -> None:
@@ -442,6 +443,17 @@ def test_a_plate_that_understates_its_size_is_not_unpacked_whole() -> None:
     assert peak < 4 * 1024 * 1024, f"{peak // 1024 // 1024} MB was inflated for a plate that declared 1 KB"
 
 
+def test_naming_the_plate_does_not_unpack_it() -> None:
+    plate = sliced_3mf(gcode_text=b"G1 X1 Y1 E1\n" * (32 * 1024 * 1024 // 12), image=None)
+    tracemalloc.start()
+    try:
+        assert gcode.plate_name(plate) == "Metadata/plate_1.gcode"
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 1024 * 1024, f"{peak // 1024} KB was held to name a plate"
+
+
 @pytest.mark.parametrize("compression", [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
 def test_a_3mf_member_packed_with_anything_but_deflate_is_refused_before_it_is_read(compression: int) -> None:
     packed = io.BytesIO()
@@ -496,6 +508,43 @@ def test_a_3mf_stored_without_compression_is_still_read() -> None:
     assert gcode.inspect(packed.getvalue(), "3mf").meta["slicer"] == "PrusaSlicer 2.8.1"
 
 
+def test_a_3mf_whose_plate_gcode_is_empty_is_refused() -> None:
+    empty = sliced_3mf(gcode_text=b"")
+    with pytest.raises(ValueError, match="plate_1.gcode in this 3mf is empty"):
+        gcode.inspect(empty, "3mf")
+    with pytest.raises(ValueError, match="is empty"):
+        gcode.plate_name(empty)
+    with pytest.raises(ValueError, match="is empty"):
+        gcode.retemper(empty, "3mf", {"nozzle": 215})
+
+
+def test_binary_gcode_with_no_gcode_or_an_empty_block_of_it_is_refused() -> None:
+    metadata = block(3, struct.pack("<H", 0), b"printer_model=MK4S\n")
+    with pytest.raises(ValueError, match="holds no gcode"):
+        gcode.inspect(bgcode(metadata, gcode=False), "bgcode")
+    with pytest.raises(ValueError, match="gcode in this binary gcode file is empty"):
+        gcode.inspect(bgcode(metadata, block(1, struct.pack("<H", 0), b"")), "bgcode")
+
+
+def test_a_plate_written_with_a_leading_zero_is_found_and_rewritten_under_its_own_name() -> None:
+    archive = sliced_3mf(plate="01", gcode_text=BAMBU_HEATED, checksum=True)
+    assert gcode.plate_name(archive) == "Metadata/plate_01.gcode"
+    assert gcode.plate_gcode(archive) == ("Metadata/plate_01.gcode", BAMBU_HEATED)
+    assert gcode.inspect(archive, "3mf").thumbnail == PNG
+    moved = gcode.retemper(archive, "3mf", {"nozzle": 240, "bed": 65})
+    assert moved != archive
+    plate = gcode.plate_gcode(moved)[1]
+    assert b"M109 S240\n" in plate
+    with zipfile.ZipFile(io.BytesIO(moved)) as rewritten:
+        assert rewritten.read("Metadata/plate_01.gcode.md5") == hashlib.md5(plate).hexdigest().upper().encode()
+
+
+def test_a_retemper_that_moved_nothing_it_was_asked_to_move_says_so() -> None:
+    with pytest.raises(ValueError, match="none of the temperatures in this file moved"):
+        gcode.retemper(b"; nozzle_temperature_initial_layer: 225\nM109 S230\nG1 X1\n", "gcode", {"nozzle": 240})
+    assert gcode.retemper(b"M109 S230\nG1 X1\n", "gcode", {"nozzle": 230}) == b"M109 S230\nG1 X1\n"
+
+
 def test_an_empty_file_is_refused() -> None:
     for ext in ("gcode", "bgcode", "3mf"):
         with pytest.raises(ValueError):
@@ -505,7 +554,7 @@ def test_an_empty_file_is_refused() -> None:
 
 
 def test_binary_gcode_cut_short_inside_a_deflated_block_is_refused() -> None:
-    whole = bgcode(block(4, struct.pack("<H", 0), b"printer_model=MK4S\n" * 64, compression=1))
+    whole = bgcode(block(4, struct.pack("<H", 0), b"printer_model=MK4S\n" * 64, compression=1), gcode=False)
     with pytest.raises(ValueError, match="cut short or damaged"):
         gcode.inspect(whole[:-12], "bgcode")
 
