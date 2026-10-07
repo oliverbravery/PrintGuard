@@ -81,7 +81,20 @@ FEEDBACK_UNSENDABLE = ("details", "not_jpeg", "too_large", "length")
 LOOP_RETRY_S = 1.0
 FAILURE_REPORT_EVERY_S = 30.0
 NOTIFY_TIMEOUT_S = 30.0
-FINISHING_COMMANDS = frozenset({"camera.remove", "printer.update", "printer.remove", "monitor.remove", "print.remove"})
+FINISHING_COMMANDS = frozenset(
+    {
+        "camera.remove",
+        "printer.update",
+        "printer.remove",
+        "monitor.remove",
+        "print.remove",
+        "settings.update",
+        "plugin.install",
+        "plugin.remove",
+        "plugin.update",
+        "plugin.secrets",
+    }
+)
 READ_ONLY_COMMANDS = frozenset({"history.get", "snapshot.get", "review.get", "camera.snapshot"})
 UNSAVED_COMMANDS = frozenset(
     {
@@ -500,9 +513,11 @@ class Engine:
         """Runs a command to its end even when whoever issued it is cancelled.
 
         A removal that stopped half way would leave a camera out of the
-        registry but still bound to its monitor and in the saved state, so it
-        carries on without its issuer, which a socket that closes or a request
-        that times out has stopped waiting for.
+        registry but still bound to its monitor and in the saved state, a
+        runtime switch would leave the setting naming a runtime other than the
+        one loaded, and a plugin change would never reach the plugin runtime.
+        So it carries on without its issuer, which a socket that closes or a
+        request that times out has stopped waiting for.
         """
         await asyncio.shield(self._hold("a command", work))
 
@@ -1765,7 +1780,9 @@ class Engine:
 
         An inference that has not come back after RUNTIME_DRAIN_TIMEOUT_S is
         given up on, since one wedged in a runtime would hold every camera
-        still behind it. The load itself is never cut short.
+        still behind it. The load itself is never cut short, and
+        ``settings.update`` is a finishing command so that holds when its
+        issuer goes away.
 
         Raises:
             RuntimeError: If an inference did not finish, so nothing was switched.

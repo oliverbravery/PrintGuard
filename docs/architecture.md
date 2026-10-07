@@ -160,7 +160,7 @@ Every command may carry a `req_id`, echoed on the responding event so the UI can
 pending requests. A command that succeeds ends with a `state` event carrying that `req_id`,
 or with its own event for the four that only read, and one that fails ends with an `error`,
 an unknown command included. `camera.remove`, `printer.update`, `printer.remove`,
-`monitor.remove` and `print.remove` are `FINISHING_COMMANDS`. Each runs as a task `Engine._background`
+`monitor.remove`, `print.remove`, `settings.update`, `plugin.install`, `plugin.remove`, `plugin.update` and `plugin.secrets` are `FINISHING_COMMANDS`. Each runs as a task `Engine._background`
 holds, so it finishes when the socket that sent it closes or its request times out. An id nothing matches fails a remove as it does an update, apart
 from `plugin.remove`, and a monitor or camera patch is refused for a setting it doesn't have or
 a value its setting doesn't take, where a number out of range is clamped. `camera.add` refuses a source whose device, path or address isn't text. `settings.update` takes `notifiers`, `update_check`, `mqtt`, `theme`, `themes`, `glass`, `layout`, `inference_runtime`, `catalogue_url`, `fault_grace_s`, `preheat` and `feedback`, and refuses any other key. A heater target is the

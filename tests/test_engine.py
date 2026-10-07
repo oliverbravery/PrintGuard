@@ -658,7 +658,7 @@ async def test_a_taken_command_is_not_resent_when_the_read_back_does_not_show_it
     async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
         await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}})
         printer_id = await _register_printer(engine)
-        await asyncio.sleep(0.2)
+        await engine.watchdog.poll_devices()
         patch = {"printer_id": printer_id, "on_defect": "pause", "cooldown_s": 0, "consecutive": 1}
         await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": patch})
         platform.failing = True
@@ -1285,7 +1285,7 @@ async def test_an_alert_channel_missing_a_required_field_is_refused_by_name() ->
 
         await engine.handle({"cmd": "notify.test", "provider": "ntfy", "config": {}}, events.append)
         (tested,) = _of(events, "notify_test")
-        assert not tested["ok"] and "Topic URL" in tested["error"] and not platform.http_calls
+        assert not tested["ok"] and "Topic URL" in tested["error"] and not _pushes(platform)
 
 
 async def test_a_printer_edited_while_it_was_being_read_drops_the_old_address_answer() -> None:
@@ -2177,6 +2177,23 @@ async def test_a_setting_changed_during_a_runtime_switch_is_kept(monkeypatch) ->
         assert platform.state["settings"]["theme"] == "dark" and platform.inference_runtime == "onnx"
 
 
+async def test_a_runtime_switch_cancelled_while_the_model_loads_still_finishes(monkeypatch) -> None:
+    platform = FakePlatform()
+    configure = platform.configure
+
+    async def slow_configure(settings: dict) -> None:
+        await asyncio.sleep(0.2)
+        await configure(settings)
+
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        monkeypatch.setattr(platform, "configure", slow_configure)
+        await _cancelled_after(engine, {"cmd": "settings.update", "patch": {"inference_runtime": "onnx"}}, 0.05)
+        await asyncio.sleep(0.5)
+        assert platform.inference_runtime == "onnx", "the load was cut short"
+        assert engine.settings["inference_runtime"] == "onnx", "the setting names a runtime that is not the one loaded"
+        assert platform.state["settings"]["inference_runtime"] == "onnx", "state.json still names the old runtime"
+
+
 UNRENDERABLE = {
     "a layout whose order is not a list": {"layout": {"monitors": {"order": "m1"}}},
     "a layout section that is not an object": {"layout": {"cameras": ["c1"]}},
@@ -2943,10 +2960,10 @@ async def test_a_runtime_switch_behind_a_wedged_inference_gives_up_and_says_so(m
     platform.inference_blocked = True
     async with running_engine(platform, camera_fps=[30.0]) as (engine, _):
         await asyncio.wait_for(platform.inference_started.wait(), timeout=1.0)
+        platform.inference_blocked = False
         with pytest.raises(RuntimeError, match="the runtime was not switched"):
             await engine.request({"cmd": "settings.update", "patch": {"inference_runtime": "onnx"}}, timeout=1.0)
         assert (engine.settings["inference_runtime"], platform.inference_runtime) == ("auto", "auto")
-        platform.inference_blocked = False
         await engine.request({"cmd": "settings.update", "patch": {"inference_runtime": "onnx"}}, timeout=1.0)
         assert platform.inference_runtime == "onnx", "the next switch is not held up by the one that gave up"
 
@@ -4823,6 +4840,33 @@ async def test_plugins_survive_a_restart() -> None:
         assert restarted.plugins.get("demo") is None
     finally:
         await restarted.stop()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        {"cmd": "plugin.remove", "id": "demo"},
+        {"cmd": "plugin.update", "id": "demo", "patch": {"enabled": False}},
+        {"cmd": "plugin.secrets", "id": "demo", "secrets": {}},
+    ],
+)
+async def test_a_plugin_change_cancelled_while_the_runtime_reloads_still_finishes(monkeypatch, command: dict) -> None:
+    platform = FakePlatform(infer_s=0.02)
+    reloads: list[set[str]] = []
+
+    async def slow_reload(running, failed_gates) -> None:
+        await asyncio.sleep(0.2)
+        reloads.append({plugin.id for plugin in running})
+
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await install_demo(engine)
+        monkeypatch.setattr(platform.plugin_runtime, "reload", slow_reload)
+        saves: list[dict] = []
+        monkeypatch.setattr(platform, "save_state", saves.append)
+        await _cancelled_after(engine, command, 0.05)
+        await asyncio.sleep(0.5)
+        assert reloads == [set() if command["cmd"] != "plugin.secrets" else {"demo"}], "the runtime was never told"
+        assert saves, "the change was never saved"
 
 
 async def _chunks(data: bytes):
