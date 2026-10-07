@@ -308,7 +308,7 @@ class ElegooAdapter(IntegrationAdapter):
         return str(config.get("host")), str(config.get("access_code") or ""), str(config.get("family"))
 
     def _family(self, config: dict[str, Any]) -> str:
-        family = str(config["family"])
+        family = config.get("family")
         if family not in (_CENTAURI, _MOONRAKER):
             raise ValueError(f"unknown Elegoo printer family {family!r}")
         return family

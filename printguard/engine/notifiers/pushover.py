@@ -72,13 +72,13 @@ class PushoverNotifier(NotifierAdapter):
         configured priority is lower. The title is cut to the 250 characters
         Pushover takes and the message to 1024.
         """
-        priority = str(config.get("priority", "")).strip()
+        priority = str(config.get("priority", ""))
         priority = priority if priority in PRIORITIES else DEFAULT_PRIORITY
         if not urgent:
             priority = str(min(int(priority), 0))
         fields = {
-            "token": str(config["api_token"]).strip(),
-            "user": str(config["user_key"]).strip(),
+            "token": config["api_token"],
+            "user": config["user_key"],
             "title": truncated(title, TITLE_LIMIT),
             "message": truncated(body, MESSAGE_LIMIT),
             "priority": priority,

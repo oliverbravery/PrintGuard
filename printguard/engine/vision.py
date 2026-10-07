@@ -238,5 +238,6 @@ def defect_score(result: dict[str, Any]) -> float:
     distances = result.get("distances") or {}
     if "success" not in distances or "failure" not in distances:
         return 0.5
-    score = 0.5 * (1.0 + math.tanh((distances["success"] ** 2 - distances["failure"] ** 2) / 2))
+    success, failure = distances["success"], distances["failure"]
+    score = 0.5 * (1.0 + math.tanh((success * success - failure * failure) / 2))
     return score if math.isfinite(score) else 0.5

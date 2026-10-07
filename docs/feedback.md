@@ -29,7 +29,7 @@ Send.
 A frame is kept as the model was given it, after the camera's rotation, crop and adjustments. One
 over 512px on its shorter side is scaled down to that. Frames are stored in the hub's data
 directory, so they survive a restart. The hub keeps the last 20 prints or 200 MB across every
-monitor and drops the oldest finished print first, apart from one waiting to send, which stays until it is sent or dismissed. The alert frames are the ones the risk
+monitor and drops the oldest finished print first, apart from one waiting to send, which stays until it is sent or dismissed and isn't counted in the 20. The alert frames are the ones the risk
 history shows under **Risky moments**. Deleting a monitor deletes every print kept from it,
 including ones waiting for a review or to send.
 

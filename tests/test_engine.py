@@ -1360,6 +1360,44 @@ async def test_an_alert_channel_missing_a_required_field_is_refused_by_name() ->
         assert not tested["ok"] and "Topic URL" in tested["error"] and not _pushes(platform)
 
 
+async def test_an_adapter_config_is_stored_as_its_schema_declares_it() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"ntfy": {"url": " http://ntfy/t\n", "token": "tk \n", "api_key": "undeclared"}}}})
+        assert engine.settings["notifiers"] == {"ntfy": {"url": "http://ntfy/t", "token": "tk"}}
+        assert engine.state_event()["settings"]["notifiers"] == {"ntfy": {}}
+
+        await engine.handle({"cmd": "printer.add", "printer": {"provider": "octoprint", "config": {"base_url": "http://op ", "api_key": "KEY\n"}}})
+        (printer,) = engine.printers.values()
+        assert printer.config == {"base_url": "http://op", "api_key": "KEY"}
+        await engine.handle({"cmd": "printer.update", "id": printer.id, "patch": {"config": {"base_url": "http://op\n"}}})
+        assert printer.config == {"base_url": "http://op", "api_key": "KEY"}, "the same address with a space after it keeps its key"
+
+        errors = len(_of(events, "error"))
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {"pushover": {"api_token": "a", "user_key": "u", "priority": "7"}}}})
+        await engine.handle({"cmd": "printer.add", "printer": {"provider": "elegoo", "config": {"family": "resin", "host": "10.0.0.9"}}})
+        refused = [error["message"] for error in _of(events, "error")[errors:]]
+        assert len(refused) == 2 and "Priority" in refused[0] and "Printer family is one of centauri, moonraker" in refused[1]
+        assert "pushover" not in engine.settings["notifiers"] and len(engine.printers.values()) == 1
+
+
+async def test_an_adapter_config_an_earlier_version_stored_unchecked_does_not_refuse_every_save_after_it() -> None:
+    platform = FakePlatform()
+    platform.state = {
+        "settings": {"notifiers": {"pushover": {"api_token": "ap", "user_key": "uk", "priority": 1, "left": "over"}, "ntfy": {"url": "http://ntfy/t", "token": ["tk"]}}},
+        "printers": [{"id": "p1", "name": "Ender", "provider": "octoprint", "config": {"base_url": "http://op", "api_key": 12345}}],
+    }
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        assert engine.settings["notifiers"] == {"pushover": {"api_token": "ap", "user_key": "uk", "priority": "1"}, "ntfy": {"url": "http://ntfy/t"}}
+        assert engine.printers.get("p1").config == {"base_url": "http://op", "api_key": "12345"}
+        assert engine.startup_warnings == ["The saved Access token of ntfy could not be used, so it was cleared"]
+
+        shown = engine.state_event()["settings"]["notifiers"]
+        await engine.handle({"cmd": "settings.update", "patch": {"notifiers": {**shown, "telegram": {"bot_token": "t", "chat_id": "1"}}}})
+        assert not _of(events, "error") and set(engine.settings["notifiers"]) == {"pushover", "ntfy", "telegram"}
+        assert engine.settings["notifiers"]["pushover"]["api_token"] == "ap"
+
+
 async def test_a_printer_edited_while_it_was_being_read_drops_the_old_address_answer() -> None:
     platform = FakePlatform()
     answering, held = asyncio.Event(), asyncio.Event()
@@ -2892,6 +2930,10 @@ def test_a_score_that_is_not_a_number_never_leaves_the_model() -> None:
     assert vision.defect_score({"distances": {"success": float("inf"), "failure": float("inf")}}) == 0.5
 
 
+def test_distances_too_large_to_square_score_as_undecided() -> None:
+    assert vision.defect_score({"distances": {"success": 1e200, "failure": 1e200}}) == 0.5
+
+
 async def test_camera_rotation_persists_and_rejects_off_axis() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
@@ -2966,6 +3008,18 @@ def test_a_gap_between_readings_is_split_across_the_buckets_it_spans() -> None:
     assert history.series([])["stats"]["watch_min"] == 2
 
 
+def test_a_clock_set_back_leaves_the_buckets_in_time_order() -> None:
+    from printguard.engine.history import MonitorHistory
+
+    history = MonitorHistory()
+    for second in (600.0, 660.0, 480.0, 540.0, 610.0, 720.0):
+        history.record(second, 0.1, 0.75)
+    buckets = history.series([])["buckets"]
+
+    assert [bucket["t"] for bucket in buckets] == [600, 660, 720], "a reading from before the last bucket opened one out of order"
+    assert [bucket["n"] for bucket in buckets] == [1, 4, 1], "the readings taken after the clock went back were not kept"
+
+
 async def test_result_events_are_bounded_without_losing_history() -> None:
     platform = FakePlatform(infer_s=0.01)
     async with running_engine(platform, camera_fps=[30.0]) as (engine, events):
@@ -3038,6 +3092,42 @@ async def test_a_runtime_switch_behind_a_wedged_inference_gives_up_and_says_so(m
         assert (engine.settings["inference_runtime"], platform.inference_runtime) == ("auto", "auto")
         await engine.request({"cmd": "settings.update", "patch": {"inference_runtime": "onnx"}}, timeout=1.0)
         assert platform.inference_runtime == "onnx", "the next switch is not held up by the one that gave up"
+
+
+async def test_removing_a_camera_frees_the_worker_its_wedged_inference_held() -> None:
+    platform = FakePlatform(infer_s=0.01)
+    platform.inference_blocked = True
+    async with running_engine(platform, camera_fps=[30.0]) as (engine, _):
+        wedged_id = next(iter(engine.cameras.items))
+        await asyncio.wait_for(platform.inference_started.wait(), timeout=1.0)
+        platform.inference_blocked = False
+        await engine.handle({"cmd": "camera.add", "name": "other", "source": {"kind": "fake", "fps": 30.0}})
+        other_id = next(camera_id for camera_id in engine.cameras.items if camera_id != wedged_id)
+        await engine.handle({"cmd": "monitor.add", "monitor": {"name": "other", "camera_id": other_id}})
+        await engine.handle({"cmd": "camera.remove", "id": wedged_id})
+        platform.inference_started.clear()
+        await asyncio.wait_for(platform.inference_started.wait(), timeout=1.0)
+        await engine.request({"cmd": "settings.update", "patch": {"inference_runtime": "onnx"}}, timeout=1.0)
+        assert platform.inference_runtime == "onnx", "the removed camera's inference still held up a runtime switch"
+
+    pending = [task for task in asyncio.all_tasks() if task is not asyncio.current_task() and not task.done()]
+    assert pending == [], "the removed camera's inference outlived the engine"
+
+
+async def test_switching_the_update_check_on_checks_at_once() -> None:
+    platform = FakePlatform()
+    platform.state = {"settings": {"update_check": False}}
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        await asyncio.sleep(0.05)
+        unchecked = engine.state_event()["update"]
+        await engine.handle({"cmd": "settings.update", "patch": {"update_check": True}})
+        await asyncio.sleep(0.05)
+        checked = engine.state_event()["update"]
+        await engine.handle({"cmd": "settings.update", "patch": {"update_check": True}})
+        await asyncio.sleep(0.05)
+
+    assert unchecked is None and checked is not None, "the check waited for the daily loop to come round"
+    assert len([call for call in platform.http_calls if "api.github.com" in call[1]]) == 1, "saving the setting unchanged checked again"
 
 
 async def test_no_alert_means_no_snapshot() -> None:
@@ -3164,6 +3254,64 @@ async def test_prints_still_running_do_not_push_out_finished_ones(monkeypatch) -
 
     assert [review["status"] for review in kept].count("running") == 3
     assert [review["status"] for review in kept].count("ready") == 1, "three running prints left no room for the one that finished"
+
+
+async def test_prints_queued_to_send_do_not_push_out_the_print_that_just_ended(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "REVIEW_MAX", 2)
+    library = reviews.ReviewLibrary(FakePlatform())
+    frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
+    monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
+    for started in (0.0, 100.0, 200.0):
+        await library.sample(monitor, frame, 0.1, started)
+        library.settle({"m": monitor}, {}, set(), True)
+        if started < 200.0:
+            library.submit(library.public()[-1]["id"], set(), set(), "")
+
+    await library.sample(monitor, frame, 0.1, 300.0)
+
+    assert [review["status"] for review in library.public()] == ["queued", "queued", "ready", "running"], "the print waiting for its review was deleted"
+
+
+async def test_a_print_left_with_no_frames_is_dropped_before_one_with_alert_frames(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "REVIEW_MAX", 3)
+    library = reviews.ReviewLibrary(FakePlatform())
+    frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
+    monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
+    await library.keep_alert("m", {"ts": 0.0, "score": 0.9, "action": "none"}, frame)
+    library.settle({"m": monitor}, {}, set(), True)
+    for started in (100.0, 200.0):
+        await library.sample(monitor, frame, 0.1, started)
+        library.settle({"m": monitor}, {}, set(), True)
+    await library.stop_asking()
+
+    await library.keep_alert("m", {"ts": 300.0, "score": 0.9, "action": "none"}, frame)
+
+    assert [frame["ts"] for frame in library.alert_frames("m")] == [0.0, 300.0], "an empty print outlasted one the risk history shows"
+    assert [review["frames"] for review in library.public()] == [1, 0, 1]
+
+
+async def test_removing_a_monitor_forgets_every_print_even_when_a_frame_cannot_be_deleted(monkeypatch) -> None:
+    platform = FakePlatform()
+    library = reviews.ReviewLibrary(platform)
+    frame = Frame(rgb=np.zeros((48, 64, 3), dtype=np.uint8), seq=1.0, ts=0.0)
+    monitor = {"id": "m", "threshold": 0.75, "printer_id": "", "enabled": False}
+    for started in (0.0, 100.0, 200.0):
+        await library.sample(monitor, frame, 0.1, started)
+        library.settle({"m": monitor}, {}, set(), True)
+    remove = platform.files.remove
+    stuck = next(iter(platform.files.blobs))
+
+    async def remove_unless_stuck(key: str) -> None:
+        if key == stuck:
+            raise PermissionError(f"cannot delete {key}")
+        await remove(key)
+
+    monkeypatch.setattr(platform.files, "remove", remove_unless_stuck)
+    with pytest.raises(PermissionError):
+        await library.forget("m")
+
+    assert library.public() == [], "a print of the removed monitor stayed in the state"
+    assert list(platform.files.blobs) == [stuck], "one frame that cannot go left the others behind"
 
 
 async def test_two_prints_beginning_at_the_cap_do_not_evict_the_same_review(monkeypatch) -> None:
@@ -3374,7 +3522,7 @@ async def test_a_print_queued_to_send_is_never_pushed_out_by_newer_ones(monkeypa
 
     assert kept[queued_id] == "queued", "a print waiting for the inbox was deleted with its frames, unsent"
     assert any(f"review-{queued_id}-" in key for key in platform.files.blobs)
-    assert len(kept) == 2, "the other prints still make room for each other"
+    assert len(kept) == 3, "the other prints still make room for each other, with the queued one outside the cap"
 
 
 @pytest.mark.parametrize("command", ["review.send", "review.retry"])
@@ -3852,7 +4000,7 @@ def test_a_log_call_that_cannot_be_formatted_does_not_raise_in_its_caller(monkey
 
 
 async def test_a_secret_an_error_quotes_reaches_no_transport_and_no_log(monkeypatch) -> None:
-    """httpx refuses a header value that ends in a newline by quoting all of it."""
+    """httpx refuses a header value it cannot send by quoting all of it. A key pasted with a newline is stored without it."""
     platform = FakePlatform(infer_s=0.02)
     answer = platform.http
 
@@ -3869,7 +4017,7 @@ async def test_a_secret_an_error_quotes_reaches_no_transport_and_no_log(monkeypa
         failed = next(e for e in _of(events, "error") if e.get("req_id") == 9)
         told = json.dumps([e for e in events if e["event"] != "state"] + engine.recent_events())
 
-    assert failed["message"] == "Illegal header value b'[redacted]\\n'"
+    assert failed["message"] == "Illegal header value b'[redacted]'"
     assert "octo-secret" not in told, "the key reached a dashboard, a plugin or the events endpoint"
     assert all("octo-secret" not in line for line in logs.recent()), "the key reached the log"
 
@@ -4132,7 +4280,7 @@ async def test_a_bundle_from_somewhere_else_inherits_nothing_but_the_id() -> Non
 async def test_catalogue_verifies_only_the_exact_bytes_it_pinned() -> None:
     platform = FakePlatform(infer_s=0.02)
     digests = plugins.digests(plugins.sanitise_manifest(MANIFEST), {"plugin.js": PLUGIN_JS}, {})
-    platform.responses = {plugins.CATALOGUE_URL: (200, {"plugins": [{"id": "demo", "name": "Demo", "digests": digests}]})}
+    platform.responses = {plugins.CATALOGUE_URL: (200, {"plugins": [{"id": "demo", "name": "Demo", "repo": "octo/demo", "ref": "a" * 40, "digests": digests}]})}
     async with running_engine(platform, camera_fps=[]) as (engine, _):
         assert (await install_demo(engine))["verified"] is True
         await engine.handle({"cmd": "plugin.install", "source": {"kind": "file"}, "zip": plugin_zip(code=PLUGIN_JS + "//")})

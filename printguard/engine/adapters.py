@@ -19,9 +19,10 @@ KINDS: dict[str, tuple[type, str]] = {"string": (str, "text"), "boolean": (bool,
 
 
 def require_typed(config: dict[str, Any], properties: dict[str, dict[str, Any]]) -> None:
-    """Refuses a config value that is not of the type its schema property declares.
+    """Refuses a config value that is not of the type its schema property declares, or not one of its ``enum``.
 
-    A value left out or sent as null is not there to be checked.
+    A value left out or sent as null is not there to be checked, and a choice
+    left blank is one not made yet.
 
     Args:
         config: The values supplied.
@@ -29,12 +30,16 @@ def require_typed(config: dict[str, Any], properties: dict[str, dict[str, Any]])
             ``title`` and a ``type`` that ``KINDS`` knows.
 
     Raises:
-        ValueError: If a value is of another type, naming the first.
+        ValueError: If a value is of another type or is not a choice its
+            property offers, naming the first.
     """
     for key, prop in properties.items():
         kind, wording = KINDS[prop["type"]]
-        if config.get(key) is not None and type(config[key]) is not kind:
+        value = config.get(key)
+        if value is not None and type(value) is not kind:
             raise ValueError(f"{prop['title']} is {wording}")
+        if value and "enum" in prop and value not in prop["enum"]:
+            raise ValueError(f"{prop['title']} is one of {', '.join(prop['enum'])}")
 
 
 class Adapter(ABC):
@@ -92,15 +97,61 @@ class Adapter(ABC):
         """Config property names the schema marks secret (credentials)."""
         return set(self.secret_fields())
 
+    def declared(self, config: dict[str, Any]) -> dict[str, Any]:
+        """Keeps the fields of a configuration the schema declares, without the whitespace around their text.
+
+        A field another service marks secret would otherwise linger unhidden,
+        and a key pasted with a space or a line break after it is refused as a
+        header by every request that carries it.
+
+        Args:
+            config: The values supplied for the schema.
+
+        Returns:
+            The configuration to check and store.
+        """
+        return {key: value.strip() if isinstance(value, str) else value for key, value in config.items() if key in self.schema["properties"]}
+
+    def restored(self, config: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+        """Makes a stored configuration one a save would take, since every save sends it back whole.
+
+        A number where the schema wants text, which an earlier version stored
+        as it was sent, becomes that text.
+
+        Args:
+            config: The configuration as the state file holds it.
+
+        Returns:
+            The declared configuration without the values that still fail
+            their field's type or choices, and the titles of the fields that
+            lost one.
+        """
+        properties = self.schema["properties"]
+        config = self.declared(
+            {
+                key: str(value) if type(value) in (int, float) and properties.get(key, {}).get("type") == "string" else value
+                for key, value in config.items()
+            }
+        )
+        reset = []
+        for key in list(config):
+            try:
+                require_typed(config, {key: properties[key]})
+            except ValueError:
+                del config[key]
+                reset.append(properties[key]["title"])
+        return config, reset
+
     def require(self, config: dict[str, Any]) -> None:
-        """Refuses a configuration with a value of the wrong type, or a field the service needs left blank.
+        """Refuses a configuration with a value of the wrong type or outside its choices, or a field the service needs left blank.
 
         Args:
             config: The values supplied for the schema.
 
         Raises:
-            ValueError: If a value is not of the type its field declares, or a
-                field the schema marks required is blank, naming each.
+            ValueError: If a value is not of the type its field declares or
+                not one of the choices it offers, or a field the schema marks
+                required is blank, naming each.
         """
         require_typed(config, self.schema.get("properties", {}))
         blank = [

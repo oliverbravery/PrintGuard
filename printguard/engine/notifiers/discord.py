@@ -40,10 +40,16 @@ class DiscordNotifier(NotifierAdapter):
     async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
         """Executes the webhook with payload_json and an optional file part, suppressing notifications when not urgent.
 
-        The message is cut to the 2000 characters Discord takes.
+        The message is cut to the 2000 characters Discord takes, and mentions
+        nobody, since a monitor or camera named ``@everyone`` would otherwise
+        ping the whole channel.
         """
-        url = str(config["webhook_url"]).strip()
-        payload = {"content": truncated(f"**{title}**\n{body}", CONTENT_LIMIT), **({} if urgent else {"flags": SUPPRESS_NOTIFICATIONS})}
+        url = config["webhook_url"]
+        payload = {
+            "content": truncated(f"**{title}**\n{body}", CONTENT_LIMIT),
+            "allowed_mentions": {"parse": []},
+            **({} if urgent else {"flags": SUPPRESS_NOTIFICATIONS}),
+        }
         if image:
             headers, data = multipart_form({"payload_json": json.dumps(payload)}, "files[0]", "snapshot.jpg", image)
             status, _ = await http("POST", url, headers=headers, data=data, timeout=15.0)

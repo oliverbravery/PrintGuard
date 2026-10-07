@@ -39,7 +39,7 @@ Every enabled channel gets every notice, so there's no routing to set up. A moni
 | [ntfy](https://ntfy.sh) | A topic URL, on ntfy.sh or your own server | No account needed. Use a hard-to-guess topic, or a protected one with an access token. Anyone with an open topic's URL can read it, so the URL is kept out of the dashboard, bug reports and the API like a password. Defect alerts and fault warnings are sent at urgent priority, and recoveries and a plugin's notices without it. Your own server takes snapshots once [attachments](https://docs.ntfy.sh/config/#attachments) are on, which needs `attachment-cache-dir` and `base-url` set |
 | [Pushover](https://pushover.net) | An application token from [pushover.net/apps/build](https://pushover.net/apps/build) and your user key | A one-off app purchase. Priority defaults to High, which bypasses the quiet hours set on the device. Recoveries and a plugin's notices go at Normal at most |
 | [Telegram](https://telegram.org) | A bot token from @BotFather and your chat ID | Recoveries and a plugin's notices are sent without a sound |
-| [Discord](https://discord.com) | A webhook URL, from Server Settings, Integrations, then Webhooks | Recoveries and a plugin's notices are sent with notifications suppressed |
+| [Discord](https://discord.com) | A webhook URL, from Server Settings, Integrations, then Webhooks | Recoveries and a plugin's notices are sent with notifications suppressed. An alert never mentions anyone, so a monitor named `@everyone` pings nobody |
 | Desktop notification | Nothing to fill in | Desktop app only. A native notification on the computer running the app, with the window open or closed. macOS asks for permission the first time, and a send fails with an error while notifications are switched off for PrintGuard in the system settings. A recovery looks like any other notice |
 
 Home Assistant gets the same defects and snapshots over MQTT, covered in
@@ -67,8 +67,8 @@ apart for each monitor, whatever the cooldown, so a pause that worked is still p
 after one that failed.
 
 A name or message longer than a service takes is cut with an ellipsis. Pushover takes a 250
-character title and a 1024 character message, Telegram a 1024 character caption, Discord 2000
-characters and ntfy 4096 bytes.
+character title and a 1024 character message, Telegram 1024 characters with a picture and 4096 without, Discord 2000
+characters and ntfy a 250 character title and a 4096 byte message.
 
 Channels are sent to together and each gets 30 seconds to answer. One that doesn't is reported as
 failed and holds up neither the others nor the monitor.

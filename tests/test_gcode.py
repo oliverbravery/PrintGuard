@@ -8,6 +8,7 @@ import base64
 import hashlib
 import io
 import struct
+import time
 import tracemalloc
 import zipfile
 import zlib
@@ -268,7 +269,7 @@ def test_a_file_that_unpacks_past_the_cap_is_refused_before_it_is_unpacked(monke
         gcode.inspect(buffer.getvalue(), "3mf")
     with pytest.raises(ValueError, match="unpacks to more than"):
         gcode.retemper(buffer.getvalue(), "3mf", {"nozzle": 210.0})
-    with pytest.raises(ValueError, match="inflates to more than"):
+    with pytest.raises(ValueError, match="come to more than"):
         gcode.inspect(bomb, "bgcode")
 
 
@@ -276,8 +277,35 @@ def test_binary_gcode_whose_blocks_inflate_past_the_cap_between_them_is_refused(
     monkeypatch.setattr(gcode, "MAX_BLOCK_BYTES", 1024)
     preview = block(5, struct.pack("<HHH", 0, 16, 16), b"\0" * 400, compression=1)
     assert gcode.inspect(bgcode(preview, preview), "bgcode").thumbnail == b"\0" * 400
-    with pytest.raises(ValueError, match="inflates to more than"):
+    with pytest.raises(ValueError, match="come to more than"):
         gcode.inspect(bgcode(preview, preview, preview), "bgcode")
+
+
+def test_binary_gcode_blocks_that_are_not_compressed_count_towards_the_cap_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gcode, "MAX_BLOCK_BYTES", 1024)
+    preview = block(5, struct.pack("<HHH", 0, 16, 16), b"\0" * 400)
+    metadata = block(4, struct.pack("<H", 0), b"\n" * 400)
+    assert gcode.inspect(bgcode(preview, metadata), "bgcode").thumbnail == b"\0" * 400
+    for blocks in ((preview, preview, preview), (preview, metadata, metadata), (block(4, struct.pack("<H", 0), b"\n" * 1025),)):
+        with pytest.raises(ValueError, match="come to more than"):
+            gcode.inspect(bgcode(*blocks), "bgcode")
+
+
+def test_binary_gcode_with_more_blocks_than_a_slicer_writes_is_refused() -> None:
+    empty = block(5, struct.pack("<HHH", 0, 1, 1), b"")
+    assert gcode.inspect(bgcode(*[empty] * gcode.MAX_BLOCKS), "bgcode").thumbnail == b""
+    with pytest.raises(ValueError, match="more than 1000 blocks"):
+        gcode.inspect(bgcode(*[empty] * (gcode.MAX_BLOCKS + 1)), "bgcode")
+
+
+def test_a_time_written_as_a_long_run_of_digits_is_read_without_stalling() -> None:
+    digits = b"1" * 200_000
+    started = time.perf_counter()
+    for line in (b"; estimated printing time (normal mode) = " + digits, b";TIME:" + digits, b";Filament used: " + digits + b"m"):
+        with pytest.raises(ValueError):
+            gcode.inspect(line + b"\nG1 X1\n", "gcode")
+    assert time.perf_counter() - started < 2
+    assert gcode.inspect(b"; estimated printing time (normal mode) = 1h 2m 3s\nG1 X1\n", "gcode").meta["time_s"] == 3723
 
 
 def test_a_number_too_large_to_be_one_is_refused() -> None:
@@ -543,6 +571,20 @@ def test_a_retemper_that_moved_nothing_it_was_asked_to_move_says_so() -> None:
     with pytest.raises(ValueError, match="none of the temperatures in this file moved"):
         gcode.retemper(b"; nozzle_temperature_initial_layer: 225\nM109 S230\nG1 X1\n", "gcode", {"nozzle": 240})
     assert gcode.retemper(b"M109 S230\nG1 X1\n", "gcode", {"nozzle": 230}) == b"M109 S230\nG1 X1\n"
+
+
+def test_set_points_move_however_the_file_spells_them() -> None:
+    spelt = b"M104S215\n  M109 S215\nm104 s215\nSET_HEATER_TEMPERATURE HEATER=extruder TARGET=215\nset_heater_temperature target=60 heater=heater_bed\n"
+    left_alone = b"M1040 S215\nSET_HEATER_TEMPERATURE HEATER=extruder1 TARGET=215\nN5 M104 S215*33\n"
+    moved = gcode.retemper(spelt + left_alone, "gcode", {"nozzle": 230.0, "bed": 65.0})
+    assert moved == b"M104S230\n  M109 S230\nm104 s230\nSET_HEATER_TEMPERATURE HEATER=extruder TARGET=230\nset_heater_temperature target=65 heater=heater_bed\n" + left_alone
+    assert gcode.inspect(b"SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=60\nM104S215\n", "gcode").meta.items() >= {"nozzle": 215.0, "bed": 60.0}.items()
+
+
+def test_a_file_whose_lines_end_with_a_carriage_return_alone_is_read_and_moved() -> None:
+    classic_mac = b";TIME:60\rM104 S200\rM140 S60\rG1 X1\r"
+    assert gcode.inspect(classic_mac, "gcode").meta.items() >= {"time_s": 60, "nozzle": 200.0, "bed": 60.0}.items()
+    assert gcode.retemper(classic_mac, "gcode", {"nozzle": 220.0}) == b";TIME:60\rM104 S220\rM140 S60\rG1 X1\r"
 
 
 def test_an_empty_file_is_refused() -> None:

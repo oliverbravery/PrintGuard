@@ -43,8 +43,7 @@ def sanitise_printer(printer_id: str, patch: dict[str, Any], base: dict[str, Any
         raise ValueError(f"unknown printer provider {provider!r}")
     record["provider"] = provider
     record["name"] = (str(record.get("name") or "").strip()) or INTEGRATIONS[provider].label
-    declared = INTEGRATIONS[provider].schema["properties"]
-    record["config"] = {key: value for key, value in (record.get("config") or {}).items() if key in declared}
+    record["config"] = INTEGRATIONS[provider].declared(record.get("config") or {})
     return record
 
 

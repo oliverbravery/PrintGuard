@@ -33,13 +33,15 @@ class MonitorHistory:
         The time since the previous reading counts as watched unless it is
         longer than WATCH_GAP_S, since a monitor that stood down or lost its
         camera in between was not watching. A gap that spans two buckets is
-        split at the boundary, so no bucket reports more than BUCKET_S.
+        split at the boundary, so no bucket reports more than BUCKET_S. A
+        reading from before the last bucket, as a clock set back gives, goes
+        into the last bucket so the series stays in time order.
         """
         self._last_score = score
         start = int(ts // BUCKET_S) * BUCKET_S
         previous = self.buckets[-1] if self.buckets else None
         bucket = previous
-        if bucket is None or bucket["t"] != start:
+        if bucket is None or bucket["t"] < start:
             bucket = {"t": start, "n": 0, "sum": 0.0, "min": score, "max": score, "defects": 0, "watched": 0.0}
             self.buckets.append(bucket)
         if self._last_ts is not None and 0 < ts - self._last_ts <= WATCH_GAP_S:

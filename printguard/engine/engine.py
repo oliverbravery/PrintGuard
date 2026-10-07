@@ -22,6 +22,7 @@ from typing import Any, Awaitable, Callable, Coroutine
 import numpy as np
 
 from . import credentials, feedback, gcode, logs, oauth, plugins, reports, updates, urls, vision
+from .adapters import Adapter
 from .cameras import declared_camera_id, same_stream, sanitise_camera, sanitise_source, stored_camera, tidy_stream_url
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
@@ -268,6 +269,10 @@ class Engine:
                 unusable.append(f"The saved {key} setting could not be used, so it was reset: {logs.describe(exc)}")
         for warning in unusable:
             self._warn_at_start(warning)
+        self.settings["notifiers"] = {
+            provider: self._restored_config(NOTIFIERS[provider], config, NOTIFIERS[provider].label) if provider in NOTIFIERS else config
+            for provider, config in self.settings["notifiers"].items()
+        }
         await self.platform.configure(self.settings)
         for notice in self.platform.take_notices():
             self._warn_at_start(notice.message)
@@ -338,7 +343,25 @@ class Engine:
         reported_status = record.get("reported_status")
         if not (reported_status is None or isinstance(reported_status, str)):
             raise ValueError("its last status is text")
-        self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=printer["config"], reported_status=reported_status))
+        config = self._restored_config(INTEGRATIONS[printer["provider"]], printer["config"], f"printer '{printer['name']}'")
+        self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=config, reported_status=reported_status))
+
+    def _restored_config(self, adapter: Adapter, config: dict[str, Any], owner: str) -> dict[str, Any]:
+        """A stored adapter config as a save would take it, warning of each value that had to be cleared.
+
+        Every save is checked against the adapter's schema and a channel save
+        sends every channel, so one value an earlier version stored unchecked
+        would refuse them all.
+
+        Args:
+            adapter: The integration or notifier the config is for.
+            config: The config as the state file holds it.
+            owner: What the config belongs to, as the warning names it.
+        """
+        config, reset = adapter.restored(config)
+        for title in reset:
+            self._warn_at_start(f"The saved {title.partition(' (')[0]} of {owner} could not be used, so it was cleared")
+        return config
 
     def _restore_plugin(self, record: dict[str, Any]) -> None:
         plugin = Plugin(**{**record, "manifest": plugins.restored_manifest(record["manifest"])})
@@ -347,6 +370,11 @@ class Engine:
             plugin.enabled = False
             wanted = ", ".join(plugins.PERMISSIONS[name]["label"] for name in asked_now)
             self._warn_at_start(f"Plugin {plugin.manifest['name']} now needs {wanted}, so it is off until you accept that in Plugins")
+        try:
+            plugin.config = plugins.sanitise_config(plugin.config)
+        except ValueError as refused:
+            plugin.config = {}
+            self._warn_at_start(f"Plugin {plugin.manifest['name']} had stored data the hub cannot keep ({refused}), so it starts without it")
         self.plugins.add(plugin)
 
     def _restore_camera(self, record: dict[str, Any]) -> None:
@@ -365,8 +393,7 @@ class Engine:
         background = (*self._tasks, *self._sends.values(), *self._background)
         for task in background:
             task.cancel()
-        for camera in self.cameras.values():
-            self.scheduler.cancel_camera(camera)
+        self.scheduler.cancel_all()
         await asyncio.gather(*background, return_exceptions=True)
         await self.sockets.drop_all(set())
         await self.watchdog.close()
@@ -812,12 +839,16 @@ class Engine:
             delay = UPDATE_CHECK_INTERVAL_S
             if self.settings.get("update_check", True):
                 try:
-                    await self._check_updates()
-                    self.emit(self.state_event())
+                    await self._announce_updates()
                 except Exception as exc:
                     logger.warning("update check failed: %s", logs.describe(exc))
                     delay = UPDATE_RETRY_S
             await asyncio.sleep(delay)
+
+    async def _announce_updates(self) -> None:
+        """Checks for an update without being asked to, and tells every client what it found."""
+        await self._check_updates()
+        self.emit(self.state_event())
 
     async def _check_updates(self) -> None:
         """Fetches and stores the update status, raising if it cannot.
@@ -1174,11 +1205,14 @@ class Engine:
         """Deregisters a camera and releases its source.
 
         Monitors keep their binding, so a camera its printer or the deployment
-        manages is watched again when it comes back under the same id.
+        manages is watched again when it comes back under the same id. An
+        inference in flight is cancelled, since one that never came back would
+        hold its worker for good.
         """
         camera = self.cameras.remove(camera_id)
         await self._cancel_attach(camera_id)
         if camera:
+            self.scheduler.cancel_camera(camera)
             await self._tidy_up(f"release the camera '{camera.name}'", self.platform.release_camera(camera.id, camera.source))
 
     async def _tidy_up(self, what: str, work: Awaitable[Any]) -> None:
@@ -1398,7 +1432,8 @@ class Engine:
         if patch.get("provider", existing.provider) != existing.provider:
             base["config"] = {}
         elif "config" in patch:
-            patch["config"] = credentials.keep_stored(patch["config"], existing.config, INTEGRATIONS[existing.provider].secret_fields())
+            adapter = INTEGRATIONS[existing.provider]
+            patch["config"] = credentials.keep_stored(adapter.declared(patch["config"]), existing.config, adapter.secret_fields())
         record = sanitise_printer(existing.id, patch, base)
         INTEGRATIONS[record["provider"]].require(record["config"])
         reports.require_storable(record["config"].values())
@@ -1468,7 +1503,7 @@ class Engine:
         adapter = INTEGRATIONS.get(message.get("provider") or "")
         if not adapter:
             raise RuntimeError(f"unknown provider {message.get('provider')!r}")
-        config = message.get("config", {})
+        config = adapter.declared(message.get("config", {}))
         typed = reports.config_secrets(config, adapter.secret_keys())
         stored = self.printers.get(message.get("id") or "")
         try:
@@ -1723,9 +1758,10 @@ class Engine:
         adapter = NOTIFIERS.get(message.get("provider") or "")
         if not adapter:
             raise RuntimeError(f"unknown notifier {message.get('provider')!r}")
-        typed = reports.config_secrets(message.get("config", {}), adapter.secret_keys())
+        config = adapter.declared(message.get("config", {}))
+        typed = reports.config_secrets(config, adapter.secret_keys())
         try:
-            config = credentials.keep_stored(message.get("config", {}), self.settings["notifiers"].get(adapter.id, {}), adapter.secret_fields())
+            config = credentials.keep_stored(config, self.settings["notifiers"].get(adapter.id, {}), adapter.secret_fields())
             adapter.require(config)
             picture = await self.platform.encode_jpeg(np.zeros(TEST_PICTURE_SHAPE, np.uint8))
             await adapter.send(self.service_http, config, "PrintGuard test", "Notifications are working.", picture)
@@ -1740,7 +1776,8 @@ class Engine:
         a change another client made while it ran is kept. A notifier secret
         or the MQTT password left out or blank keeps its stored value and null
         clears it, and the catalogue address sent back as the snapshot shows
-        it keeps its login.
+        it keeps its login. A notifier config keeps only the fields its schema
+        declares, as a printer's does.
 
         Raises:
             ValueError: If the patch names a setting there is not, a value in it
@@ -1757,7 +1794,9 @@ class Engine:
                 raise ValueError(f"unknown notifier {provider!r}")
         if "notifiers" in patch:
             patch["notifiers"] = {
-                provider: credentials.keep_stored(config, self.settings["notifiers"].get(provider, {}), NOTIFIERS[provider].secret_fields())
+                provider: credentials.keep_stored(
+                    NOTIFIERS[provider].declared(config), self.settings["notifiers"].get(provider, {}), NOTIFIERS[provider].secret_fields()
+                )
                 for provider, config in patch["notifiers"].items()
             }
         if "mqtt" in patch:
@@ -1773,7 +1812,10 @@ class Engine:
             NOTIFIERS[provider].require(config)
         if settings["inference_runtime"] != self.settings["inference_runtime"]:
             await self._switch_runtime(settings)
+        switched_on = settings["update_check"] and not self.settings["update_check"]
         self.settings = {**self.settings, **{key: settings[key] for key in patch}}
+        if switched_on:
+            self._hold("the update check", self._announce_updates())
         if patch.get("feedback") == "off":
             await self._tidy_up("delete the frames kept for review", self.reviews.stop_asking())
         logger.info("settings updated: %s", sorted(patch))
@@ -1898,7 +1940,9 @@ class Engine:
         over a zip keeps its stored data and credentials, but is accepted again,
         unless it reaches further than the one it replaces. One that
         signs in at different addresses is signed out as well, so a refresh
-        token is never sent to an endpoint it was not issued by.
+        token is never sent to an endpoint it was not issued by. A zip the
+        catalogue vouches for is recorded as the catalogue's own install, so its
+        README and pictures come from the pinned commit and never from the zip.
         """
         source = dict(message.get("source") or {})
         page: dict[str, str] = {}
@@ -1926,6 +1970,8 @@ class Engine:
         digests = plugins.digests(manifest, sources, assets)
         await self._refresh_catalogue(quiet=True)
         entry = plugins.verified_by(self.catalogue, manifest["id"], digests)
+        if entry is not None and source["kind"] == "file":
+            source, page = plugins.pinned_source(entry), {}
         existing = self.plugins.get(manifest["id"])
         inherits = existing is not None and plugins.same_source(existing.source, source)
         widened = existing is not None and plugins.widens(existing.manifest, manifest)
@@ -2112,7 +2158,7 @@ class Engine:
             raise PermissionError(f"plugin {plugin.id} may not set the Host header")
         self._spend_request(plugin)
         await self._refresh_sign_in(plugin)
-        request = {"url": url, "headers": headers or None, "json": message.get("json")}
+        request = {"url": url, "headers": headers or None, "json": plugins.shallow(message.get("json"), "a request body")}
         usable = plugins.fillable(plugin.secrets)
         blank = plugins.missing_secrets(request, usable)
         if blank:
@@ -2376,7 +2422,7 @@ class Engine:
         needed = plugins.UI_EFFECTS.get(str(effect.get("kind", "")))
         if plugin is None or needed is None or not plugin.may(needed):
             raise PermissionError("plugin may not ask a dashboard for that")
-        if len(plugins.canonical(effect)) > plugins.MAX_EFFECT_BYTES:
+        if len(plugins.canonical(plugins.shallow(effect, "a plugin effect"))) > plugins.MAX_EFFECT_BYTES:
             raise ValueError(f"a plugin effect is {plugins.MAX_EFFECT_BYTES // 1024 // 1024} MB at most")
         if effect["kind"] == "background":
             effect = {**effect, "image": plugins.background_image(effect.get("image"))}

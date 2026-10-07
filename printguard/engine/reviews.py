@@ -335,9 +335,18 @@ class ReviewLibrary:
         return [review for review in self._reviews.values() if review.status == "queued" and (review.submission["retry_at"] or 0.0) <= now]
 
     async def forget(self, monitor_id: str) -> None:
-        """Deletes every review of a monitor, with their frames."""
-        for review in [review for review in self._reviews.values() if review.monitor_id == monitor_id]:
-            await self._discard(review)
+        """Deletes every review of a monitor, with their frames.
+
+        Every review is forgotten and every file is tried even when one cannot be deleted.
+
+        Raises:
+            OSError: If a frame's file could not be deleted, once all the rest were.
+        """
+        reviews = [review for review in self._reviews.values() if review.monitor_id == monitor_id]
+        for review in reviews:
+            self._reviews.pop(review.id)
+        outcomes = await asyncio.gather(*(self._drop(review, list(review.frames)) for review in reviews), return_exceptions=True)
+        _raise_first(outcomes)
 
     def _running(self, monitor_id: str) -> Review | None:
         return next((review for review in self._reviews.values() if review.monitor_id == monitor_id and review.ended is None), None)
@@ -346,16 +355,18 @@ class ReviewLibrary:
         """Opens a review, dropping the oldest finished ones to stay within the caps.
 
         Prints still running are not counted, so a hub with many monitors keeps finished ones too.
-        A print queued to send is never dropped, since it leaves when it is sent or dismissed.
+        A print queued to send is never dropped, since it leaves when it is sent or dismissed, and
+        is not counted either, or enough of them would have each new print drop the one before it.
+        A print left with no frames goes before any that has some.
         """
-        finished = [review for review in self._reviews.values() if review.ended is not None]
-        droppable = sorted((review for review in finished if review.status != "queued"), key=lambda review: review.started)
+        droppable = sorted(
+            (review for review in self._reviews.values() if review.ended is not None and review.status != "queued"),
+            key=lambda review: (bool(review.frames), review.started),
+        )
         review = Review(id=uuid.uuid4().hex[:12], monitor_id=monitor_id, started=ts, spacing_s=SPACED_START_S)
         self._reviews[review.id] = review
-        kept = len(finished)
-        while droppable and (kept >= REVIEW_MAX or self._stored_bytes() > BYTES_MAX):
+        while droppable and (len(droppable) >= REVIEW_MAX or self._stored_bytes() > BYTES_MAX):
             await self._discard(droppable.pop(0))
-            kept -= 1
         return review
 
     def _stored_bytes(self) -> int:

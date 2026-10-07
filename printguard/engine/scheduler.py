@@ -106,8 +106,13 @@ class Scheduler:
             remaining -= camera.target_fps
 
     def cancel_camera(self, camera: Camera) -> None:
-        """Cancels the active inference job for a restarted camera."""
+        """Cancels the active inference job of a camera that is restarted or removed."""
         if task := self._camera_jobs.get(camera.id):
+            task.cancel()
+
+    def cancel_all(self) -> None:
+        """Cancels every inference job, including one whose camera is no longer registered."""
+        for task in self._jobs:
             task.cancel()
 
     async def dispatch(self) -> float:

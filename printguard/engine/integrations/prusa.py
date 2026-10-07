@@ -61,7 +61,7 @@ job, so neither says the print stopped."""
 
 
 def _username(config: dict[str, Any]) -> str:
-    return str(config.get("username") or "").strip() or _USERNAME
+    return config.get("username") or _USERNAME
 
 
 def _failure(response: httpx.Response) -> str:

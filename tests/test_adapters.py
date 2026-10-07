@@ -269,7 +269,7 @@ async def test_discord_uploads_snapshot_with_payload_json() -> None:
     http = RecordingHttp()
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", JPEG)
     call = http.last
-    assert jsonlib.dumps({"content": "**T**\nB"}).encode() in call["data"]
+    assert jsonlib.dumps({"content": "**T**\nB", "allowed_mentions": {"parse": []}}).encode() in call["data"]
     assert b'filename="snapshot.jpg"' in call["data"]
     assert JPEG in call["data"]
 
@@ -277,7 +277,15 @@ async def test_discord_uploads_snapshot_with_payload_json() -> None:
 async def test_discord_posts_json_without_snapshot() -> None:
     http = RecordingHttp()
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None)
-    assert http.last["json"] == {"content": "**T**\nB"}
+    assert http.last["json"] == {"content": "**T**\nB", "allowed_mentions": {"parse": []}}
+
+
+async def test_discord_pings_nobody_a_monitor_is_named_after() -> None:
+    http = RecordingHttp()
+    for image in (None, JPEG):
+        await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "Defect on @everyone", "B", image)
+        payload = http.last["json"] if image is None else jsonlib.loads(_field(http.last["data"], "payload_json"))
+        assert payload == {"content": "**Defect on @everyone**\nB", "allowed_mentions": {"parse": []}}
 
 
 async def test_discord_raises_on_rejection() -> None:
@@ -1854,7 +1862,7 @@ async def test_octoprint_upload_it_stored_but_did_not_start_raises() -> None:
 def test_prusa_signs_in_as_maker_unless_another_username_is_given() -> None:
     from printguard.engine.integrations.prusa import _username
 
-    assert _username({"password": "p"}) == _username({"username": " "}) == "maker"
+    assert _username({"password": "p"}) == _username({"username": ""}) == "maker"
     assert _username({"username": "olly"}) == "olly"
 
 
@@ -2251,11 +2259,11 @@ async def test_telegram_sends_a_quiet_notice_silently() -> None:
 async def test_discord_sends_a_quiet_notice_with_notifications_suppressed() -> None:
     http = RecordingHttp()
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None, urgent=False)
-    assert http.last["json"] == {"content": "**T**\nB", "flags": 4096}
+    assert http.last["json"] == {"content": "**T**\nB", "allowed_mentions": {"parse": []}, "flags": 4096}
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", JPEG, urgent=False)
-    assert jsonlib.dumps({"content": "**T**\nB", "flags": 4096}).encode() in http.last["data"]
+    assert jsonlib.dumps({"content": "**T**\nB", "allowed_mentions": {"parse": []}, "flags": 4096}).encode() in http.last["data"]
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None)
-    assert http.last["json"] == {"content": "**T**\nB"}
+    assert http.last["json"] == {"content": "**T**\nB", "allowed_mentions": {"parse": []}}
 
 
 async def test_native_takes_urgent_and_ignores_it(monkeypatch) -> None:
@@ -2314,3 +2322,61 @@ async def test_ntfy_cuts_a_long_message_to_the_bytes_it_takes() -> None:
     http = RecordingHttp()
     await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "Defect", LONG_NAME * 5, None)
     assert len(http.last["data"]) <= 4096 and http.last["data"].decode().endswith("…")
+
+
+async def test_ntfy_cuts_a_long_title_before_it_becomes_a_header() -> None:
+    import base64
+
+    http = RecordingHttp()
+    await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, f"Defect on {LONG_NAME}", "B", None)
+    title = base64.b64decode(http.last["headers"]["Title"].removeprefix("=?UTF-8?B?").removesuffix("?=")).decode()
+    assert len(title) == 250 and title == f"Defect on {LONG_NAME}"[:249] + "…"
+
+
+def test_a_config_is_held_to_the_choices_its_schema_offers() -> None:
+    pushover, elegoo = NOTIFIERS["pushover"], INTEGRATIONS["elegoo"]
+    pushover.require({"api_token": "a", "user_key": "u", "priority": "-1"})
+    pushover.require({"api_token": "a", "user_key": "u", "priority": ""})
+    with pytest.raises(ValueError, match=r"Priority \(applies to every notice\) is one of -2, -1, 0, 1"):
+        pushover.require({"api_token": "a", "user_key": "u", "priority": "7"})
+    with pytest.raises(ValueError, match="Printer family is one of centauri, moonraker"):
+        elegoo.require({"family": "resin", "host": "10.0.0.9"})
+
+
+@pytest.mark.parametrize("adapter", [*INTEGRATIONS.values(), *NOTIFIERS.values()], ids=lambda adapter: adapter.id)
+def test_a_config_keeps_only_its_declared_fields_without_the_whitespace_around_them(adapter: Any) -> None:
+    pasted = {key: " pasted\n" for key in adapter.schema["properties"]}
+    assert adapter.declared({**pasted, "undeclared": "x", "api_token ": "y"}) == {key: "pasted" for key in pasted}
+    assert adapter.declared({"undeclared": None}) == {}
+
+
+def test_a_stored_config_is_made_one_a_save_would_take() -> None:
+    assert NOTIFIERS["pushover"].restored({"api_token": "ap ", "user_key": "uk", "priority": 1, "left": "over"}) == (
+        {"api_token": "ap", "user_key": "uk", "priority": "1"},
+        [],
+    )
+    assert NOTIFIERS["pushover"].restored({"api_token": ["ap"], "user_key": "uk", "priority": 7}) == ({"user_key": "uk"}, ["Application API token", "Priority (applies to every notice)"])
+    assert INTEGRATIONS["octoprint"].restored({"base_url": "http://op", "api_key": 12345}) == ({"base_url": "http://op", "api_key": "12345"}, [])
+    assert INTEGRATIONS["octoprint"].restored({"base_url": "http://op", "api_key": True}) == ({"base_url": "http://op"}, ["API key"])
+
+
+@pytest.mark.parametrize(
+    ("adapter", "config", "header"),
+    [
+        (INTEGRATIONS["octoprint"], {"base_url": "http://op ", "api_key": "KEY\n"}, ("X-Api-Key", "KEY")),
+        (INTEGRATIONS["klipper"], {"base_url": "http://mr", "api_key": " KEY"}, ("X-Api-Key", "KEY")),
+    ],
+)
+async def test_a_printer_key_pasted_with_whitespace_is_sent_without_it(adapter: Any, config: dict, header: tuple[str, str]) -> None:
+    http = RecordingHttp(status=401)
+    with pytest.raises(PermissionError):
+        await adapter.fetch_state(http, adapter.declared(config))
+    assert http.last["url"].startswith(config["base_url"].strip() + "/") and http.last["headers"][header[0]] == header[1]
+
+
+async def test_a_channel_key_pasted_with_whitespace_is_sent_without_it() -> None:
+    http = RecordingHttp(body={"ok": True})
+    await NOTIFIERS["ntfy"].send(http, NOTIFIERS["ntfy"].declared({"url": " https://ntfy.sh/t\n", "token": "tk\n"}), "T", "B", None)
+    assert (http.last["url"], http.last["headers"]["Authorization"]) == ("https://ntfy.sh/t", "Bearer tk")
+    await NOTIFIERS["telegram"].send(http, NOTIFIERS["telegram"].declared({"bot_token": "12:ab \n", "chat_id": " 77"}), "T", "B", None)
+    assert http.last["url"] == "https://api.telegram.org/bot12:ab/sendMessage" and http.last["json"]["chat_id"] == "77"

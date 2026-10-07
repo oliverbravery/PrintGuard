@@ -154,7 +154,7 @@ temperatures a start gcode probes or wipes at stay put. A file sliced with sever
 the one its first layer prints with and moves only that filament's temperatures, and nothing moves
 past 350°C on the nozzle or 150°C on the bed. A file whose slicer lists no print
 temperatures has every set-point above zero moved. Binary gcode keeps the temperatures it
-was sliced with.
+was sliced with, and so does a line a host numbered and checksummed, such as `N5 M104 S215*33`.
 
 Each file keeps the preview, estimated time, filament and printer model its slicer wrote into it.
 Cura and a few others write no preview, so your browser draws one and adds it to the gcode as
@@ -189,7 +189,7 @@ A file is sent under its library name, with each run of anything outside plain l
 dots, dashes and underscores turned into one `_` and the name before the extension cut to 60
 characters. Rename it first if the printer's own file list matters to you. PrusaLink replaces a
 file of the same name already on the printer. A file can be up to 512 MB, and a 3mf whose files
-unpack to more than that between them is refused. So is an empty file, a 3mf whose plate gcode is empty, binary gcode with no gcode in it, a damaged 3mf, a 3mf with a member compressed
+unpack to more than that between them is refused. So is an empty file, a 3mf whose plate gcode is empty, binary gcode with no gcode in it or with more than 16 MB of metadata and previews, a damaged 3mf, a 3mf with a member compressed
 with anything but stored or deflate, and a file whose comments give a print time of over a year or
 an amount of filament or a temperature no slicer would write. A file whose gcode is over 32 MB isn't drawn in the browser, since parsing it takes
 about nine times its size in memory, so it has no 3D view and no drawn preview. It uploads and
