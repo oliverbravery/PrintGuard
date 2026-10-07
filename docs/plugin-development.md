@@ -252,7 +252,7 @@ proxy named in the environment.
 A plugin can't call the hub's own API, with or without `net:local`. Every request, sign-in and
 socket PrintGuard makes for a plugin carries `X-PrintGuard-Plugin: 1`, and the hub answers `403`
 to anything that arrives with it. A request that sets that header itself is refused, as one that
-sets `Host` is. Read the dashboard with `state:read`, `camera:frames` and `history:read`.
+sets `Host` or `Connection` is. Read the dashboard with `state:read`, `camera:frames` and `history:read`.
 
 ## The three halves
 

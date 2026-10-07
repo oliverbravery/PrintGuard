@@ -80,6 +80,7 @@ PLUGIN_TIMEOUT_S = 10.0
 PLUGIN_STORE_SAVE_S = 1.0
 NOTIFY_SEND_LIMIT = 20
 MAX_PLUGIN_BODY = 256 * 1024
+PLUGIN_RESERVED_HEADERS = ("Host", "Connection", PLUGIN_HEADER)
 CALL_TTL_S = 30.0
 FEEDBACK_RETRY_S = 6 * 3600.0
 FEEDBACK_RECHECK_S = 60.0
@@ -2322,7 +2323,8 @@ class Engine:
         A ``Host`` header is refused, since a server holding several sites
         would answer as the one it names, not the one the address did. Every
         request carries ``PLUGIN_HEADER``, which the plugin may not set, so the
-        hub refuses one that comes back to itself. The
+        hub refuses one that comes back to itself. ``Connection`` is refused
+        too, since a proxy removes every header it names. The
         whole request has ``PLUGIN_TIMEOUT_S``, so an answer that trickles in
         cannot hold it open. The plugin is looked up again once its sign-in
         has been renewed, since it may have been removed or reinstalled while
@@ -2334,7 +2336,7 @@ class Engine:
         plugin = self._network_allows(message["id"], url)
         headers = dict(message.get("headers") or {})
         named = {str(name).lower() for name in headers}
-        for reserved in ("Host", PLUGIN_HEADER):
+        for reserved in PLUGIN_RESERVED_HEADERS:
             if reserved.lower() in named:
                 raise PermissionError(f"plugin {plugin.id} may not set the {reserved} header")
         self._spend_request(plugin)

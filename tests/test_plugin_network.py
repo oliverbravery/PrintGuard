@@ -251,6 +251,16 @@ async def test_a_request_cannot_name_a_host_its_address_did_not(headers: object)
     assert [sent["headers"] for sent in platform.http_requests if sent["url"].startswith(API)] == [{"X-Forwarded-Host": "kept", PLUGIN_HEADER: "1"}]
 
 
+@pytest.mark.parametrize("headers", [{"Connection": PLUGIN_HEADER}, {"cOnNeCtIoN": "close"}, [["connection", PLUGIN_HEADER]]])
+async def test_a_request_cannot_have_a_proxy_strip_the_header_the_hub_refuses(headers: object) -> None:
+    platform = FakePlatform()
+    async with engine_with(platform, manifest("net", urls=[f"{API}/v1/*"])) as engine:
+        with pytest.raises(RuntimeError, match="may not set the Connection header"):
+            await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "headers": headers})
+
+    assert [sent for sent in platform.http_requests if sent["url"].startswith(API)] == []
+
+
 async def test_the_address_is_checked_again_with_its_secrets_filled_in() -> None:
     platform = FakePlatform()
     async with engine_with(platform, manifest("net", urls=[f"{API}/v1/*"], secrets={"key": "An API key"})) as engine:
