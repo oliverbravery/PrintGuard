@@ -562,6 +562,18 @@ async def test_klipper_derives_mjpeg_without_renaming_the_host() -> None:
     assert [cam["source"]["url"] for cam in cams] == ["http://snapshot-cam.local/stream", "http://webrtc-cam.local/webcam/stream"]
 
 
+async def test_klipper_leaves_out_a_webcam_it_cannot_read() -> None:
+    """Each was registered with its signalling address or its page as the stream, which never opens."""
+    body = {"result": {"webcams": [
+        {"name": "janus", "uid": "u1", "service": "webrtc-janus", "stream_url": "http://pi.lan/janus"},
+        {"name": "page", "uid": "u2", "service": "iframe", "stream_url": "http://pi.lan/camera.html"},
+        {"name": "jmuxer", "uid": "u3", "service": "jmuxer-stream", "stream_url": "ws://pi.lan:8080/stream"},
+        {"name": "mjpeg", "uid": "u4", "service": "mjpegstreamer", "stream_url": "/webcam/?action=stream"},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl"})
+    assert [cam["name"] for cam in cams] == ["mjpeg"]
+
+
 async def test_klipper_preserves_whep_endpoint() -> None:
     body = {"result": {"webcams": [
         {"name": "WHEP", "uid": "u1", "stream_url": "/webcam/whep", "enabled": True},

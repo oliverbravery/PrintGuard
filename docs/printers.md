@@ -261,7 +261,9 @@ already works, so one registered before you updated stays where it was.
 
 A Moonraker webcam set to the MediaMTX or go2rtc WebRTC service is pulled from that server's
 WHEP endpoint. One set to camera-streamer is read from its MJPEG stream, since camera-streamer
-has no WHEP endpoint.
+has no WHEP endpoint. A webcam set to Janus with no snapshot URL, to an iframe or to jMuxer isn't
+registered, since PrintGuard can't read those. Add its RTSP or MJPEG address as a
+[stream URL](cameras.md#stream-urls) instead.
 
 ### Running in Docker
 
