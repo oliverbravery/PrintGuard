@@ -1607,6 +1607,13 @@ async def test_prusa_upload_behind_a_redirect_names_where_it_went() -> None:
             await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G28")
 
 
+async def test_prusa_upload_to_something_that_lists_no_storage_says_it_is_not_prusalink() -> None:
+    server, config = await _prusa_answering("200 OK")
+    async with server:
+        with pytest.raises(RuntimeError, match="PrusaLink did not answer like its API$"):
+            await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G28")
+
+
 @pytest.mark.parametrize(("answer", "said"), [("404 Not Found", "PrusaLink did not answer like its API: HTTP 404"), ("200 OK", "PrusaLink did not answer like its API$")])
 async def test_prusa_that_answers_like_something_else_says_so(answer: str, said: str) -> None:
     server, config = await _prusa_answering(answer)

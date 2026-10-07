@@ -172,7 +172,10 @@ class PrusaAdapter(IntegrationAdapter):
                 raise RuntimeError(redirect_message(listing))
             if listing.status_code >= 400:
                 raise RuntimeError(f"PrusaLink refused to list its storage: HTTP {listing.status_code}")
-            storages = listing.json()["storage_list"]
+            try:
+                storages = listing.json()["storage_list"]
+            except (json.JSONDecodeError, KeyError, TypeError):
+                raise RuntimeError("PrusaLink did not answer like its API") from None
             storage = next((s["path"] for s in storages if s.get("available") and not s.get("read_only")), None)
             if not storage:
                 raise RuntimeError("Prusa printer has no storage to upload to")
