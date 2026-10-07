@@ -84,16 +84,16 @@ export function SettingsDialog() {
   const saveTheme = () => {
     if (!editing) return;
     const next = upsertTheme(themes, { ...editing, name: editing.name.trim() || "Custom" });
-    if (!send({ cmd: "settings.update", patch: { themes: next, theme: editing.id } })) return;
     endPreview();
     applyTheme(editing.id, next, glass, true);
+    updateSettings({ themes: next, theme: editing.id });
     setEditing(null);
   };
   const deleteTheme = (id: string) => {
     const next = themes.filter((t) => t.id !== id);
     const selection = theme === id ? "system" : theme;
-    if (!send({ cmd: "settings.update", patch: { themes: next, theme: selection } })) return;
     applyTheme(selection, next, glass, true);
+    updateSettings({ themes: next, theme: selection });
   };
 
   useEffect(() => {

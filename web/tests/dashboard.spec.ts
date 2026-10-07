@@ -1349,15 +1349,31 @@ test("closing settings part way through a theme puts the saved theme back", asyn
   await expect(page.locator("html")).toHaveAttribute("data-glass", "");
 });
 
-test("a theme saved while the hub is away stays in the editor with what was typed", async ({ page }) => {
+test("a theme saved while the hub is away is sent once it is back", async ({ page }) => {
+  const { sockets, commands } = await hub(page);
+  await page.evaluate(() => (window as any).__pg.getState().openSettings("appearance"));
+  await page.getByRole("button", { name: "+ New" }).click();
+  await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
+  await sockets[0].close();
+  await expect(page.getByText("reconnecting")).toBeVisible();
+  await page.getByRole("button", { name: "Save theme" }).click();
+
+  await expect(page.getByRole("textbox", { name: "Theme name" })).toBeHidden();
+  await expect.poll(() => commands.filter((c) => c.cmd === "settings.update").at(-1)?.patch.themes?.[0].name, { timeout: 8000 }).toBe("Workshop");
+});
+
+test("a saved theme stays on screen through a state sent before the hub has answered it", async ({ page }) => {
   await dashboard(page, { dialog: "settings", settingsTab: "appearance" });
   await page.getByRole("button", { name: "+ New" }).click();
   await page.getByRole("textbox", { name: "Theme name" }).fill("Workshop");
-  await page.evaluate(() => (window as any).__pg.setState({ link: { send: () => false, close() {} } }));
   await page.getByRole("button", { name: "Save theme" }).click();
+  await emit(page, { event: "state", ...engine() });
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--color-on-accent"))).not.toBe("");
 
-  await expect(page.getByRole("status").filter({ hasText: "wasn't sent" })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Theme name" })).toHaveValue("Workshop");
+  const saved = await page.evaluate(() => (window as any).__pg.getState().engine.settings);
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await emit(page, { event: "state", ...engine({ settings: saved }) });
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--color-on-accent"))).toBe("");
 });
 
 test("a theme started from dark keeps dark text on its accent", async ({ page }) => {
