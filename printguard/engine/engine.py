@@ -797,7 +797,8 @@ class Engine:
             self.save()
         if self.settings["feedback"] == "ask":
             for review in self.reviews.due(time.time()):
-                self._start_send(review)
+                if review.id not in self._sends:
+                    self._start_send(review)
         for notice in self.platform.take_notices():
             camera = self.cameras.get(notice.camera_id) if notice.camera_id else None
             subject = f"'{camera.name}' " if camera else ""

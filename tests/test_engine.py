@@ -3699,6 +3699,18 @@ async def test_a_second_send_during_an_upload_replaces_the_choices_and_repeats_n
     assert (final["status"], final["sent"], final["chosen"]) == ("sent", 3, 3)
 
 
+async def test_the_clock_does_not_ask_again_for_a_print_that_is_uploading(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.1)
+    monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.02)
+    platform = FakePlatform(infer_s=0.02)
+    _slow_inbox(platform, monkeypatch)
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, events):
+        review = await _finished_review(engine)
+        await engine.handle({"cmd": "review.send", "id": review["id"], "req_id": 7})
+        await asyncio.sleep(0.2)
+        assert engine._send_requests[review["id"]] == [7], "every tick queued another answer for the upload in flight"
+
+
 @asynccontextmanager
 async def configured_logging():
     """Installs the real logging setup for a test, restoring pytest's after."""
