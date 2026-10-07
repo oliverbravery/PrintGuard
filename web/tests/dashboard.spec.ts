@@ -596,6 +596,24 @@ test("a heater target the printer refuses goes back to what the printer has", as
   await expect(target).toHaveValue("0");
 });
 
+test("a monitor name or heater target typed and left with Escape is still saved", async ({ page }) => {
+  const heater = { actual: 21, target: 0 };
+  const printer = {
+    id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
+    device_state: { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: heater, bed: heater },
+  };
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
+  const panel = page.getByRole("dialog", { name: "Prusa" });
+  await panel.getByRole("textbox", { name: "Name" }).fill("Bench");
+  await panel.getByRole("spinbutton", { name: "nozzle target" }).fill("215");
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+
+  const commands = () => page.evaluate(() => (window as any).__sent.map((c: any) => [c.cmd, c.patch ?? c.nozzle]));
+  expect(await commands()).toEqual(expect.arrayContaining([["monitor.update", { name: "Bench" }], ["printer.heat", 215]]));
+  expect(await commands()).toHaveLength(2);
+});
+
 test("the register form keeps what was typed when the printer is refused and clears once it is added", async ({ page }) => {
   await dashboard(page, { dialog: "printers" });
   const service = page.getByRole("combobox");
@@ -1001,6 +1019,38 @@ test("an upload the hub refuses stays in the sheet with what was typed, and clos
   await page.route(route, (request) => request.fulfill({ json: {} }));
   await page.getByRole("button", { name: "Upload", exact: true }).click();
   await expect(name).toBeHidden();
+});
+
+test("discarding or closing the sheet while a file uploads cancels the request", async ({ page }) => {
+  await page.addInitScript(() => {
+    const win = window as any;
+    const abort = XMLHttpRequest.prototype.abort;
+    win.__aborts = 0;
+    XMLHttpRequest.prototype.abort = function () {
+      win.__aborts++;
+      abort.call(this);
+    };
+  });
+  await stagePrint(page);
+  await page.route(/\/api\/prints\?/, () => {});
+  const upload = page.getByRole("button", { name: "Upload", exact: true });
+  const aborts = () => page.evaluate(() => (window as any).__aborts);
+  const stage = () => page.evaluate(() => (window as any).__pg.getState().stagePrints([new File(["G1 Z0.2\n"], "cube.gcode")]));
+
+  const sentCount = () => page.evaluate(() => (window as any).__uploads.length);
+  await upload.click();
+  await expect.poll(sentCount).toBe(1);
+  await page.getByRole("button", { name: "Discard" }).click();
+  await expect.poll(aborts).toBe(1);
+  expect(await page.evaluate(() => (window as any).__pg.getState().uploads)).toEqual([]);
+
+  await stage();
+  await upload.click();
+  await expect.poll(sentCount).toBe(2);
+  await page.getByRole("button", { name: "Cancel uploads" }).click();
+  await expect.poll(aborts).toBe(2);
+  expect(await page.evaluate(() => (window as any).__pg.getState().uploads)).toEqual([]);
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("a preview that fails to draw on upload leaves nothing behind, and the file is read once", async ({ page }) => {
