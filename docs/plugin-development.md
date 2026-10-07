@@ -136,7 +136,7 @@ A plugin needs at least one of the three source files.
 | `tick_s` | How often its worker runs anyway, 5 to 86400 seconds. Under 5 switches the timer off |
 
 A permission without a reason, `urls` without `net`, a [local address](#addresses) (a wildcard
-over a local suffix included) without `net:local`, `oauth` without the `oauth` permission, the `oauth` permission without `oauth`, or `provides` and `consumes` without their
+over a local suffix included) or a sign-in at one without `net:local`, `oauth` without the `oauth` permission, the `oauth` permission without `oauth`, or `provides` and `consumes` without their
 link permission each refuse the install.
 
 ### Reasons
@@ -660,8 +660,8 @@ them the redirect URI to give the provider and links `register_url`.
 
 `authorize_url` and `token_url` are each one `https` address with no wildcards and a plain host,
 which leaves out a login, a backslash and a percent-encoded or non-ASCII host, since a browser and
-the hub read those differently. An `authorize_url` may carry a query of its own, which is kept. A `token_url`
-on this machine or the network around it needs `net:local`. The consent dialog lists both
+the hub read those differently. An `authorize_url` may carry a query of its own, which is kept. Either one
+on this machine or the network around it needs `net:local`, and without it accepted the sign-in does not start. The consent dialog lists both
 addresses, and an update that changes either one signs its users out and has to be accepted
 again. A sign-in left open while an update changes `token_url`, or takes the permission away, is
 refused when the user comes back. A token endpoint that can't be reached, or answers with more than

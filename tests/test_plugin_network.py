@@ -282,21 +282,26 @@ def test_a_sign_in_endpoint_is_one_literal_https_address(endpoint: str) -> None:
             plugins.sanitise_sign_in(block)
 
 
-async def test_a_token_endpoint_on_this_network_needs_the_grant_that_covers_it() -> None:
-    declared = manifest("oauth", oauth={"authorize_url": f"{API}/authorize", "token_url": f"{ROUTER}/apply.cgi"})
-    platform = FakePlatform()
-    async with engine_with(platform, declared) as engine:
-        state = (await start_sign_in(engine))["state"][0]
-        with pytest.raises(PermissionError, match="net:local"):
-            await engine.finish_sign_in(state, "code-1")
+@pytest.mark.parametrize("endpoint", plugins.SIGN_IN_ENDPOINTS)
+async def test_a_sign_in_on_this_network_needs_the_grant_that_covers_it(endpoint: str) -> None:
+    sign_in = {"authorize_url": f"{API}/authorize", "token_url": f"{API}/token", endpoint: f"{ROUTER}/apply.cgi"}
+    with pytest.raises(ValueError, match=rf"reaching {ROUTER}/apply.cgi needs the net:local permission"):
+        plugins.sanitise_manifest(manifest("oauth", oauth=sign_in))
+    assert "net:local" in plugins.restored_manifest(manifest("oauth", oauth=sign_in))["permissions"], "one saved by 2.5 was not asked again"
 
-    assert not [call for call in platform.http_calls if call[1].startswith(ROUTER)], "the hub posted to this network for a plugin that may not reach it"
-
-    allowed = manifest("oauth", "net", "net:local", urls=[f"{ROUTER}/*"], oauth=declared["oauth"])
     platform = FakePlatform()
-    platform.responses[f"{ROUTER}/apply.cgi"] = (200, {"access_token": "at-1"})
-    async with engine_with(platform, allowed) as engine:
+    platform.responses[sign_in["token_url"]] = (200, {"access_token": "at-1"})
+    async with engine_with(platform, manifest("oauth", "net:local", oauth=sign_in)) as engine:
         assert await engine.finish_sign_in((await start_sign_in(engine))["state"][0], "code-1") == "demo"
+        waiting = (await start_sign_in(engine))["state"][0]
+        platform.http_calls.clear()
+        await engine.request({"cmd": "plugin.update", "id": "demo", "patch": {"granted": ["oauth"], "enabled": False}})
+        with pytest.raises(PermissionError, match="net:local"):
+            await engine.finish_sign_in(waiting, "code-2")
+        with pytest.raises(RuntimeError, match="net:local"):
+            await start_sign_in(engine)
+
+    assert not platform.http_calls, "the hub posted a code for a plugin that may not reach this network"
 
 
 async def test_a_sign_in_left_too_long_is_no_longer_honoured() -> None:
@@ -715,7 +720,7 @@ async def test_a_sign_in_to_an_endpoint_the_manifest_has_since_changed_sends_the
     platform.responses[f"{API}/token"] = (200, TOKEN_PAGE)
     async with engine_with(platform, SIGNS_IN) as engine:
         state = (await start_sign_in(engine))["state"][0]
-        moved = {**SIGNS_IN, "oauth": {**SIGNS_IN["oauth"], "token_url": "https://203.0.113.9/token"}}
+        moved = {**SIGNS_IN, "oauth": {**SIGNS_IN["oauth"], "token_url": "https://93.184.216.35/token"}}
         await install(engine, moved)
         await engine.request({"cmd": "plugin.secrets", "id": "demo", "secrets": {oauth.CLIENT_ID: "my-client"}})
         await engine.request({"cmd": "plugin.update", "id": "demo", "patch": {"granted": moved["permissions"], "enabled": True}})

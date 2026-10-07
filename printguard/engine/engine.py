@@ -2254,9 +2254,13 @@ class Engine:
         token endpoint that resolves here needs.
 
         Raises:
-            PermissionError: If nobody has typed one in.
+            PermissionError: If either address of the sign-in is on this network
+                and the plugin may not reach it, or nobody has typed a client
+                id in.
         """
         provider = plugin.manifest["oauth"]
+        if plugins.local_sign_in(provider) and not plugin.may("net:local"):
+            raise PermissionError(f"{provider['label']} signs in on this network, which needs the net:local permission")
         client_id = plugin.secrets.get(oauth.CLIENT_ID, "")
         if not client_id:
             raise PermissionError(f"{plugin.id} needs the client id of a {provider['label']} app you registered")

@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
-from . import urls
 from .adapters import HttpFn
 from .bounds import clamp
 from .platform import plain_failure
@@ -147,8 +146,8 @@ class OAuthFlows:
             PermissionError: If the state is unknown or has expired, which is
                 what stands in the way of a callback nobody asked for, the
                 manifest now signs in somewhere other than where the user was
-                sent, or the token endpoint is on this network and the plugin
-                may not reach it.
+                sent, or the token endpoint resolves to this network and the
+                plugin may not reach it.
             RuntimeError: If the provider refused the exchange, could not be
                 reached, or answered with a lifetime that is not a number.
         """
@@ -190,8 +189,6 @@ class OAuthFlows:
         return {**held, **renewed}
 
     async def _tokens(self, provider: dict[str, Any], form: dict[str, str]) -> dict[str, str]:
-        if not provider["local"] and urls.is_local_url(provider["token_url"]):
-            raise PermissionError(f"{provider['label']} signs in on this network, which needs the net:local permission")
         try:
             status, body = await self._http(
                 "POST",
