@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlencode
 
-from .base import HttpFn, NotifierAdapter, multipart_form, truncated
+from .base import HttpFn, NotifierAdapter, multipart_form, require_reply, truncated
 
 API = "https://api.pushover.net/1/messages.json"
 PRIORITIES = ["-2", "-1", "0", "1"]
@@ -71,6 +71,9 @@ class PushoverNotifier(NotifierAdapter):
         A notice that is not urgent goes at normal priority, or lower where the
         configured priority is lower. The title is cut to the 250 characters
         Pushover takes and the message to 1024.
+
+        Raises:
+            RuntimeError: If Pushover rejects the alert, or does not answer with status 1.
         """
         priority = str(config.get("priority", ""))
         priority = priority if priority in PRIORITIES else DEFAULT_PRIORITY
@@ -89,7 +92,6 @@ class PushoverNotifier(NotifierAdapter):
             headers = {"Content-Type": "application/x-www-form-urlencoded"}
             payload = urlencode(fields).encode()
         status, resp = await http("POST", API, headers=headers, data=payload, timeout=15.0)
-        if status >= 400:
-            errors = resp.get("errors") if isinstance(resp, dict) else None
-            detail = "; ".join(errors) if isinstance(errors, list) else None
-            raise RuntimeError(f"Pushover rejected the alert: {detail or f'HTTP {status}'}")
+        answered = resp if isinstance(resp, dict) else {}
+        errors = answered.get("errors")
+        require_reply("Pushover", "the alert", status, answered.get("status") == 1, "; ".join(errors) if isinstance(errors, list) else None)

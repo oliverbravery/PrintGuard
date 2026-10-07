@@ -88,10 +88,6 @@ export function matches(pattern: string, url: string): boolean {
   return scopedAt < 0 || matchesPath(rule.path.slice(scopedAt + 1), (plain[5] ?? "").replace(DROPPED_BY_CLIENTS, ""));
 }
 
-export function allowed(url: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => matches(pattern, url));
-}
-
 function bits(address: string): string {
   if (!address.includes(":")) return address.split(".").map((octet) => Number(octet).toString(2).padStart(8, "0")).join("");
   const [before, after] = address.split("::").map((run) => (run ? run.split(":") : []));
@@ -128,7 +124,7 @@ export function isLocalAddress(rooted: string): boolean {
 
 export function reachesLocal(pattern: string): boolean {
   const rule = parse(pattern);
-  return rule !== null && (rule.host === "*" || isLocalAddress(rule.host.replace(/^\*\./, "any.")));
+  return rule !== null && (rule.host === "*" || (rule.host.startsWith("*.") && NUMBER.test(rule.host.split(".").at(-1)!)) || isLocalAddress(rule.host.replace(/^\*\./, "any.")));
 }
 
 export function webUrl(raw: string): string | null {

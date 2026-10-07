@@ -44,6 +44,18 @@ def test_a_zip_installs_the_files_beside_its_manifest_and_not_one_that_shares_a_
     assert assets == {} and page == {}
 
 
+def test_an_image_path_keeps_the_capitals_its_file_is_named_with() -> None:
+    """The schema allows capitals, and the path was lowercased, so the file was not found wherever names keep their case."""
+    capitals = {**MANIFEST, "icon": "art/Icon.png", "media": ["shots/Panel.png"]}
+    manifest, _, _, page = plugins.unpack(bundle([("plugin.json", json.dumps(capitals)), ("art/Icon.png", "icon"), ("shots/Panel.png", "shot")]))
+    assert page == {"art/Icon.png": b"icon", "shots/Panel.png": b"shot"}
+    kept = plugins.sanitise_manifest(manifest)
+    assert (kept["icon"], kept["media"]) == ("art/Icon.png", ["shots/Panel.png"])
+    assert set(plugins.sanitise_page(page)) == set(page)
+    with pytest.raises(ValueError, match="icon names an image file"):
+        plugins.sanitise_manifest({**MANIFEST, "icon": "Icon.png"})
+
+
 def test_a_zip_reads_its_files_from_the_folder_that_holds_the_manifest() -> None:
     _, sources, assets, page = plugins.unpack(
         bundle(

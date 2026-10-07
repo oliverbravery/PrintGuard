@@ -214,10 +214,16 @@ def reaches_local(pattern: str) -> bool:
     """Whether a pattern can land on the machine's own network.
 
     A wildcard host counts, since it covers private addresses too, which makes
-    ``*://*/*`` the widest thing a plugin can ask for.
+    ``*://*/*`` the widest thing a plugin can ask for. So does a wildcard over
+    a host ending in a number, which is the tail of an IPv4 address:
+    ``*.168.1.1`` covers ``192.168.1.1`` and ``*.1`` covers ``127.0.0.1``.
     """
     rule = parse(pattern)
-    return rule is not None and (rule["host"] == "*" or is_local_address(rule["host"].replace("*.", "any.", 1)))
+    if rule is None:
+        return False
+    host = rule["host"]
+    numeric_tail = host.startswith("*.") and NUMBER.fullmatch(host.rpartition(".")[2]) is not None
+    return host == "*" or numeric_tail or is_local_address(host.replace("*.", "any.", 1))
 
 
 def is_local_url(url: str) -> bool:

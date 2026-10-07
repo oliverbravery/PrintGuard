@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .base import HttpFn, NotifierAdapter, multipart_form, truncated
+from .base import HttpFn, NotifierAdapter, multipart_form, require_reply, truncated
 
 SUPPRESS_NOTIFICATIONS = 1 << 12
 CONTENT_LIMIT = 2000
@@ -42,7 +42,12 @@ class DiscordNotifier(NotifierAdapter):
 
         The message is cut to the 2000 characters Discord takes, and mentions
         nobody, since a monitor or camera named ``@everyone`` would otherwise
-        ping the whole channel.
+        ping the whole channel. Discord answers 204, or the message it posted
+        when the webhook URL carries ``?wait=true``.
+
+        Raises:
+            RuntimeError: If Discord rejects the alert, or the webhook URL
+                answers with anything else.
         """
         url = config["webhook_url"]
         payload = {
@@ -52,8 +57,7 @@ class DiscordNotifier(NotifierAdapter):
         }
         if image:
             headers, data = multipart_form({"payload_json": json.dumps(payload)}, "files[0]", "snapshot.jpg", image)
-            status, _ = await http("POST", url, headers=headers, data=data, timeout=15.0)
+            status, reply = await http("POST", url, headers=headers, data=data, timeout=15.0)
         else:
-            status, _ = await http("POST", url, json=payload, timeout=15.0)
-        if status >= 400:
-            raise RuntimeError(f"Discord rejected the alert: HTTP {status}")
+            status, reply = await http("POST", url, json=payload, timeout=15.0)
+        require_reply("Discord", "the alert", status, status == 204 or (isinstance(reply, dict) and "id" in reply))

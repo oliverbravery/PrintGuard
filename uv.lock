@@ -1284,7 +1284,7 @@ requires-dist = [
     { name = "paho-mqtt", specifier = ">=2.1" },
     { name = "pillow", specifier = ">=10" },
     { name = "platformdirs", marker = "extra == 'desktop'", specifier = ">=4" },
-    { name = "pycentauri", specifier = ">=0.7.0" },
+    { name = "pycentauri", specifier = ">=0.9.1" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=12.2" },
     { name = "pyprusalink", specifier = ">=3.0" },

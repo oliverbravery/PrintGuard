@@ -130,7 +130,8 @@ class OctoPrintAdapter(IntegrationAdapter):
 
         OctoPrint answers 201 with ``effectivePrint`` false when it kept the
         file and did not start it, such as for a key without the print
-        permission.
+        permission. OctoPrint before 1.8.0 answers without it, and is taken
+        to have started the print it was asked for.
 
         Raises:
             RuntimeError: If OctoPrint refuses the file, does not answer with
@@ -144,8 +145,8 @@ class OctoPrintAdapter(IntegrationAdapter):
             data=body,
             timeout=_UPLOAD_TIMEOUT_S,
         )
-        require_reply("OctoPrint", filename, status, status == 201 and isinstance(stored, dict) and "effectivePrint" in stored)
-        if not stored["effectivePrint"]:
+        require_reply("OctoPrint", filename, status, status == 201 and isinstance(stored, dict) and "done" in stored)
+        if stored.get("effectivePrint") is False:
             raise RuntimeError(f"OctoPrint stored {filename} but did not start printing it")
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:

@@ -125,9 +125,12 @@ WILDCARD_PATTERNS = [
     "http://*.home.arpa/*",
     "ws://*.internal/*",
     "http://*.localhost:8000/*",
+    "http://*.168.1.50/*",
+    "http://*.1/*",
+    "http://*.0x1/*",
     "https://*.github.com/*",
     "https://*.example.com/*",
-    "http://*.168.1.50/*",
+    "https://*.1password.com/*",
 ]
 
 
@@ -136,7 +139,14 @@ def test_a_wildcard_over_a_local_suffix_reaches_this_network(pattern: str) -> No
     assert urls.reaches_local(pattern)
 
 
-@pytest.mark.parametrize("pattern", WILDCARD_PATTERNS[5:])
+@pytest.mark.parametrize(("pattern", "address"), list(zip(WILDCARD_PATTERNS[5:8], ["http://192.168.1.50/", "http://127.0.0.1/", "http://127.0.0x1/"])))
+def test_a_wildcard_over_the_end_of_an_address_reaches_this_network(pattern: str, address: str) -> None:
+    """These were listed under the internet in the consent dialog while they matched a private address."""
+    assert urls.matches(pattern, address) and urls.is_local_url(address)
+    assert urls.reaches_local(pattern)
+
+
+@pytest.mark.parametrize("pattern", WILDCARD_PATTERNS[8:])
 def test_a_wildcard_over_a_public_name_does_not(pattern: str) -> None:
     assert not urls.reaches_local(pattern)
 

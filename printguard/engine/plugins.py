@@ -704,10 +704,10 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         raise ValueError("the oauth permission and the oauth block go together")
     if sign_in:
         wanted[oauth.CLIENT_ID] = f"The client id of the {sign_in['label']} app you registered"
-    icon = str(raw.get("icon", "")).strip().lower()
+    icon = str(raw.get("icon", "")).strip()
     if icon and not MEDIA_PATTERN.match(icon):
         raise ValueError("icon names an image file inside the plugin's folder")
-    media = [str(shot).strip().lower() for shot in raw.get("media", []) if str(shot).strip()][:MAX_MEDIA]
+    media = [str(shot).strip() for shot in raw.get("media", []) if str(shot).strip()][:MAX_MEDIA]
     if any(not MEDIA_PATTERN.match(shot) for shot in media):
         raise ValueError("each media entry names an image file inside the plugin's folder")
     surfaces = [s for s in raw.get("surfaces", []) if s in SURFACES] or ["panel"]
@@ -1009,8 +1009,8 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
         content = read_capped(name, cap)
         total = within_budget(name, cap + 1 if content is None else len(content), total)
         assets[name] = content
-    listed = [str(manifest.get("icon", "")).strip().lower(), README_FILE]
-    listed += [str(shot).strip().lower() for shot in manifest.get("media", [])]
+    listed = [str(manifest.get("icon", "")).strip(), README_FILE]
+    listed += [str(shot).strip() for shot in manifest.get("media", [])]
     page: dict[str, bytes] = {}
     total = 0
     for path in listed:

@@ -1,6 +1,7 @@
 """ntfy notifier.
 
 API reference: https://docs.ntfy.sh/publish/
+The message a publish answers with: https://docs.ntfy.sh/subscribe/api/#json-message-format
 Subscribing on a phone (how alerts are received): https://docs.ntfy.sh/subscribe/phone/
 
 An open topic has no credential but its name, so whoever holds the topic URL
@@ -12,7 +13,7 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-from .base import HttpFn, NotifierAdapter, truncated
+from .base import HttpFn, NotifierAdapter, require_reply, truncated
 
 TITLE_LIMIT = 250
 MESSAGE_LIMIT_BYTES = 4096
@@ -28,6 +29,11 @@ def _header(text: str) -> str:
     if text.isascii() and text.isprintable() and text == text.strip():
         return text
     return f"=?UTF-8?B?{base64.b64encode(text.encode()).decode()}?="
+
+
+def _published(reply: Any) -> bool:
+    """Whether a reply is the message ntfy answers a publish with, which always carries its id."""
+    return isinstance(reply, dict) and "id" in reply
 
 
 class NtfyNotifier(NotifierAdapter):
@@ -68,7 +74,9 @@ class NtfyNotifier(NotifierAdapter):
         run long.
 
         Raises:
-            RuntimeError: If ntfy rejects the alert, or takes it only without its snapshot.
+            RuntimeError: If ntfy rejects the alert, takes it only without its
+                snapshot, or the topic URL answers with something other than
+                the message ntfy publishes.
         """
         body = truncated(body, MESSAGE_LIMIT_BYTES, utf8_bytes=True)
         headers = {"Title": _header(truncated(title, TITLE_LIMIT)), **({"Priority": "urgent", "Tags": "rotating_light"} if urgent else {})}
@@ -78,11 +86,10 @@ class NtfyNotifier(NotifierAdapter):
         refused = None
         if image:
             attached = {**headers, "Filename": "snapshot.jpg", "Message": _header(body)}
-            refused, _ = await http("PUT", url, headers=attached, data=image, timeout=15.0)
+            refused, reply = await http("PUT", url, headers=attached, data=image, timeout=15.0)
             if refused < 400:
-                return
-        status, _ = await http("POST", url, headers=headers, data=body.encode(), timeout=15.0)
-        if status >= 400:
-            raise RuntimeError(f"ntfy rejected the alert: HTTP {status}")
+                return require_reply("ntfy", "the alert", refused, _published(reply))
+        status, reply = await http("POST", url, headers=headers, data=body.encode(), timeout=15.0)
+        require_reply("ntfy", "the alert", status, _published(reply))
         if refused:
             raise RuntimeError(f"the server refused the snapshot with HTTP {refused}, so the alert was sent as text")

@@ -16,6 +16,8 @@ import httpx
 HttpFn = Callable[..., Awaitable[tuple[int, Any]]]
 KINDS: dict[str, tuple[type, str]] = {"string": (str, "text"), "boolean": (bool, "true or false")}
 """The Python type a schema property's JSON type holds, and how a refusal words it."""
+WEB_SCHEMES = ("http://", "https://")
+"""What an address an adapter reaches over HTTP starts with."""
 
 
 def require_typed(config: dict[str, Any], properties: dict[str, dict[str, Any]]) -> None:
@@ -143,17 +145,25 @@ class Adapter(ABC):
         return config, reset
 
     def require(self, config: dict[str, Any]) -> None:
-        """Refuses a configuration with a value of the wrong type or outside its choices, or a field the service needs left blank.
+        """Refuses a configuration with a value of the wrong type or outside its choices, an address with no scheme, or a field the service needs left blank.
+
+        An address saved without its scheme reaches nothing, and is not
+        recognised as one when the password in it has to be hidden.
 
         Args:
             config: The values supplied for the schema.
 
         Raises:
             ValueError: If a value is not of the type its field declares or
-                not one of the choices it offers, or a field the schema marks
-                required is blank, naming each.
+                not one of the choices it offers, a ``format: uri`` field does
+                not start with ``http://`` or ``https://``, or a field the
+                schema marks required is blank, naming each.
         """
-        require_typed(config, self.schema.get("properties", {}))
+        properties = self.schema.get("properties", {})
+        require_typed(config, properties)
+        for key, prop in properties.items():
+            if prop.get("format") == "uri" and config.get(key) and not config[key].lower().startswith(WEB_SCHEMES):
+                raise ValueError(f"{prop['title']} needs http:// or https:// at the start")
         blank = [
             self.schema["properties"][key]["title"]
             for key in self.schema.get("required", [])
@@ -161,6 +171,29 @@ class Adapter(ABC):
         ]
         if blank:
             raise ValueError(f"{self.label} needs {' and '.join(blank)} filled in")
+
+
+def require_reply(service: str, doing: str, status: int, genuine: bool, detail: str | None = None) -> None:
+    """Raises unless a service answered a request with the reply only its own API gives.
+
+    An address that answers 200 with something else, such as an auth proxy's
+    sign-in page, would otherwise pass for a command taken or an alert sent.
+
+    Args:
+        service: The service's name, for the error.
+        doing: What was asked, for the error.
+        status: The HTTP status of the answer.
+        genuine: Whether the status and body are the service's success reply.
+        detail: The service's own account of a rejection, where it gave one.
+
+    Raises:
+        RuntimeError: If the service rejected the request with an error
+            status, or answered with anything but its success reply.
+    """
+    if status >= 400:
+        raise RuntimeError(f"{service} rejected {doing}: {detail or f'HTTP {status}'}")
+    if not genuine:
+        raise RuntimeError(f"{service} did not answer {doing} like its API: HTTP {status}")
 
 
 def redirect_message(response: httpx.Response) -> str:

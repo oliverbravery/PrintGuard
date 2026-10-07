@@ -447,6 +447,14 @@ def test_temperatures_that_cannot_move_are_refused() -> None:
         gcode.retemper(PRUSA_HEATED, "gcode", {"nozzle": 0})
 
 
+def test_a_target_that_would_turn_a_cooler_layer_off_is_refused() -> None:
+    """A bed at 60 for the first layer and 55 after, asked for 4, was rewritten to M140 S0 for the rest of the print."""
+    cooler_after = PRUSA_HEATED.replace(b"G1 X1 E1\n", b"G1 X1 E1\nM140 S55\n").replace(b"; bed_temperature = 60", b"; bed_temperature = 55")
+    with pytest.raises(ValueError, match="lowering the bed by 56°C would turn it off where this file sets it to 55°C"):
+        gcode.retemper(cooler_after, "gcode", {"bed": 4})
+    assert b"M190 S10\n" in (moved := gcode.retemper(cooler_after, "gcode", {"bed": 10})) and b"M140 S5\n" in moved
+
+
 def test_a_wait_written_with_r_moves_with_its_set_point() -> None:
     """Marlin waits on ``M109 R`` and ``M190 R`` too, and one left behind holds the print at the old temperature."""
     moved = gcode.retemper(b"M140 S60\nM190 R60\nM104 S200\nM109 R200\nG1 X1\n", "gcode", {"nozzle": 230, "bed": 70})

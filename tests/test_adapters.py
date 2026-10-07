@@ -67,6 +67,7 @@ class RoutedHttp(RecordingHttp):
 
 
 SIGN_IN_PAGE = (200, "<html>Sign in</html>")
+NTFY_PUBLISHED = {"id": "sPs71M8A2T", "time": 1735941767, "expires": 1735985967, "event": "message", "topic": "t", "message": "Body"}
 MOONRAKER_OK = {"result": "ok"}
 OCTOPRINT_UPLOADED = {"files": {"local": {"name": "benchy.gcode"}}, "done": True, "effectiveSelect": True, "effectivePrint": True}
 OCTOPRINT_HEATERS = {"temperature": {"tool0": {"actual": 209.6, "target": 210.0, "offset": 0}, "bed": {"actual": 60.2, "target": 60.0, "offset": 0}}}
@@ -127,7 +128,7 @@ async def test_multipart_form_sends_the_file_itself_and_never_a_copy_of_it() -> 
 
 
 async def test_ntfy_attaches_snapshot_with_token() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=NTFY_PUBLISHED)
     await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t", "token": "tk"}, "Title", "Body", JPEG)
     call = http.last
     assert (call["method"], call["url"]) == ("PUT", "https://ntfy.sh/t")
@@ -139,7 +140,7 @@ async def test_ntfy_attaches_snapshot_with_token() -> None:
 
 
 async def test_ntfy_posts_text_without_snapshot() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=NTFY_PUBLISHED)
     await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "Title", "Body", None)
     call = http.last
     assert call["method"] == "POST"
@@ -149,7 +150,7 @@ async def test_ntfy_posts_text_without_snapshot() -> None:
 
 @pytest.mark.parametrize("image", [JPEG, None])
 async def test_ntfy_headers_carry_names_outside_ascii(image: bytes | None) -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=NTFY_PUBLISHED)
     title, body = "PrintGuard: Küche № 2 defect (87%)", "Camera 'Küche' is offline,\nso it is not watched"
     await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, title, body, image)
     sent = httpx.Request(http.last["method"], http.last["url"], headers=http.last["headers"], content=http.last["data"])
@@ -171,7 +172,7 @@ async def test_ntfy_sends_the_alert_as_text_when_the_server_takes_no_attachments
             await super().__call__(method, url, **kwargs)
             if "Filename" in kwargs["headers"]:
                 return 400, {"code": 40014, "http": 400, "error": "invalid request: attachments not allowed"}
-            return 200, {}
+            return 200, NTFY_PUBLISHED
 
     http = NoAttachments()
     with pytest.raises(RuntimeError, match="refused the snapshot with HTTP 400, so the alert was sent as text"):
@@ -266,7 +267,7 @@ async def test_pushover_defaults_priority_when_unset_or_invalid() -> None:
 
 
 async def test_discord_uploads_snapshot_with_payload_json() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(status=204)
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", JPEG)
     call = http.last
     assert jsonlib.dumps({"content": "**T**\nB", "allowed_mentions": {"parse": []}}).encode() in call["data"]
@@ -275,13 +276,13 @@ async def test_discord_uploads_snapshot_with_payload_json() -> None:
 
 
 async def test_discord_posts_json_without_snapshot() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(status=204)
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None)
     assert http.last["json"] == {"content": "**T**\nB", "allowed_mentions": {"parse": []}}
 
 
 async def test_discord_pings_nobody_a_monitor_is_named_after() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(status=204)
     for image in (None, JPEG):
         await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "Defect on @everyone", "B", image)
         payload = http.last["json"] if image is None else jsonlib.loads(_field(http.last["data"], "payload_json"))
@@ -291,6 +292,54 @@ async def test_discord_pings_nobody_a_monitor_is_named_after() -> None:
 async def test_discord_raises_on_rejection() -> None:
     with pytest.raises(RuntimeError, match="HTTP 404"):
         await NOTIFIERS["discord"].send(RecordingHttp(status=404), {"webhook_url": "u"}, "T", "B", None)
+
+
+@pytest.mark.parametrize(
+    ("provider", "config"),
+    [
+        ("ntfy", {"url": "https://proxy.example/topic"}),
+        ("discord", {"webhook_url": "https://proxy.example/hook"}),
+        ("telegram", {"bot_token": "12:ab", "chat_id": "77"}),
+        ("pushover", {"api_token": "ap", "user_key": "uk"}),
+    ],
+)
+@pytest.mark.parametrize("image", [None, JPEG])
+async def test_a_notifier_answered_with_a_page_has_not_delivered(provider: str, config: dict[str, Any], image: bytes | None) -> None:
+    """A topic or webhook URL behind an auth proxy answers 200 with its sign-in page, which counted as sent."""
+    with pytest.raises(RuntimeError, match=f"{NOTIFIERS[provider].label} did not answer the alert like its API: HTTP 200"):
+        await NOTIFIERS[provider].send(RecordingHttp(*SIGN_IN_PAGE), config, "T", "B", image)
+
+
+async def test_discord_takes_the_message_a_waiting_webhook_answers_with() -> None:
+    await NOTIFIERS["discord"].send(RecordingHttp(body={"id": "1", "channel_id": "2"}), {"webhook_url": "https://discord.com/api/webhooks/1/a?wait=true"}, "T", "B", None)
+
+
+async def test_ntfy_that_refuses_the_snapshot_and_answers_the_text_with_a_page_has_not_delivered() -> None:
+    class TextAnsweredWithAPage(RecordingHttp):
+        async def __call__(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+            await super().__call__(method, url, **kwargs)
+            return (400, {"code": 40014}) if "Filename" in kwargs["headers"] else SIGN_IN_PAGE
+
+    with pytest.raises(RuntimeError, match="ntfy did not answer the alert like its API"):
+        await NOTIFIERS["ntfy"].send(TextAnsweredWithAPage(), {"url": "https://proxy.example/topic"}, "T", "B", JPEG)
+
+
+@pytest.mark.parametrize(
+    ("provider", "config", "said"),
+    [
+        ("octoprint", {"base_url": "admin:hunter2pw@192.168.1.5:5000", "api_key": "k"}, "Base URL needs http:// or https:// at the start"),
+        ("klipper", {"base_url": "192.168.1.60:7125"}, "Base URL needs http:// or https:// at the start"),
+        ("prusa", {"base_url": "ftp://192.168.1.80", "password": "pw"}, "Base URL needs http:// or https:// at the start"),
+        ("ntfy", {"url": "ntfy.sh/my-printers"}, "Topic URL needs http:// or https:// at the start"),
+        ("discord", {"webhook_url": "discord.com/api/webhooks/1/a"}, "Webhook URL needs http:// or https:// at the start"),
+    ],
+)
+def test_an_address_saved_without_its_scheme_is_refused(provider: str, config: dict[str, Any], said: str) -> None:
+    """One with a password in it was stored and shown whole, since nothing recognised it as an address."""
+    adapter = {**INTEGRATIONS, **NOTIFIERS}[provider]
+    with pytest.raises(ValueError, match=said):
+        adapter.require(config)
+    adapter.require({**config, next(iter(config)): "HTTPS://192.168.1.5"})
 
 
 async def test_native_delivers_with_snapshot_written_to_disk(monkeypatch) -> None:
@@ -558,6 +607,31 @@ async def test_klipper_webrtc_without_snapshot_derives_mjpeg_from_stream_path() 
     ]}}
     cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl"})
     assert cams[0]["source"]["url"] == "http://kl/webcam/stream", "absent a snapshot URL the MJPEG path is derived from the WebRTC path"
+
+
+async def test_klipper_never_registers_a_still_as_the_stream() -> None:
+    """A snapshot that names no stream sibling was registered as it was, so the camera was one frame."""
+    body = {"result": {"webcams": [
+        {"name": "Still", "uid": "u1", "service": "webrtc-camerastreamer", "stream_url": "/webcam/webrtc", "snapshot_url": "/webcam/snap.jpg"},
+        {"name": "Neither", "uid": "u2", "service": "webrtc-janus", "stream_url": "/janus/", "snapshot_url": "/webcam/snap.jpg"},
+    ]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://kl:7125"})
+    assert [cam["source"]["url"] for cam in cams] == ["http://kl/webcam/stream"]
+
+
+@pytest.mark.parametrize(
+    ("webcam", "registered"),
+    [
+        ({"service": "webrtc-camerastreamer", "stream_url": "/webcam/webrtc", "snapshot_url": "http://127.0.0.1:8080/?action=snapshot"}, "http://192.168.1.60:8080/?action=stream"),
+        ({"service": "webrtc-camerastreamer", "stream_url": "/webcam/webrtc", "snapshot_url": "http://localhost/webcam/?action=snapshot"}, "http://192.168.1.60/webcam/?action=stream"),
+        ({"service": "mjpegstreamer", "stream_url": "http://[::1]:8080/?action=stream", "snapshot_url": ""}, "http://192.168.1.60:8080/?action=stream"),
+    ],
+)
+async def test_klipper_reads_a_webcam_on_the_printers_loopback_from_the_printer(webcam: dict[str, str], registered: str) -> None:
+    """The hub registered its own loopback, where there is no camera."""
+    body = {"result": {"webcams": [{"name": "Cam", "uid": "u1", **webcam}]}}
+    cams = await INTEGRATIONS["klipper"].cameras(RecordingHttp(body=body), {"base_url": "http://user:pw@192.168.1.60:7125"})
+    assert [cam["source"]["url"] for cam in cams] == [registered]
 
 
 async def test_klipper_derives_mjpeg_without_renaming_the_host() -> None:
@@ -1847,7 +1921,7 @@ async def test_octoprint_that_answers_a_command_with_a_page_has_not_taken_it(com
             await adapter.send(http, {"base_url": "http://op"}, DeviceAction(command))
 
 
-@pytest.mark.parametrize("answer", [SIGN_IN_PAGE, (201, "<html>Sign in</html>"), (200, OCTOPRINT_UPLOADED), (201, {"done": True})])
+@pytest.mark.parametrize("answer", [SIGN_IN_PAGE, (201, "<html>Sign in</html>"), (200, OCTOPRINT_UPLOADED), (201, {"effectivePrint": True})])
 async def test_octoprint_that_answers_an_upload_with_something_else_has_not_taken_it(answer: tuple[int, Any]) -> None:
     with pytest.raises(RuntimeError, match="did not answer benchy.gcode like its API"):
         await INTEGRATIONS["octoprint"].print_file(RecordingHttp(*answer), {"base_url": "http://op"}, "benchy.gcode", b"G1\n")
@@ -1857,6 +1931,12 @@ async def test_octoprint_upload_it_stored_but_did_not_start_raises() -> None:
     stored = {"files": {"local": {"name": "benchy.gcode"}}, "done": True, "effectiveSelect": False, "effectivePrint": False}
     with pytest.raises(RuntimeError, match="did not start printing"):
         await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=201, body=stored), {"base_url": "http://op", "api_key": "k"}, "benchy.gcode", b"G1 X1\n")
+
+
+async def test_octoprint_before_1_8_started_the_print_it_does_not_report() -> None:
+    """effectivePrint came with OctoPrint 1.8.0, and an older one's upload reply was refused as not OctoPrint's."""
+    stored = {"files": {"local": {"name": "benchy.gcode"}}, "done": True}
+    await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=201, body=stored), {"base_url": "http://op", "api_key": "k"}, "benchy.gcode", b"G1 X1\n")
 
 
 def test_prusa_signs_in_as_maker_unless_another_username_is_given() -> None:
@@ -2093,6 +2173,9 @@ async def test_elegoo_moonraker_family_uploads_through_moonraker() -> None:
         (octoprint._API_PORTS, "http://nas.lan:8080", "/webcam/?action=stream", "http://nas.lan:8080/webcam/?action=stream"),
         (octoprint._API_PORTS, "https://print.example.com", "/webcam/?action=stream", "https://print.example.com/webcam/?action=stream"),
         (octoprint._API_PORTS, "http://octopi.local:5000", "http://cam.lan/stream", "http://cam.lan/stream"),
+        (octoprint._API_PORTS, "http://octopi.local:5000", "http://127.0.0.1:8080/?action=stream", "http://octopi.local:8080/?action=stream"),
+        (octoprint._API_PORTS, "http://[fd00::7]:5000", "http://localhost/webcam/?action=stream", "http://[fd00::7]/webcam/?action=stream"),
+        (octoprint._API_PORTS, "http://127.0.0.1:5000", "http://127.0.0.1:8080/?action=stream", "http://127.0.0.1:8080/?action=stream"),
     ],
 )
 def test_a_relative_webcam_url_resolves_where_the_web_interface_is_served(
@@ -2171,15 +2254,23 @@ async def test_a_rejected_api_key_says_so_where_an_unreachable_printer_is_offlin
         await INTEGRATIONS[provider].fetch_state(RecordingHttp(status=status, body={}), config)
 
 
-async def test_a_rejected_prusalink_password_says_so(monkeypatch) -> None:
-    from pyprusalink.types import InvalidAuth
+async def test_a_rejected_prusalink_password_says_so_on_a_read_and_on_a_command() -> None:
+    """A pause PrusaLink answered with 401 surfaced as the bare word InvalidAuth."""
+    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        writer.close()
 
-    async def refused(config: dict[str, Any]) -> Any:
-        raise InvalidAuth()
-
-    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", refused)
-    with pytest.raises(PermissionError, match="PrusaLink rejected the username or password"):
-        await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
+    server = await asyncio.start_server(answer, "127.0.0.1", 0)
+    config = {"base_url": f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}", "password": "wrong"}
+    try:
+        prusa = INTEGRATIONS["prusa"]
+        for call in (lambda: prusa.fetch_state(None, config), lambda: prusa.send(None, config, DeviceAction.PAUSE), lambda: prusa._command(config, 7, DeviceAction.PAUSE)):
+            with pytest.raises(PermissionError, match="PrusaLink rejected the username or password"):
+                await call()
+    finally:
+        server.close()
 
 
 async def test_prusa_reads_the_ca_bundle_once_not_at_every_poll(monkeypatch) -> None:
@@ -2225,10 +2316,10 @@ def test_a_password_holding_a_url_delimiter_is_still_scrubbed(password: str) -> 
 
 async def test_ntfy_marks_only_an_urgent_notice_urgent() -> None:
     for urgent, expected in ((True, {"Priority": "urgent", "Tags": "rotating_light"}), (False, {})):
-        http = RecordingHttp()
+        http = RecordingHttp(body=NTFY_PUBLISHED)
         await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "T", "B", None, urgent=urgent)
         assert {name: value for name, value in http.last["headers"].items() if name in ("Priority", "Tags")} == expected
-        http = RecordingHttp()
+        http = RecordingHttp(body=NTFY_PUBLISHED)
         await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "T", "B", JPEG, urgent=urgent)
         assert {name: value for name, value in http.last["headers"].items() if name in ("Priority", "Tags")} == expected
 
@@ -2257,7 +2348,7 @@ async def test_telegram_sends_a_quiet_notice_silently() -> None:
 
 
 async def test_discord_sends_a_quiet_notice_with_notifications_suppressed() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(status=204)
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", None, urgent=False)
     assert http.last["json"] == {"content": "**T**\nB", "allowed_mentions": {"parse": []}, "flags": 4096}
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/a"}, "T", "B", JPEG, urgent=False)
@@ -2311,7 +2402,7 @@ async def test_telegram_cuts_a_long_caption_and_a_long_text_to_what_it_takes() -
 
 
 async def test_discord_cuts_a_long_message_to_what_it_takes() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(status=204)
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/x"}, f"Defect on {LONG_NAME}", LONG_NAME * 4, None)
     assert len(http.last["json"]["content"]) == 2000 and http.last["json"]["content"].endswith("…")
     await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/x"}, "T", LONG_NAME * 4, JPEG)
@@ -2319,7 +2410,7 @@ async def test_discord_cuts_a_long_message_to_what_it_takes() -> None:
 
 
 async def test_ntfy_cuts_a_long_message_to_the_bytes_it_takes() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=NTFY_PUBLISHED)
     await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "Defect", LONG_NAME * 5, None)
     assert len(http.last["data"]) <= 4096 and http.last["data"].decode().endswith("…")
 
@@ -2327,7 +2418,7 @@ async def test_ntfy_cuts_a_long_message_to_the_bytes_it_takes() -> None:
 async def test_ntfy_cuts_a_long_title_before_it_becomes_a_header() -> None:
     import base64
 
-    http = RecordingHttp()
+    http = RecordingHttp(body=NTFY_PUBLISHED)
     await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, f"Defect on {LONG_NAME}", "B", None)
     title = base64.b64decode(http.last["headers"]["Title"].removeprefix("=?UTF-8?B?").removesuffix("?=")).decode()
     assert len(title) == 250 and title == f"Defect on {LONG_NAME}"[:249] + "…"
@@ -2375,7 +2466,7 @@ async def test_a_printer_key_pasted_with_whitespace_is_sent_without_it(adapter: 
 
 
 async def test_a_channel_key_pasted_with_whitespace_is_sent_without_it() -> None:
-    http = RecordingHttp(body={"ok": True})
+    http = RecordingHttp(body={"ok": True, "id": "sPs71M8A2T"})
     await NOTIFIERS["ntfy"].send(http, NOTIFIERS["ntfy"].declared({"url": " https://ntfy.sh/t\n", "token": "tk\n"}), "T", "B", None)
     assert (http.last["url"], http.last["headers"]["Authorization"]) == ("https://ntfy.sh/t", "Bearer tk")
     await NOTIFIERS["telegram"].send(http, NOTIFIERS["telegram"].declared({"bot_token": "12:ab \n", "chat_id": " 77"}), "T", "B", None)

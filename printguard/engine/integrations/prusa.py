@@ -120,10 +120,7 @@ class PrusaAdapter(IntegrationAdapter):
             RuntimeError: If it answers with an error or a redirect.
             httpx.HTTPError: If the printer cannot be reached.
         """
-        try:
-            job, status = await self._read(config)
-        except InvalidAuth:
-            raise PermissionError("PrusaLink rejected the username or password") from None
+        job, status = await self._read(config)
         printer = status.get("printer") or {}
         heaters = {
             "nozzle": Heater.reported(printer.get("temp_nozzle"), printer.get("target_nozzle")),
@@ -145,7 +142,12 @@ class PrusaAdapter(IntegrationAdapter):
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
-        """Pauses, resumes or cancels the active job by its id."""
+        """Pauses, resumes or cancels the active job by its id.
+
+        Raises:
+            PermissionError: If PrusaLink rejects the username or password.
+            RuntimeError: If there is no active job, or PrusaLink refuses the command.
+        """
         job = await self._job(config)
         if not job:
             raise RuntimeError(f"Prusa printer has no active job to {action.value}")
@@ -201,6 +203,7 @@ class PrusaAdapter(IntegrationAdapter):
         pyprusalink's own calls drop the answer, so the request goes through its client.
 
         Raises:
+            PermissionError: If PrusaLink rejects the username or password.
             RuntimeError: If PrusaLink answers with anything but 204.
         """
         method, path = _JOB_COMMANDS[action]
@@ -212,6 +215,8 @@ class PrusaAdapter(IntegrationAdapter):
         async with httpx.AsyncClient(timeout=_TIMEOUT_S, verify=_TLS) as client:
             try:
                 yield PrusaLink(client, str(config["base_url"]).rstrip("/"), _username(config), str(config.get("password", "")))
+            except InvalidAuth:
+                raise PermissionError("PrusaLink rejected the username or password") from None
             except httpx.HTTPStatusError as exc:
                 raise RuntimeError(_failure(exc.response)) from None
             except Conflict:

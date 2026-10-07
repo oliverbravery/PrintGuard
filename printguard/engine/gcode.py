@@ -159,8 +159,9 @@ def retemper(data: bytes, ext: str, targets: dict[str, float]) -> bytes:
         The file with its temperatures moved.
 
     Raises:
-        ValueError: If the file is binary gcode, never heats a heater named, or
-            a target is not above zero, or if no temperature in it moved.
+        ValueError: If the file is binary gcode, never heats a heater named, a
+            target is not above zero or would move another layer's
+            temperature to zero or below, or if no temperature in it moved.
     """
     if ext == "bgcode":
         raise ValueError("binary gcode's temperatures can't be changed, export it as text gcode instead")
@@ -417,11 +418,18 @@ def _shift(data: bytes, heater: str, listed: set[float] | None, delta: float) ->
         heater: One of the keys of ``_TEMPERATURE_KEYS``.
         listed: The print temperatures to move, or None for every non-zero one.
         delta: How far to move them, in degrees Celsius.
+
+    Raises:
+        ValueError: If a set-point would move to 0°C or below, which turns the heater off.
     """
 
     def moved(value: bytes) -> bytes:
         degrees = float(value)
-        return b"%g" % max(0.0, min(HEATER_MAX[heater], degrees + delta)) if degrees and (listed is None or degrees in listed) else value
+        if not degrees or (listed is not None and degrees not in listed):
+            return value
+        if degrees + delta <= 0:
+            raise ValueError(f"lowering the {heater} by {-delta:g}°C would turn it off where this file sets it to {degrees:g}°C")
+        return b"%g" % min(HEATER_MAX[heater], degrees + delta)
 
     data = _SETPOINT[heater].sub(lambda match: match[1] + moved(match[2]), b"\n" + data)
     data = _MACRO.sub(lambda line: _macro_param(line[0], heater).sub(lambda param: param[1] + moved(param[2]), line[0]), data)

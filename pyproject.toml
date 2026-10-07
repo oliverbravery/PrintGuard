@@ -20,7 +20,7 @@ dependencies = [
     "packaging>=24.0",
     "paho-mqtt>=2.1",
     "pillow>=10",
-    "pycentauri>=0.7.0",
+    "pycentauri>=0.9.1",
     "pydantic>=2.0",
     "pyobjc-framework-cocoa>=12.2; sys_platform == 'darwin'",
     "pyprusalink>=3.0",

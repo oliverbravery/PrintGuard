@@ -11,7 +11,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Any
 
-from ..adapters import Adapter, HttpFn, multipart_form
+from ..adapters import Adapter, HttpFn, multipart_form, require_reply
 
 ELLIPSIS = "…"
 
@@ -55,8 +55,9 @@ class NotifierAdapter(Adapter):
                 service with a quieter way to deliver one uses it.
 
         Raises:
-            RuntimeError: If the service rejects the notification.
+            RuntimeError: If the service rejects the notification, or the
+                answer is not its API's.
         """
 
 
-__all__ = ["HttpFn", "NotifierAdapter", "multipart_form", "truncated"]
+__all__ = ["HttpFn", "NotifierAdapter", "multipart_form", "require_reply", "truncated"]

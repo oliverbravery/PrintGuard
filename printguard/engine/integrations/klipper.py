@@ -149,8 +149,8 @@ class KlipperAdapter(IntegrationAdapter):
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Lists Moonraker's registered webcams via /server/webcams/list.
 
-        Each webcam's stream_url may be relative, resolved against the host's web
-        port (see ``webcam_url``); its stable uid keys the registered camera, or
+        Each webcam's stream_url may be relative or on the printer's own
+        loopback, resolved against the host (see ``webcam_url``); its stable uid keys the registered camera, or
         its name on a Moonraker too old to give one. A webcam on MediaMTX or
         go2rtc is pulled from that server's WHEP endpoint, which the hub's
         MediaMTX client reads. camera-streamer, the Crowsnest V5 default,
@@ -189,14 +189,15 @@ def _mjpeg_endpoint(webcam: dict[str, Any]) -> str:
     camera-streamer serves the same feed as MJPEG alongside WebRTC, at the
     sibling of its snapshot (``…/?action=snapshot`` becomes ``…/?action=stream``)
     or of its WebRTC path (``…/webrtc`` becomes ``…/stream``). The snapshot is preferred as
-    Moonraker reports it verbatim; an empty string means none could be derived.
+    Moonraker reports it verbatim. A snapshot that names no sibling, such as
+    ``/webcam/snap.jpg``, is only a still and is passed over. An empty string
+    means none could be derived.
     """
-    snapshot = str(webcam.get("snapshot_url") or "")
-    if snapshot:
-        return _stream_sibling(snapshot, "snapshot")
-    stream = str(webcam.get("stream_url") or "")
-    mjpeg = _stream_sibling(stream, "webrtc")
-    return "" if mjpeg == stream else mjpeg
+    for url, named in ((webcam.get("snapshot_url"), "snapshot"), (webcam.get("stream_url"), "webrtc")):
+        mjpeg = _stream_sibling(str(url or ""), named)
+        if mjpeg != str(url or ""):
+            return mjpeg
+    return ""
 
 
 def _stream_sibling(url: str, named: str) -> str:

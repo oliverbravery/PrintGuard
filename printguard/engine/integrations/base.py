@@ -9,6 +9,7 @@ printguard.engine.integrations.INTEGRATIONS.
 
 from __future__ import annotations
 
+import ipaddress
 import math
 from abc import abstractmethod
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from enum import Enum
 from typing import Any, Container
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
-from ..adapters import Adapter, HttpFn
+from ..adapters import Adapter, HttpFn, require_reply
 from ..bounds import clamp
 
 HEATERS = ("nozzle", "bed")
@@ -228,28 +229,6 @@ class IntegrationAdapter(Adapter):
         """Releases persistent connections for one configuration or all configurations."""
 
 
-def require_reply(service: str, doing: str, status: int, genuine: bool) -> None:
-    """Raises unless a service answered a command with the reply only its own API gives.
-
-    A base URL that answers 200 with something else, such as an auth proxy's
-    sign-in page, would otherwise pass for a command taken.
-
-    Args:
-        service: The service's name, for the error.
-        doing: What was asked, for the error.
-        status: The HTTP status of the answer.
-        genuine: Whether the status and body are the service's success reply.
-
-    Raises:
-        RuntimeError: If the service rejected the command with an error
-            status, or answered with anything but its success reply.
-    """
-    if status >= 400:
-        raise RuntimeError(f"{service} rejected {doing}: HTTP {status}")
-    if not genuine:
-        raise RuntimeError(f"{service} did not answer {doing} like its API: HTTP {status}")
-
-
 def webcam_url(base_url: str, stream: str, api_ports: Container[int]) -> str:
     """Resolves the webcam URL a service reports against the address its web interface is served on.
 
@@ -257,7 +236,9 @@ def webcam_url(base_url: str, stream: str, api_ports: Container[int]) -> str:
     for their web interface to resolve against its own origin. A base URL on
     one of the service's own API ports routes no webcam path, so it is joined
     on the scheme's default port, where that web interface is. Any other port
-    is the web server or a proxy in front of it and is kept.
+    is the web server or a proxy in front of it and is kept. A URL on loopback
+    (``http://127.0.0.1:8080/?action=stream``) is the printer's own, which the
+    hub would read as itself, so it takes the base URL's host and keeps its port.
 
     Args:
         base_url: The service's configured API address.
@@ -265,10 +246,21 @@ def webcam_url(base_url: str, stream: str, api_ports: Container[int]) -> str:
         api_ports: The ports the service's own API listens on.
 
     Returns:
-        The stream URL, an absolute one unchanged.
+        The stream URL, an absolute one that is not on loopback unchanged.
     """
-    if urlsplit(stream).scheme:
-        return stream
-    host = urlsplit(base_url)
+    host, reported = urlsplit(base_url), urlsplit(stream)
+    if reported.scheme:
+        if not _is_loopback(reported.hostname or ""):
+            return stream
+        name = host.netloc.rpartition("@")[2].removesuffix(f":{host.port}")
+        return urlunsplit(reported._replace(netloc=f"{name}:{reported.port}" if reported.port else name))
     netloc = host.netloc.rpartition(":")[0] if host.port in api_ports else host.netloc
     return urljoin(urlunsplit((host.scheme, netloc, "", "", "")), stream)
+
+
+def _is_loopback(hostname: str) -> bool:
+    """Whether a URL's host is the machine it is read on."""
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return hostname == "localhost"

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import HttpFn, NotifierAdapter, multipart_form, truncated
+from .base import HttpFn, NotifierAdapter, multipart_form, require_reply, truncated
 
 CAPTION_LIMIT = 1024
 TEXT_LIMIT = 4096
@@ -38,6 +38,9 @@ class TelegramNotifier(NotifierAdapter):
         """Calls sendPhoto with a multipart upload, or sendMessage without, silently when not urgent.
 
         The message is cut to the 1024 characters a photo's caption takes, or the 4096 a text message does.
+
+        Raises:
+            RuntimeError: If Telegram rejects the alert, or does not answer ``ok``.
         """
         api = f"https://api.telegram.org/bot{config['bot_token']}"
         text = f"{title}\n{body}"
@@ -47,6 +50,5 @@ class TelegramNotifier(NotifierAdapter):
             status, resp = await http("POST", f"{api}/sendPhoto", headers=headers, data=payload, timeout=15.0)
         else:
             status, resp = await http("POST", f"{api}/sendMessage", json={"chat_id": config["chat_id"], "text": truncated(text, TEXT_LIMIT), **({} if urgent else {"disable_notification": True})}, timeout=15.0)
-        if status >= 400:
-            detail = resp.get("description") if isinstance(resp, dict) else None
-            raise RuntimeError(f"Telegram rejected the alert: {detail or f'HTTP {status}'}")
+        answered = resp if isinstance(resp, dict) else {}
+        require_reply("Telegram", "the alert", status, answered.get("ok") is True, answered.get("description"))
