@@ -185,6 +185,7 @@ test("a hub that goes silent without closing is dropped and reached again", asyn
 test("a command pressed while the hub is away says so and leaves its button free", async ({ page }) => {
   const { sockets } = await hub(page);
   await page.evaluate(() => (window as any).__pg.getState().openDetail("m1"));
+  await page.routeWebSocket(/\/api\/ws$/, (socket) => void socket.close());
   await sockets[0].close();
   await expect(page.getByRole("status").getByText("reconnecting")).toBeVisible();
   const panel = page.getByRole("dialog", { name: "Prusa" });
