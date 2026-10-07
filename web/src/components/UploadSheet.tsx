@@ -12,7 +12,19 @@ function stem(filename: string): string {
   return filename.includes(".") ? filename.slice(0, filename.lastIndexOf(".")) : filename;
 }
 
-function TemperatureField({ heater, value, heats, onChange }: { heater: HeaterName; value: string; heats: boolean; onChange: (value: string) => void }) {
+function TemperatureField({
+  heater,
+  value,
+  heats,
+  invalid,
+  onChange,
+}: {
+  heater: HeaterName;
+  value: string;
+  heats: boolean;
+  invalid: boolean;
+  onChange: (value: string) => void;
+}) {
   return (
     <label className="flex items-center gap-2">
       <span className="label w-12">{heater}</span>
@@ -22,8 +34,9 @@ function TemperatureField({ heater, value, heats, onChange }: { heater: HeaterNa
         inputMode="numeric"
         min={1}
         max={HEATER_MAX[heater]}
-        placeholder="none"
+        placeholder={heats ? undefined : "none"}
         disabled={!heats}
+        aria-invalid={invalid}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -73,14 +86,15 @@ function StagedPrintForm({
   }, []);
 
   const temperatures: Temperatures = {};
-  let valid = inspection !== null && drawn !== undefined;
+  const invalidHeaters: HeaterName[] = [];
   for (const heater of HEATERS) {
     const sliced = inspection?.meta[heater];
     const target = Number(drafts[heater]);
     if (!sliced) continue;
-    if (!drafts[heater].trim() || !(target > 0 && target <= HEATER_MAX[heater])) valid = false;
+    if (!drafts[heater].trim() || !(target > 0 && target <= HEATER_MAX[heater])) invalidHeaters.push(heater);
     else if (target !== sliced) temperatures[heater] = target;
   }
+  const valid = inspection !== null && drawn !== undefined && invalidHeaters.length === 0;
 
   const upload = () => {
     setError(null);
@@ -113,10 +127,16 @@ function StagedPrintForm({
                 heater={heater}
                 value={drafts[heater]}
                 heats={Boolean(inspection?.meta[heater])}
+                invalid={invalidHeaters.includes(heater)}
                 onChange={(value) => setDrafts((d) => ({ ...d, [heater]: value }))}
               />
             ))}
           </div>
+          {invalidHeaters.length > 0 && (
+            <p className="mono mt-1.5 text-[0.66rem] text-bad">
+              Upload needs {invalidHeaters.map((heater) => `${heater} between 1 and ${HEATER_MAX[heater]} °C`).join(" and ")}
+            </p>
+          )}
           {ext === "bgcode" && <p className="mono mt-1.5 text-[0.66rem] text-text-2">binary gcode prints at the temperatures it was sliced with</p>}
         </div>
         <div>
