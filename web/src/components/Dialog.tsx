@@ -15,6 +15,10 @@ function subscribeToModals(listener: () => void) {
   return () => void modalListeners.delete(listener);
 }
 
+function commitFocusedEdit() {
+  (document.activeElement as HTMLElement | null)?.blur();
+}
+
 export function useTopModal(): HTMLDialogElement | null {
   return useSyncExternalStore(subscribeToModals, () => openModals.at(-1) ?? null);
 }
@@ -43,6 +47,7 @@ export function Modal({
 
     const onCancel = (event: Event) => {
       event.preventDefault();
+      commitFocusedEdit();
       onCloseRef.current();
     };
     let pressedBackdrop = false;
@@ -50,7 +55,9 @@ export function Modal({
       pressedBackdrop = event.target === dialog;
     };
     const onLightDismiss = (event: MouseEvent) => {
-      if (pressedBackdrop && event.target === dialog) onCloseRef.current();
+      if (!pressedBackdrop || event.target !== dialog) return;
+      commitFocusedEdit();
+      onCloseRef.current();
     };
     dialog.addEventListener("cancel", onCancel);
     dialog.addEventListener("pointerdown", onPress);
@@ -78,7 +85,10 @@ export function CloseButton({ label, onClick }: { label: string; onClick: () => 
     <button
       type="button"
       className="-my-2 -mr-2.5 grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded text-text-2 transition-colors hover:text-accent"
-      onClick={onClick}
+      onClick={() => {
+        commitFocusedEdit();
+        onClick();
+      }}
       aria-label={label}
     >
       <X size={20} aria-hidden />
