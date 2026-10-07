@@ -18,7 +18,7 @@ Catches failed 3D prints on your own hardware, pauses the printer and sends you 
 A compact vision model scores every camera frame on the machine you run it on. When a defect
 holds for long enough, PrintGuard pauses or cancels the print through your print server and
 pushes a snapshot to your phone. There's no cloud and no subscription, and your camera frames
-stay on your hardware. A defect snapshot goes to the alert channels you set up, and nothing else leaves
+stay on your hardware. A defect snapshot goes to the alert channels and the MQTT broker you set up, and nothing else leaves
 unless you [send some frames to help train the model](docs/feedback.md).
 
 The detector is my own, a ShuffleNetV2 encoder of about 5 MB trained for this in
