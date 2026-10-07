@@ -13,7 +13,6 @@ import contextvars
 import functools
 import logging
 import re
-import sys
 import time
 import traceback
 import uuid
@@ -23,7 +22,6 @@ from typing import Any, Awaitable, Callable, Coroutine
 import numpy as np
 
 from . import credentials, feedback, gcode, logs, oauth, plugins, reports, updates, urls, vision
-from .bounds import clamp
 from .cameras import declared_camera_id, same_stream, sanitise_camera, stored_camera, tidy_stream_url
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
@@ -44,11 +42,11 @@ from .registry import (
     Token,
     TokenRegistry,
 )
-from .reviews import Review, ReviewLibrary, frame_key
+from .reviews import Review, ReviewLibrary, frame_key, stored_review
 from .scheduler import Scheduler
 from .settings import CHECKS, require_broker
 from .sockets import SocketBroker
-from .tokens import new_token
+from .tokens import new_token, stored_token
 from .watchdog import GRACE_DEFAULT_S, Watchdog
 
 logger = logging.getLogger(__name__)
@@ -262,10 +260,10 @@ class Engine:
         self.scheduler.reset()
         self.feedback_token = persisted.get("feedback_token")
         restorers: dict[str, Callable[[dict[str, Any]], None]] = {
-            "tokens": lambda record: self.tokens.add(Token(**record)),
+            "tokens": lambda record: self.tokens.add(Token(**stored_token(record))),
             "printers": self._restore_printer,
             "monitors": lambda record: self.monitors.update({record["id"]: stored_monitor(record)}),
-            "reviews": self._restore_review,
+            "reviews": lambda record: self.reviews.restore(stored_review(record)),
             "prints": lambda record: self.prints.add(PrintFile(**stored_print(record))),
             "plugins": lambda record: self.plugins.add(Plugin(**{**record, "manifest": plugins.sanitise_manifest(record["manifest"])})),
             "cameras": self._restore_camera,
@@ -328,18 +326,6 @@ class Engine:
         camera = Camera(**stored_camera(record))
         self.cameras.add(camera)
         self._schedule_attach(camera)
-
-    def _restore_review(self, record: dict[str, Any]) -> None:
-        frames, submission = record.get("frames", []), record.get("submission")
-        if not isinstance(frames, list) or not all(isinstance(frame, dict) and {"id", "ts", "score", "kind", "size"} <= frame.keys() for frame in frames):
-            raise ValueError("its kept frames are not a list of frames")
-        if not (submission is None or isinstance(submission, dict) and isinstance(submission.get("labels"), dict) and isinstance(submission.get("sent"), list)):
-            raise ValueError("what was chosen to send is not a set of labels")
-        if record.get("status") not in ("running", "ready", "dismissed", "queued", "sent") or (record["status"] == "queued" and submission is None):
-            raise ValueError("it has a status it cannot have, or is queued with nothing chosen to send")
-        clamp("started", record.get("started"), 0.0, sys.float_info.max)
-        clamp("spacing_s", record.get("spacing_s"), 0.0, sys.float_info.max)
-        self.reviews.restore([record])
 
     async def stop(self) -> None:
         """Cancels background loops and inferences in flight, then closes every frame source.

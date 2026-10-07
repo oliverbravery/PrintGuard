@@ -11,12 +11,14 @@ restart.
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from . import vision
+from .bounds import clamp
 from .platform import Frame, Platform, as_chunks
 
 if TYPE_CHECKING:
@@ -32,6 +34,9 @@ REVIEW_MAX = 20
 BYTES_MAX = 200 * 1024 * 1024
 UNLINKED_PRINT_S = 24 * 3600.0
 ENDED_STATUSES = ("idle", "error")
+STATUSES = ("running", "ready", "dismissed", "queued", "sent")
+FRAME_KINDS = ("alert", "near", "spaced")
+LABELS = ("failure", "good")
 
 
 @dataclass
@@ -89,6 +94,57 @@ class Review:
         }
 
 
+def stored_review(record: dict[str, Any]) -> Review:
+    """Reads a review back from the state store.
+
+    Args:
+        record: One review as ``ReviewLibrary.persisted`` wrote it.
+
+    Returns:
+        The review, with every kept frame and choice checked to be of the kind
+        the rest of the engine reads it as.
+
+    Raises:
+        KeyError: If the record has no status.
+        TypeError: If the record has a field a review does not, or lacks one.
+        ValueError: If a value is not of the kind its field takes.
+    """
+    if not isinstance(record.get("monitor_id"), str):
+        raise ValueError("its monitor is an id")
+    if record["status"] not in STATUSES:
+        raise ValueError("it has a status it cannot have")
+    frames, submission = record.get("frames", []), record.get("submission")
+    for frame in frames if isinstance(frames, list) else [None]:
+        if not (isinstance(frame, dict) and isinstance(frame.get("id"), str) and frame.get("kind") in FRAME_KINDS):
+            raise ValueError("its kept frames are not a list of frames")
+        if frame["kind"] == "alert" and not isinstance(frame.get("action"), str):
+            raise ValueError("a kept alert frame has no action")
+        for key in ("ts", "score", "size"):
+            clamp(f"a kept frame's {key}", frame.get(key), 0.0, sys.float_info.max)
+    if submission is None:
+        if record["status"] == "queued":
+            raise ValueError("it is queued with nothing chosen to send")
+    else:
+        if not (
+            isinstance(submission, dict)
+            and {"labels", "printer", "sent", "code", "retry_at"} <= submission.keys()
+            and isinstance(submission["labels"], dict)
+            and all(isinstance(frame_id, str) and label in LABELS for frame_id, label in submission["labels"].items())
+            and isinstance(submission["sent"], list)
+            and all(isinstance(frame_id, str) for frame_id in submission["sent"])
+            and isinstance(submission["printer"], str)
+            and (submission["code"] is None or isinstance(submission["code"], str))
+        ):
+            raise ValueError("what was chosen to send is not a set of labels")
+        if submission["retry_at"] is not None:
+            clamp("the time to try sending again", submission["retry_at"], 0.0, sys.float_info.max)
+    clamp("started", record.get("started"), 0.0, sys.float_info.max)
+    clamp("spacing_s", record.get("spacing_s"), 0.0, sys.float_info.max)
+    if record.get("ended") is not None:
+        clamp("ended", record["ended"], 0.0, sys.float_info.max)
+    return Review(**record)
+
+
 def frame_key(review_id: str, frame_id: str) -> str:
     """The file store key a kept frame's JPEG lives under."""
     return f"review-{review_id}-{frame_id}.jpg"
@@ -102,9 +158,9 @@ class ReviewLibrary:
         self._reviews: dict[str, Review] = {}
         self._stops = 0
 
-    def restore(self, records: list[dict[str, Any]]) -> None:
-        """Loads reviews a previous run persisted."""
-        self._reviews.update({record["id"]: Review(**record) for record in records})
+    def restore(self, review: Review) -> None:
+        """Loads a review a previous run persisted, as ``stored_review`` read it."""
+        self._reviews[review.id] = review
 
     def persisted(self) -> list[dict[str, Any]]:
         """Serialises every review for the state store."""

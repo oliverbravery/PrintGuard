@@ -5702,6 +5702,14 @@ async def test_a_print_record_dropped_at_start_says_its_file_is_kept() -> None:
 
 _FAKE_CAMERA = {"id": "c1", "name": "n", "source": {"kind": "fake"}, "max_fps": 15.0}
 _FAKE_REVIEW = {"id": "r1", "monitor_id": "m1", "started": 1.0, "spacing_s": 60.0, "ended": 2.0}
+_FAKE_FRAME = {"id": "f1", "ts": 1.5, "score": 0.9, "kind": "alert", "action": "none", "size": 6}
+_QUEUED_REVIEW = {
+    **_FAKE_REVIEW,
+    "status": "queued",
+    "frames": [_FAKE_FRAME],
+    "submission": {"labels": {"f1": "failure"}, "printer": "", "sent": [], "code": "rate_limited", "retry_at": 9e9},
+}
+_FAKE_TOKEN = {"id": "t1", "name": "t", "scope": "read", "hash": "0" * 64, "hint": "pg_abc…", "created": 1.0}
 
 
 @pytest.mark.parametrize(
@@ -5727,6 +5735,17 @@ _FAKE_REVIEW = {"id": "r1", "monitor_id": "m1", "started": 1.0, "spacing_s": 60.
         {"reviews": [{**_FAKE_REVIEW, "frames": [{"id": "f"}]}]},
         {"reviews": [{**_FAKE_REVIEW, "status": "queued"}]},
         {"reviews": [{**_FAKE_REVIEW, "status": "later"}]},
+        *({"reviews": [{**_QUEUED_REVIEW, "monitor_id": junk}]} for junk in ([], {}, None, 5)),
+        *({"reviews": [{**_QUEUED_REVIEW, "submission": {**_QUEUED_REVIEW["submission"], "retry_at": junk}}]} for junk in ("x", [1], {"a": 1}, True)),
+        {"reviews": [{**_QUEUED_REVIEW, "submission": {key: value for key, value in _QUEUED_REVIEW["submission"].items() if key != "retry_at"}}]},
+        {"reviews": [{**_QUEUED_REVIEW, "submission": {**_QUEUED_REVIEW["submission"], "labels": {"f1": "maybe"}}}]},
+        {"reviews": [{**_QUEUED_REVIEW, "submission": {**_QUEUED_REVIEW["submission"], "printer": ["Voron"]}}]},
+        {"reviews": [{**_QUEUED_REVIEW, "frames": [{key: value for key, value in _FAKE_FRAME.items() if key != "action"}]}]},
+        *({"reviews": [{**_QUEUED_REVIEW, "frames": [{**_FAKE_FRAME, "ts": junk}]}]} for junk in (None, "x", [], {}, True)),
+        {"reviews": [{**_QUEUED_REVIEW, "frames": [{**_FAKE_FRAME, "kind": "other"}]}]},
+        *({"tokens": [{**_FAKE_TOKEN, "hash": junk}]} for junk in ([], {}, None, 5)),
+        {"tokens": [{**_FAKE_TOKEN, "scope": "root"}]},
+        {"tokens": [{**_FAKE_TOKEN, "created": "now"}]},
         {"monitors": [{"id": "m1", "threshold": 10**400}]},
         {"monitors": [{"id": "m1", "threshold": True}]},
         {"prints": [{"id": "p", "name": "n", "filename": "f.gcode", "ext": "gcode", "size": 1, "printer_ids": None, "uploaded": 1, "meta": {}}]},
@@ -5743,6 +5762,19 @@ async def test_a_stored_value_of_the_wrong_kind_is_dropped_with_a_warning_and_th
         json.dumps(engine.state_event(), allow_nan=False)
         assert engine.reviews.public() == []
         await engine.request({"cmd": "settings.update", "patch": {"theme": "dark"}})
+    finally:
+        await engine.stop()
+
+
+async def test_a_queued_review_and_a_token_as_saved_are_restored() -> None:
+    platform = FakePlatform()
+    platform.state = {"reviews": [_QUEUED_REVIEW], "tokens": [_FAKE_TOKEN]}
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        assert engine.startup_warnings == []
+        assert [(review["status"], review["retry_at"]) for review in engine.reviews.public()] == [("queued", 9e9)]
+        assert engine.token_scopes() == {"0" * 64: "read"}
     finally:
         await engine.stop()
 
