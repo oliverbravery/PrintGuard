@@ -20,6 +20,12 @@ const PATTERN = new RegExp(
     `(?::(\\*|\\d{1,5}))?` +
     `(/[^\\s]*)$`,
 );
+const PLAIN_URL = /^([a-z][a-z0-9+.-]*):\/\/([a-z0-9.-]+|\[[0-9a-f:]+\])(?::(\d{1,5}))?(?=[/?#]|\n?$)([^?#]*)(?:\?([^#]*))?/i;
+const DROPPED_BY_CLIENTS = /[\t\r\n]/g;
+const BRACKETS = /^\[|\]$/g;
+const NUMBER = /^(?:\d+|0x[0-9a-f]*)$/i;
+const ROOT_DOT = /\.$/;
+const UNREAD_BY_RESOLVERS = /\.$|(?:^|\.)0x$/i;
 
 export interface UrlPattern {
   scheme: string;
@@ -54,24 +60,32 @@ function matchesPath(pattern: string, path: string): boolean {
   return true;
 }
 
+function climbs(path: string): boolean {
+  return path
+    .replace(/\\/g, "/")
+    .split("/")
+    .some((segment) => [".", ".."].includes(segment.replace(/%2e/gi, ".")));
+}
+
 export function matches(pattern: string, url: string): boolean {
   const rule = parse(pattern);
-  if (!rule) return false;
-  let parsed: URL;
-  try {
-    parsed = new URL(url.trim());
-  } catch {
-    return false;
-  }
-  const scheme = parsed.protocol.replace(":", "");
+  const plain = PLAIN_URL.exec(url);
+  if (!rule || !plain || Number(plain[3] ?? 0) > 65535) return false;
+  const unrooted = plain[2].replace(ROOT_DOT, "");
+  const numbered = unrooted.startsWith("[") || NUMBER.test(unrooted.split(".").at(-1)!);
+  if (numbered && literalAddress(unrooted) === null) return false;
+  const scheme = plain[1].toLowerCase();
+  const host = plain[2].toLowerCase().replace(BRACKETS, "");
   const allowed = rule.scheme === "*" ? WILDCARD_SCHEMES : [rule.scheme];
-  if (!parsed.hostname || !allowed.includes(scheme)) return false;
-  const port = parsed.port ? Number(parsed.port) : (DEFAULT_PORTS[scheme] ?? 0);
+  if (!allowed.includes(scheme)) return false;
+  const port = Number(plain[3] ?? 0) || (DEFAULT_PORTS[scheme] ?? 0);
   if (rule.port !== "*" && Number(rule.port) !== port) return false;
+  const path = plain[4].replace(DROPPED_BY_CLIENTS, "") || "/";
+  if (climbs(path)) return false;
   const scopedAt = rule.path.indexOf("?");
   const pathRule = scopedAt < 0 ? rule.path : rule.path.slice(0, scopedAt);
-  if (!matchesHost(rule.host, parsed.hostname.toLowerCase()) || !matchesPath(pathRule, parsed.pathname || "/")) return false;
-  return scopedAt < 0 || matchesPath(rule.path.slice(scopedAt + 1), parsed.search.slice(1));
+  if (!matchesHost(rule.host.replace(BRACKETS, ""), host) || !matchesPath(pathRule, path)) return false;
+  return scopedAt < 0 || matchesPath(rule.path.slice(scopedAt + 1), (plain[5] ?? "").replace(DROPPED_BY_CLIENTS, ""));
 }
 
 export function allowed(url: string, patterns: string[]): boolean {
@@ -95,15 +109,17 @@ function within(address: string, networks: string[]): boolean {
 }
 
 function literalAddress(host: string): string | null {
+  if (UNREAD_BY_RESOLVERS.test(host)) return null;
   try {
-    const written = new URL(`http://${host}`).hostname.replace(/^\[|\]$/g, "");
+    const written = new URL(`http://${host}`).hostname.replace(BRACKETS, "");
     return written.includes(":") || /^\d+\.\d+\.\d+\.\d+$/.test(written) ? bits(written) : null;
   } catch {
     return null;
   }
 }
 
-export function isLocalAddress(host: string): boolean {
+export function isLocalAddress(rooted: string): boolean {
+  const host = rooted.replace(ROOT_DOT, "");
   const address = literalAddress(host);
   if (address === null) return LOCAL_HOSTNAMES.includes(host) || LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix));
   if (address.length === 128 && !within(address, EMBEDDING_V4)) return within(address, LOCAL_V6) && !within(address, GLOBAL_V6);

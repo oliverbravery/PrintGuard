@@ -156,7 +156,7 @@ class StateFile:
             return {}
         except (PermissionError, IsADirectoryError) as exc:
             raise data_directory_refused(self._path.parent, f"{self._path} could not be read", exc) from None
-        except ValueError as exc:
+        except (ValueError, RecursionError) as exc:
             kept = self._free_name_for_damaged_copy()
             try:
                 self._path.replace(kept)

@@ -315,6 +315,31 @@ async def test_a_sign_in_on_this_network_needs_the_grant_that_covers_it(endpoint
     assert not platform.http_calls, "the hub posted a code for a plugin that may not reach this network"
 
 
+@pytest.mark.parametrize("address", ["https://localhost./authorize", "https://127.0.0.1./authorize", "https://printer.lan./authorize"])
+def test_a_sign_in_on_this_network_needs_the_grant_however_its_host_ends(address: str) -> None:
+    """A dot after the host hid it from the check, so it installed with the oauth permission alone."""
+    sign_in = {"authorize_url": address, "token_url": f"{API}/token"}
+    with pytest.raises(ValueError, match="needs the net:local permission"):
+        plugins.sanitise_manifest(manifest("oauth", oauth=sign_in))
+    plugins.sanitise_manifest(manifest("oauth", "net:local", oauth=sign_in))
+
+
+async def test_a_request_body_nested_too_deep_is_refused_before_it_is_sent() -> None:
+    """The hub walks a body to fill in its secrets, and Python walks JSON one call per level."""
+    body: dict = {}
+    for _ in range(plugins.MAX_DEPTH):
+        body = {"a": body}
+    platform = FakePlatform()
+    async with engine_with(platform, manifest("net", urls=[f"{API}/v1/*"])) as engine:
+        platform.http_calls.clear()
+        with pytest.raises(RuntimeError, match=f"nested more than {plugins.MAX_DEPTH} deep"):
+            await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "method": "POST", "json": body})
+        assert platform.http_calls == []
+        await engine.request({"cmd": "plugin.http", "id": "demo", "url": f"{API}/v1/now", "method": "POST", "json": body["a"]})
+
+    assert len(platform.http_calls) == 1
+
+
 async def test_a_sign_in_left_too_long_is_no_longer_honoured() -> None:
     platform = FakePlatform()
     platform.responses[f"{API}/token"] = (200, {"access_token": "at-1"})
@@ -779,6 +804,9 @@ async def test_a_request_carries_the_access_token_and_nothing_else_of_a_sign_in(
         "https://accounts.spotify.com\t.evil.example/api/token",
         "https://accounts.spotify.com:99999/api/token",
         "https://ａccounts.example/api/token",
+        "https://256.256.256.256/api/token",
+        "https://1.2.3.4.5/api/token",
+        "https://x.0x/api/token",
     ],
 )
 def test_a_sign_in_endpoint_names_the_same_host_to_python_and_a_browser(endpoint: str) -> None:

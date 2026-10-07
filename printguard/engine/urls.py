@@ -37,7 +37,10 @@ EMBEDDING_IPV4 = tuple(ipaddress.ip_network(network) for network in ("::/96", ":
 UNROUTED = tuple(ipaddress.ip_network(network) for network in ("224.0.0.0/4", "fec0::/10", "ff00::/8"))
 """Multicast and the retired site-local range, which the standard library calls global and no public service answers on."""
 
-PLAIN_URL = re.compile(r"^[a-z][a-z0-9+.-]*://(?:[a-z0-9.-]+|\[[0-9a-f:]+\])(?::(?P<port>\d{1,5}))?(?:[/?#]|$)", re.IGNORECASE)
+PLAIN_URL = re.compile(r"^[a-z][a-z0-9+.-]*://(?P<host>[a-z0-9.-]+|\[[0-9a-f:]+\])(?::(?P<port>\d{1,5}))?(?:[/?#]|$)", re.IGNORECASE)
+
+NUMBER = re.compile(r"\d+|0x[0-9a-f]*", re.IGNORECASE)
+"""What a browser reads as a number when it ends a host, which makes the whole host an IPv4 address or nothing."""
 
 LOCAL_HOSTNAMES = ("localhost",)
 LOCAL_SUFFIXES = (".local", ".localhost", ".internal", ".home", ".lan", ".home.arpa")
@@ -112,7 +115,9 @@ def is_plain(url: str) -> bool:
     A backslash is a slash to a browser and part of a login to Python, so
     ``https://good.example\\@evil.example/`` is two different hosts. The same
     goes for a percent-encoded host, non-ASCII, a space or a control character
-    in it.
+    in it. A host whose last label is a number is an IPv4 address to a browser,
+    which refuses the whole URL when it is not a valid one, such as
+    ``256.256.256.256`` or ``1.2.3.4.5``.
 
     Args:
         url: The address as it would be requested.
@@ -122,7 +127,15 @@ def is_plain(url: str) -> bool:
         userinfo.
     """
     match = PLAIN_URL.match(url)
-    return match is not None and int(match["port"] or 0) < 65536
+    if match is None or int(match["port"] or 0) > 65535:
+        return False
+    host = match["host"].removesuffix(".")
+    if NUMBER.fullmatch(host.rpartition(".")[2]):
+        try:
+            socket.inet_aton(host)
+        except OSError:
+            return False
+    return True
 
 
 def _climbs(path: str) -> bool:
@@ -181,8 +194,10 @@ def is_local_address(host: str) -> bool:
     address written inside an IPv6 one is judged as the IPv4 address it is,
     which Python only began doing for itself part way through 3.12. Multicast
     and site-local addresses count as local, though the standard library calls
-    them global.
+    them global. One dot ending the host is dropped first, since ``localhost.``
+    is the same place as ``localhost``.
     """
+    host = host.removesuffix(".")
     try:
         address = ipaddress.ip_address(host.strip("[]"))
     except ValueError:

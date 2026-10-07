@@ -59,6 +59,17 @@ REFUSED = [
     ("https://api.telegram.org/bot*/sendMessage", "https://api.telegram.org/bot1/getUpdates?x=/sendMessage"),
     ("https://example.com/*/cancel", "https://example.com/v1/delete?then=/cancel"),
     ("https://example.com/search?q=*", "https://example.com/search?page=2"),
+    ("https://example.com/*", "https://user:pw@example.com/"),
+    ("https://example.com/*", "https://example.com\\@evil.test/"),
+    ("https://evil.test/*", "https://example.com\\@evil.test/"),
+    ("https://example.com/*", "https://example.com/a/../b"),
+    ("https://example.com/*", "https://example.com/%2e%2e/x"),
+    ("https://example.com/*", "https://example.com/a\\..\\b"),
+    ("https://example.com/*", "https://example.com/a/..\t"),
+    ("https://example.com/*", " https://example.com/a"),
+    ("https://example.com/*", "https://example.com:65536/a"),
+    ("http://127.0.0.1/*", "http://127.1/status"),
+    ("http://[fd00::1]/*", "http://[fd00:0::1]/status"),
 ]
 
 
@@ -169,6 +180,26 @@ def test_an_ipv4_address_inside_an_ipv6_one_is_public_when_the_ipv4_address_is(h
 @pytest.mark.parametrize("host", ["134744072", "8.8.2056", "0x8.8.8.8", "1.1.1.1.1", "example.com"])
 def test_an_oddly_spelt_public_address_is_not_local(host: str) -> None:
     assert not urls.is_local_address(host)
+
+
+@pytest.mark.parametrize("host", ["localhost.", "127.0.0.1.", "127.1.", "printer.lan.", "octopi.local.", "router.home.arpa."])
+def test_a_dot_ending_a_host_does_not_make_it_public(host: str) -> None:
+    """A fully qualified name is the same place, and a sign-in at one installed without the local network permission."""
+    assert urls.is_local_address(host)
+    assert urls.is_local_url(f"https://{host}/authorize")
+    assert not urls.is_local_address("example.com.")
+
+
+@pytest.mark.parametrize("host", ["256.256.256.256", "1.2.3.4.5", "x.0x", "example.1", "1.2.3.4.5.", "08", "a.0xzz.0x1f"])
+def test_a_host_ending_in_a_number_that_is_no_ipv4_address_is_not_a_plain_one(host: str) -> None:
+    """A browser reads such a host as an IPv4 address and refuses the URL, so the hub would hold an address nobody can open."""
+    assert not urls.is_plain(f"https://{host}/a")
+    assert not urls.matches("https://*/*", f"https://{host}/a")
+
+
+@pytest.mark.parametrize("host", ["93.184.216.34", "93.184.216.34.", "127.1", "0x7f.0.0.1", "2130706433", "example.com", "example.com.", "1e3.example", "x1", "[::1]"])
+def test_a_host_a_browser_can_read_is_a_plain_one(host: str) -> None:
+    assert urls.is_plain(f"https://{host}/a")
 
 
 def edges() -> list[str]:

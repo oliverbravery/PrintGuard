@@ -117,7 +117,7 @@ A plugin needs at least one of the three source files.
 |---|---|
 | `id` | Required. 3 to 40 lowercase letters, digits or hyphens, starting and ending with a letter or digit |
 | `version` | Required. Up to 32 letters, digits, underscores, dots, hyphens or plus signs |
-| `name` | Falls back to the id |
+| `name` | Cut at 80 characters. Falls back to the id |
 | `description` | Cut at 400 characters |
 | `author` | Cut at 80 characters |
 | `homepage` | An `http` or `https` link |
@@ -138,6 +138,17 @@ A plugin needs at least one of the three source files.
 A permission without a reason, `urls` without `net`, a [local address](#addresses) (a wildcard
 over a local suffix included) or a sign-in at one without `net:local`, `oauth` without the `oauth` permission, the `oauth` permission without `oauth`, or `provides` and `consumes` without their
 link permission each refuse the install.
+
+`oauth` takes these keys, and [credentials](#credentials) has how the sign-in runs.
+
+| Key | Rule |
+|---|---|
+| `authorize_url`, `token_url` | Required. Each one `https` address with a plain host and no wildcards |
+| `label` | The provider's name as the dashboard shows it, cut at 80 characters. Falls back to the host of `authorize_url` |
+| `register_url` | An `http` or `https` link to where the user registers their own app, cut at 200 characters |
+| `scopes` | Up to 20 |
+
+The manifest's own `homepage` is cut at 200 characters too.
 
 ### Reasons
 
@@ -263,7 +274,7 @@ Neither frame has `fetch`, `WebSocket` or `RTCPeerConnection`, and a frame made 
 no script of its own. [What a browser still allows](plugins.md#what-a-browser-still-allows)
 lists what is left.
 
-The hub only lets its own pages put the dashboard and these two frames in a frame, so another site can't frame them.
+The hub only lets its own pages and the origins in `PRINTGUARD_ORIGINS` put the dashboard and these two frames in a frame, so another site can't frame them.
 
 ### plugin.js
 
@@ -769,7 +780,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | What it sees | The same request shape a route gets, with no body. WebSocket handshakes are asked about too, as a `GET` |
 | Under load | A request that waits more than 5 seconds for the gate to be free is refused on its own. The gate is not disabled for it |
 | What stays open | `/api/health` and the gating plugin's own pages, so uptime checks keep working and it can serve its own sign-in page |
-| Caching | An approval is cached for 10 seconds per cookie, authorisation header, method, path and query string. A refusal is never cached, so signing in takes effect at once |
+| Caching | An approval is cached for 10 seconds per method, path, query and set of the headers above, so a gate that decides by `x-forwarded-for` or `user-agent` is asked again for each. A refusal is never cached, so signing in takes effect at once |
 
 ## Limits
 
@@ -785,6 +796,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | Channels | 8 in `provides`, 16 in `consumes` |
 | Store | 16 KB |
 | Body of a call, answer or publish | 16 KB |
+| Nesting | Objects and lists 32 deep in the store, and in the JSON a `ctx.http` request sends, 31 deep in the body of a call, answer or publish. Anything deeper is refused |
 | `tick_s` | 5 to 86400 seconds, fired on a 5 second clock, so 7 means 10 |
 | Effects | 32 per call. The rest are dropped |
 | `plugin.js` call | 4 seconds, then the plugin is stopped |
@@ -794,7 +806,7 @@ plugin.gate((request, ctx) => request.path.startsWith("/api/") || Boolean(ctx.st
 | Node text | `label` 80 characters, `action` 60, `placeholder` 60 |
 | `select` options | 60 |
 | `panel.html` height | 900px |
-| `ctx.http` | 60 requests a minute per plugin, counting each socket it opens, 10 seconds each. A refused request gets no `http` event, and only a request that goes out counts towards the 60 |
+| `ctx.http` | 60 requests a minute per plugin, counting each socket it opens, 10 seconds each. A refused request gets no `http` event. One refused for an address the manifest doesn't cover, a `Host` header or a secret before the path doesn't count towards the 60, and one refused for a blank secret or a failed sign-in does |
 | `ctx.http` answer | 256 KB once decompressed, whatever its type. A larger one fails the request and no `http` event arrives |
 | Sockets | 4 open per plugin, 64 KB per text frame sent, 256 KB per frame received, 10 seconds to open |
 | Sandbox start | 8 seconds for `plugin.js` or `panel.html` to load |

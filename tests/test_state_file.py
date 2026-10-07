@@ -127,6 +127,16 @@ def test_a_damaged_state_file_is_kept_rather_than_overwritten(tmp_path, caplog) 
     assert "state.json.corrupt" in caplog.text
 
 
+def test_a_state_file_nested_too_deep_to_parse_is_kept_like_any_other_damaged_one(tmp_path, caplog) -> None:
+    """Python gives up on JSON nested that deep with a RecursionError, which stopped the hub at every start."""
+    nested = '{"settings": ' + '{"a": ' * 200_000 + "1" + "}" * 200_000 + "}"
+    (tmp_path / "state.json").write_text(nested)
+
+    assert state_file_in(tmp_path).load() == {}
+    assert (tmp_path / "state.json.corrupt").read_text() == nested
+    assert [record.levelname for record in caplog.records] == ["ERROR"]
+
+
 def test_a_second_damaged_state_file_does_not_replace_the_first_one_kept(tmp_path) -> None:
     """The empty hub's own file can be damaged before its owner has recovered the real one."""
     state_file = state_file_in(tmp_path)

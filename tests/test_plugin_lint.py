@@ -107,6 +107,45 @@ def test_an_address_built_at_runtime_is_reported_as_unknowable() -> None:
     assert found(findings, "dynamic") == ["an address it builds as it runs"]
 
 
+DISGUISED = {
+    "worker.js": [
+        "plugin.on('tick', (event, ctx) => { const c = ctx; c.http({ url: 'https://other.example/x' }); });",
+        "plugin.on('tick', (event, ctx) => { ctx['http']({ url: 'https://other.example/x' }); });",
+        "plugin.on('tick', (event, ctx) => { const { http } = ctx; http({ url: 'https://other.example/x' }); });",
+        "plugin.on('tick', (event, ctx) => { const send = ctx.http; send({ url: 'https://other.example/x' }); });",
+        "plugin.on('tick', (event, ctx) => { send(ctx); });",
+        "plugin.on('tick', (event, c) => { c.http({ url: 'https://other.example/x' }); });",
+        "plugin.on('tick', function () { arguments[1].http({ url: 'https://other.example/x' }); });",
+        "function later(event, c) { c.http({ url: 'https://other.example/x' }); } plugin.on('tick', later);",
+        "const p = plugin; p.route((request, ctx) => ({}));",
+        "globalThis.plugin.route((request, ctx) => ({}));",
+    ],
+    "panel.html": [
+        "<script>const p = pg; p.http({ url: 'https://other.example/x' });</script>",
+        "<script>window.pg.http({ url: 'https://other.example/x' });</script>",
+        "<script>self['pg'].http({ url: 'https://other.example/x' });</script>",
+    ],
+}
+
+
+@pytest.mark.parametrize("name,code", [(name, code) for name, written in DISGUISED.items() for code in written])
+def test_the_api_reached_under_another_name_is_reported_as_unknowable(name: str, code: str) -> None:
+    """A call the check cannot see is a call it cannot vouch for, so the dialog must not say the code matches."""
+    findings = pin.findings(plugins.sanitise_manifest({"id": "disguised", "version": "1.0.0"}), {name: code})
+
+    assert found(findings, "dynamic") == ["its API under another name"]
+
+
+def test_the_api_used_by_its_own_name_is_read_without_a_caveat() -> None:
+    """Every plugin that ships calls it directly, as does the handler that takes no context at all."""
+    direct = "plugin.render((ctx) => ({ type: 'text', value: ctx.target || '' })); plugin.on('tick', (event) => {}); plugin.action((name, arg, ctx) => { ctx.log(name); });"
+    assert pin.findings(plugins.sanitise_manifest({"id": "direct", "version": "1.0.0"}), {"plugin.js": direct}) == []
+    for directory in sorted(pin.HERE.iterdir()):
+        if (directory / plugins.MANIFEST_FILE).exists():
+            manifest = plugins.sanitise_manifest(json.loads((directory / plugins.MANIFEST_FILE).read_text()))
+            assert "its API under another name" not in found(pin.findings(manifest, pin.source_files(directory)), "dynamic")
+
+
 PANEL = {
     "panel.html": """
 <style>body{margin:0}</style>

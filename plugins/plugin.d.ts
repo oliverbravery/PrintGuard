@@ -59,8 +59,8 @@ declare global {
     threshold: number;
     /** The last score, or null before the first one. */
     result: { ts: number; score: number } | null;
-    /** The alert in force, or null when nothing is wrong. */
-    alert: { ts: number; score: number; action: string } | null;
+    /** The alert in force, absent until the monitor's first alert and null once one has cleared. */
+    alert?: { ts: number; score: number; action: string } | null;
   }
 
   /** A camera, as `state:read` allows you to see it. */
@@ -74,7 +74,7 @@ declare global {
     /** Whether a monitor is using it. */
     in_use: boolean;
     max_fps: number;
-    /** What inference is managing, against the monitor's target. */
+    /** The rate of completed inferences on this camera, a second. */
     achieved_fps: number;
   }
 
@@ -141,9 +141,37 @@ declare global {
       event: "history";
       monitor_id: string;
       now: number;
-      buckets: { t: number; n: number; sum: number; min: number; max: number; defects: number }[];
+      /** One per minute with a reading in it, oldest first. */
+      buckets: {
+        /** The minute's start, in seconds since the epoch. */
+        t: number;
+        /** How many frames were scored in it. */
+        n: number;
+        sum: number;
+        min: number;
+        max: number;
+        /** How many of them reached the threshold. */
+        defects: number;
+        /** Seconds of it the monitor was watching, never more than 60. */
+        watched: number;
+      }[];
       alerts: { ts: number; score: number; action: string }[];
-      stats: { current: number; avg: number; min: number; max: number; inferences: number; defect_frames: number };
+      stats: {
+        current: number;
+        avg: number;
+        min: number;
+        max: number;
+        inferences: number;
+        defect_frames: number;
+        /** `defect_frames` as a percentage of `inferences`, to one decimal place. */
+        defect_pct: number;
+        /** How many alerts fired. */
+        alerts: number;
+        /** Whole minutes the readings spanned, with gaps over 30 seconds left out. */
+        watch_min: number;
+        /** How many alert snapshots are kept. */
+        snaps: number;
+      };
     };
     /** Every inference on a watched monitor, capped at 5 a second per monitor, before any threshold or streak logic. Needs `state:read`. */
     result: { event: "result"; monitor_id: string; camera_id: string; score: number; prediction: "failure" | "success"; margin: number; ms: number; ts: number };
@@ -168,7 +196,7 @@ declare global {
     query: Record<string, string>;
     /** Cookie, authorization, accept, content-type, x-forwarded-for and user-agent, where present. */
     headers: Record<string, string>;
-    /** Null for a request without one, and capped at 64 KB. */
+    /** Capped at 64 KB and empty for a request without one. Null when a gate is being asked. */
     body: string | null;
   }
 
@@ -248,8 +276,8 @@ declare global {
   interface PluginApi {
     /**
      * Draws the view, again on every state change and after every action, so
-     * keep it a plain function of `ctx`. On the `monitor` surface it is called
-     * once more per monitor, with `ctx.target` naming which.
+     * keep it a plain function of `ctx`. On the `monitor` and `settings` surfaces it is
+     * called once more per monitor, with `ctx.target` naming which.
      */
     render(view: (ctx: PluginContext) => PluginNode | null): void;
     /** Handles a press or a choice, named by the node's `action` and given its `arg`. */

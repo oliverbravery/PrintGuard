@@ -101,6 +101,60 @@ def test_worker_cannot_name_the_sandbox_around_it(runtime: WasmPluginRuntime) ->
     assert output["store"] == dict.fromkeys(names, "undefined")
 
 
+def test_a_worker_has_the_globals_the_docs_list_and_no_others(runtime: WasmPluginRuntime) -> None:
+    """QuickJS's command line leaves ``gc``, ``scriptArgs``, ``argv0`` and ``execArgv`` behind."""
+    language = ["parseInt", "parseFloat", "isNaN", "isFinite", "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent", "escape", "unescape", "undefined", "eval", "globalThis"]
+    output = call(
+        runtime,
+        f"const language = {json.dumps(language)};"
+        "const beside = Object.getOwnPropertyNames(globalThis).filter((name) => !/^[A-Z]/.test(name) && !language.includes(name));"
+        "plugin.on('alert', (event, ctx) => { ctx.store = { beside: beside.sort() }; });",
+    )
+
+    assert output["store"] == {"beside": ["atob", "btoa", "navigator", "performance", "queueMicrotask"]}
+
+
+async def test_a_worker_cannot_write_a_line_of_its_own_into_the_hub_log(runtime: WasmPluginRuntime, caplog: pytest.LogCaptureFixture) -> None:
+    """A newline in ``ctx.log`` started a fresh line, which a plugin could dress as the hub's own."""
+    worker = "plugin.on('alert', (event, ctx) => ctx.log('hello\\n2026-10-07 12:00:00 WARNING printguard.server.app: forged\\r\\u2028\\x1b[2Jend'));"
+    engine = Engine(HostedPlatform(runtime))
+    await engine.start()
+    try:
+        await install_and_accept(engine, {**WORKER_MANIFEST, "permissions": ["state:read"], "reasons": {"state:read": "to hear alerts"}}, worker)
+        with caplog.at_level("INFO", logger="printguard.server.plugins"):
+            engine.emit({"event": "alert", "monitor_id": "m", "score": 0.9, "action": "none"})
+            await asyncio.sleep(0.5)
+    finally:
+        await engine.stop()
+
+    logged = [record.getMessage() for record in caplog.records if record.name == "printguard.server.plugins" and "hello" in record.getMessage()]
+    assert logged == ["plugin guard: hello 2026-10-07 12:00:00 WARNING printguard.server.app: forged   [2Jend"]
+
+
+async def test_a_store_nested_too_deep_is_refused_and_the_hub_goes_on_saving(runtime: WasmPluginRuntime) -> None:
+    """A store 2,000 objects deep fitted in 16 KB and failed every save of the state file after it."""
+    worker = "plugin.on('alert', (event, ctx) => { const top = {}; let at = top; for (let i = 0; i < event.score; i++) at = at.a = {}; ctx.store = { kept: event.score, top }; });"
+    platform = HostedPlatform(runtime)
+    saved: list[str] = []
+    platform.save_state = lambda state: saved.append(json.dumps(state, indent=2))
+    engine = Engine(platform)
+    await engine.start()
+    try:
+        await install_and_accept(engine, {**WORKER_MANIFEST, "permissions": ["state:read"], "reasons": {"state:read": "to hear alerts"}}, worker)
+        for depth in (engine_plugins.MAX_DEPTH - 2, 2000):
+            engine.emit({"event": "alert", "monitor_id": "m", "score": depth, "action": "none"})
+            await asyncio.sleep(0.5)
+        engine.save()
+
+        assert engine.plugins.get("guard").config["kept"] == engine_plugins.MAX_DEPTH - 2, "the deep store replaced the one that fitted"
+        with pytest.raises(RuntimeError, match=f"nested more than {engine_plugins.MAX_DEPTH} deep"):
+            await engine.request({"cmd": "plugin.update", "id": "guard", "patch": {"config": json.loads('{"a":' * 40 + "1" + "}" * 40)}})
+    finally:
+        await engine.stop()
+
+    assert saved
+
+
 def test_a_dynamic_import_never_resolves(runtime: WasmPluginRuntime) -> None:
     """``import()`` is an expression, so it parses. The driver exits before it can load anything."""
     output = call(

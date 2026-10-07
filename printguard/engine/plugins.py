@@ -32,6 +32,16 @@ MAX_ZIP_BYTES = 12 * 1024 * 1024
 SURFACES = ("panel", "monitor", "settings")
 MAX_SOURCE_BYTES = 256 * 1024
 MAX_CONFIG_BYTES = 16 * 1024
+MAX_DEPTH = 32
+"""How deep the JSON a plugin hands over may nest.
+
+Python walks JSON recursively, so a few kilobytes of nothing but nesting would
+otherwise fail every save of the state file.
+"""
+MAX_NAME_CHARS = 80
+MAX_SCOPES = 20
+LIST_FIELDS = ("permissions", "consumes", "media", "surfaces", "platforms", "assets", "urls", "events")
+MAP_FIELDS = ("reasons", "secrets", "provides", "oauth")
 MIN_TICK_S = 5.0
 MAX_TICK_S = 86400.0
 MAX_SECRETS = 8
@@ -59,7 +69,8 @@ ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
 _REPO_PATTERN = re.compile(r"^[\w.-]+/[\w.-]+$")
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PATH_PATTERN = re.compile(r"^[\w./-]*$")
-_ASSET_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
+MAX_ASSET_NAME_CHARS = 40
+_ASSET_PATTERN = re.compile(rf"^[a-z0-9][a-z0-9._-]{{0,{MAX_ASSET_NAME_CHARS - 1}}}$")
 VERSION_PATTERN = re.compile(r"^[\w.+-]{1,32}$")
 MEDIA_PATTERN = re.compile(r"^[a-z0-9][\w-]*(?:/[\w-]+)*\.(?:png|jpe?g|webp|gif|svg)$")
 MAX_MEDIA = 8
@@ -94,7 +105,7 @@ PERMISSIONS: dict[str, dict[str, Any]] = {
     },
     "camera:control": {
         "label": "Retune cameras",
-        "description": "Change any camera's picture and frame rate.",
+        "description": "Change any camera's picture and detection rate.",
         "commands": ["camera.update"],
     },
     "camera:manage": {
@@ -627,11 +638,32 @@ def described(raw: Any, field: str, pattern: re.Pattern[str], cap: int, complain
     Raises:
         ValueError: If a name or its description is unusable.
     """
-    given = raw.get(field) if isinstance(raw.get(field), dict) else {}
-    lines = {str(name).strip().lower(): str(why).strip()[:200] for name, why in list(given.items())[:cap]}
+    lines = {str(name).strip().lower(): str(why).strip()[:200] for name, why in list(raw.get(field, {}).items())[:cap]}
     if any(not pattern.match(name) or not why for name, why in lines.items()):
         raise ValueError(complaint)
     return lines
+
+
+def shaped(raw: Any) -> dict[str, Any]:
+    """Checks a manifest is an object whose lists are lists and whose objects are objects.
+
+    Args:
+        raw: The parsed ``plugin.json``.
+
+    Returns:
+        The manifest, unchanged.
+
+    Raises:
+        ValueError: If it is not an object, or a field is the wrong kind of
+            value, naming the field.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"{MANIFEST_FILE} is not a JSON object")
+    for fields, kind, noun in ((LIST_FIELDS, list, "a list"), (MAP_FIELDS, dict, "an object")):
+        for field in fields:
+            if field in raw and not isinstance(raw[field], kind):
+                raise ValueError(f"{field} in {MANIFEST_FILE} must be {noun}")
+    return raw
 
 
 def sanitise_manifest(raw: Any) -> dict[str, Any]:
@@ -646,8 +678,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     Raises:
         ValueError: If the manifest is unusable.
     """
-    if not isinstance(raw, dict):
-        raise ValueError("plugin.json is not an object")
+    raw = shaped(raw)
     plugin_id = str(raw.get("id", "")).strip().lower()
     if not ID_PATTERN.match(plugin_id):
         raise ValueError("plugin id must be 3-40 lowercase letters, digits or hyphens")
@@ -655,8 +686,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     if not VERSION_PATTERN.match(version):
         raise ValueError("plugin version is missing or unusable")
     permissions = [p for p in PERMISSIONS if p in raw.get("permissions", [])]
-    given = raw.get("reasons") if isinstance(raw.get("reasons"), dict) else {}
-    reasons = {p: str(given.get(p, "")).strip()[:200] for p in permissions}
+    reasons = {p: str(raw.get("reasons", {}).get(p, "")).strip()[:200] for p in permissions}
     unexplained = [p for p, why in reasons.items() if not why]
     if unexplained:
         raise ValueError(f"reasons must say why the plugin wants {', '.join(unexplained)}")
@@ -698,7 +728,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
         tick_s = 0.0
     return {
         "id": plugin_id,
-        "name": str(raw.get("name", "")).strip() or plugin_id,
+        "name": str(raw.get("name", "")).strip()[:MAX_NAME_CHARS] or plugin_id,
         "version": version,
         "description": str(raw.get("description", "")).strip()[:400],
         "author": str(raw.get("author", "")).strip()[:80],
@@ -806,13 +836,15 @@ def sanitise_sign_in(raw: Any) -> dict[str, Any]:
     """
     if not isinstance(raw, dict) or not raw:
         return {}
+    if not isinstance(raw.get("scopes", []), list):
+        raise ValueError("scopes in oauth must be a list")
     endpoints = {key: str(raw.get(key, "")).strip() for key in SIGN_IN_ENDPOINTS}
     if any("*" in value or urlsplit(value).scheme != "https" or not urls.is_plain(value) for value in endpoints.values()):
         raise ValueError("oauth needs an https authorize_url and token_url, each with a plain host")
     return {
         **endpoints,
         "register_url": urls.link(raw.get("register_url")),
-        "scopes": [str(scope).strip() for scope in raw.get("scopes", []) if str(scope).strip()][:20],
+        "scopes": [str(scope).strip() for scope in raw.get("scopes", []) if str(scope).strip()][:MAX_SCOPES],
         "label": str(raw.get("label", "")).strip()[:80] or urlsplit(endpoints["authorize_url"]).hostname or "",
     }
 
@@ -840,11 +872,39 @@ def sanitise_sources(files: dict[str, str]) -> dict[str, str]:
     return sources
 
 
+def shallow(value: Any, what: str) -> Any:
+    """Refuses JSON from a plugin that nests too deep to be walked safely.
+
+    The depth is counted a level at a time, since the point is to never recurse
+    into it.
+
+    Args:
+        value: Parsed JSON of any shape.
+        what: What the plugin handed over, for the refusal.
+
+    Returns:
+        The value, unchanged.
+
+    Raises:
+        ValueError: If objects and lists sit more than ``MAX_DEPTH`` inside each other.
+    """
+    level = [value]
+    for _ in range(MAX_DEPTH):
+        level = [item for held in level if isinstance(held, (dict, list)) for item in (held.values() if isinstance(held, dict) else held)]
+        if not any(isinstance(held, (dict, list)) for held in level):
+            return value
+    raise ValueError(f"{what} is nested more than {MAX_DEPTH} deep")
+
+
 def sanitise_config(raw: Any) -> dict[str, Any]:
-    """Accepts a plugin's own stored data, refusing oversized objects."""
+    """Accepts a plugin's own stored data, refusing objects too large or too deeply nested.
+
+    Raises:
+        ValueError: If the data is over 16 KB or nested past ``MAX_DEPTH``.
+    """
     if not isinstance(raw, dict):
         return {}
-    if len(canonical(raw)) > MAX_CONFIG_BYTES:
+    if len(canonical(shallow(raw, "plugin data"))) > MAX_CONFIG_BYTES:
         raise ValueError(f"plugin data is larger than {MAX_CONFIG_BYTES // 1024} KB")
     return raw
 
@@ -939,9 +999,7 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
             raise ValueError(f"{name} is larger than {cap // 1024} KB")
         return content
 
-    manifest = json.loads(read(MANIFEST_FILE, MAX_SOURCE_BYTES))
-    if not isinstance(manifest, dict):
-        raise ValueError(f"{MANIFEST_FILE} is not a JSON object")
+    manifest = shaped(json.loads(read(MANIFEST_FILE, MAX_SOURCE_BYTES)))
     sources = {name: read(name, MAX_SOURCE_BYTES).decode("utf-8", "replace") for name in SOURCE_FILES if name in entries}
     declared = {str(name).strip().lower() for name in manifest.get("assets", [])}
     assets: dict[str, bytes] = {}
@@ -1008,10 +1066,10 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
             source file answers with anything but its content or a 404, or its
             assets pass what a plugin may ship, at the file that does it.
     """
-    if not _REPO_PATTERN.match(repo):
+    if not _REPO_PATTERN.match(repo) or _climbs(repo):
         raise ValueError(f"{repo!r} is not an owner/name repository")
     path = path.strip("/")
-    if not _PATH_PATTERN.match(path):
+    if not _PATH_PATTERN.match(path) or _climbs(path):
         raise ValueError(f"{path!r} is not a usable path")
     sha = ref if _SHA_PATTERN.match(ref) else await _resolve_commit(http, repo, ref)
     prefix = f"{path}/" if path else ""
@@ -1020,6 +1078,7 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
     )
     if status != 200 or not isinstance(manifest, dict):
         raise ValueError(f"no {MANIFEST_FILE} at {repo}/{prefix} ({status})")
+    shaped(manifest)
     sources: dict[str, str] = {}
     for name in SOURCE_FILES:
         status, body = await http(
@@ -1047,6 +1106,15 @@ async def fetch_github(http: HttpFn, repo: str, path: str, ref: str) -> tuple[di
         assets[name] = base64.b64decode(body)
         total = within_budget(name, len(assets[name]), total)
     return manifest, sources, assets, sha
+
+
+def _climbs(path: str) -> bool:
+    """Whether a repository or a path inside one has a ``.`` or ``..`` segment.
+
+    An HTTP client collapses those before it sends, so the files would come from
+    another repository than the one recorded and shown.
+    """
+    return any(segment in (".", "..") for segment in path.split("/"))
 
 
 async def _resolve_commit(http: HttpFn, repo: str, ref: str) -> str:
@@ -1078,3 +1146,19 @@ def verified_by(catalogue: list[dict[str, Any]], plugin_id: str, hashed: dict[st
         if entry.get("id") == plugin_id and entry.get("digests") == hashed:
             return entry
     return None
+
+
+def pinned_source(entry: dict[str, Any]) -> dict[str, Any]:
+    """Where the catalogue pins a plugin, as an install from its repository records it.
+
+    A zip the catalogue vouches for is recorded this way. The digests cover the
+    manifest and the code but not the README, icon or screenshots, so those are
+    read from the pinned commit like any catalogue install's, never from the zip.
+
+    Args:
+        entry: The catalogue entry vouching for the bundle.
+
+    Returns:
+        The repository, path and commit the entry names.
+    """
+    return {"kind": "github", "repo": str(entry["repo"]), "path": str(entry.get("path", "")), "ref": str(entry["ref"])}

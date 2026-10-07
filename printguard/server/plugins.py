@@ -67,8 +67,7 @@ const ctx = {
   background(image) { __effects.push({ kind: "background", image: String(image) }); },
   log(text) { __effects.push({ kind: "log", text: String(text) }); },
 };
-delete globalThis.print;
-delete globalThis.console;
+for (const name of ["print", "console", "gc", "scriptArgs", "argv0", "execArgv"]) delete globalThis[name];
 new Function("plugin", '"use strict";' + __input.worker)(plugin);
 let __result = null;
 if (__input.kind === "event" || __input.kind === "tick") {
@@ -412,6 +411,6 @@ class WasmPluginRuntime:
                 elif kind in plugins.UI_EFFECTS:
                     await self._request({"cmd": "plugin.effect", "id": plugin.id, "effect": effect})
                 elif kind == "log":
-                    logger.info("plugin %s: %s", plugin.id, str(effect["text"])[:400])
+                    logger.info("plugin %s: %s", plugin.id, "".join(char if char.isprintable() else " " for char in str(effect["text"])[:400]))
             except Exception as exc:
                 logger.warning("plugin %s effect %s refused: %s", plugin.id, kind, exc)

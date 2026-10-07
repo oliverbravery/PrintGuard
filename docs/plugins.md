@@ -73,6 +73,9 @@ the default catalogue these are the ones I have reviewed, and a hub whose `catal
 points elsewhere checks against that file instead. Anything else is third party, so read it
 first. Both run under the same restrictions.
 
+A zip that verifies is recorded as an install from the catalogue, so its page shows the README,
+icon and screenshots at the pinned commit and not the ones in the zip.
+
 When you enable one, PrintGuard reads its code and shows in the same dialog where the code and
 the manifest disagree.
 
@@ -129,7 +132,7 @@ that permission. Accept it on the plugin's page to turn it back on. One whose si
 | `net` | Reach the addresses its manifest lists |
 | `net:local` | Reach addresses on this machine and the network around it, which covers private addresses, `localhost`, names ending `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.localhost`, a wildcard over one of those such as `*.local`, and an IPv4 address written inside an IPv6 one |
 | `monitor:manage` | Add monitors and delete them |
-| `camera:control` | Rename any camera and change its brightness, contrast, sharpness, crop, rotation and frame rate |
+| `camera:control` | Rename any camera and change its brightness, contrast, sharpness, crop, rotation and detection rate |
 | `camera:manage` | Register cameras and delete them, and scan for ones not yet registered |
 | `camera:frames` | Take a still of any camera and read the picture itself |
 | `history:read` | Read a monitor's score history and past alerts |
@@ -141,7 +144,7 @@ that permission. Accept it on the plugin's page to turn it back on. One whose si
 | `link:consume` | Ask the plugins and channels it names, and hear them |
 | `background` | Put a picture behind the dashboard, which the Glass theme shows through its see-through panels |
 | `routes` | Answer requests under `/plugins/<id>/`, reading each request's headers |
-| `gate` | See and refuse every other request to the hub. A yes is reused for 10 seconds for the same cookie, authorisation header, method, path and query |
+| `gate` | See and refuse every other request to the hub. A yes is reused for 10 seconds for a request with the same method, path, query and headers it is shown |
 
 Every permission a manifest asks for carries a line saying why, in the plugin author's own
 words, and one without a reason will not install. That line sits beside PrintGuard's own
