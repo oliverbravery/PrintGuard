@@ -137,6 +137,13 @@ def test_an_address_is_local_however_it_is_spelt(host: str) -> None:
     assert urls.reaches_local(f"http://{host}/*"), "a plugin asked for this network under the public permission"
 
 
+@pytest.mark.parametrize("host", ["[fec0::1]", "[feff::1]", "[ff02::1]", "[ff0e::1]", "224.0.0.1", "239.255.255.250"])
+def test_a_site_local_or_multicast_address_is_local(host: str) -> None:
+    """The standard library calls these global, and a connection to one stays on this network."""
+    assert urls.is_local_address(host)
+    assert urls.reaches_local(f"http://{host}/*"), "a plugin asked for this network under the public permission"
+
+
 @pytest.mark.parametrize(
     "host", ["[64:ff9b::c0a8:101]", "[64:ff9b::7f00:1]", "[::192.168.1.1]", "[::c0a8:101]", "[::ffff:0:c0a8:101]", "[::ffff:192.168.1.1]", "[::7f00:1]"]
 )
@@ -161,7 +168,7 @@ def edges() -> list[str]:
     constants = (ipaddress._IPv4Constants, ipaddress._IPv6Constants)
     networks = [network for family in constants for network in (*family._private_networks, *family._private_networks_exceptions)]
     networks.append(ipaddress._IPv4Constants._public_network)
-    networks.extend(urls.EMBEDDING_IPV4)
+    networks.extend((*urls.EMBEDDING_IPV4, *urls.UNROUTED))
     hosts = ["2130706433", "127.1", "0x7f.0.0.1", "134744072", "1.1.1.1.1", "localhost", "octopi.local", "example.com", "local"]
     for network in networks:
         first, last = int(network.network_address), int(network.broadcast_address)

@@ -231,7 +231,7 @@ any address that is not a public one, `localhost`, or a name ending `.local`, `.
 `.home`, `.home.arpa`, `.internal` or `.localhost`. A wildcard host counts, since it covers
 both, and so does a wildcard over one of those suffixes, such as `*.local`. An address in any
 spelling a browser takes counts too, such as `127.1` or `2130706433`, and so does an IPv4 address
-written inside an IPv6 one, such as `[64:ff9b::c0a8:101]`. Without `net:local`, PrintGuard
+written inside an IPv6 one, such as `[64:ff9b::c0a8:101]`. A multicast or site-local address counts as well, such as `224.0.0.1` or `[fec0::1]`. Without `net:local`, PrintGuard
 resolves a name once when a request or socket connects, refuses it if any address it resolves to
 is on this network and connects to an address it checked, so a public name pointing somewhere
 private gets nowhere, however often its answer changes. That connection never goes through a
