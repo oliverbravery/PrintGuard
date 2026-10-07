@@ -136,7 +136,7 @@ A plugin needs at least one of the three source files.
 | `tick_s` | How often its worker runs anyway, 5 to 86400 seconds. Under 5 switches the timer off |
 
 A permission without a reason, `urls` without `net`, a [local address](#addresses) (a wildcard
-over a local suffix included) without `net:local`, `oauth` without the `oauth` permission, the `oauth` permission without `oauth`, or `provides` and `consumes` without their
+over a local suffix included) or a sign-in at one without `net:local`, `oauth` without the `oauth` permission, the `oauth` permission without `oauth`, or `provides` and `consumes` without their
 link permission each refuse the install.
 
 ### Reasons
@@ -217,7 +217,12 @@ missing port means any port. An IPv6 address goes in brackets, as `http://[fd00:
 
 The scheme and host match in any case. The path matches as written, so
 `https://api.telegram.org/bot*/sendMessage` does not cover `/bot1/sendmessage`. A `*` in a path
-stands for any run of characters, `/` and the query string included.
+stands for any run of characters, `/` included.
+
+The query string is not part of the path. A pattern without a `?` covers its path with any
+query, so `https://api.telegram.org/bot*/sendMessage` covers `/bot1/sendMessage?chat_id=5` and
+not `/bot1/getUpdates?next=/sendMessage`. A pattern with a `?` matches what follows it against
+the query, as `https://example.com/search?q=*` does.
 
 A URL with a `.` or `..` segment in its path matches no pattern, percent-encoded or not.
 
@@ -226,7 +231,7 @@ any address that is not a public one, `localhost`, or a name ending `.local`, `.
 `.home`, `.home.arpa`, `.internal` or `.localhost`. A wildcard host counts, since it covers
 both, and so does a wildcard over one of those suffixes, such as `*.local`. An address in any
 spelling a browser takes counts too, such as `127.1` or `2130706433`, and so does an IPv4 address
-written inside an IPv6 one, such as `[64:ff9b::c0a8:101]`. Without `net:local`, PrintGuard
+written inside an IPv6 one, such as `[64:ff9b::c0a8:101]`. A multicast or site-local address counts as well, such as `224.0.0.1` or `[fec0::1]`. Without `net:local`, PrintGuard
 resolves a name once when a request or socket connects, refuses it if any address it resolves to
 is on this network and connects to an address it checked, so a public name pointing somewhere
 private gets nowhere, however often its answer changes. That connection never goes through a
@@ -558,6 +563,8 @@ it base64 encoded. The manifest needs `http` in `events`, or the answer never re
 A redirect is not followed. Its 3xx status arrives as the answer, so ask for the address the
 service finally answers on.
 
+A request with a `Host` header is refused. The host is the one in `url`.
+
 A body over 256 KB fails the request, whether it is JSON, text or `binary`. The size is counted
 after decompression and before base64. PrintGuard asks for gzip or nothing, and an answer in any
 other encoding fails the same way. Nothing is cut short, so no `http` event arrives. The error shows in the
@@ -660,8 +667,8 @@ them the redirect URI to give the provider and links `register_url`.
 
 `authorize_url` and `token_url` are each one `https` address with no wildcards and a plain host,
 which leaves out a login, a backslash and a percent-encoded or non-ASCII host, since a browser and
-the hub read those differently. An `authorize_url` may carry a query of its own, which is kept. A `token_url`
-on this machine or the network around it needs `net:local`. The consent dialog lists both
+the hub read those differently. An `authorize_url` may carry a query of its own, which is kept. Either one
+on this machine or the network around it needs `net:local`, and without it accepted the sign-in does not start. The consent dialog lists both
 addresses, and an update that changes either one signs its users out and has to be accepted
 again. A sign-in left open while an update changes `token_url`, or takes the permission away, is
 refused when the user comes back. A token endpoint that can't be reached, or answers with more than

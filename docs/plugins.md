@@ -110,7 +110,7 @@ out.
 | A zip over the zip it replaces | Stored data and credentials carry across when it asks for nothing more, and the permissions are asked again |
 | Anywhere else | Start from scratch |
 
-A plugin saved before 2.6.0 that lists an address on your own network without **Reach your own
+A plugin saved before 2.6.0 that lists an address on your own network, or signs in at one, without **Reach your own
 network** stays installed with its data and credentials, off, and the hub warns at start that it now needs
 that permission. Accept it on the plugin's page to turn it back on. One whose sign-in is plain
 `http` is removed at start, since that sign-in can't be read any more, and the warning names it.

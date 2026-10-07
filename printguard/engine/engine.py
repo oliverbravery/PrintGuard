@@ -162,7 +162,7 @@ class Engine:
         self.sockets = SocketBroker(platform.open_socket, self.emit)
         self.oauth = oauth.OAuthFlows(platform.http)
         self._plugin_calls: dict[str, list[float]] = {}
-        self._pending_calls: dict[str, tuple[str, str, str, float]] = {}
+        self._pending_calls: dict[str, tuple[str, str, str, float, str]] = {}
         self._answered_calls: dict[str, tuple[str, float]] = {}
         self._sign_in_refreshes: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._sinks: list[Callable[[dict[str, Any]], None]] = []
@@ -2073,14 +2073,19 @@ class Engine:
         the request fails. A plugin without ``net:local`` passes ``public_only``,
         so the connection itself is refused an address on this network, which a
         name that resolves there would otherwise get past the check made here.
+        A ``Host`` header is refused, since a server holding several sites
+        would answer as the one it names, not the one the address did.
         """
         url = str(message.get("url", ""))
         if plugins.addresses_a_secret(url):
             raise PermissionError(f"plugin {message['id']} may only use a secret in the path of its address")
         plugin = self._network_allows(message["id"], url)
+        headers = dict(message.get("headers") or {})
+        if any(str(name).lower() == "host" for name in headers):
+            raise PermissionError(f"plugin {plugin.id} may not set the Host header")
         self._spend_request(plugin)
         await self._refresh_sign_in(plugin)
-        request = {"url": url, "headers": message.get("headers") or None, "json": message.get("json")}
+        request = {"url": url, "headers": headers or None, "json": message.get("json")}
         usable = plugins.fillable(plugin.secrets)
         blank = plugins.missing_secrets(request, usable)
         if blank:
@@ -2200,7 +2205,7 @@ class Engine:
         call_id = uuid.uuid4().hex
         now = time.monotonic()
         self._pending_calls = {k: v for k, v in self._pending_calls.items() if now - v[3] < CALL_TTL_S}
-        self._pending_calls[call_id] = (caller.id, to, str(message.get("tag", "")), now)
+        self._pending_calls[call_id] = (caller.id, to, str(message.get("tag", "")), now, channel)
         self.emit({"event": "call", "id": to, "from": caller.id, "channel": channel, "body": body, "call_id": call_id})
 
     async def _cmd_plugin_answer(self, message: dict[str, Any]) -> None:
@@ -2208,6 +2213,8 @@ class Engine:
 
         Every open dashboard answers a call its plugin serves, so an answer to
         one that has just been answered by the same plugin is dropped quietly.
+        The answer is labelled with the channel the question was asked on,
+        whatever the answering plugin calls it.
         """
         call_id = str(message.get("call_id", ""))
         now = time.monotonic()
@@ -2217,10 +2224,10 @@ class Engine:
             return
         if waiting is None or waiting[1] != message["id"]:
             raise PermissionError("no question of that plugin is waiting for an answer")
-        caller, answering, tag, _ = waiting
+        caller, answering, tag, _, channel = waiting
         self._answered_calls[call_id] = (answering, now)
         body = plugins.sanitise_config({"body": message.get("body")})["body"]
-        self.emit({"event": "answer", "id": caller, "tag": tag, "from": answering, "channel": str(message.get("channel", "")), "body": body})
+        self.emit({"event": "answer", "id": caller, "tag": tag, "from": answering, "channel": channel, "body": body})
 
     async def _cmd_plugin_publish(self, message: dict[str, Any]) -> None:
         """Hands one plugin's message to everybody who asked to hear that channel."""
@@ -2254,9 +2261,13 @@ class Engine:
         token endpoint that resolves here needs.
 
         Raises:
-            PermissionError: If nobody has typed one in.
+            PermissionError: If either address of the sign-in is on this network
+                and the plugin may not reach it, or nobody has typed a client
+                id in.
         """
         provider = plugin.manifest["oauth"]
+        if plugins.local_sign_in(provider) and not plugin.may("net:local"):
+            raise PermissionError(f"{provider['label']} signs in on this network, which needs the net:local permission")
         client_id = plugin.secrets.get(oauth.CLIENT_ID, "")
         if not client_id:
             raise PermissionError(f"{plugin.id} needs the client id of a {provider['label']} app you registered")

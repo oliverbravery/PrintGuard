@@ -4547,6 +4547,18 @@ async def test_one_plugin_asks_another_and_the_answer_comes_back_to_it() -> None
     assert plugins.project_event(answer, ["state:read"]) is None, "an answer reached a plugin without the grant"
 
 
+async def test_an_answer_carries_the_channel_it_was_asked_on() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_pair(engine)
+        await engine.handle({"cmd": "plugin.call", "id": "np-widget", "to": "spotify", "channel": "now-playing", "tag": "np"})
+        asked = next(e for e in events if e.get("event") == "call")
+        await engine.handle({"cmd": "plugin.answer", "id": "spotify", "call_id": asked["call_id"], "channel": "library", "body": {}})
+        answer = next(e for e in events if e.get("event") == "answer")
+
+    assert answer["channel"] == "now-playing", "the answering plugin chose which channel its answer came from"
+
+
 async def test_a_plugin_reaches_no_channel_it_did_not_declare() -> None:
     platform = FakePlatform(infer_s=0.02)
     async with running_engine(platform, camera_fps=[]) as (engine, events):

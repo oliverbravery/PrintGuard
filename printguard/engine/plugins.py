@@ -686,7 +686,7 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     if any(asset_type(name) is None for name in assets):
         raise ValueError(f"a plugin may only ship {', '.join(sorted(set(ASSET_TYPES)))}")
     patterns = urls.sanitise(raw.get("urls"))
-    local = [pattern for pattern in patterns if urls.reaches_local(pattern)]
+    local = [pattern for pattern in patterns if urls.reaches_local(pattern)] + local_sign_in(sign_in)
     if patterns and "net" not in permissions:
         raise ValueError("urls needs the net permission")
     if local and "net:local" not in permissions:
@@ -724,7 +724,8 @@ def restored_manifest(raw: Any) -> dict[str, Any]:
     """Reads a manifest an earlier version stored.
 
     One stored before 2.6.0 can name a local address, such as ``*.home.arpa`` or
-    ``127.1``, without the ``net:local`` permission that now covers it. It is
+    ``127.1``, or sign in at one, without the ``net:local`` permission that now
+    covers it. It is
     read as asking for that permission, which nobody has accepted, so the plugin
     stays installed with its data and waits to be accepted.
 
@@ -814,6 +815,18 @@ def sanitise_sign_in(raw: Any) -> dict[str, Any]:
         "scopes": [str(scope).strip() for scope in raw.get("scopes", []) if str(scope).strip()][:20],
         "label": str(raw.get("label", "")).strip()[:80] or urlsplit(endpoints["authorize_url"]).hostname or "",
     }
+
+
+def local_sign_in(sign_in: dict[str, Any]) -> list[str]:
+    """The addresses a sign-in uses on this machine or the network around it.
+
+    Args:
+        sign_in: A manifest's validated ``oauth`` block, empty when it has none.
+
+    Returns:
+        Whichever of the authorise and token addresses need ``net:local``.
+    """
+    return [sign_in[key] for key in SIGN_IN_ENDPOINTS if key in sign_in and urls.is_local_url(sign_in[key])]
 
 
 def sanitise_sources(files: dict[str, str]) -> dict[str, str]:

@@ -34,6 +34,9 @@ PATTERN = re.compile(
 EMBEDDING_IPV4 = tuple(ipaddress.ip_network(network) for network in ("::/96", "::ffff:0:0/96", "::ffff:0:0:0/96", "64:ff9b::/96"))
 """The IPv6 ranges that carry an IPv4 address in their last 32 bits, which a network may deliver as that address."""
 
+UNROUTED = tuple(ipaddress.ip_network(network) for network in ("224.0.0.0/4", "fec0::/10", "ff00::/8"))
+"""Multicast and the retired site-local range, which the standard library calls global and no public service answers on."""
+
 PLAIN_URL = re.compile(r"^[a-z][a-z0-9+.-]*://(?:[a-z0-9.-]+|\[[0-9a-f:]+\])(?::(?P<port>\d{1,5}))?(?:[/?#]|$)", re.IGNORECASE)
 
 LOCAL_HOSTNAMES = ("localhost",)
@@ -139,10 +142,11 @@ def matches(pattern: str, url: str) -> bool:
         url: The URL a plugin asked for.
 
     Returns:
-        True when scheme, host, port and path all match. The query string is
-        matched as part of the path, as a browser does, so a pattern ending in
-        ``*`` covers a URL's parameters. A path with a ``.`` or ``..`` segment
-        matches nothing.
+        True when scheme, host, port and path all match. The path is matched
+        on its own, so a ``*`` in it is never satisfied by the query string. A
+        pattern with a ``?`` matches what follows it against the query, and one
+        without covers any query. A path with a ``.`` or ``..`` segment matches
+        nothing.
     """
     rule = parse(pattern)
     if rule is None:
@@ -158,7 +162,10 @@ def matches(pattern: str, url: str) -> bool:
     path = parsed.path or "/"
     if _climbs(path):
         return False
-    return _matches_host(rule["host"].strip("[]"), host) and _matches_path(rule["path"], f"{path}?{parsed.query}" if parsed.query else path)
+    path_rule, scoped, query_rule = rule["path"].partition("?")
+    if not _matches_host(rule["host"].strip("[]"), host) or not _matches_path(path_rule, path):
+        return False
+    return not scoped or _matches_path(query_rule, parsed.query)
 
 
 def allowed(url: str, patterns: list[str]) -> bool:
@@ -172,7 +179,9 @@ def is_local_address(host: str) -> bool:
     An IPv4 address is read in every spelling a resolver takes, so ``127.1``,
     ``0x7f.0.0.1`` and ``2130706433`` are all the loopback address. An IPv4
     address written inside an IPv6 one is judged as the IPv4 address it is,
-    which Python only began doing for itself part way through 3.12.
+    which Python only began doing for itself part way through 3.12. Multicast
+    and site-local addresses count as local, though the standard library calls
+    them global.
     """
     try:
         address = ipaddress.ip_address(host.strip("[]"))
@@ -183,7 +192,7 @@ def is_local_address(host: str) -> bool:
             return host in LOCAL_HOSTNAMES or host.endswith(LOCAL_SUFFIXES)
     if address.version == 6 and any(address in network for network in EMBEDDING_IPV4):
         address = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
-    return not address.is_global or address.is_private or address.is_loopback
+    return not address.is_global or address.is_private or address.is_loopback or any(address in network for network in UNROUTED)
 
 
 def reaches_local(pattern: str) -> bool:

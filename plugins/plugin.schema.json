@@ -227,7 +227,7 @@
           "type": "string",
           "format": "uri",
           "pattern": "^https://[^*]+$",
-          "description": "Where the user is sent to sign in. One https address."
+          "description": "Where the user is sent to sign in. One https address, and one on your own network needs net:local."
         },
         "token_url": {
           "type": "string",

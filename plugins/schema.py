@@ -114,7 +114,7 @@ def schema() -> dict:
                 "required": ["authorize_url", "token_url"],
                 "additionalProperties": False,
                 "properties": {
-                    "authorize_url": {"type": "string", "format": "uri", "pattern": "^https://[^*]+$", "description": "Where the user is sent to sign in. One https address."},
+                    "authorize_url": {"type": "string", "format": "uri", "pattern": "^https://[^*]+$", "description": "Where the user is sent to sign in. One https address, and one on your own network needs net:local."},
                     "token_url": {"type": "string", "format": "uri", "pattern": "^https://[^*]+$", "description": "Where the code is exchanged for tokens. One https address, and one on your own network needs net:local."},
                     "register_url": {"type": "string", "format": "uri", "maxLength": 200, "description": "Where the user goes to register their own app, shown alongside the redirect URI to give it."},
                     "scopes": {"type": "array", "uniqueItems": True, "items": {"type": "string"}},
