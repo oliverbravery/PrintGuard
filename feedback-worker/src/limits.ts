@@ -1,4 +1,5 @@
 export const FRAME_BYTES_MAX = 150 * 1024;
+export const PIXELS_MAX = 4096 * 4096;
 export const STORED_BYTES_MAX = 5 * 1024 ** 3;
 export const STORED_BYTES_WARN = 4 * 1024 ** 3;
 export const UPLOADS_PER_DAY = 1000;

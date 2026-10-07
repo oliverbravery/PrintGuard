@@ -105,7 +105,8 @@ skips isn't counted as sent. A frame the inbox already holds is answered as sent
 written again, so it doesn't count twice and the copy keeps the labels of the first send. A print
 none of whose frames could be sent goes back to waiting for a review. The hub drops control
 characters from the printer model you type, and the Worker refuses a frame with one in its labels
-or with a label written as an RFC 2047 encoded word, such as `=?utf-8?q?x?=`.
+or with a label written as an RFC 2047 encoded word, such as `=?utf-8?q?x?=`. It also refuses a
+file that isn't a complete JPEG or is over 4096 by 4096 pixels.
 
 The limit for everyone is shared, so a handful of busy networks can use it up for the day.
 Your frames wait on your hub until it resets.
