@@ -109,10 +109,17 @@ def origin_allowed(connection: HTTPConnection, allowed: set[str], *, required: b
     origin = connection.headers.get("origin")
     if not origin:
         return not required
-    host = (connection.headers.get("x-forwarded-host") or connection.headers["host"]).split(",")[0].strip()
-    scheme = connection.headers.get("x-forwarded-proto", "").split(",")[0].strip() or SOCKET_SCHEMES.get(connection.url.scheme, connection.url.scheme)
     try:
-        return normalised_origin(origin) in allowed | {normalised_origin(f"{scheme}://{host}")}
+        requested = normalised_origin(origin)
+    except ValueError:
+        return False
+    if requested in allowed:
+        return True
+    host = (connection.headers.get("x-forwarded-host") or connection.headers["host"]).split(",")[0].strip()
+    forwarded = connection.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    scheme = SOCKET_SCHEMES.get(forwarded, forwarded) or SOCKET_SCHEMES.get(connection.url.scheme, connection.url.scheme)
+    try:
+        return requested == normalised_origin(f"{scheme}://{host}")
     except ValueError:
         return False
 
@@ -201,7 +208,7 @@ class HostGuard:
         if unknown is None:
             await self._app(scope, receive, send)
             return
-        secure = scope["scheme"] in ("https", "wss") or headers.get("x-forwarded-proto", "").startswith("https")
+        secure = scope["scheme"] in ("https", "wss") or headers.get("x-forwarded-proto", "").startswith(("https", "wss"))
         message = (
             f"PrintGuard refused a request for {unknown} because it does not know that name. "
             f"To reach the hub there, add PRINTGUARD_ORIGINS={'https' if secure else 'http'}://{unknown} to its environment and restart it."

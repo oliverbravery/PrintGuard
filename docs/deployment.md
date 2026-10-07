@@ -190,7 +190,7 @@ host or forwards it. Tailscale, Cloudflare and oauth2-proxy all do one or the ot
 
 The hub also rejects any WebSocket, print upload or camera stream request a browser sends from an
 `Origin` that is not the address the request was for, with the same scheme and port, or one listed in
-`PRINTGUARD_ORIGINS`. Behind a proxy that ends TLS, send `X-Forwarded-Proto` so the scheme matches. An upload or stream
+`PRINTGUARD_ORIGINS`. Behind a proxy that ends TLS, send `X-Forwarded-Proto` so the scheme matches. It can be `http`, `https`, `ws` or `wss`, and a value that is none of those only stops the hub matching its own address, so a listed origin still gets in. An upload or stream
 request with no `Origin`, which is what a script sends, is let through. A WebSocket with none is refused,
 since every browser sends one and only the dashboard opens them. An `Origin` that isn't a valid
 address is refused too, with a `403` or by closing the WebSocket. An auth proxy checks the session cookie,

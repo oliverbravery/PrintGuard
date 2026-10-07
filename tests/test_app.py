@@ -135,9 +135,10 @@ async def handshake_answer(app, path: str, headers: dict[str, str]) -> str:
 class Tab:
     """Plays a browser tab on one of the hub's sockets, a frame at a time."""
 
-    def __init__(self, app, path: str = "/api/ws") -> None:
+    def __init__(self, app, path: str = "/api/ws", headers: dict[str, str] | None = None) -> None:
         self._app = app
         self._path = path
+        self._headers = headers or {"host": "test", "origin": "http://test"}
         self._inbound: asyncio.Queue[dict] = asyncio.Queue()
         self._sent: list[dict] = []
         self._inbound.put_nowait({"type": "websocket.connect"})
@@ -150,7 +151,7 @@ class Tab:
             "raw_path": self._path.encode(),
             "root_path": "",
             "query_string": b"",
-            "headers": [(b"host", b"test"), (b"origin", b"http://test")],
+            "headers": [(name.encode(), value.encode()) for name, value in self._headers.items()],
             "subprotocols": [],
         }
         self._socket = asyncio.ensure_future(self._app(scope, self._inbound.get, self._keep))
@@ -960,6 +961,49 @@ async def test_an_origin_is_the_hubs_own_only_with_the_scheme_and_port_it_was_as
     async with named_hub(monkeypatch) as (_app, client, _told):
         headers = {"host": host, "origin": origin, **extra}
         assert (await client.post("/api/prints?filename=a.stl", content=b"solid", headers=headers)).status_code == answered
+
+
+PROXIED_SOCKET_CASES = [
+    ({}, "http://test", True),
+    ({"x-forwarded-proto": "ws"}, "http://test", True),
+    ({"x-forwarded-proto": "wss"}, "https://test", True),
+    ({"x-forwarded-proto": "wss"}, "http://test", False),
+    ({"x-forwarded-proto": "https"}, "https://test", True),
+    ({"x-forwarded-proto": "HTTPS"}, "https://test", True),
+    ({"x-forwarded-proto": "https,http"}, "https://test", True),
+    ({"x-forwarded-proto": "https,http"}, "http://test", False),
+    ({"x-forwarded-proto": "gopher"}, "http://test", False),
+    ({"x-forwarded-proto": "gopher"}, "https://hub.example.com", False),
+]
+
+
+@pytest.mark.parametrize("listed", [False, True])
+@pytest.mark.parametrize("path", ["/api/ws", "/api/publish/cam"])
+@pytest.mark.parametrize(("forwarded", "origin", "own"), PROXIED_SOCKET_CASES)
+async def test_a_socket_is_let_in_by_the_scheme_a_proxy_forwards_whatever_word_it_uses(
+    monkeypatch, forwarded: dict[str, str], origin: str, own: bool, path: str, listed: bool
+) -> None:
+    """Traefik sends ws or wss on an upgrade, and a value that is no scheme can only fail the hub's own origin."""
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+
+    monkeypatch.setattr(app_module, "remux", lambda source, url: [None for _chunk in iter(lambda: source.read(1), b"")])
+    if listed:
+        monkeypatch.setenv("PRINTGUARD_ORIGINS", "https://hub.example.com")
+    engine = Engine(FakePlatform())
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    try:
+        for asked, expected in ((origin, own or (listed and origin == "https://hub.example.com")), ("https://hub.example.com", listed)):
+            async with Tab(app, path, {"host": "test", "origin": asked, **forwarded}) as tab:
+                async with asyncio.timeout(2):
+                    while not tab._sent:
+                        await asyncio.sleep(0.01)
+                assert (tab._sent[0]["type"] == "websocket.accept") is expected, (asked, forwarded, listed)
+    finally:
+        await engine.stop()
 
 
 @pytest.mark.parametrize("origin", ["http://test:abc", "http://test:99999", "http://[::1"])
