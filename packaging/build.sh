@@ -51,12 +51,12 @@ if [ "$OS" = darwin ]; then
   iconutil -c icns "$iconset" -o build/desktop/icon.icns
   export PRINTGUARD_ICON="$ROOT/build/desktop/icon.icns"
 elif [ "$OS" = windows ]; then
-  uv run --extra desktop python -c \
+  uv run --locked --extra desktop python -c \
     "from PIL import Image; Image.open('$ICON_SRC').save('build/desktop/icon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
   export PRINTGUARD_ICON="$ROOT/build/desktop/icon.ico"
 fi
 
-uv run --extra desktop pyinstaller packaging/printguard.spec --noconfirm --distpath dist --workpath build/pyinstaller
+uv run --locked --extra desktop pyinstaller packaging/printguard.spec --noconfirm --distpath dist --workpath build/pyinstaller
 
 if [ "$OS" = darwin ]; then
   out="dist/PrintGuard-${LABEL}.dmg"
