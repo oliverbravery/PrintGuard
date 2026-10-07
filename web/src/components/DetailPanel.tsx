@@ -101,7 +101,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
             min={0.05}
             max={0.95}
             step={0.01}
-            hint="The score a frame must reach to count as a defect. Raise to cut false alarms; lower to catch subtler failures."
+            hint="The score a frame must reach to count as a defect. Raise to cut false alarms. Lower to catch subtler failures."
             onChange={(v) => updateMonitor(monitor.id, { threshold: v })}
           />
           <Slider
@@ -111,7 +111,7 @@ export function DetailPanel({ monitor }: { monitor: Monitor }) {
             max={30}
             step={1}
             format={String}
-            hint="Flagged frames in a row before it acts. Raise to ride out brief blips; lower to react faster."
+            hint="Flagged frames in a row before it acts. Raise to ride out brief blips. Lower to react faster."
             onChange={(v) => updateMonitor(monitor.id, { consecutive: v })}
           />
         </div>

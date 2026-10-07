@@ -505,7 +505,7 @@ export function SettingsDialog() {
             </select>
             <span className="block text-[0.7rem] leading-relaxed text-text-2">
               Automatic benchmarks both models and uses the higher-throughput runtime. ONNX Runtime can use Core ML,
-              Windows ML, OpenVINO or NVIDIA hardware; LiteRT uses its optimised CPU runtime for this model.
+              Windows ML, OpenVINO or NVIDIA hardware. LiteRT uses its optimised CPU runtime for this model.
             </span>
             <div className="flex items-center justify-between gap-3 rounded border border-line-0 px-3 py-2">
               <span className="text-xs text-text-1">Active compute</span>
