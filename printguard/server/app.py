@@ -360,7 +360,9 @@ def create_app() -> FastAPI:
             await sweep_orphans(engine, unnamed=not (data_dir / "state.json.corrupt").exists())
             app.state.engine = engine
             api_app.state.engine = engine
-            app.state.hls = httpx.AsyncClient(base_url=mediamtx_hls, auth=mediamtx_login, timeout=httpx.Timeout(10.0, read=60.0))
+            app.state.hls = httpx.AsyncClient(
+                base_url=mediamtx_hls, auth=mediamtx_login, timeout=httpx.Timeout(10.0, read=60.0), trust_env=False
+            )
             resources.push_async_callback(app.state.hls.aclose)
             bridge = MqttBridge(engine, lambda: engine.settings.get("mqtt", {}))
             bridge.start()

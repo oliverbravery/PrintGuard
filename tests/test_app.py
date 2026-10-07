@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -494,6 +495,35 @@ async def test_failed_startup_stops_the_streaming_server(monkeypatch, tmp_path) 
             pass
 
     streamer.stop.assert_awaited_once()
+
+
+async def test_a_proxy_in_the_environment_is_never_sent_the_hubs_calls_to_its_own_streaming_server(tmp_path, monkeypatch) -> None:
+    """With HTTP_PROXY set and no NO_PROXY, the proxy was sent the login the bundled server answers to."""
+    proxy = socket.create_server(("127.0.0.1", 0))
+    proxy.setblocking(False)
+    with socket.create_server(("127.0.0.1", 0)) as unused:
+        streaming_server = f"http://127.0.0.1:{unused.getsockname()[1]}"
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PRINTGUARD_PLUGINS", "off")
+    monkeypatch.setenv("MEDIAMTX_API", streaming_server)
+    monkeypatch.setenv("MEDIAMTX_HLS", streaming_server)
+    monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{proxy.getsockname()[1]}")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    app = create_app()
+
+    try:
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8000") as client,
+        ):
+            with pytest.raises(httpx.ConnectError):
+                await app.state.engine.platform.mediamtx.list_paths()
+            assert (await client.get("/hls/camera-one/index.m3u8")).status_code == 502
+        with pytest.raises(BlockingIOError):
+            proxy.accept()
+    finally:
+        proxy.close()
 
 
 class StubRuntime:
