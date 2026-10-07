@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { alertOutcome, GROUP_S, groupBuckets, HISTORY_BUCKET_MS, PERIODS, type Period } from "../history";
-import { framesLabel, statusText } from "../review";
+import { clock, framesLabel, statusText } from "../review";
 import { useLazySnapshot } from "../snapshot";
 import { useStore } from "../store";
 import type { Monitor, Snapshot } from "../types";
@@ -20,10 +20,6 @@ function ago(ts: number, now: number): string {
 function duration(min: number): string {
   if (min < 60) return `${min}m`;
   return `${Math.floor(min / 60)}h ${min % 60}m`;
-}
-
-function clock(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function StatTile({ label, value }: { label: string; value: string }) {
