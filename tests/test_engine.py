@@ -5692,6 +5692,23 @@ async def test_a_wrong_shaped_record_is_dropped_at_start_and_the_rest_load(caplo
     assert len(restarted.startup_warnings) == 8
 
 
+async def test_a_monitor_bound_to_a_printer_dropped_at_start_is_unlinked_with_a_warning() -> None:
+    platform = FakePlatform()
+    async with running_engine(platform, camera_fps=[10.0]) as (engine, _):
+        printer_id = await _register_printer(engine)
+        await engine.handle({"cmd": "monitor.update", "id": next(iter(engine.monitors)), "patch": {"printer_id": printer_id, "on_defect": "pause"}})
+    saved = platform.state
+    platform.state = {**saved, "printers": [{**saved["printers"][0], "reported_status": ["idle"]}]}
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        monitor = next(iter(restarted.monitors.values()))
+        assert monitor["printer_id"] == "" and monitor["on_defect"] == "pause"
+        assert len(restarted.startup_warnings) == 2 and "no longer pauses" in restarted.startup_warnings[1], restarted.startup_warnings
+    finally:
+        await restarted.stop()
+
+
 async def test_a_print_record_dropped_at_start_says_its_file_is_kept() -> None:
     platform = FakePlatform()
     platform.state = {"prints": [{"id": "abcd1234", "filename": "benchy.gcode"}], "reviews": [{"id": "a1b2c3"}]}

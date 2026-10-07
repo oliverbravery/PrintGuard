@@ -238,7 +238,8 @@ class Engine:
         A stored plugin manifest goes back through ``sanitise_manifest``, since
         one written by an earlier version is missing whatever has been added
         since. A record of any kind that no longer reads is dropped and warned
-        of, so one of them cannot keep the hub from starting. A stored setting
+        of, so one of them cannot keep the hub from starting, and a monitor
+        bound to a printer that was dropped is unlinked from it. A stored setting
         no command could have written is put back to its default on its own,
         since a theme no dashboard could render leaves nobody a page to fix it
         from, and any other would refuse every edit after it.
@@ -280,6 +281,10 @@ class Engine:
                         self.dropped_ids.add(str(record["id"]))
                     kept = " (its file was kept in the data directory)" if kind in ("prints", "reviews") else ""
                     self._warn_at_start(f"A saved {kind[:-1]}{f' ({label})' if label else ''} could not be read and was dropped: {logs.describe(exc)}{kept}")
+        for monitor in self.monitors.values():
+            if monitor["printer_id"] and self.printers.get(monitor["printer_id"]) is None:
+                monitor["printer_id"] = ""
+                self._warn_at_start(f"Monitor '{monitor['name']}' was bound to a printer that could not be read, so it is no longer linked to one and no longer pauses or cancels a print")
         await self.reconcile_declared_cameras()
         self.cameras.sync_in_use(self.monitors, self.printers)
         self.watchdog.reconcile_cameras_once_read(self.printers.items)
