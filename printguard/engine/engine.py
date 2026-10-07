@@ -29,7 +29,7 @@ from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
 from .monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor, stored_monitor
 from .notifiers import NOTIFIERS, notifiers_meta
-from .platform import Frame, Platform, as_chunks
+from .platform import Frame, Platform, as_chunks, plain_failure
 from .printers import PREHEAT_DEFAULTS, sanitise_printer, sanitise_targets
 from .prints import accepts, extension, printer_filename, sanitise_name, sanitise_printers, stored_print
 from .registry import (
@@ -47,7 +47,7 @@ from .registry import (
 from .reviews import Review, ReviewLibrary, frame_key
 from .scheduler import Scheduler
 from .settings import CHECKS, require_broker
-from .sockets import SocketBroker
+from .sockets import SocketBroker, SocketRefused
 from .tokens import new_token
 from .watchdog import GRACE_DEFAULT_S, Watchdog
 
@@ -266,7 +266,7 @@ class Engine:
             "monitors": lambda record: self.monitors.update({record["id"]: stored_monitor(record)}),
             "reviews": self._restore_review,
             "prints": lambda record: self.prints.add(PrintFile(**stored_print(record))),
-            "plugins": lambda record: self.plugins.add(Plugin(**{**record, "manifest": plugins.sanitise_manifest(record["manifest"])})),
+            "plugins": self._restore_plugin,
             "cameras": self._restore_camera,
         }
         for kind, restore in restorers.items():
@@ -322,6 +322,15 @@ class Engine:
         if not (reported_status is None or isinstance(reported_status, str)):
             raise ValueError("its last status is text")
         self.printers.add(Printer(id=printer["id"], name=printer["name"], provider=printer["provider"], config=printer["config"], reported_status=reported_status))
+
+    def _restore_plugin(self, record: dict[str, Any]) -> None:
+        plugin = Plugin(**{**record, "manifest": plugins.restored_manifest(record["manifest"])})
+        asked_now = [name for name in plugin.manifest["permissions"] if name not in record["manifest"].get("permissions", [])]
+        if asked_now:
+            plugin.enabled = False
+            wanted = ", ".join(plugins.PERMISSIONS[name]["label"] for name in asked_now)
+            self._warn_at_start(f"Plugin {plugin.manifest['name']} now needs {wanted}, so it is off until you accept that in Plugins")
+        self.plugins.add(plugin)
 
     def _restore_camera(self, record: dict[str, Any]) -> None:
         camera = Camera(**stored_camera(record))
@@ -1943,7 +1952,7 @@ class Engine:
             raise PermissionError("plugin may not reach the network")
         return plugin
 
-    async def _network_allows(self, plugin_id: str, url: str) -> Plugin:
+    def _network_allows(self, plugin_id: str, url: str) -> Plugin:
         """Checks a plugin may reach a URL, and returns the plugin.
 
         Args:
@@ -1955,22 +1964,31 @@ class Engine:
 
         Raises:
             PermissionError: If the plugin is not running, holds no network grant, the URL falls
-                outside every pattern it declared, or it lands on this network
-                without the grant that covers that.
+                outside every pattern it declared, or it is written as an address
+                on this network without the grant that covers that. A name that
+                only resolves to one is refused when the platform connects.
         """
         plugin = self._networked(plugin_id)
         if not urls.allowed(url, plugin.manifest["urls"]):
-            raise PermissionError(f"plugin {plugin.id} did not declare {url}")
-        if await asyncio.to_thread(urls.resolves_local, url) and not plugin.may("net:local"):
-            raise PermissionError(f"plugin {plugin.id} may not reach {url} on this network")
+            raise PermissionError(f"plugin {plugin.id} did not declare that address")
+        if urls.is_local_url(url) and not plugin.may("net:local"):
+            raise PermissionError(f"plugin {plugin.id} may not reach this network")
         return plugin
 
-    def _within_rate(self, plugin_id: str) -> bool:
-        """Whether a plugin has requests left in the current window."""
+    def _spend_request(self, plugin: Plugin) -> None:
+        """Counts one request or socket a plugin opens against its window.
+
+        Raises:
+            PermissionError: If it has made ``PLUGIN_RATE_LIMIT`` in the last
+                minute. A refused one is not counted, so a plugin that keeps
+                asking gets through again once its earlier requests age out.
+        """
         now = time.monotonic()
-        recent = [at for at in self._plugin_calls.get(plugin_id, []) if now - at < PLUGIN_RATE_WINDOW_S]
-        self._plugin_calls[plugin_id] = [*recent, now]
-        return len(recent) < PLUGIN_RATE_LIMIT
+        recent = [at for at in self._plugin_calls.get(plugin.id, []) if now - at < PLUGIN_RATE_WINDOW_S]
+        if len(recent) >= PLUGIN_RATE_LIMIT:
+            self._plugin_calls[plugin.id] = recent
+            raise PermissionError(f"plugin {plugin.id} is making requests faster than {PLUGIN_RATE_LIMIT} a minute")
+        self._plugin_calls[plugin.id] = [*recent, now]
 
     async def _cmd_plugin_http(self, message: dict[str, Any]) -> None:
         """Makes an outbound request on a plugin's behalf, if it may.
@@ -1983,39 +2001,41 @@ class Engine:
         redirect is handed back as the answer, never followed, so neither can
         take the request somewhere the plugin did not declare. The platform
         stops reading an answer past ``MAX_PLUGIN_BODY``, whatever its type, and
-        the request fails.
+        the request fails. A plugin without ``net:local`` passes ``public_only``,
+        so the connection itself is refused an address on this network, which a
+        name that resolves there would otherwise get past the check made here.
         """
         url = str(message.get("url", ""))
         if plugins.addresses_a_secret(url):
-            raise PermissionError(f"plugin {message['id']} may only use a secret in the path of {url}")
-        plugin = await self._network_allows(message["id"], url)
-        if not self._within_rate(plugin.id):
-            raise PermissionError(f"plugin {plugin.id} is making requests faster than {PLUGIN_RATE_LIMIT} a minute")
+            raise PermissionError(f"plugin {message['id']} may only use a secret in the path of its address")
+        plugin = self._network_allows(message["id"], url)
+        self._spend_request(plugin)
         await self._refresh_sign_in(plugin)
         request = {"url": url, "headers": message.get("headers") or None, "json": message.get("json")}
-        blank = plugins.missing_secrets(request, plugin.secrets)
+        usable = plugins.fillable(plugin.secrets)
+        blank = plugins.missing_secrets(request, usable)
         if blank:
-            raise ValueError(
-                f"{plugin.id} is not signed in yet"
-                if blank & set(oauth.SESSION)
-                else f"{plugin.id} needs {', '.join(sorted(blank))} filled in first"
-            )
-        filled = plugins.fill_secrets(request, plugin.secrets)
+            raise ValueError(self._unfilled(plugin, blank))
+        filled = plugins.fill_secrets(request, usable)
         if filled["url"] != url:
             try:
-                await self._network_allows(plugin.id, filled["url"])
+                self._network_allows(plugin.id, filled["url"])
             except PermissionError:
-                raise PermissionError(f"plugin {plugin.id} did not declare where its secrets take {url}") from None
-        status, body = await self.platform.http(
-            str(message.get("method", "GET")).upper(),
-            filled["url"],
-            headers=filled["headers"],
-            json=filled["json"],
-            binary=message.get("binary") is True,
-            timeout=PLUGIN_TIMEOUT_S,
-            redirects="answer",
-            max_bytes=MAX_PLUGIN_BODY,
-        )
+                raise PermissionError(f"plugin {plugin.id} did not declare where its secrets take its address") from None
+        try:
+            status, body = await self.platform.http(
+                str(message.get("method", "GET")).upper(),
+                filled["url"],
+                headers=filled["headers"],
+                json=filled["json"],
+                binary=message.get("binary") is True,
+                timeout=PLUGIN_TIMEOUT_S,
+                redirects="answer",
+                max_bytes=MAX_PLUGIN_BODY,
+                public_only=not plugin.may("net:local"),
+            )
+        except Exception as exc:
+            raise self._network_failure(plugin.id, "request", exc) from None
         self.emit(
             {
                 "event": "http",
@@ -2033,16 +2053,54 @@ class Engine:
         Only the declared address is checked, and the platform refuses a
         handshake that redirects, so a socket ends where the plugin said. A
         frame is written only while the plugin is still running with ``net``.
+        Opening one counts against the same rate limit as a request, and
+        without ``net:local`` it is refused an address on this network as a
+        request is.
         """
         action = str(message.get("action", ""))
         plugin_id = str(message["id"])
+        public_only = True
         if action == "open":
-            await self._network_allows(plugin_id, str(message.get("url", "")))
+            plugin = self._network_allows(plugin_id, str(message.get("url", "")))
+            self._spend_request(plugin)
+            public_only = not plugin.may("net:local")
         elif action == "send":
             self._networked(plugin_id)
-        await self.sockets.act(
-            plugin_id, action, str(message.get("tag", "")), str(message.get("url", "")), str(message.get("text", ""))
-        )
+        try:
+            await self.sockets.act(
+                plugin_id, action, str(message.get("tag", "")), str(message.get("url", "")), str(message.get("text", "")), public_only
+            )
+        except SocketRefused:
+            raise
+        except Exception as exc:
+            raise self._network_failure(plugin_id, "socket", exc) from None
+
+    @staticmethod
+    def _unfilled(plugin: Plugin, blank: set[str]) -> str:
+        """Says what a plugin's request is missing, in words the plugin did not choose.
+
+        Only a name the manifest declared is repeated, since an echoed
+        reference would let a plugin test a guess against the secrets the hub
+        holds.
+        """
+        if oauth.ACCESS in blank:
+            return f"{plugin.id} is not signed in yet"
+        needed = sorted((blank & plugin.manifest["secrets"].keys()) - set(oauth.WITHHELD))
+        return f"{plugin.id} needs {', '.join(needed)} filled in first" if needed else f"{plugin.id} refers to a secret it does not hold"
+
+    def _network_failure(self, plugin_id: str, kind: str, failure: Exception) -> Exception:
+        """What a plugin hears of a request or socket that failed.
+
+        A library's message can quote the address, a header or something the
+        other end chose, and every error event reaches plugins, so the log keeps
+        the message and the event carries the kind of failure only. A
+        ``RuntimeError`` is the platform's own refusal, which quotes nothing
+        the request or the answer chose.
+        """
+        logger.warning("plugin %s %s failed: %s", plugin_id, kind, self._scrubbed(logs.describe(failure)))
+        if isinstance(failure, PermissionError):
+            return PermissionError(f"plugin {plugin_id} may not reach this network")
+        return plain_failure(failure, f"plugin {plugin_id} {kind}")
 
     def _offering(self, plugin_id: str, channel: str) -> Plugin:
         """The plugin answering on a channel, if it offers that channel at all.
@@ -2053,9 +2111,9 @@ class Engine:
         """
         plugin = self._running_plugin(plugin_id)
         if plugin is None or not plugin.may("link:provide"):
-            raise PermissionError(f"no plugin {plugin_id!r} is answering other plugins")
+            raise PermissionError("no running plugin is answering other plugins there")
         if channel not in plugin.manifest["provides"]:
-            raise PermissionError(f"{plugin_id} does not offer {channel!r}")
+            raise PermissionError(f"plugin {plugin.id} does not offer that channel")
         return plugin
 
     async def _cmd_plugin_call(self, message: dict[str, Any]) -> None:
@@ -2067,7 +2125,7 @@ class Engine:
         caller = self._running_plugin(message["id"])
         to, channel = str(message.get("to", "")), str(message.get("channel", ""))
         if not caller or not caller.may("link:consume") or f"{to}:{channel}" not in caller.manifest["consumes"]:
-            raise PermissionError(f"plugin {message['id']} did not declare {to}:{channel}")
+            raise PermissionError("plugin did not declare that plugin and channel")
         self._offering(to, channel)
         body = plugins.sanitise_config({"body": message.get("body")})["body"]
         call_id = uuid.uuid4().hex
@@ -2160,6 +2218,8 @@ class Engine:
         plugin = self.plugins.get(plugin_id) if plugin_id else None
         if plugin is None:
             return None
+        if not plugin.may("oauth"):
+            raise PermissionError("plugin may not connect an account")
         session = await self.oauth.finish(state, code, self._provider(plugin))
         plugin.secrets = {**plugin.secrets, **session}
         logger.info("plugin %s signed in", plugin.id)
@@ -2208,7 +2268,7 @@ class Engine:
         effect = message.get("effect") if isinstance(message.get("effect"), dict) else {}
         needed = plugins.UI_EFFECTS.get(str(effect.get("kind", "")))
         if plugin is None or needed is None or not plugin.may(needed):
-            raise PermissionError(f"plugin {message.get('id')!r} may not ask a dashboard for {effect.get('kind')!r}")
+            raise PermissionError("plugin may not ask a dashboard for that")
         if len(plugins.canonical(effect)) > plugins.MAX_EFFECT_BYTES:
             raise ValueError(f"a plugin effect is {plugins.MAX_EFFECT_BYTES // 1024 // 1024} MB at most")
         if effect["kind"] == "background":
@@ -2238,7 +2298,12 @@ class Engine:
             await runtime.reload(running, {plugin.id for plugin in self.plugins.values() if plugin.failure and plugin.may("gate")})
 
     def plugin_failed(self, plugin_id: str, reason: str) -> None:
-        """Disables a plugin its runtime could not keep running, drops it from the runtime, closes its sockets and says why."""
+        """Disables a plugin its runtime could not keep running, drops it from the runtime and closes its sockets.
+
+        The reason is the plugin's own error, so it stays on the plugin's record
+        and in the log. The event says only that it stopped, since every plugin
+        reads the error events.
+        """
         plugin = self.plugins.get(plugin_id)
         if plugin is None or not plugin.enabled:
             return
@@ -2246,7 +2311,8 @@ class Engine:
         plugin.failure = reason
         asyncio.ensure_future(self.sockets.drop_for(plugin_id))
         asyncio.ensure_future(self._reload_plugins())
-        self.emit({"event": "error", "message": f"plugin {plugin.manifest['name']} stopped: {reason}"})
+        logger.warning("plugin %s stopped: %s", plugin_id, self._scrubbed(reason))
+        self.emit({"event": "error", "message": f"plugin {plugin.manifest['name']} stopped, and Plugins says why"})
         self._sync()
 
     async def _cmd_report_bundle(self, message: dict[str, Any]) -> None:

@@ -132,6 +132,20 @@ def test_an_address_is_local_however_it_is_spelt(host: str) -> None:
     assert urls.reaches_local(f"http://{host}/*"), "a plugin asked for this network under the public permission"
 
 
+@pytest.mark.parametrize(
+    "host", ["[64:ff9b::c0a8:101]", "[64:ff9b::7f00:1]", "[::192.168.1.1]", "[::c0a8:101]", "[::ffff:0:c0a8:101]", "[::ffff:192.168.1.1]", "[::7f00:1]"]
+)
+def test_an_ipv4_address_inside_an_ipv6_one_is_local_when_the_ipv4_address_is(host: str) -> None:
+    """NAT64 and the other embeddings deliver to the IPv4 address, which the standard library calls global."""
+    assert urls.is_local_address(host)
+    assert "." in host or urls.reaches_local(f"http://{host}/*")
+
+
+@pytest.mark.parametrize("host", ["[64:ff9b::808:808]", "[::808:808]", "[::ffff:0:808:808]", "[::ffff:8.8.8.8]"])
+def test_an_ipv4_address_inside_an_ipv6_one_is_public_when_the_ipv4_address_is(host: str) -> None:
+    assert not urls.is_local_address(host)
+
+
 @pytest.mark.parametrize("host", ["134744072", "8.8.2056", "0x8.8.8.8", "1.1.1.1.1", "example.com"])
 def test_an_oddly_spelt_public_address_is_not_local(host: str) -> None:
     assert not urls.is_local_address(host)
@@ -142,6 +156,7 @@ def edges() -> list[str]:
     constants = (ipaddress._IPv4Constants, ipaddress._IPv6Constants)
     networks = [network for family in constants for network in (*family._private_networks, *family._private_networks_exceptions)]
     networks.append(ipaddress._IPv4Constants._public_network)
+    networks.extend(urls.EMBEDDING_IPV4)
     hosts = ["2130706433", "127.1", "0x7f.0.0.1", "134744072", "1.1.1.1.1", "localhost", "octopi.local", "example.com", "local"]
     for network in networks:
         first, last = int(network.network_address), int(network.broadcast_address)
@@ -149,7 +164,7 @@ def edges() -> list[str]:
             address = ipaddress.ip_address(number) if network.version == 4 else ipaddress.IPv6Address(number)
             hosts.append(str(address) if network.version == 4 else f"[{address}]")
             if network.version == 4:
-                hosts.append(f"[::ffff:{address}]")
+                hosts.extend(f"[{prefix}{address}]" for prefix in ("::ffff:", "::ffff:0:", "64:ff9b::", "::"))
     return sorted(set(hosts))
 
 
@@ -167,19 +182,6 @@ def test_the_dashboard_calls_local_exactly_what_the_engine_does() -> None:
 
     dashboard = dict(zip(hosts, json.loads(answered.stdout)))
     assert dashboard == {host: urls.is_local_address(host) for host in hosts}
-
-
-def test_a_public_name_pointing_at_a_private_address_counts_as_local(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The literal says nothing, so the answer decides."""
-    monkeypatch.setattr(urls.socket, "getaddrinfo", lambda *_: [(2, 1, 6, "", ("10.0.0.5", 0))])
-
-    assert urls.resolves_local("https://looks-public.example/x")
-
-
-def test_a_name_that_will_not_resolve_is_not_local(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(urls.socket, "getaddrinfo", lambda *_: (_ for _ in ()).throw(OSError()))
-
-    assert not urls.resolves_local("https://nowhere.example/x")
 
 
 def test_a_pattern_reads_back_in_words() -> None:

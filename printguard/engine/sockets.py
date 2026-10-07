@@ -20,6 +20,10 @@ MAX_PER_PLUGIN = 4
 MAX_TEXT_BYTES = 64 * 1024
 
 
+class SocketRefused(ValueError):
+    """A request about a socket the broker refuses, in words that quote nothing the plugin sent."""
+
+
 class Socket(Protocol):
     """One open connection, as a platform hands it back."""
 
@@ -32,8 +36,8 @@ class Socket(Protocol):
         ...
 
 
-OpenFn = Callable[[str, Callable[[str, str], None]], Awaitable[Socket]]
-"""Opens a URL and calls back with ``(state, text)`` for every frame.
+OpenFn = Callable[[str, Callable[[str, str], None], bool], Awaitable[Socket]]
+"""Opens a URL, refusing this network when told to, and calls back with ``(state, text)`` for every frame.
 
 State is ``open`` when the connection is up, ``message`` for each frame, and
 ``closed`` once it ends for any reason.
@@ -49,7 +53,7 @@ class SocketBroker:
         self._sockets: dict[tuple[str, str], Socket] = {}
         self._opening: dict[tuple[str, str], Callable[[str, str], None]] = {}
 
-    async def act(self, plugin_id: str, action: str, tag: str, url: str, text: str) -> None:
+    async def act(self, plugin_id: str, action: str, tag: str, url: str, text: str, public_only: bool) -> None:
         """Opens, sends on or closes one of a plugin's connections.
 
         Args:
@@ -58,29 +62,32 @@ class SocketBroker:
             tag: The plugin's own name for the connection.
             url: Where to connect, for ``open``.
             text: The frame to write, for ``send``.
+            public_only: Whether ``open`` is refused a host on this network.
 
         Raises:
-            ValueError: If the tag is missing, the plugin is holding as many
-                connections as it may, or a frame is too large.
-            KeyError: If sending on or closing a connection it has not opened.
+            SocketRefused: If the tag is missing, the plugin is holding as many
+                connections as it may, a frame is too large, or it sends on a
+                connection it has not opened.
         """
         if not tag:
-            raise ValueError("a socket needs a tag to answer on")
+            raise SocketRefused("a socket needs a tag to answer on")
         key = (plugin_id, tag)
         if action == "open":
-            await self._open_one(key, url)
+            await self._open_one(key, url, public_only)
         elif action == "send":
             if len(text.encode()) > MAX_TEXT_BYTES:
-                raise ValueError(f"a frame is {MAX_TEXT_BYTES // 1024} KB at most")
+                raise SocketRefused(f"a frame is {MAX_TEXT_BYTES // 1024} KB at most")
+            if key not in self._sockets:
+                raise SocketRefused("no socket is open under that tag")
             await self._sockets[key].send(text)
         elif action == "close":
             await self.drop(plugin_id, tag)
 
-    async def _open_one(self, key: tuple[str, str], url: str) -> None:
+    async def _open_one(self, key: tuple[str, str], url: str, public_only: bool) -> None:
         if key in self._sockets or key in self._opening:
             return
         if sum(1 for held in (*self._sockets, *self._opening) if held[0] == key[0]) >= MAX_PER_PLUGIN:
-            raise ValueError(f"a plugin holds {MAX_PER_PLUGIN} sockets at most")
+            raise SocketRefused(f"a plugin holds {MAX_PER_PLUGIN} sockets at most")
         plugin_id, tag = key
         socket: Socket | None = None
 
@@ -91,7 +98,7 @@ class SocketBroker:
 
         self._opening[key] = arrived
         try:
-            socket = await self._open(url, arrived)
+            socket = await self._open(url, arrived, public_only)
         finally:
             wanted = self._opening.get(key) is arrived
             if wanted:

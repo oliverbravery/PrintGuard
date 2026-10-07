@@ -5692,15 +5692,17 @@ async def test_what_start_dropped_or_worked_around_is_kept_for_a_dashboard_that_
         platform.notices = [Notice("live view unavailable: refused")]
         await asyncio.sleep(1.2)
         warnings = engine.state_event()["startup_warnings"]
+        kept = engine.plugins.get("local-thing")
     finally:
         await engine.stop()
 
     assert "Intel GPU cannot run the model, so detection is not using it: out of memory" in warnings
     assert any("saved monitor (Bench)" in warning and "on_defect" in warning for warning in warnings), warnings
-    assert any("saved plugin (local-thing)" in warning and "net:local" in warning for warning in warnings), warnings
+    assert any("Plugin Local thing now needs Reach your own network" in warning for warning in warnings), warnings
     assert any("glass" in warning for warning in warnings), warnings
     assert len(warnings) == 4, "something raised after start was kept with what start raised"
     assert heard[0]["startup_warnings"] == warnings, "a dashboard connecting later is handed them in its first snapshot"
+    assert not kept.enabled and "net:local" in kept.manifest["permissions"], "a plugin saved by 2.5 lost its data, or ran on a grant nobody gave"
 
 
 async def test_a_wrong_shaped_layout_is_reset_without_the_theme() -> None:

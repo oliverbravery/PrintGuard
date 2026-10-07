@@ -21,6 +21,23 @@ Redirects = Literal["follow", "answer", "refuse"]
 """What a request does with a 3xx: follow it, hand it back as the answer, or fail naming where it points."""
 
 
+def plain_failure(failure: Exception, what: str) -> Exception:
+    """Rewrites a failed platform call so that nothing a stranger chose is in its message.
+
+    A library's message can quote the address, a header or a name from the other
+    end. A ``RuntimeError`` is the platform's own refusal and quotes nothing
+    like that, so it stands, and anything else is reduced to its type.
+
+    Args:
+        failure: What the platform call raised.
+        what: What was being done, in a few words that start the message.
+
+    Returns:
+        The error to raise in its place.
+    """
+    return failure if isinstance(failure, RuntimeError) else RuntimeError(f"{what} failed ({type(failure).__name__})")
+
+
 @dataclass
 class Frame:
     """A single captured video frame.
@@ -221,6 +238,7 @@ class Platform(Protocol):
         timeout: float = 10.0,
         redirects: Redirects = "follow",
         max_bytes: int | None = None,
+        public_only: bool = False,
     ) -> tuple[int, Any]:
         """Performs an HTTP request and returns (status, parsed body).
 
@@ -233,17 +251,25 @@ class Platform(Protocol):
         update check, since none of those answers comes from anywhere
         PrintGuard trusts.
 
+        A request that may not reach this network passes ``public_only``. The
+        name is resolved once, every answer is checked and the connection goes
+        to an address that was, so a name that answers differently a second
+        time gets nowhere.
+
         Raises:
+            PermissionError: If ``public_only`` is set and the host is, or
+                resolves to, an address on this network.
             RuntimeError: If a redirect is refused, if following one would send
                 the request under another method, so a command never arrives as
                 a read, or if
                 the body is larger than ``max_bytes`` once decompressed, which
                 is noticed while it arrives and not after, or a capped request
-                is answered in an encoding other than gzip.
+                is answered in an encoding other than gzip. A capped request's
+                message quotes nothing the answer chose, since a plugin hears it.
         """
         ...
 
-    async def open_socket(self, url: str, arrived: Callable[[str, str], None]) -> sockets.Socket:
+    async def open_socket(self, url: str, arrived: Callable[[str, str], None], public_only: bool = False) -> sockets.Socket:
         """Opens a WebSocket and reports every frame through the callback.
 
         A redirect is a failed handshake, never followed, since only ``url``
@@ -254,9 +280,15 @@ class Platform(Protocol):
                 plugin's grant.
             arrived: Called with ``open``, then ``message`` per frame, then
                 ``closed`` once, whatever ends it.
+            public_only: Whether the connection is refused, as ``http`` refuses
+                it, when the host is or resolves to an address on this network.
 
         Returns:
             The connection, for writing to and closing.
+
+        Raises:
+            PermissionError: If ``public_only`` is set and the host is on this
+                network.
         """
         ...
 

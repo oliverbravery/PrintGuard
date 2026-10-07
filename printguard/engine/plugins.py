@@ -342,6 +342,16 @@ def sanitise_secrets(raw: Any, names: list[str]) -> dict[str, str]:
     return kept
 
 
+def fillable(secrets: dict[str, str]) -> dict[str, str]:
+    """The secrets a request may refer to, which leaves out the rest of a sign-in.
+
+    A plugin sends its access token, and holding the refresh token or the client
+    id is not needed for that. Letting a request carry them would let a plugin
+    with a second declared host keep the sign-in for itself.
+    """
+    return {name: value for name, value in secrets.items() if name not in oauth.WITHHELD}
+
+
 def missing_secrets(value: Any, secrets: dict[str, str]) -> set[str]:
     """Names the secrets a request refers to that the plugin has nothing for.
 
@@ -502,12 +512,17 @@ def project_event(event: dict[str, Any], granted: list[str]) -> dict[str, Any] |
     Returns:
         The event carrying only the fields ``EVENTS`` lists for it, or None if
         no plugin may hook it or this one lacks the grant. A state event comes
-        back as the projection the grants allow.
+        back as the projection the grants allow. An error that answers a
+        command is not handed over, since it can quote what whoever sent the
+        command chose, and a plugin could send guesses and read each stored
+        credential off the ones the hub redacts.
     """
     name = str(event.get("event", ""))
     fields = EVENTS.get(name)
     needed = EVENT_PERMISSIONS.get(name)
     if fields is None or (needed is not None and needed not in granted):
+        return None
+    if name == "error" and event.get("req_id") is not None:
         return None
     if name == "state":
         return {"event": name, **project_state(event, granted)}
@@ -705,6 +720,38 @@ def sanitise_manifest(raw: Any) -> dict[str, Any]:
     }
 
 
+def restored_manifest(raw: Any) -> dict[str, Any]:
+    """Reads a manifest an earlier version stored.
+
+    One stored before 2.6.0 can name a local address, such as ``*.home.arpa`` or
+    ``127.1``, without the ``net:local`` permission that now covers it. It is
+    read as asking for that permission, which nobody has accepted, so the plugin
+    stays installed with its data and waits to be accepted.
+
+    Args:
+        raw: The stored manifest.
+
+    Returns:
+        The manifest as ``sanitise_manifest`` reads it, with ``net:local`` added
+        where only that was missing.
+
+    Raises:
+        ValueError: If the manifest is unusable for any other reason.
+    """
+    try:
+        return sanitise_manifest(raw)
+    except ValueError as refused:
+        if not isinstance(raw, dict) or not isinstance(raw.get("permissions"), list):
+            raise
+        reasons = raw.get("reasons") if isinstance(raw.get("reasons"), dict) else {}
+        try:
+            return sanitise_manifest(
+                {**raw, "permissions": [*raw["permissions"], "net:local"], "reasons": {**reasons, "net:local": "To reach the addresses it lists on your network."}}
+            )
+        except ValueError:
+            raise refused from None
+
+
 def linked_events(raw: Any) -> set[str]:
     """The events a plugin gets for talking to other plugins.
 
@@ -759,8 +806,8 @@ def sanitise_sign_in(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict) or not raw:
         return {}
     endpoints = {key: str(raw.get(key, "")).strip() for key in SIGN_IN_ENDPOINTS}
-    if any("*" in value or urlsplit(value).scheme != "https" or not urlsplit(value).hostname for value in endpoints.values()):
-        raise ValueError("oauth needs an https authorize_url and token_url")
+    if any("*" in value or urlsplit(value).scheme != "https" or not urls.is_plain(value) for value in endpoints.values()):
+        raise ValueError("oauth needs an https authorize_url and token_url, each with a plain host")
     return {
         **endpoints,
         "register_url": urls.link(raw.get("register_url")),
@@ -829,10 +876,11 @@ def outbound_socket(plugin_id: str, action: str, request: Any) -> dict[str, Any]
 def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes], dict[str, bytes]]:
     """Reads a manifest, sources, declared assets and page files out of a zipped bundle.
 
-    Files may sit at the root or under a single directory, the shape a GitHub
-    archive comes in. Page files are the icon, the media the manifest lists and
-    a README beside the manifest: a zip is the only copy of its plugin, so what
-    presents it travels with it.
+    The files are the ones beside the manifest, at the root or under the one
+    directory that holds it, the shape a GitHub archive comes in. Page files
+    are the icon, the media the manifest lists and a README beside the
+    manifest: a zip is the only copy of its plugin, so what presents it travels
+    with it.
 
     Args:
         data: The zip as uploaded.
@@ -843,10 +891,10 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
         path the manifest uses.
 
     Raises:
-        ValueError: If the zip is unreadable, carries no manifest or one that
-            is not an object, is over 12 MB, uses a compression other than
-            stored or deflate, or holds a file that inflates past what a plugin
-            may ship.
+        ValueError: If the zip is unreadable, carries no manifest, more than
+            one or one that is not an object, lists a file twice, is over
+            12 MB, uses a compression other than stored or deflate, or holds a
+            file that inflates past what a plugin may ship.
     """
     if len(data) > MAX_ZIP_BYTES:
         raise ValueError(f"this zip is over {MAX_ZIP_BYTES // 1024 // 1024} MB")
@@ -856,20 +904,24 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
         raise ValueError("not a zip archive") from exc
     if any(info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED) for info in archive.infolist()):
         raise ValueError("this zip uses a compression PrintGuard does not read")
-    entries: dict[str, str] = {}
-    for entry in archive.namelist():
-        entries.setdefault(entry.rsplit("/", 1)[-1], entry)
-    if MANIFEST_FILE not in entries:
+    members = archive.namelist()
+    if len(members) != len(set(members)):
+        raise ValueError("this zip lists a file more than once")
+    manifests = [member for member in members if member == MANIFEST_FILE or member.endswith(f"/{MANIFEST_FILE}")]
+    if not manifests:
         raise ValueError(f"bundle has no {MANIFEST_FILE}")
-    prefix = entries[MANIFEST_FILE][: -len(MANIFEST_FILE)]
+    if len(manifests) > 1:
+        raise ValueError(f"this zip holds more than one {MANIFEST_FILE}")
+    prefix = manifests[0][: -len(MANIFEST_FILE)]
+    entries = {member[len(prefix) :] for member in members if member.startswith(prefix)}
 
     def read_capped(entry: str, cap: int) -> bytes | None:
-        with archive.open(entry) as member:
+        with archive.open(f"{prefix}{entry}") as member:
             content = member.read(cap + 1)
         return content if len(content) <= cap else None
 
     def read(name: str, cap: int) -> bytes:
-        content = read_capped(entries[name], cap)
+        content = read_capped(name, cap)
         if content is None:
             raise ValueError(f"{name} is larger than {cap // 1024} KB")
         return content
@@ -881,21 +933,19 @@ def unpack(data: bytes) -> tuple[dict[str, Any], dict[str, str], dict[str, bytes
     declared = {str(name).strip().lower() for name in manifest.get("assets", [])}
     assets: dict[str, bytes] = {}
     total = 0
-    for name in sorted(declared & entries.keys()):
+    for name in sorted(declared & entries):
         cap = min(MAX_ASSET_BYTES, MAX_ASSETS_BYTES - total)
-        content = read_capped(entries[name], cap)
+        content = read_capped(name, cap)
         total = within_budget(name, cap + 1 if content is None else len(content), total)
         assets[name] = content
     listed = [str(manifest.get("icon", "")).strip().lower(), README_FILE]
     listed += [str(shot).strip().lower() for shot in manifest.get("media", [])]
-    named = set(archive.namelist())
     page: dict[str, bytes] = {}
     total = 0
     for path in listed:
-        entry = f"{prefix}{path}"
-        if path and path not in page and entry in named:
+        if path and path not in page and path in entries:
             cap = MAX_README_BYTES if path == README_FILE else MAX_ASSET_BYTES
-            content = read_capped(entry, min(cap, MAX_ASSETS_BYTES - total))
+            content = read_capped(path, min(cap, MAX_ASSETS_BYTES - total))
             if content is not None:
                 page[path] = content
                 total += len(content)

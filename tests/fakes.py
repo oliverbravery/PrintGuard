@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import numpy as np
 import websockets
 
-from printguard.engine.platform import Frame, Notice
+from printguard.engine.platform import Frame, Notice, Redirects
 
 
 class FakeSource:
@@ -43,6 +43,7 @@ class FakeSocket:
     def __init__(self, url: str, arrived: Any) -> None:
         self.url = url
         self.arrived = arrived
+        self.public_only = False
         self.sent: list[str] = []
         self.closed = False
 
@@ -184,15 +185,32 @@ class FakePlatform:
     async def release_camera(self, camera_id: str, source: dict[str, Any]) -> None:
         self.released_cameras.append(camera_id)
 
-    async def open_socket(self, url: str, arrived: Any) -> "FakeSocket":
+    async def open_socket(self, url: str, arrived: Any, public_only: bool = False) -> "FakeSocket":
         socket = FakeSocket(url, arrived)
+        socket.public_only = public_only
         self.sockets.append(socket)
         arrived("open", "")
         return socket
 
-    async def http(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+    async def http(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: bytes | None = None,
+        binary: bool = False,
+        timeout: float = 10.0,
+        redirects: Redirects = "follow",
+        max_bytes: int | None = None,
+        public_only: bool = False,
+    ) -> tuple[int, Any]:
         self.http_calls.append((method, url))
-        self.http_requests.append({"method": method, "url": url, **kwargs})
+        self.http_requests.append(
+            {"method": method, "url": url, "headers": headers, "json": json, "data": data, "binary": binary,
+             "timeout": timeout, "redirects": redirects, "max_bytes": max_bytes, "public_only": public_only}
+        )
         hostname = urlparse(url).hostname or ""
         if url in self.responses:
             return self.responses[url]

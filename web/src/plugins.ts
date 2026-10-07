@@ -43,6 +43,7 @@ export function projectEvent(
   const fields = events[name];
   const needed = eventPermissions[name];
   if (!fields || (needed !== undefined && !granted.includes(needed))) return null;
+  if (name === "error" && event.req_id != null) return null;
   if (name === "state") return { event: name, ...projectState(event as unknown as EngineState, granted, permissions) };
   return { event: name, ...Object.fromEntries(fields.filter((field) => field in event).map((field) => [field, event[field]])) };
 }
