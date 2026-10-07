@@ -68,8 +68,10 @@ export function matches(pattern: string, url: string): boolean {
   if (!parsed.hostname || !allowed.includes(scheme)) return false;
   const port = parsed.port ? Number(parsed.port) : (DEFAULT_PORTS[scheme] ?? 0);
   if (rule.port !== "*" && Number(rule.port) !== port) return false;
-  const path = (parsed.pathname || "/") + parsed.search;
-  return matchesHost(rule.host, parsed.hostname.toLowerCase()) && matchesPath(rule.path, path);
+  const scopedAt = rule.path.indexOf("?");
+  const pathRule = scopedAt < 0 ? rule.path : rule.path.slice(0, scopedAt);
+  if (!matchesHost(rule.host, parsed.hostname.toLowerCase()) || !matchesPath(pathRule, parsed.pathname || "/")) return false;
+  return scopedAt < 0 || matchesPath(rule.path.slice(scopedAt + 1), parsed.search.slice(1));
 }
 
 export function allowed(url: string, patterns: string[]): boolean {

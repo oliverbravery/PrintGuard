@@ -75,6 +75,18 @@ def test_a_permission_asked_for_but_never_used_is_caught() -> None:
     assert "sound" in found(findings, "unused")
 
 
+def test_a_sign_in_on_this_network_is_a_use_of_reaching_it() -> None:
+    manifest = plugins.sanitise_manifest({
+        "id": "home",
+        "version": "1.0.0",
+        "permissions": ["oauth", "net:local"],
+        "reasons": {"oauth": "a", "net:local": "b"},
+        "oauth": {"authorize_url": "https://192.168.1.2/auth", "token_url": "https://192.168.1.2/token"},
+    })
+
+    assert "net:local" not in found(pin.findings(manifest, {"plugin.js": "plugin.render(() => ({ type: 'text', value: '' }));"}), "unused")
+
+
 def test_an_address_outside_the_declared_patterns_is_caught() -> None:
     findings = pin.findings(plugins.sanitise_manifest(LIAR_MANIFEST), LIAR)
 

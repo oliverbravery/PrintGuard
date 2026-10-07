@@ -72,6 +72,14 @@ def test_a_pattern_covers_nothing_else(pattern: str, url: str) -> None:
     assert not urls.matches(pattern, url)
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="the dashboard's copy of the rules runs on node")
+def test_the_dashboard_matches_a_pattern_as_the_engine_does() -> None:
+    cases = MATCHING + REFUSED
+    script = "import('./src/urls.ts').then((urls) => console.log(JSON.stringify(JSON.parse(process.argv[1]).map(([pattern, url]) => urls.matches(pattern, url)))))"
+    answered = subprocess.run(["node", "-e", script, json.dumps(cases)], cwd=Path(__file__).resolve().parent.parent / "web", capture_output=True, text=True, check=True)
+    assert json.loads(answered.stdout) == [urls.matches(pattern, url) for pattern, url in cases]
+
+
 def test_a_pattern_keeps_the_case_of_its_path_and_drops_that_of_its_host() -> None:
     assert urls.sanitise(["HTTPS://API.Telegram.org/bot*/sendMessage"]) == ["https://api.telegram.org/bot*/sendMessage"]
 

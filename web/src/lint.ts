@@ -2,7 +2,7 @@ import { parse } from "acorn";
 import { simple } from "acorn-walk";
 import { parseFragment } from "parse5";
 import type { Permission, PluginManifest } from "./types";
-import { matches, reachesLocal } from "./urls.ts";
+import { isLocalAddress, matches, reachesLocal } from "./urls.ts";
 
 export interface Finding {
   kind: "unused" | "undeclared" | "dynamic";
@@ -151,6 +151,7 @@ export function lint(
   if (manifest.consumes.length) wanted.add("link:consume");
   if (Object.keys(manifest.provides).length) wanted.add("link:provide");
   const local = manifest.urls.some(reachesLocal);
+  const localSignIn = [manifest.oauth.authorize_url, manifest.oauth.token_url].some((url) => url && isLocalAddress(new URL(url).hostname));
   for (const event of manifest.events) {
     if (tables.events[event]) wanted.add(tables.events[event]);
   }
@@ -159,7 +160,7 @@ export function lint(
     if (!declared.has(permission)) findings.push({ kind: "undeclared", what: permission });
   }
   for (const permission of declared) {
-    const implied = permission === "net:local" ? wanted.has("net") && local : permission === "oauth" || permission === "camera:view";
+    const implied = permission === "net:local" ? (wanted.has("net") && local) || localSignIn : permission === "oauth" || permission === "camera:view";
     if (!wanted.has(permission) && !implied) findings.push({ kind: "unused", what: permission });
   }
   for (const call of calls) {
