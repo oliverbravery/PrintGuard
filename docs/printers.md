@@ -84,6 +84,10 @@ The chamber camera is registered automatically: RTSPS on port 322 on the X1 and 
 proprietary port 6000 protocol on the A1 and P1 series. The form links Bambu's
 [Enable LAN Mode](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode) guide.
 
+Bambu printers present self-signed certificates, so PrintGuard doesn't verify the printer it
+connects to. The access code only goes to the address you registered, so keep the printer on a
+network you trust.
+
 PrintGuard holds one connection to the printer and reads the reports it pushes. A printer that
 pushes nothing for a minute is reconnected and shown offline until it reports again. With
 Developer Mode off the printer still reports its state but rejects a pause, cancel, heater
@@ -127,7 +131,7 @@ MK2.5. It authenticates with HTTP Digest.
 
 PrusaLink reports ERROR as error, and ATTENTION and BUSY as unknown. Buddy firmware shows a
 warning over a print that keeps running, as ATTENTION or as a paused job, so PrintGuard keeps what it
-last knew while one is up. With no job running the printer's own state is used.
+last knew while one is up. With no job running the printer's own state is used, and unknown if it gives none.
 
 PrusaConnect is not used, so no frames or job data leave hardware you own. PrusaLink's
 webcam feature pushes snapshots to PrusaConnect rather than serving a local video stream, so
@@ -174,13 +178,18 @@ report idle at the moment you press **Print**, so nothing lands on top of a runn
 | Bambu Lab | `.3mf` sliced by Bambu Studio or Orca | Uploaded to the printer's storage over FTPS, then the first plate is started over MQTT |
 
 A file the service stores but doesn't start, or a start the printer refuses, is reported as a
-failed print.
+failed print. Moonraker set to queue uploads can hold a file that can't start at once, which is
+reported as queued and may print later.
+
+A pause, cancel, heater target or file counts as sent only when the service answers in its own
+way. An address that answers with a sign-in page, as an auth proxy does once its session has
+expired, is reported as failed.
 
 A file is sent under its library name, with each run of anything outside plain letters, digits,
 dots, dashes and underscores turned into one `_` and the name before the extension cut to 60
 characters. Rename it first if the printer's own file list matters to you. PrusaLink replaces a
 file of the same name already on the printer. A file can be up to 512 MB, and a 3mf whose files
-unpack to more than that between them is refused. So is an empty file, a damaged 3mf, a 3mf with a member compressed
+unpack to more than that between them is refused. So is an empty file, a 3mf whose plate gcode is empty, binary gcode with no gcode in it, a damaged 3mf, a 3mf with a member compressed
 with anything but stored or deflate, and a file whose comments give a print time of over a year or
 an amount of filament or a temperature no slicer would write. A file whose gcode is over 32 MB isn't drawn in the browser, since parsing it takes
 about nine times its size in memory, so it has no 3D view and no drawn preview. It uploads and
