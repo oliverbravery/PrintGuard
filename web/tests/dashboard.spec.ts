@@ -1732,7 +1732,7 @@ test("a hub that never answers the connection is tried again", async ({ page }) 
   });
   await page.goto("/");
   await expect.poll(() => page.evaluate(() => (window as any).__dialled)).toBe(1);
-  await page.clock.fastForward(12_000);
+  await page.clock.runFor(12_000);
   await expect.poll(() => page.evaluate(() => (window as any).__dialled)).toBe(2);
 });
 
@@ -1757,6 +1757,35 @@ test("a preset temperature can be cleared and retyped, and pause is off for a pa
   await nozzle.blur();
   await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
   expect((await sent(page, "settings.update")).patch.preheat).toEqual([{ name: "PLA", nozzle: 210, bed: 60 }]);
+});
+
+test("a page that was frozen for longer than the silence limit does not drop a hub that kept talking", async ({ page }) => {
+  await page.clock.install();
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__dialled = 0;
+    win.WebSocket = class {
+      static OPEN = 1;
+      readyState = 1;
+      onopen: (() => void) | null = null;
+      constructor(url: string) {
+        if (!url.endsWith("/api/ws")) return;
+        win.__dialled++;
+        setTimeout(() => this.onopen?.(), 0);
+      }
+      close() {}
+      send() {}
+    };
+  });
+  await page.goto("/");
+  await expect.poll(() => page.evaluate(() => (window as any).__dialled)).toBe(1);
+  await page.clock.fastForward(12_000);
+  await page.clock.runFor(2_000);
+  expect(await page.evaluate(() => (window as any).__dialled)).toBe(1);
+
+  await page.clock.runFor(11_000);
+  await page.clock.runFor(2_000);
+  expect(await page.evaluate(() => (window as any).__dialled)).toBe(2);
 });
 
 test("pause, resume and cancel are each enabled only when the printer's state allows them", async ({ page }) => {
