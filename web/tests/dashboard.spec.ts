@@ -95,6 +95,15 @@ test("a warning raised while the hub started is toasted once per page load, not 
   for (const warning of warnings) await expect(page.getByText(warning)).toHaveCount(1);
 });
 
+test("the update dialog opened while the hub is away asks for the releases once it is back", async ({ page }) => {
+  await dashboard(page, { dialog: "update", reconnecting: true });
+  await expect(page.getByRole("dialog", { name: "Updates" })).toBeVisible();
+  expect(await sent(page, "update.releases")).toBeUndefined();
+
+  await page.evaluate(() => (window as any).__pg.setState({ reconnecting: false }));
+  await expect.poll(() => sent(page, "update.releases")).toBeDefined();
+});
+
 test("a dashboard left open through an update reloads onto the new version", async ({ page }) => {
   const { sockets } = await hub(page);
   sockets[0].send(JSON.stringify({ event: "state", ...engine({ version: "next" }) }));

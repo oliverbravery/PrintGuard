@@ -8,7 +8,7 @@ import { NewTab } from "./NewTab";
 const PULL_COMMAND = "docker compose pull && docker compose up -d";
 
 export function UpdateDialog() {
-  const { engine, releases, send, isPending, openDialog } = useStore();
+  const { engine, releases, reconnecting, send, isPending, openDialog } = useStore();
   const update = engine?.update ?? null;
   const checking = isPending("update.check");
   const current = engine?.version || update?.current;
@@ -16,8 +16,8 @@ export function UpdateDialog() {
   const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
-    send({ cmd: "update.releases" });
-  }, [send]);
+    if (!reconnecting) send({ cmd: "update.releases" });
+  }, [reconnecting]);
 
   const release = releases.find((entry) => entry.version === selected) ?? releases[0] ?? null;
   const date = release?.published_at ? new Date(release.published_at).toLocaleDateString() : null;
