@@ -62,7 +62,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cutoff=$(date -u -d '30 days ago' +%FT%TZ)
-          issue_numbers=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "status: completed" --json number --jq '.[].number')
+          issue_numbers=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "status: completed" --limit 1000 --json number --jq '.[].number')
           for issue_number in $issue_numbers; do
             unanswered=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments" --jq '.[]' \
               | jq -s --arg cutoff "$cutoff" '(last // {}) | ((.body // "") | contains("<!-- release-follow-up:")) and ((.created_at // "") < $cutoff)')

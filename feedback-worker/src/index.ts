@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Gate, type Refusal } from "./gate";
 import { DAY_MS, EXPIRY_DAYS, EXPIRY_WARN_DAYS, FRAME_BYTES_MAX, RATE_PERIOD_S, RECOUNT_GAP_MS, STORED_BYTES_MAX, STORED_BYTES_WARN } from "./limits";
+import { isJpeg } from "./jpeg";
 import { hubOf, issueToken, keyed } from "./token";
 
 export { Gate };
@@ -62,7 +63,7 @@ async function register(request: Request, env: Env): Promise<Response> {
   return Response.json({ token: await issueToken(env.TOKEN_SECRET) }, { status: 201 });
 }
 
-async function storeFrame(request: Request, env: Env): Promise<Response> {
+async function storeFrame(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
   const hub = await hubOf((request.headers.get("Authorization") ?? "").replace(/^Bearer /, ""), env.TOKEN_SECRET);
   if (!hub) return refuse({ status: 401, code: "token" });
   if (!(await env.FRAME_RATE.limit({ key: hub })).success) return refuse(tooFast());
@@ -73,30 +74,32 @@ async function storeFrame(request: Request, env: Env): Promise<Response> {
   if (!details.success) return refuse({ status: 400, code: "details" });
   const jpeg = new Uint8Array(await request.arrayBuffer());
   if (jpeg.byteLength > FRAME_BYTES_MAX) return refuse({ status: 413, code: "too_large" });
-  if (jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || jpeg[2] !== 0xff) return refuse({ status: 415, code: "not_jpeg" });
+  if (!isJpeg(jpeg)) return refuse({ status: 415, code: "not_jpeg" });
 
-  const gate = env.GATE.getByName("gate");
-  const network = await callerNetwork(request, env);
   const { print, frame, ...labels } = details.data;
-  const key = `${hub}/${print}/${frame}.jpg`;
+  const stored = reserveAndWrite(env, hub, await callerNetwork(request, env), `${hub}/${print}/${frame}.jpg`, jpeg, labels);
+  context.waitUntil(stored);
+  return stored;
+}
+
+async function reserveAndWrite(env: Env, hub: string, network: string, key: string, jpeg: Uint8Array, labels: Record<string, unknown>): Promise<Response> {
+  const gate = env.GATE.getByName("gate");
   let reserved = await gate.reserve(hub, network, key, jpeg.byteLength);
   if ("code" in reserved && reserved.code === "storage_full" && (await recountBucket(env, RECOUNT_GAP_MS))) {
     reserved = await gate.reserve(hub, network, key, jpeg.byteLength);
   }
   if ("code" in reserved) return refuse(reserved);
-  if (reserved.uploads === 0) return Response.json({}, { status: 201 });
-  let written: R2Object | null;
+  if (reserved.uploads === 0) return (await env.FRAMES.head(key)) ? Response.json({}, { status: 201 }) : refuse(tooFast());
+  let written: R2Object | null = null;
   try {
     written = await env.FRAMES.put(key, jpeg, {
       onlyIf: { etagDoesNotMatch: "*" },
       httpMetadata: { contentType: "image/jpeg" },
       customMetadata: Object.fromEntries(Object.entries(labels).map(([name, value]) => [name, String(value)])),
     });
-  } catch (error) {
-    await gate.release(hub, network, key, reserved);
-    throw error;
+  } finally {
+    if (!written) await gate.release(hub, network, key, reserved);
   }
-  if (!written) await gate.release(hub, network, key, reserved);
   return Response.json({}, { status: 201 });
 }
 
@@ -141,11 +144,11 @@ async function recountAndRemind(env: Env): Promise<void> {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, context) {
     const { pathname } = new URL(request.url);
     if (env.ACCEPTING !== "true") return refuse({ status: 503, code: "closed" });
     if (request.method === "POST" && pathname === "/register") return register(request, env);
-    if (request.method === "PUT" && pathname === "/frame") return storeFrame(request, env);
+    if (request.method === "PUT" && pathname === "/frame") return storeFrame(request, env, context);
     return new Response(null, { status: 404 });
   },
   async scheduled(_controller, env) {

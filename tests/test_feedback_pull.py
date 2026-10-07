@@ -40,8 +40,13 @@ def labels(**changes: str) -> dict[str, str]:
 
 
 class Bucket:
-    def __init__(self, objects: dict[str, tuple[bytes, dict[str, str]]]) -> None:
+    class exceptions:
+        class NoSuchKey(Exception):
+            pass
+
+    def __init__(self, objects: dict[str, tuple[bytes, dict[str, str]]], expiring: tuple[str, ...] = ()) -> None:
         self.objects = dict(objects)
+        self.expiring = expiring
 
     def get_paginator(self, _name: str) -> Any:
         keys = sorted(self.objects)
@@ -54,6 +59,10 @@ class Bucket:
         return Pages()
 
     def get_object(self, Bucket: str, Key: str) -> dict[str, Any]:
+        if Key in self.expiring:
+            del self.objects[Key]
+        if Key not in self.objects:
+            raise self.exceptions.NoSuchKey(Key)
         body, metadata = self.objects[Key]
         return {"Body": io.BytesIO(body), "Metadata": metadata, "LastModified": UPLOADED}
 
@@ -73,6 +82,18 @@ def test_a_label_that_only_looks_encoded_is_kept_as_sent(pull: types.ModuleType,
     assert bucket.objects == {}
     rows = [json.loads(row) for row in (tmp_path / "frames.jsonl").read_text().splitlines()]
     assert sorted(row["printer"] for row in rows) == ["=?utf-8?b?A?=", "Voron 2.4", "Voron 2.4"]
+
+
+def test_an_object_that_expires_between_the_listing_and_the_download_is_skipped_and_the_rest_are_pulled(
+    pull: types.ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bucket = Bucket({key(frame): (jpeg(), labels()) for frame in (1, 2, 3)}, expiring=(key(2),))
+
+    assert pull.pull(bucket, tmp_path) == (2, 0)
+
+    assert bucket.objects == {}
+    assert key(2) in capsys.readouterr().out
+    assert sorted(json.loads(row)["file"] for row in (tmp_path / "frames.jsonl").read_text().splitlines()) == [f"{HUB}/{PRINT}/{1:012x}.jpg", f"{HUB}/{PRINT}/{3:012x}.jpg"]
 
 
 def test_a_label_in_rfc_2047_is_decoded(pull: types.ModuleType) -> None:

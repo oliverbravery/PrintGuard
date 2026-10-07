@@ -1,4 +1,4 @@
-import { createScheduledController, runInDurableObject } from "cloudflare:test";
+import { createExecutionContext, createScheduledController, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker, { expiresSoon, networkOf, reminders } from "../src";
@@ -18,7 +18,12 @@ import {
 import { issueToken } from "../src/token";
 
 const ORIGIN = "https://feedback.example";
-const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+const jpegOf = (width: number, height: number, extra: number[] = []) =>
+  new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0, 11, 8, height >> 8, height & 0xff, width >> 8, width & 0xff, 1, 1, 0x11, 0, ...extra, 0xff, 0xd9]);
+const JPEG = jpegOf(16, 16);
+
+const callWorker = (request: Parameters<typeof worker.fetch>[0], bindings: Env, context = createExecutionContext()) =>
+  worker.fetch(request, bindings, context);
 
 const details = (frame: string, changes: Record<string, unknown> = {}) => ({
   print: "aaaaaaaaaaaa",
@@ -193,6 +198,37 @@ describe("uploading a frame", () => {
     expect((await upload(token, "203.0.113.15", frameId(8010), JPEG, { printer: "Prusa MK4 \u00e9\u4e2d" })).status).toBe(201);
   });
 
+  it("turns away junk that only starts like a JPEG, without taking quota for it", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const junk = [
+      new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]),
+      new Uint8Array([...jpegOf(16, 16).slice(0, -2), 0, 0]),
+      new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+      new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0xff, 0xd9]),
+      new Uint8Array([0xff, 0xd8, 0xff, 0xda, 0, 2, 0xff, 0xd9, 0, 0, 0, 0, 0, 0]),
+      jpegOf(0, 16),
+      jpegOf(16, 0),
+      jpegOf(4097, 4096),
+    ];
+    const refusals = [];
+    for (const [index, body] of junk.entries()) refusals.push(await upload(token, "203.0.113.16", frameId(8100 + index), body));
+
+    expect(refusals.map((response) => response.status)).toEqual(Array(junk.length).fill(415));
+    expect(await hubCount(token.split(".")[0])).toBeUndefined();
+    for (const [width, height] of [[4096, 4096], [1, 1], [640, 480]]) {
+      expect((await upload(token, "203.0.113.16", frameId(8200 + width), jpegOf(width, height, [1, 2, 3]))).status).toBe(201);
+    }
+  });
+
+  it("counts a label's length in characters, as the hub trims it, so 80 emoji fit and 81 do not", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const emoji = "\u{1F600}";
+    expect((await upload(token, "203.0.113.17", frameId(8300), JPEG, { printer: emoji.repeat(80) })).status).toBe(201);
+    expect(await code(await upload(token, "203.0.113.17", frameId(8301), JPEG, { printer: emoji.repeat(81) }))).toBe("details");
+    expect((await upload(token, "203.0.113.17", frameId(8302), JPEG, { printer: `${"x".repeat(79)}${emoji}` })).status).toBe(201);
+    expect(await code(await upload(token, "203.0.113.17", frameId(8303), JPEG, { printer: "x".repeat(81) }))).toBe("details");
+  });
+
   it("stops one hub at its daily limit and leaves other hubs alone", async () => {
     const token = await issueToken(env.TOKEN_SECRET);
     for (let sent = 0; sent < UPLOADS_PER_HUB; sent += 1) {
@@ -214,8 +250,8 @@ describe("uploading a frame", () => {
 
     const resent = countingCalls(env.FRAMES, "put");
     for (let attempt = 0; attempt < 50; attempt += 1) {
-      const body = new Uint8Array([...JPEG, attempt]);
-      const response = await worker.fetch(frameRequest(token, "203.0.113.13", frameId(2000), body, { label: "failure", printer: `rewrite ${attempt}` }), { ...env, FRAMES: resent.bucket });
+      const body = jpegOf(16, 16, [attempt]);
+      const response = await callWorker(frameRequest(token, "203.0.113.13", frameId(2000), body, { label: "failure", printer: `rewrite ${attempt}` }), { ...env, FRAMES: resent.bucket });
       expect(response.status).toBe(201);
     }
 
@@ -235,7 +271,7 @@ describe("uploading a frame", () => {
   });
 
   it("answers closed when collection is switched off", async () => {
-    const response = await worker.fetch(new Request(`${ORIGIN}/register`, { method: "POST" }), { ...env, ACCEPTING: "false" });
+    const response = await callWorker(new Request(`${ORIGIN}/register`, { method: "POST" }), { ...env, ACCEPTING: "false" });
     expect(response.status).toBe(503);
     expect(await code(response)).toBe("closed");
   });
@@ -249,18 +285,20 @@ describe("two requests for one frame at once", () => {
     const hub = token.split(".")[0];
     const racing = holdingPuts(env.FRAMES);
     const raced = { ...env, FRAMES: racing.bucket };
-    const holder = worker.fetch(frameRequest(token, "203.0.113.60", frameId(7000), JPEG, { label: "good", printer: "first" }), raced).then(
+    const holder = callWorker(frameRequest(token, "203.0.113.60", frameId(7000), JPEG, { label: "good", printer: "first" }), raced).then(
       (response) => response.status,
       () => "failed",
     );
     await until(() => racing.pending.length === 1);
-    const duplicate = await worker.fetch(frameRequest(token, "198.51.100.9", frameId(7000), new Uint8Array([...JPEG, 9, 9]), { label: "failure", printer: "second" }), raced);
+    const duplicate = await callWorker(frameRequest(token, "198.51.100.9", frameId(7000), jpegOf(16, 16, [9, 9]), { label: "failure", printer: "second" }), raced);
     return { hub, puts: racing.pending, holder, duplicate };
   };
 
-  it("answers the second request as held without writing, so the first send's bytes and labels stand", async () => {
+  it("asks the second request to try again without writing, so the first send's bytes and labels stand and nothing is recorded as sent that is not stored", async () => {
     const { hub, puts, holder, duplicate } = await startRace();
-    expect(duplicate.status).toBe(201);
+    expect(duplicate.status).toBe(429);
+    expect(await code(duplicate)).toBe("rate_limited");
+    expect(Number(duplicate.headers.get("Retry-After"))).toBeGreaterThan(0);
     expect(puts).toHaveLength(1);
     await puts[0].finish();
     expect(await holder).toBe(201);
@@ -279,6 +317,54 @@ describe("two requests for one frame at once", () => {
     expect(await holder).toBe("failed");
     expect((await env.FRAMES.list({ prefix: hub })).objects).toEqual([]);
     expect(await hubCount(hub)).toBe(0);
+  });
+
+  it("keeps writing after the sender has gone, so a request cut off between the count and the write still stores the frame", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const hub = token.split(".")[0];
+    const racing = holdingPuts(env.FRAMES);
+    const context = createExecutionContext();
+    const waitUntil = vi.spyOn(context, "waitUntil");
+    void callWorker(frameRequest(token, "203.0.113.62", frameId(7400)), { ...env, FRAMES: racing.bucket }, context);
+    await until(() => racing.pending.length === 1);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+
+    await racing.pending[0].finish();
+    await waitOnExecutionContext(context);
+
+    expect(await env.FRAMES.head(`${hub}/aaaaaaaaaaaa/${frameId(7400)}.jpg`)).not.toBeNull();
+    expect(await hubCount(hub)).toBe(1);
+  });
+
+  it("gives the frame back when the write is cut off, so the sender's retry stores it", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const hub = token.split(".")[0];
+    const racing = holdingPuts(env.FRAMES);
+    const context = createExecutionContext();
+    const cutOff = callWorker(frameRequest(token, "203.0.113.63", frameId(7500)), { ...env, FRAMES: racing.bucket }, context).catch(() => "failed");
+    await until(() => racing.pending.length === 1);
+    await racing.pending[0].finish(new Error("The operation was aborted"));
+    expect(await cutOff).toBe("failed");
+    await waitOnExecutionContext(context).catch(() => undefined);
+    expect(await hubCount(hub)).toBe(0);
+
+    expect((await upload(token, "203.0.113.63", frameId(7500))).status).toBe(201);
+    expect(await env.FRAMES.head(`${hub}/aaaaaaaaaaaa/${frameId(7500)}.jpg`)).not.toBeNull();
+    expect(await hubCount(hub)).toBe(1);
+  });
+
+  it("does not answer sent for a frame that was counted but never written", async () => {
+    const token = await issueToken(env.TOKEN_SECRET);
+    const hub = token.split(".")[0];
+    const key = `${hub}/aaaaaaaaaaaa/${frameId(7600)}.jpg`;
+    await env.GATE.getByName("gate").reserve(hub, "unrelated-network", key, JPEG.byteLength);
+
+    const retried = await upload(token, "203.0.113.64", frameId(7600));
+
+    expect(retried.status).toBe(429);
+    expect(await code(retried)).toBe("rate_limited");
+    expect(await env.FRAMES.head(key)).toBeNull();
+    await env.GATE.getByName("gate").release(hub, "unrelated-network", key, { bytes: JPEG.byteLength, uploads: 1, day: NEW.day });
   });
 
   it("leaves an object that is already in the bucket as it is and counts nothing for the send", async () => {
@@ -329,7 +415,7 @@ describe("a request that is refused", () => {
   it("costs no gate or bucket call when the hub sends faster than the rate", async () => {
     const token = await issueToken(env.TOKEN_SECRET);
     const tooFast = { limit: async () => ({ success: false }) };
-    const response = await worker.fetch(frameRequest(token, "203.0.113.70", frameId(7200)), { ...env, FRAME_RATE: tooFast, GATE: untouched, FRAMES: untouched } as unknown as typeof env);
+    const response = await callWorker(frameRequest(token, "203.0.113.70", frameId(7200)), { ...env, FRAME_RATE: tooFast, GATE: untouched, FRAMES: untouched } as unknown as typeof env);
     expect(response.status).toBe(429);
     expect(await code(response)).toBe("rate_limited");
     expect(Number(response.headers.get("Retry-After"))).toBeGreaterThan(0);
@@ -337,7 +423,7 @@ describe("a request that is refused", () => {
 
   it("costs no gate call when a network registers faster than the rate", async () => {
     const tooFast = { limit: async () => ({ success: false }) };
-    const response = await worker.fetch(
+    const response = await callWorker(
       new Request(`${ORIGIN}/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
       { ...env, REGISTER_RATE: tooFast, GATE: untouched } as unknown as typeof env,
     );
@@ -348,7 +434,7 @@ describe("a request that is refused", () => {
   it("costs no bucket call when the hub is at its daily limit", async () => {
     const token = await issueToken(env.TOKEN_SECRET);
     for (let sent = 0; sent < UPLOADS_PER_HUB; sent += 1) await upload(token, "203.0.113.71", frameId(7300 + sent));
-    const refused = await worker.fetch(frameRequest(token, "203.0.113.71", frameId(7399)), { ...env, FRAMES: untouched } as unknown as typeof env);
+    const refused = await callWorker(frameRequest(token, "203.0.113.71", frameId(7399)), { ...env, FRAMES: untouched } as unknown as typeof env);
     expect(await code(refused)).toBe("hub_daily");
   });
 });
@@ -414,7 +500,7 @@ describe("an inbox that has been pulled", () => {
     await believeFull();
     const listing = countingCalls(env.FRAMES, "list");
 
-    const response = await worker.fetch(frameRequest(token, "203.0.113.30", frameId(9000)), { ...env, FRAMES: listing.bucket });
+    const response = await callWorker(frameRequest(token, "203.0.113.30", frameId(9000)), { ...env, FRAMES: listing.bucket });
 
     expect(response.status).toBe(201);
     expect(listing.calls.length).toBeGreaterThan(0);
@@ -436,7 +522,7 @@ describe("an inbox that has been pulled", () => {
     const full = { ...env, FRAMES: listing.bucket };
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const refused = await worker.fetch(frameRequest(token, "203.0.113.31", frameId(9100 + attempt)), full);
+      const refused = await callWorker(frameRequest(token, "203.0.113.31", frameId(9100 + attempt)), full);
       expect([refused.status, await code(refused)]).toEqual([507, "storage_full"]);
     }
     expect(listing.calls).toHaveLength(1);

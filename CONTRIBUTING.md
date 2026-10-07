@@ -334,16 +334,19 @@ blocking a merge. A pull request into a release branch runs **tests**, **audit**
 | **launch** | On pull requests into `main`, the container and both desktop apps start from what would ship and catch a failing print, so a release that cannot start never goes out |
 | **version** | The version has no release tag yet and has a matching `CHANGELOG.md` section, dated the day it merges into `main` in London time. Re-publishing an existing tag is refused |
 
-Every check runs again when a pull request is edited, so retargeting a release-branch pull request
-at `main` brings in **launch** and the date. **launch** fails, not skips, on a pull request into
-`main` where the apps never started.
+Every check runs again when a pull request's base branch changes, so retargeting a release-branch pull request
+at `main` brings in **launch** and the date. Editing only the title or description runs them
+again too, but without the launch builds, so **launch** takes the result already on that commit and
+waits for it if it's still running. **launch** fails, not skips, on a pull request into `main`
+where the apps never started.
 
 Every action in the workflows is pinned to a commit, with its version in a comment. The base
 images in the `Dockerfile` and the QEMU, BuildKit and SBOM scanner images the workflows pull are
 pinned by digest beside their tag, and the MediaMTX archive in `packaging/build.sh` and the Intel
 GPU packages in both workflows carry the sha256 their release publishes. `create-dmg`, which builds
 the macOS disk image, is cloned at the commit of its release in `packaging/build.sh`. Bumping any of them means
-changing the version and its hash together. Node in the workflows matches the `node:22-alpine`
+changing the version and its hash together. Dependabot opens a weekly pull request for the actions
+with the new commit and version, so retarget it at the open release branch. Node in the workflows matches the `node:22-alpine`
 digest in the `Dockerfile`, and `hatchling` is pinned in `pyproject.toml`.
 
 On merge, the [release workflow](.github/workflows/release.yml):

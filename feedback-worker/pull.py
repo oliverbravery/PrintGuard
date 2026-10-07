@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["boto3", "pillow"]
+# dependencies = ["boto3==1.43.108", "pillow==12.3.0"]
 # ///
 """Empties the training inbox into a local dataset.
 
@@ -92,13 +92,19 @@ def pull(client: Any, out: Path) -> tuple[int, int]:
         out: The dataset directory.
 
     Returns:
-        How many frames were kept and how many were discarded as undecodable.
+        How many frames were kept and how many were discarded as undecodable. An
+        object that expired between the listing and the download is skipped with
+        a note and counted as neither.
     """
     kept = discarded = 0
     out.mkdir(parents=True, exist_ok=True)
     with (out / "frames.jsonl").open("a") as rows:
         for key in list(inbox(client)):
-            stored = client.get_object(Bucket=BUCKET, Key=key)
+            try:
+                stored = client.get_object(Bucket=BUCKET, Key=key)
+            except client.exceptions.NoSuchKey:
+                print(f"{key} expired before it could be pulled, skipped")
+                continue
             clean = sanitised(stored["Body"].read()) if FRAME_KEY.fullmatch(key) else None
             if clean is None:
                 discarded += 1
