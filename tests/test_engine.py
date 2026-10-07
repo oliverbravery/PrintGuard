@@ -2633,6 +2633,34 @@ async def test_camera_add_refuses_a_source_already_registered() -> None:
         assert "already registered" in refused[0]["message"]
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"kind": "device", "device_id": "/dev/video0", "url": None},
+        {"kind": "url", "url": 5},
+        {"kind": "url", "url": ["rtsp://cam.local/stream"]},
+        {"kind": "device", "device_id": {"path": "/dev/video0"}},
+        {"kind": "path", "path": 7},
+        {"kind": 3, "url": "rtsp://cam.local/stream"},
+        "rtsp://cam.local/stream",
+    ],
+)
+async def test_camera_add_refuses_a_source_the_next_start_could_not_read(source) -> None:
+    platform = FakePlatform()
+    platform.devices = [{"kind": "device", "device_id": "/dev/video0", "label": "Cam", "declared": False}]
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        with pytest.raises(RuntimeError, match="a camera's source"):
+            await engine.request({"cmd": "camera.add", "name": "Cam", "source": source})
+        assert engine.cameras.values() == []
+
+    restarted = Engine(platform)
+    await restarted.start()
+    try:
+        assert restarted.startup_warnings == []
+    finally:
+        await restarted.stop()
+
+
 async def test_camera_add_delegates_whep_url_to_platform() -> None:
     platform = FakePlatform()
     async with running_engine(platform, camera_fps=[]) as (engine, events):

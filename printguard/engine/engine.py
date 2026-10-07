@@ -22,7 +22,7 @@ from typing import Any, Awaitable, Callable, Coroutine
 import numpy as np
 
 from . import credentials, feedback, gcode, logs, oauth, plugins, reports, updates, urls, vision
-from .cameras import declared_camera_id, same_stream, sanitise_camera, stored_camera, tidy_stream_url
+from .cameras import declared_camera_id, same_stream, sanitise_camera, sanitise_source, stored_camera, tidy_stream_url
 from .history import MonitorHistory
 from .integrations import INTEGRATIONS, DeviceAction, DeviceStatus, integrations_meta
 from .monitors import MONITOR_DEFAULTS, monitor_watching, persisted_monitor, sanitise_monitor, stored_monitor
@@ -1050,12 +1050,13 @@ class Engine:
         """Registers a camera once it opens.
 
         Raises:
-            ValueError: If its device or stream is already registered, or is
+            ValueError: If its source is one the hub could not read back at its
+                next start, or its device or stream is already registered, or is
                 being registered by another command still waiting on it to open.
         """
-        source = dict(message["source"])
+        source = dict(sanitise_source(message["source"]))
         if source.get("url"):
-            source["url"] = tidy_stream_url(str(source["url"]))
+            source["url"] = tidy_stream_url(source["url"])
         reports.require_storable(source.values())
         address = _address(source)
         if self._stream_taken(source):
