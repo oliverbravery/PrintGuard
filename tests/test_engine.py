@@ -1135,6 +1135,40 @@ async def test_the_reattach_tick_leaves_a_camera_alone_while_it_is_taken_down(mo
     assert platform.opened == [expected], "the camera was opened more than once, or at the address it was leaving"
 
 
+async def test_a_camera_moved_while_it_restarts_is_opened_at_the_new_address_only(monkeypatch) -> None:
+    async def webcam(http, config):
+        return [{"key": "webcam", "name": "Shop cam", "source": {"kind": "fake", "fps": 20.0, "url": f"{config['base_url']}/stream"}}]
+
+    monkeypatch.setattr(INTEGRATIONS["octoprint"], "cameras", webcam)
+
+    class SlowRelease(FakePlatform):
+        opened: list[str] = []
+        release_s = 0.0
+
+        async def open_camera(self, camera_id, source):
+            self.opened.append(source["url"])
+            return await super().open_camera(camera_id, source)
+
+        async def release_camera(self, camera_id, source):
+            await asyncio.sleep(self.release_s)
+            await super().release_camera(camera_id, source)
+
+    platform = SlowRelease()
+    async with running_engine(platform, camera_fps=[]) as (engine, _):
+        printer_id = await _register_printer(engine)
+        await asyncio.sleep(0.2)
+        camera = engine.cameras.values()[0]
+        platform.opened.clear()
+        platform.release_s = 0.3
+        restart = asyncio.create_task(engine.restart_camera(camera))
+        await asyncio.sleep(0.1)
+        await engine.handle({"cmd": "printer.update", "id": printer_id, "patch": {"config": {"base_url": "http://moved", "api_key": "k"}}})
+        await restart
+        await asyncio.sleep(0.5)
+        assert camera.source["url"] == "http://moved/stream"
+        assert platform.opened == ["http://moved/stream"], "the restart opened the camera at the address it was leaving"
+
+
 async def test_refresh_keeps_a_printer_camera_that_works_and_moves_one_that_does_not(monkeypatch) -> None:
     monkeypatch.setattr(engine_module, "CAMERA_SETTLE_S", 0.3)
 

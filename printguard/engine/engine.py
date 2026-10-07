@@ -16,7 +16,7 @@ import re
 import time
 import traceback
 import uuid
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from typing import Any, Awaitable, Callable, Coroutine
 
 import numpy as np
@@ -186,7 +186,7 @@ class Engine:
         self._tasks: list[asyncio.Task[None]] = []
         self._background: set[asyncio.Task[None]] = set()
         self._attach_tasks: dict[str, asyncio.Task[None]] = {}
-        self._detaching: set[str] = set()
+        self._detaching: Counter[str] = Counter()
         self._reconciles: dict[str, asyncio.Lock] = {}
         self._starting: set[str] = set()
         self._adding: set[Any] = set()
@@ -727,7 +727,7 @@ class Engine:
 
     def _schedule_attach(self, camera: Camera) -> None:
         """Starts attaching a camera, unless it is attached, being attached or being taken down to be attached afresh."""
-        if camera.frame_source is not None or camera.id in self._attach_tasks or camera.id in self._detaching:
+        if camera.frame_source is not None or camera.id in self._attach_tasks or self._detaching[camera.id]:
             return
         task = asyncio.create_task(self._attach(camera))
         self._attach_tasks[camera.id] = task
@@ -743,14 +743,14 @@ class Engine:
         source = camera.frame_source
         if source is None:
             return
-        self._detaching.add(camera.id)
+        self._detaching[camera.id] += 1
         try:
             self.scheduler.cancel_camera(camera)
             camera.frame_source = None
             source.close()
             await self.platform.release_camera(camera.id, camera.source)
         finally:
-            self._detaching.discard(camera.id)
+            self._detaching[camera.id] -= 1
         if self.cameras.get(camera.id) is camera:
             self._schedule_attach(camera)
 
@@ -1353,9 +1353,11 @@ class Engine:
         """Releases a camera's source and attaches it again at a new address.
 
         The re-attach tick leaves the camera alone while it is taken down, so
-        it is never opened at the address it is leaving.
+        it is never opened at the address it is leaving. A restart can be
+        taking it down at the same time, which is why what is taking it down
+        is counted.
         """
-        self._detaching.add(camera.id)
+        self._detaching[camera.id] += 1
         try:
             await self._cancel_attach(camera.id)
             if camera.frame_source:
@@ -1365,7 +1367,7 @@ class Engine:
             await self.platform.release_camera(camera.id, camera.source)
             camera.source = source
         finally:
-            self._detaching.discard(camera.id)
+            self._detaching[camera.id] -= 1
         self._schedule_attach(camera)
 
     async def _cmd_printer_add(self, message: dict[str, Any]) -> None:
