@@ -19,6 +19,7 @@ from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 import httpx
+import idna
 import uvicorn
 from cachetools import TTLCache
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -91,16 +92,20 @@ def normalised_origin(origin: str) -> str:
 
     Returns:
         Its scheme and host in lower case, with the port left off when it is
-        the scheme's own and a trailing dot on the host dropped.
+        the scheme's own, a trailing dot on the host dropped and an
+        internationalised name in the punycode a browser sends.
 
     Raises:
         ValueError: If the origin is not http or https, has a port that is not a
-            number or is a malformed address.
+            number, is a malformed address or has a name that cannot be written
+            in punycode.
     """
     parts = urlsplit(origin.strip())
     if parts.scheme not in WEB_SCHEMES:
         raise ValueError(f"the scheme {parts.scheme or 'is missing, it'} must be http or https")
     host = (parts.hostname or "").removesuffix(".")
+    if not host.isascii():
+        host = idna.encode(host, uts46=True).decode()
     port = "" if parts.port in (None, DEFAULT_PORTS.get(parts.scheme)) else f":{parts.port}"
     return f"{parts.scheme}://{f'[{host}]' if ':' in host else host}{port}"
 

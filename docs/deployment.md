@@ -178,7 +178,8 @@ is called DNS rebinding.
 ```
 
 Each entry needs its scheme, which is `http` or `https`. Capitals, a `:443` or `:80` and a trailing dot on the name make no
-difference, and the hub logs a warning at start for an entry it can't read.
+difference, and the hub logs a warning at start for an entry it can't read. A name with letters outside ASCII, such as
+`https://drucker.müller.example`, can be listed as written or in punycode.
 
 Every request for a name that isn't covered, or that sends no `Host` header, gets a `403` that says which line to add, and the
 hub logs the same line once for each of the first 32 names. A WebSocket is closed with no text,

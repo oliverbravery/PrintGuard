@@ -32,6 +32,7 @@ dependencies = [
     "wasdk-Microsoft.Windows.ApplicationModel.DynamicDependency.Bootstrap; sys_platform == 'win32'",
     "websockets>=14.0",
     "cachetools>=7.1.4",
+    "idna>=3.7",
 ]
 
 [project.scripts]

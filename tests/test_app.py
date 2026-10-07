@@ -1077,6 +1077,21 @@ async def test_an_origin_entry_with_a_trailing_dot_still_names_the_hub(monkeypat
         assert upload.status_code == 400, "the origin was refused, where the file should have been"
 
 
+@pytest.mark.parametrize(
+    ("listed", "sent"),
+    [("https://drucker.müller.example", "drucker.xn--mller-kva.example"), ("https://Straße.example", "xn--strae-oqa.example")],
+)
+async def test_an_internationalised_origin_entry_names_the_hub_the_way_a_browser_sends_it(monkeypatch, listed: str, sent: str) -> None:
+    """It was taken as written, which no browser sends, so the name was refused with nothing logged."""
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", listed)
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/api/health", headers={"host": sent})).status_code == 200
+        upload = await client.post("/api/prints?filename=a.stl", content=b"solid", headers={"host": "printguard:8000", "origin": f"https://{sent}"})
+        assert upload.status_code == 400, "the origin was refused, where the file should have been"
+
+
 async def test_an_origin_entry_with_another_scheme_is_ignored_and_names_no_host(monkeypatch) -> None:
     monkeypatch.setenv("PRINTGUARD_ORIGINS", "ftp://ftp.example.io, https://ok.example.com")
     told: list[str] = []
