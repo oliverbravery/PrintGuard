@@ -165,8 +165,9 @@ function errorDetail(status: number, body: string): string {
   }
 }
 
-export function sendPrint(draft: PrintDraft, body: Blob, onProgress: (fraction: number) => void): Promise<void> {
+export function sendPrint(draft: PrintDraft, body: Blob, onProgress: (fraction: number) => void, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
     const request = new XMLHttpRequest();
     const params = new URLSearchParams({ filename: draft.file.name, name: draft.name, printer_ids: draft.printerIds.join(",") });
     for (const [heater, target] of Object.entries(draft.temperatures)) params.set(heater, String(target));
@@ -175,6 +176,8 @@ export function sendPrint(draft: PrintDraft, body: Blob, onProgress: (fraction: 
     request.upload.onprogress = (event) => event.lengthComputable && onProgress(event.loaded / event.total);
     request.onload = () => (request.status < 400 ? resolve() : reject(new Error(errorDetail(request.status, request.responseText))));
     request.onerror = () => reject(new Error("the upload did not reach the hub"));
+    request.onabort = () => reject(signal.reason);
+    signal.addEventListener("abort", () => request.abort(), { once: true });
     request.send(body);
   });
 }

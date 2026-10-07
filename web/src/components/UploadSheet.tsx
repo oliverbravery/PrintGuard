@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { acceptedTags, extOf, formatBytes, inspectPrint, isText, toolpathOf, type Inspection, type Temperatures } from "../prints";
 import { useStore, type StagedPrint } from "../store";
 import { Sheet } from "./Dialog";
@@ -51,6 +51,7 @@ function StagedPrintForm({
   const [drawn, setDrawn] = useState<ParsedToolpath | null>();
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const uploadAbort = useRef<AbortController>(null);
   const [name, setName] = useState(stem(file.name));
   const [drafts, setDrafts] = useState<Record<HeaterName, string>>({ nozzle: "", bed: "" });
   const printerIds = engine ? acceptedTags(engine, tags, ext) : [];
@@ -67,6 +68,7 @@ function StagedPrintForm({
       .catch((err: Error) => current && setError(err.message));
     return () => {
       current = false;
+      uploadAbort.current?.abort();
     };
   }, []);
 
@@ -83,7 +85,8 @@ function StagedPrintForm({
   const upload = () => {
     setError(null);
     setUploading(true);
-    uploadPrint({ file, name: name.trim(), printerIds, temperatures }, isText(file.name) && !inspection!.thumbnail ? drawn! : null)
+    uploadAbort.current = new AbortController();
+    uploadPrint({ file, name: name.trim(), printerIds, temperatures }, isText(file.name) && !inspection!.thumbnail ? drawn! : null, uploadAbort.current.signal)
       .then(onDone)
       .catch((err: Error) => {
         setError(err.message);

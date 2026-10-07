@@ -183,7 +183,7 @@ interface PgStore {
   openPrint(id: string | null): void;
   stagePrints(files: File[]): void;
   unstage(id: number): void;
-  uploadPrint(draft: PrintDraft, thumbnailFrom: ParsedToolpath | null): Promise<void>;
+  uploadPrint(draft: PrintDraft, thumbnailFrom: ParsedToolpath | null, signal: AbortSignal): Promise<void>;
   fetchSnapshot(monitorId: string, id: string): void;
   clearCreatedToken(): void;
   testPrinter(target: string, provider: string, config: AdapterConfig, id?: string): void;
@@ -970,12 +970,12 @@ export const useStore = create<PgStore>((set, get) => {
       set((s) => ({ staged: s.staged.filter((p) => p.id !== id) }));
     },
 
-    uploadPrint(draft, thumbnailFrom) {
+    uploadPrint(draft, thumbnailFrom, signal) {
       const id = ++uploadSeq;
       set((s) => ({ uploads: [...s.uploads, { id, name: draft.name || draft.file.name, progress: 0 }] }));
       return (thumbnailFrom ? withPreview(draft.file, thumbnailFrom).catch(() => draft.file) : Promise.resolve(draft.file))
         .then((body) =>
-          sendPrint(draft, body, (progress) => set((s) => ({ uploads: s.uploads.map((u) => (u.id === id ? { ...u, progress } : u)) }))),
+          sendPrint(draft, body, (progress) => set((s) => ({ uploads: s.uploads.map((u) => (u.id === id ? { ...u, progress } : u)) })), signal),
         )
         .finally(() => set((s) => ({ uploads: s.uploads.filter((u) => u.id !== id) })));
     },
