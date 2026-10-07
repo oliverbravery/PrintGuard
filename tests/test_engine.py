@@ -700,6 +700,26 @@ async def test_a_camera_dropout_ends_the_defect_streak() -> None:
     assert not _of(events, "alert"), "two defect frames before a dropout and one after are not three in a row"
 
 
+async def test_a_camera_dropped_and_registered_again_ends_the_defect_streak() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    platform.inference_blocked = True
+    async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
+        monitor = next(iter(engine.monitors.values()))
+        camera = next(iter(engine.cameras.values()))
+        await engine.handle({"cmd": "monitor.update", "id": monitor["id"], "patch": {"consecutive": 3, "notify": False}})
+        monitor = engine.monitors[monitor["id"]]
+        frame = Frame(rgb=np.zeros((48, 64, 3), np.uint8), seq=0.0, ts=time.time())
+        await engine.watchdog.on_score(monitor, frame, 0.99)
+        await engine.watchdog.on_score(monitor, frame, 0.99)
+        await engine._drop_camera(camera.id)
+        await engine.watchdog.watch_health()
+        engine.cameras.add(camera)
+        await engine.watchdog.on_score(monitor, frame, 0.99)
+        await asyncio.sleep(0)
+
+    assert not _of(events, "alert"), "two defect frames before the camera went and one after it came back are not three in a row"
+
+
 async def test_a_removed_monitor_leaves_nothing_behind_in_the_watchdog() -> None:
     platform = FakePlatform(infer_s=0.02, failing=True)
     async with running_engine(platform, camera_fps=[15.0]) as (engine, events):
