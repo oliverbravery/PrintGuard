@@ -12,7 +12,9 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-from .base import HttpFn, NotifierAdapter
+from .base import HttpFn, NotifierAdapter, truncated
+
+MESSAGE_LIMIT_BYTES = 4096
 
 
 def _header(text: str) -> str:
@@ -58,11 +60,13 @@ class NtfyNotifier(NotifierAdapter):
 
         A self-hosted server takes attachments only once ``attachment-cache-dir``
         and ``base-url`` are set, and answers 400 until then, so an alert whose
-        snapshot is refused is sent again as text.
+        snapshot is refused is sent again as text. The message is cut to the
+        4096 bytes ntfy takes, since it turns a longer one into an attachment.
 
         Raises:
             RuntimeError: If ntfy rejects the alert, or takes it only without its snapshot.
         """
+        body = truncated(body, MESSAGE_LIMIT_BYTES, utf8_bytes=True)
         headers = {"Title": _header(title), **({"Priority": "urgent", "Tags": "rotating_light"} if urgent else {})}
         if config.get("token"):
             headers["Authorization"] = f"Bearer {config['token']}"

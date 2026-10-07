@@ -40,8 +40,6 @@ MAX_MILLIMETRES = 1_000_000_000.0
 MAX_DEGREES = 1000.0
 """The most a file's estimates and temperatures may say, far above any print and low enough to encode."""
 PLATE_GCODE = re.compile(r"^Metadata/plate_(\d+)\.gcode$")
-PLATE_GCODE_NAME = "Metadata/plate_{plate}.gcode"
-PLATE_IMAGE = "Metadata/plate_{plate}.png"
 BGCODE_MAGIC = b"GCDE"
 IMAGE_TYPES = {"png": "image/png", "jpg": "image/jpeg"}
 
@@ -114,17 +112,17 @@ def inspect(data: bytes, ext: str) -> Sliced:
         What the file says about itself.
 
     Raises:
-        ValueError: If the file is empty, a 3mf carries no sliced plate, a bgcode
-            file is not one or is cut short, or either unpacks to more than a
-            sliced file should.
+        ValueError: If the file is empty, a 3mf carries no sliced plate or an
+            empty one, a bgcode file is not one, is cut short or holds no gcode,
+            or either unpacks to more than a sliced file should.
     """
     if not data:
         raise ValueError("this file is empty")
     if ext == "3mf":
         with _archive(data) as archive:
-            plate, gcode = _plate(archive)
+            name, gcode = _plate(archive)
             sliced = _text(gcode)
-            image_name = PLATE_IMAGE.format(plate=plate)
+            image_name = f"{name.removesuffix('.gcode')}.png"
             if sliced.thumbnail is None and image_name in archive.namelist():
                 sliced.thumbnail, sliced.thumbnail_type = _unpacked(archive, image_name), IMAGE_TYPES["png"]
         return sliced
@@ -153,7 +151,7 @@ def retemper(data: bytes, ext: str, targets: dict[str, float]) -> bytes:
 
     Raises:
         ValueError: If the file is binary gcode, never heats a heater named, or
-            a target is not above zero.
+            a target is not above zero, or if no temperature in it moved.
     """
     if ext == "bgcode":
         raise ValueError("binary gcode's temperatures can't be changed, export it as text gcode instead")
@@ -173,18 +171,36 @@ def retemper(data: bytes, ext: str, targets: dict[str, float]) -> bytes:
         for heater, (listed, delta) in moves.items():
             lines = _shift(lines, heater, listed, delta)
         output.write(lines)
-    return output.getvalue()
+    moved = output.getvalue()
+    if moved == data and any(delta for _, delta in moves.values()):
+        raise ValueError("none of the temperatures in this file moved, so it would print at the ones it was sliced for")
+    return moved
 
 
-def plate_gcode(data: bytes) -> tuple[int, bytes]:
+def plate_name(data: bytes) -> str:
+    """Names the first sliced plate's gcode inside a Bambu Studio or Orca 3mf, without unpacking it.
+
+    Returns:
+        The member's own name, such as ``Metadata/plate_1.gcode``, which a
+        slicer may write with a leading zero.
+
+    Raises:
+        ValueError: If the file is not a zip, is damaged, holds no plate gcode,
+            which is what an unsliced project looks like, or an empty one, or
+            unpacks to too much.
+    """
+    with _archive(data) as archive:
+        return _plate_name(archive)
+
+
+def plate_gcode(data: bytes) -> tuple[str, bytes]:
     """Finds the first sliced plate inside a Bambu Studio or Orca 3mf.
 
     Returns:
-        The plate number and its gcode.
+        The plate's member name and its gcode.
 
     Raises:
-        ValueError: If the file is not a zip, is damaged or holds no plate gcode,
-            which is what an unsliced project looks like, or unpacks to too much.
+        ValueError: As ``plate_name``.
     """
     with _archive(data) as archive:
         return _plate(archive)
@@ -216,12 +232,19 @@ def _archive(data: bytes) -> Iterator[zipfile.ZipFile]:
         raise ValueError("this 3mf is not a zip archive or is cut short or damaged") from exc
 
 
-def _plate(archive: zipfile.ZipFile) -> tuple[int, bytes]:
+def _plate_name(archive: zipfile.ZipFile) -> str:
     plates = sorted((int(m.group(1)), name) for name in archive.namelist() if (m := PLATE_GCODE.match(name)))
     if not plates:
         raise ValueError("this 3mf has not been sliced, export it from Bambu Studio or Orca with the gcode included")
-    plate, name = plates[0]
-    return plate, _unpacked(archive, name)
+    name = plates[0][1]
+    if not archive.getinfo(name).file_size:
+        raise ValueError(f"the gcode of {name} in this 3mf is empty")
+    return name
+
+
+def _plate(archive: zipfile.ZipFile) -> tuple[str, bytes]:
+    name = _plate_name(archive)
+    return name, _unpacked(archive, name)
 
 
 def _unpacked(archive: zipfile.ZipFile, name: str) -> bytes:
@@ -238,8 +261,7 @@ def _replace_plate(data: bytes, rewrite: Callable[[bytes], bytes]) -> bytes:
     """Rewrites a 3mf's first sliced plate and the checksum Bambu Studio keeps beside it."""
     output = io.BytesIO()
     with _archive(data) as source:
-        plate, gcode = _plate(source)
-        name = PLATE_GCODE_NAME.format(plate=plate)
+        name, gcode = _plate(source)
         gcode = rewrite(gcode)
         with zipfile.ZipFile(output, "w") as target:
             for member in source.infolist():
@@ -388,7 +410,7 @@ def _binary(data: bytes) -> Sliced:
 
     Raises:
         ValueError: If the file is not binary gcode, is cut short or damaged,
-            or its blocks inflate past the cap.
+            holds no gcode or an empty block of it, or its blocks inflate past the cap.
     """
     if data[:4] != BGCODE_MAGIC:
         raise ValueError("this is not a binary gcode file")
@@ -404,13 +426,17 @@ def _blocks(data: bytes) -> Sliced:
     found: dict[str, str] = {}
     thumbnails: list[tuple[int, str, bytes]] = []
     room = MAX_BLOCK_BYTES
-    while offset + 8 <= len(data):
+    while True:
+        if offset + 8 > len(data):
+            raise ValueError("this binary gcode file holds no gcode")
         kind, compression, size = struct.unpack_from("<HHI", data, offset)
         offset += 8
         if compression:
             size = struct.unpack_from("<I", data, offset)[0]
             offset += 4
         if kind == _BGCODE_GCODE:
+            if not size:
+                raise ValueError("the gcode in this binary gcode file is empty")
             break
         params = 6 if kind == _BGCODE_THUMBNAIL else 2
         header = data[offset : offset + params]

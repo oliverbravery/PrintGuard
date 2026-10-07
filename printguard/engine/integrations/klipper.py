@@ -12,11 +12,12 @@ from urllib.parse import urlsplit, urlunsplit
 
 from ..adapters import multipart_form
 from ..cameras import webrtc_endpoint, whep_endpoint
-from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, webcam_url
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, require_reply, webcam_url
 
 _UPLOAD_TIMEOUT_S = 180.0
 _API_PORTS = range(7125, 7200)
 """Moonraker's own ports: 7125, one more for each further instance on the host, and 7130 for TLS."""
+_OK = {"result": "ok"}
 _HEATERS = {"nozzle": "extruder", "bed": "heater_bed"}
 _STATUS_MAP = {
     "printing": DeviceStatus.PRINTING,
@@ -91,32 +92,44 @@ class KlipperAdapter(IntegrationAdapter):
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
-        """Issues pause/resume/cancel through /printer/print endpoints."""
-        status, _ = await http(
+        """Issues pause/resume/cancel through /printer/print endpoints, which answer ``{"result": "ok"}``.
+
+        Raises:
+            RuntimeError: If Moonraker rejects the command or answers with anything else.
+        """
+        status, body = await http(
             "POST",
             f"{config['base_url'].rstrip('/')}/printer/print/{action.value}",
             headers=self._headers(config),
         )
-        if status >= 400:
-            raise RuntimeError(f"Moonraker rejected {action.value}: HTTP {status}")
+        require_reply("Moonraker", action.value, status, body == _OK)
 
     async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
-        """Sets a heater target with SET_HEATER_TEMPERATURE through /printer/gcode/script."""
-        status, _ = await http(
+        """Sets a heater target with SET_HEATER_TEMPERATURE through /printer/gcode/script.
+
+        Raises:
+            RuntimeError: If Moonraker rejects the target or answers with anything but ``{"result": "ok"}``.
+        """
+        status, body = await http(
             "POST",
             f"{config['base_url'].rstrip('/')}/printer/gcode/script",
             headers=self._headers(config),
             json={"script": f"SET_HEATER_TEMPERATURE HEATER={_HEATERS[heater]} TARGET={target:g}"},
         )
-        if status >= 400:
-            raise RuntimeError(f"Moonraker rejected the {heater} target: HTTP {status}")
+        require_reply("Moonraker", f"the {heater} target", status, body == _OK)
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
         """Uploads into the gcodes root through /server/files/upload and starts it.
 
         Moonraker answers 201 for a file it stored whether or not Klipper then
         started it, and says which in ``print_started``. This reply is the one
-        Moonraker does not wrap in ``result``.
+        Moonraker does not wrap in ``result``. A file that cannot start at once
+        is held in the job queue when ``queue_gcode_uploads`` is set, and
+        ``print_queued`` says so.
+
+        Raises:
+            RuntimeError: If Moonraker refuses the file, does not answer with
+                its 201 upload reply, or does not start the print.
         """
         headers, body = multipart_form({"root": "gcodes", "print": "true"}, "file", filename, data, "application/octet-stream")
         status, reply = await http(
@@ -126,10 +139,12 @@ class KlipperAdapter(IntegrationAdapter):
             data=body,
             timeout=_UPLOAD_TIMEOUT_S,
         )
-        if status >= 400:
-            raise RuntimeError(f"Moonraker rejected {filename}: HTTP {status}")
-        if not reply["print_started"]:
-            raise RuntimeError(f"Moonraker stored {filename} but did not start printing it")
+        require_reply("Moonraker", filename, status, status == 201 and isinstance(reply, dict) and "print_started" in reply)
+        if reply["print_started"]:
+            return
+        if reply.get("print_queued"):
+            raise RuntimeError(f"Moonraker queued {filename} and will print it when the printer is free")
+        raise RuntimeError(f"Moonraker stored {filename} but did not start printing it")
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:
         """Lists Moonraker's registered webcams via /server/webcams/list.

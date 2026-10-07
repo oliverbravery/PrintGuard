@@ -47,7 +47,7 @@ from typing import Any, Callable
 
 import paho.mqtt.client as mqtt
 
-from ..gcode import plate_gcode
+from ..gcode import plate_name
 from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter
 
 _PORT = 8883
@@ -57,6 +57,8 @@ _CAMERA_PORT = 6000
 _USERNAME = "bblp"
 _CONNECT_TIMEOUT_S = 5.0
 _REPLY_TIMEOUT_S = 5.0
+_STORED_REPLY_TIMEOUT_S = 60.0
+"""How long the printer may take to confirm a stored file, since it answers after flushing the whole of it to the SD card."""
 _DEADLINE_S = 12.0
 _KEEPALIVE_S = 30
 _SILENCE_LIMIT_S = 60.0
@@ -316,13 +318,13 @@ class BambuAdapter(IntegrationAdapter):
         deadline of its own, since a large file to a slow printer takes as
         long as it takes and each step of it times out on its socket.
         """
-        plate, _ = plate_gcode(data)
+        plate = await asyncio.to_thread(plate_name, data)
         await _blocking(self._upload, config, filename, data)
         product = await asyncio.wait_for(_blocking(self._product, config), _DEADLINE_S)
         payload = {
             "print": {
                 **_PROJECT_FILE,
-                "param": f"Metadata/plate_{plate}.gcode",
+                "param": plate,
                 "url": f"ftp:///{filename}" if product in _FTP_URL_PRODUCTS else f"file:///sdcard/{filename}",
                 "subtask_name": filename.rsplit(".", 1)[0],
             }
@@ -402,12 +404,15 @@ class BambuAdapter(IntegrationAdapter):
 
                 ftplib unwraps TLS first, which the printer does not answer, so
                 the wait times out after the file is stored. ha-bambulab and
-                bambulabs_api both close the socket instead.
+                bambulabs_api both close the socket instead. The printer confirms
+                the file once it has written it, which takes longer than any
+                other reply on the control channel.
                 """
                 self.voidcmd("TYPE I")
                 with self.transfercmd(cmd, rest) as conn:
                     while chunk := fp.read(blocksize):
                         conn.sendall(chunk)
+                self.sock.settimeout(_STORED_REPLY_TIMEOUT_S)
                 return self.voidresp()
 
         ftps = ImplicitFtps(context=context, timeout=_CONNECT_TIMEOUT_S)

@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlencode
 
-from .base import HttpFn, NotifierAdapter, multipart_form
+from .base import HttpFn, NotifierAdapter, multipart_form, truncated
 
 API = "https://api.pushover.net/1/messages.json"
 PRIORITIES = ["-2", "-1", "0", "1"]
@@ -24,6 +24,8 @@ PRIORITY_LABELS = [
     "High - bypasses your quiet hours",
 ]
 DEFAULT_PRIORITY = "1"
+TITLE_LIMIT = 250
+MESSAGE_LIMIT = 1024
 
 
 class PushoverNotifier(NotifierAdapter):
@@ -67,7 +69,8 @@ class PushoverNotifier(NotifierAdapter):
         """Posts the message, as multipart with the snapshot or form-encoded without.
 
         A notice that is not urgent goes at normal priority, or lower where the
-        configured priority is lower.
+        configured priority is lower. The title is cut to the 250 characters
+        Pushover takes and the message to 1024.
         """
         priority = str(config.get("priority", "")).strip()
         priority = priority if priority in PRIORITIES else DEFAULT_PRIORITY
@@ -76,8 +79,8 @@ class PushoverNotifier(NotifierAdapter):
         fields = {
             "token": str(config["api_token"]).strip(),
             "user": str(config["user_key"]).strip(),
-            "title": title,
-            "message": body,
+            "title": truncated(title, TITLE_LIMIT),
+            "message": truncated(body, MESSAGE_LIMIT),
             "priority": priority,
         }
         if image:

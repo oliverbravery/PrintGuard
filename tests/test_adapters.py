@@ -44,6 +44,8 @@ class RecordingHttp:
         self.calls: list[dict[str, Any]] = []
 
     async def __call__(self, method, url, *, headers=None, json=None, data=None, timeout=10.0):
+        if hasattr(data, "__aiter__"):
+            data = b"".join([chunk async for chunk in data])
         self.calls.append({"method": method, "url": url, "headers": headers or {}, "json": json, "data": data})
         return self.status, self.body
 
@@ -64,11 +66,16 @@ class RoutedHttp(RecordingHttp):
         return next((answer for key, answer in self.routes.items() if key in url), (404, {}))
 
 
+SIGN_IN_PAGE = (200, "<html>Sign in</html>")
+MOONRAKER_OK = {"result": "ok"}
+OCTOPRINT_UPLOADED = {"files": {"local": {"name": "benchy.gcode"}}, "done": True, "effectiveSelect": True, "effectivePrint": True}
 OCTOPRINT_HEATERS = {"temperature": {"tool0": {"actual": 209.6, "target": 210.0, "offset": 0}, "bed": {"actual": 60.2, "target": 60.0, "offset": 0}}}
 
 
-def test_multipart_form_builds_a_well_formed_body() -> None:
-    headers, body = multipart_form({"chat_id": "7", "caption": "T\nB"}, "photo", "snap.jpg", JPEG)
+async def test_multipart_form_builds_a_well_formed_body() -> None:
+    headers, chunks = multipart_form({"chat_id": "7", "caption": "T\nB"}, "photo", "snap.jpg", JPEG)
+    body = b"".join([chunk async for chunk in chunks])
+    assert headers["Content-Length"] == str(len(body))
     content_type = headers["Content-Type"]
     assert content_type.startswith("multipart/form-data; boundary=")
     boundary = content_type.split("boundary=")[1].encode()
@@ -79,6 +86,44 @@ def test_multipart_form_builds_a_well_formed_body() -> None:
     assert b'name="photo"; filename="snap.jpg"' in body
     assert b"Content-Type: image/jpeg" in body
     assert JPEG in body
+
+
+async def test_a_multipart_upload_holds_no_more_than_the_file_while_it_is_sent() -> None:
+    """A 64 MB upload held 137 MB beside the file when the body was built as one buffer."""
+    import tracemalloc
+
+    size, announced = 64 * 1024 * 1024, []
+
+    async def receive(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        head = (await reader.readuntil(b"\r\n\r\n")).decode().lower()
+        length = int(head.split("content-length: ")[1].split("\r\n")[0])
+        announced.append("transfer-encoding" in head)
+        while length > 0:
+            length -= len(await reader.read(min(length, 65536)))
+        writer.write(b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(receive, "127.0.0.1", 0)
+    file = bytes(size)
+    headers, body = multipart_form({"print": "true"}, "file", "big.gcode", file, "application/octet-stream")
+    tracemalloc.start()
+    try:
+        async with httpx.AsyncClient() as client:
+            sent = await client.post(f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}/", headers=headers, content=body, timeout=60)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+        server.close()
+    assert sent.status_code == 201 and announced == [False]
+    assert peak < size // 4, f"{peak // 1024 // 1024} MB was held beside a {size // 1024 // 1024} MB file"
+
+
+async def test_multipart_form_sends_the_file_itself_and_never_a_copy_of_it() -> None:
+    file = bytes(8 * 1024 * 1024)
+    _, chunks = multipart_form({"print": "true"}, "file", "big.gcode", file, "application/octet-stream")
+    sent = [chunk async for chunk in chunks]
+    assert any(chunk is file for chunk in sent), "joining the parts into one body would hold the file twice more"
 
 
 async def test_ntfy_attaches_snapshot_with_token() -> None:
@@ -419,7 +464,7 @@ async def test_klipper_without_progress_has_no_time_left() -> None:
 
 
 async def test_klipper_heater_targets_go_through_gcode_script() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=MOONRAKER_OK)
     await INTEGRATIONS["klipper"].heat(http, {"base_url": "http://kl/", "api_key": "kk"}, "nozzle", 215.0)
     assert (http.last["method"], http.last["url"]) == ("POST", "http://kl/printer/gcode/script")
     assert http.last["json"] == {"script": "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=215"}
@@ -431,7 +476,7 @@ async def test_klipper_heater_targets_go_through_gcode_script() -> None:
 
 
 async def test_klipper_actions_and_auth() -> None:
-    http = RecordingHttp()
+    http = RecordingHttp(body=MOONRAKER_OK)
     await INTEGRATIONS["klipper"].send(http, {"base_url": "http://kl/", "api_key": "kk"}, DeviceAction.CANCEL)
     assert http.last["url"] == "http://kl/printer/print/cancel"
     assert http.last["headers"] == {"X-Api-Key": "kk"}
@@ -902,6 +947,13 @@ def test_bambu_upload_does_not_wait_on_the_data_channels_tls_shutdown(monkeypatc
 
         def __init__(self) -> None:
             self._closed = False
+            self._timeout: float | None = None
+
+        def settimeout(self, value: float | None) -> None:
+            self._timeout = value
+
+        def gettimeout(self) -> float | None:
+            return self._timeout
 
         def sendall(self, data: bytes) -> None:
             sent.append(data)
@@ -913,6 +965,7 @@ def test_bambu_upload_does_not_wait_on_the_data_channels_tls_shutdown(monkeypatc
             self._closed = True
 
     channels: list[DataChannel] = []
+    confirmed_within: list[float | None] = []
 
     class Context:
         def wrap_socket(self, sock: Any, **kwargs: Any) -> DataChannel:
@@ -928,11 +981,14 @@ def test_bambu_upload_does_not_wait_on_the_data_channels_tls_shutdown(monkeypatc
     monkeypatch.setattr(ftplib.FTP_TLS, "prot_p", lambda self: commands.append("PROT P"))
     monkeypatch.setattr(ftplib.FTP, "voidcmd", lambda self, cmd: commands.append(cmd))
     monkeypatch.setattr(ftplib.FTP, "ntransfercmd", lambda self, cmd, rest=None: (commands.append(cmd) or object(), None))
-    monkeypatch.setattr(ftplib.FTP, "voidresp", lambda self: "226 Transfer complete")
+    monkeypatch.setattr(ftplib.FTP, "voidresp", lambda self: confirmed_within.append(self.sock.gettimeout()) or "226 Transfer complete")
     monkeypatch.setattr(ftplib.FTP, "close", lambda self: None)
     BambuAdapter()._upload(BAMBU_CONFIG, "benchy.3mf", b"3mf bytes")
     assert commands == ["USER bblp", "PROT P", "TYPE I", "STOR benchy.3mf"]
     assert sent == [b"3mf bytes"] and channels[-1]._closed
+    assert confirmed_within == [bambu._STORED_REPLY_TIMEOUT_S] and bambu._STORED_REPLY_TIMEOUT_S > bambu._CONNECT_TIMEOUT_S, (
+        "a printer confirms a large file only after writing it, which the control socket's own timeout must not cut short"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1265,6 +1321,50 @@ async def test_a_cancelled_centauri_connect_closes_what_it_went_on_to_open(monke
     assert client.closed and not adapter._connections
 
 
+async def test_closing_a_centauri_carbon_2_that_is_slow_to_stop_does_not_stop_the_loop(monkeypatch) -> None:
+    """paho's loop_stop joins a network thread that a printer which is off keeps in a reconnect for up to about 5 s."""
+    adapter = ElegooAdapter()
+    stopped: list[str] = []
+
+    class SlowMqtt:
+        running = True
+
+        def disconnect(self) -> None:
+            stopped.append("disconnect")
+            time.sleep(0.4 if self.running else 0)
+
+        def loop_stop(self) -> None:
+            stopped.append("loop_stop")
+            time.sleep(0.4 if self.running else 0)
+            self.running = False
+
+    class SlowCentauri(FakeCentauri):
+        _mqtt = SlowMqtt()
+
+        async def close(self) -> None:
+            self._mqtt.disconnect()
+            self._mqtt.loop_stop()
+            await super().close()
+
+    client = SlowCentauri()
+    monkeypatch.setattr(adapter, "_connect_centauri", _fake_centauri(client))
+    await adapter.fetch_state(None, ELEGOO_CENTAURI_CONFIG)
+    adapter._connections[adapter.connection_key(ELEGOO_CENTAURI_CONFIG)] = client
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    ticking = asyncio.create_task(tick())
+    await adapter.close()
+    ticking.cancel()
+    assert client.closed and stopped[:2] == ["disconnect", "loop_stop"]
+    assert ticks > 50, f"the loop ran {ticks} times in the 0.8 s it took to stop the connection"
+
+
 async def test_elegoo_centauri_reconnects_after_failure(monkeypatch) -> None:
     adapter = ElegooAdapter()
 
@@ -1307,6 +1407,7 @@ async def test_elegoo_moonraker_reuses_klipper_protocol() -> None:
     assert state.progress == 50.0
     assert http.last["url"] == "http://192.168.1.91:7125/printer/objects/query?print_stats&virtual_sdcard&extruder&heater_bed"
     assert http.last["headers"] == {"X-Api-Key": "secret"}
+    http = RecordingHttp(body=MOONRAKER_OK)
     await INTEGRATIONS["elegoo"].send(http, ELEGOO_MOONRAKER_CONFIG, DeviceAction.PAUSE)
     assert http.last["url"] == "http://192.168.1.91:7125/printer/print/pause"
     await INTEGRATIONS["elegoo"].heat(http, ELEGOO_MOONRAKER_CONFIG, "bed", 60.0)
@@ -1367,6 +1468,13 @@ async def test_prusa_no_active_job_is_idle(monkeypatch) -> None:
     assert state.status is DeviceStatus.IDLE
     assert state.job is None, "204 No Content from /api/v1/job is idle, not a phantom job"
     assert state.public()["bed"] == {"actual": 59.6, "target": 60.0}, "an idle printer still reports its heaters"
+
+
+@pytest.mark.parametrize("status", [{}, {"printer": {}}])
+async def test_prusa_that_says_nothing_of_its_state_is_not_idle(monkeypatch, status: dict[str, Any]) -> None:
+    monkeypatch.setattr(INTEGRATIONS["prusa"], "_read", _prusa_read(None, status))
+    state = await INTEGRATIONS["prusa"].fetch_state(None, PRUSA_CONFIG)
+    assert state.status is DeviceStatus.UNKNOWN, "missing data is not a positive not-printing, which would stand a monitor down"
 
 
 async def test_prusa_unreachable_says_why(monkeypatch) -> None:
@@ -1606,7 +1714,7 @@ async def test_an_adapter_without_uploads_says_so() -> None:
 
 
 async def test_octoprint_uploads_selected_and_printing() -> None:
-    http = RecordingHttp(status=201)
+    http = RecordingHttp(status=201, body=OCTOPRINT_UPLOADED)
     await INTEGRATIONS["octoprint"].print_file(http, {"base_url": "http://op/", "api_key": "k"}, "benchy.gcode", b"G1 X1\n")
     call = http.last
     assert (call["method"], call["url"]) == ("POST", "http://op/api/files/local")
@@ -1615,6 +1723,23 @@ async def test_octoprint_uploads_selected_and_printing() -> None:
     assert b'name="file"; filename="benchy.gcode"\r\nContent-Type: application/octet-stream\r\n\r\nG1 X1\n' in call["data"]
     with pytest.raises(RuntimeError, match="HTTP 415"):
         await INTEGRATIONS["octoprint"].print_file(RecordingHttp(status=415), {"base_url": "http://op", "api_key": "k"}, "x.gcode", b"")
+
+
+@pytest.mark.parametrize("command", ["pause", "resume", "cancel", "nozzle", "bed"])
+async def test_octoprint_that_answers_a_command_with_a_page_has_not_taken_it(command: str) -> None:
+    http = RecordingHttp(*SIGN_IN_PAGE)
+    adapter = INTEGRATIONS["octoprint"]
+    with pytest.raises(RuntimeError, match="did not answer .* like its API: HTTP 200"):
+        if command in ("nozzle", "bed"):
+            await adapter.heat(http, {"base_url": "http://op"}, command, 200.0)
+        else:
+            await adapter.send(http, {"base_url": "http://op"}, DeviceAction(command))
+
+
+@pytest.mark.parametrize("answer", [SIGN_IN_PAGE, (201, "<html>Sign in</html>"), (200, OCTOPRINT_UPLOADED), (201, {"done": True})])
+async def test_octoprint_that_answers_an_upload_with_something_else_has_not_taken_it(answer: tuple[int, Any]) -> None:
+    with pytest.raises(RuntimeError, match="did not answer benchy.gcode like its API"):
+        await INTEGRATIONS["octoprint"].print_file(RecordingHttp(*answer), {"base_url": "http://op"}, "benchy.gcode", b"G1\n")
 
 
 async def test_octoprint_upload_it_stored_but_did_not_start_raises() -> None:
@@ -1631,6 +1756,29 @@ def test_prusa_signs_in_as_maker_unless_another_username_is_given() -> None:
 
 
 MOONRAKER_UPLOADED = {"item": {"path": "benchy.gcode", "root": "gcodes"}, "print_started": True, "print_queued": False, "action": "create_file"}
+
+
+@pytest.mark.parametrize("command", ["pause", "resume", "cancel", "nozzle", "bed"])
+async def test_klipper_that_answers_a_command_with_a_page_has_not_taken_it(command: str) -> None:
+    http = RecordingHttp(*SIGN_IN_PAGE)
+    adapter = INTEGRATIONS["klipper"]
+    with pytest.raises(RuntimeError, match="did not answer .* like its API: HTTP 200"):
+        if command in ("nozzle", "bed"):
+            await adapter.heat(http, {"base_url": "http://kl"}, command, 200.0)
+        else:
+            await adapter.send(http, {"base_url": "http://kl"}, DeviceAction(command))
+
+
+@pytest.mark.parametrize("answer", [SIGN_IN_PAGE, (201, "<html>Sign in</html>"), (200, MOONRAKER_UPLOADED), (201, {"result": "ok"})])
+async def test_klipper_that_answers_an_upload_with_something_else_has_not_taken_it(answer: tuple[int, Any]) -> None:
+    with pytest.raises(RuntimeError, match="did not answer benchy.gcode like its API"):
+        await INTEGRATIONS["klipper"].print_file(RecordingHttp(*answer), {"base_url": "http://mr:7125"}, "benchy.gcode", b"G1\n")
+
+
+async def test_klipper_upload_that_moonraker_queued_says_it_may_start_later() -> None:
+    queued = {**MOONRAKER_UPLOADED, "print_started": False, "print_queued": True}
+    with pytest.raises(RuntimeError, match="queued benchy.gcode and will print it when the printer is free"):
+        await INTEGRATIONS["klipper"].print_file(RecordingHttp(status=201, body=queued), {"base_url": "http://mr:7125"}, "benchy.gcode", b"G1\n")
 
 
 async def test_klipper_upload_that_does_not_start_the_print_raises() -> None:
@@ -1654,8 +1802,8 @@ async def test_klipper_uploads_into_gcodes_and_prints() -> None:
 class FakePrusaLink:
     """A loopback PrusaLink that challenges every request without digest credentials."""
 
-    def __init__(self, storages: list[dict[str, Any]], listing: int = 200) -> None:
-        self.storages, self.listing = storages, listing
+    def __init__(self, storages: list[dict[str, Any]], listing: int = 200, stored: str = "201 Created") -> None:
+        self.storages, self.listing, self.stored = storages, listing, stored
         self.received: list[tuple[str, str, bool, dict[str, str], bytes]] = []
 
     async def __aenter__(self) -> dict[str, str]:
@@ -1679,7 +1827,7 @@ class FakePrusaLink:
             status, extra = f"{self.listing} Listing", "Content-Type: application/json\r\n"
             payload = jsonlib.dumps({"storage_list": self.storages}).encode()
         else:
-            status, extra, payload = "201 Created", "", b""
+            status, extra, payload = self.stored, "", b""
         writer.write(f"HTTP/1.1 {status}\r\nContent-Length: {len(payload)}\r\nConnection: close\r\n{extra}\r\n".encode() + payload)
         await writer.drain()
         writer.close()
@@ -1706,6 +1854,29 @@ async def test_prusa_puts_onto_the_first_writable_storage_and_sends_the_file_onc
     )
 
 
+async def test_prusa_that_answers_an_upload_with_something_else_has_not_taken_it() -> None:
+    async with FakePrusaLink([{"path": "/usb", "available": True}], stored="200 OK") as config:
+        with pytest.raises(RuntimeError, match="did not answer the file like its API: HTTP 200"):
+            await INTEGRATIONS["prusa"].print_file(None, config, "benchy.gcode", b"G1")
+
+
+async def test_prusa_commands_are_taken_on_a_204_and_on_nothing_else() -> None:
+    for action, method, path in (
+        (DeviceAction.PAUSE, "PUT", "/api/v1/job/7/pause"),
+        (DeviceAction.RESUME, "PUT", "/api/v1/job/7/resume"),
+        (DeviceAction.CANCEL, "DELETE", "/api/v1/job/7"),
+    ):
+        async with FakePrusaLink([], stored="204 No Content") as config:
+            await INTEGRATIONS["prusa"]._command(config, 7, action)
+        async with FakePrusaLink([], stored="200 OK") as config:
+            with pytest.raises(RuntimeError, match=f"did not answer {action.value} like its API: HTTP 200"):
+                await INTEGRATIONS["prusa"]._command(config, 7, action)
+    commands = FakePrusaLink([], stored="204 No Content")
+    async with commands as config:
+        await INTEGRATIONS["prusa"]._command(config, 7, DeviceAction.CANCEL)
+    assert [(method, path) for method, path, *_ in commands.received] == [("DELETE", "/api/v1/job/7"), ("DELETE", "/api/v1/job/7")]
+
+
 async def test_prusa_without_storage_raises() -> None:
     printer = FakePrusaLink([{"path": "/usb", "available": False}])
     async with printer as config:
@@ -1724,7 +1895,7 @@ async def test_bambu_uploads_over_ftps_then_prints_the_plate(monkeypatch) -> Non
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_upload", lambda config, filename, data: steps.append(("upload", filename, data)))
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_publish", lambda config, payload: steps.append(("publish", payload)))
     monkeypatch.setattr(INTEGRATIONS["bambu"], "_product", lambda config: "Bambu Lab P1S")
-    data = sliced_3mf(plate=3)
+    data = sliced_3mf(plate="03")
     await INTEGRATIONS["bambu"].print_file(None, BAMBU_CONFIG, "benchy.3mf", data)
     assert steps[0] == ("upload", "benchy.3mf", data), "the file is on the SD card before the print is asked for"
     assert steps[1] == (
@@ -1733,7 +1904,7 @@ async def test_bambu_uploads_over_ftps_then_prints_the_plate(monkeypatch) -> Non
             "print": {
                 "sequence_id": "0",
                 "command": "project_file",
-                "param": "Metadata/plate_3.gcode",
+                "param": "Metadata/plate_03.gcode",
                 "url": "file:///sdcard/benchy.3mf",
                 "subtask_name": "benchy",
                 "bed_type": "auto",
@@ -1990,3 +2161,53 @@ async def test_native_takes_urgent_and_ignores_it(monkeypatch) -> None:
 
     monkeypatch.setattr(NOTIFIERS["native"], "_deliver", deliver)
     await NOTIFIERS["native"].send(None, {}, "Title", "Body", None, urgent=False)
+
+
+LONG_NAME = "Printer " + "é" * 600
+
+
+def _field(multipart: bytes, name: str) -> str:
+    return multipart.split(f'name="{name}"\r\n\r\n'.encode())[1].split(b"\r\n--")[0].decode()
+
+
+def test_text_is_cut_to_a_limit_with_an_ellipsis_where_it_was_cut() -> None:
+    from printguard.engine.notifiers.base import truncated
+
+    assert truncated("short", 10) == "short" and truncated("x" * 10, 10) == "x" * 10
+    assert truncated("x" * 11, 10) == "x" * 9 + "…"
+    assert truncated("é" * 10, 10, utf8_bytes=True) == "é" * 3 + "…", "a byte limit never cuts a character in two"
+    assert len(truncated("é" * 3000, 4096, utf8_bytes=True).encode()) <= 4096
+
+
+async def test_pushover_cuts_a_long_title_and_message_to_what_it_takes() -> None:
+    from urllib.parse import parse_qs
+
+    http = RecordingHttp(body={"status": 1})
+    await NOTIFIERS["pushover"].send(http, {"api_token": "ap", "user_key": "uk"}, f"Defect on {LONG_NAME}", LONG_NAME * 3, None)
+    sent = {key: values[0] for key, values in parse_qs(http.last["data"].decode()).items()}
+    assert len(sent["title"]) == 250 and sent["title"].endswith("…")
+    assert len(sent["message"]) == 1024 and sent["message"].endswith("…")
+
+
+async def test_telegram_cuts_a_long_caption_and_a_long_text_to_what_it_takes() -> None:
+    http = RecordingHttp(body={"ok": True})
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "b", "chat_id": "7"}, f"Defect on {LONG_NAME}", LONG_NAME * 6, JPEG)
+    caption = _field(http.last["data"], "caption")
+    assert len(caption) == 1024 and caption.endswith("…")
+    await NOTIFIERS["telegram"].send(http, {"bot_token": "b", "chat_id": "7"}, f"Defect on {LONG_NAME}", LONG_NAME * 6, None)
+    text = http.last["json"]["text"]
+    assert 1024 < len(text) == 4096 and text.endswith("…")
+
+
+async def test_discord_cuts_a_long_message_to_what_it_takes() -> None:
+    http = RecordingHttp()
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/x"}, f"Defect on {LONG_NAME}", LONG_NAME * 4, None)
+    assert len(http.last["json"]["content"]) == 2000 and http.last["json"]["content"].endswith("…")
+    await NOTIFIERS["discord"].send(http, {"webhook_url": "https://discord.com/api/webhooks/1/x"}, "T", LONG_NAME * 4, JPEG)
+    assert len(jsonlib.loads(_field(http.last["data"], "payload_json"))["content"]) == 2000
+
+
+async def test_ntfy_cuts_a_long_message_to_the_bytes_it_takes() -> None:
+    http = RecordingHttp()
+    await NOTIFIERS["ntfy"].send(http, {"url": "https://ntfy.sh/t"}, "Defect", LONG_NAME * 5, None)
+    assert len(http.last["data"]) <= 4096 and http.last["data"].decode().endswith("…")

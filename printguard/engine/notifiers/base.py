@@ -13,6 +13,29 @@ from typing import Any
 
 from ..adapters import Adapter, HttpFn, multipart_form
 
+ELLIPSIS = "…"
+
+
+def truncated(text: str, limit: int, *, utf8_bytes: bool = False) -> str:
+    """Cuts text to a service's documented limit, ending in an ellipsis where it cut.
+
+    A monitor's or a camera's name has no length cap and goes into the alert,
+    so a long one would make the service refuse the alert.
+
+    Args:
+        text: What would be sent.
+        limit: The most the service takes.
+        utf8_bytes: Whether the limit counts UTF-8 bytes and not characters.
+
+    Returns:
+        The text, or its start and an ellipsis if it was over the limit.
+    """
+    if utf8_bytes:
+        encoded = text.encode()
+        room = limit - len(ELLIPSIS.encode())
+        return text if len(encoded) <= limit else encoded[:room].decode(errors="ignore") + ELLIPSIS
+    return text if len(text) <= limit else text[: limit - len(ELLIPSIS)] + ELLIPSIS
+
 
 class NotifierAdapter(Adapter):
     """Base class for alert notifiers."""
@@ -36,4 +59,4 @@ class NotifierAdapter(Adapter):
         """
 
 
-__all__ = ["HttpFn", "NotifierAdapter", "multipart_form"]
+__all__ = ["HttpFn", "NotifierAdapter", "multipart_form", "truncated"]

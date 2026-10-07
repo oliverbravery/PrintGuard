@@ -38,8 +38,8 @@ Every enabled channel gets every notice, so there's no routing to set up. A moni
 |---|---|---|
 | [ntfy](https://ntfy.sh) | A topic URL, on ntfy.sh or your own server | No account needed. Use a hard-to-guess topic, or a protected one with an access token. Anyone with an open topic's URL can read it, so the URL is kept out of the dashboard, bug reports and the API like a password. Defect alerts and fault warnings are sent at urgent priority, and recoveries and a plugin's notices without it. Your own server takes snapshots once [attachments](https://docs.ntfy.sh/config/#attachments) are on, which needs `attachment-cache-dir` and `base-url` set |
 | [Pushover](https://pushover.net) | An application token from [pushover.net/apps/build](https://pushover.net/apps/build) and your user key | A one-off app purchase. Priority defaults to High, which bypasses the quiet hours set on the device. Recoveries and a plugin's notices go at Normal at most |
-| [Telegram](https://telegram.org) | A bot token from @BotFather and your chat ID | Recoveries are sent without a sound |
-| [Discord](https://discord.com) | A webhook URL, from Server Settings, Integrations, then Webhooks | Recoveries are sent with notifications suppressed |
+| [Telegram](https://telegram.org) | A bot token from @BotFather and your chat ID | Recoveries and a plugin's notices are sent without a sound |
+| [Discord](https://discord.com) | A webhook URL, from Server Settings, Integrations, then Webhooks | Recoveries and a plugin's notices are sent with notifications suppressed |
 | Desktop notification | Nothing to fill in | Desktop app only. A native notification on the computer running the app, with the window open or closed. macOS asks for permission the first time, and a send fails with an error while notifications are switched off for PrintGuard in the system settings. A recovery looks like any other notice |
 
 Home Assistant gets the same defects and snapshots over MQTT, covered in
@@ -53,6 +53,7 @@ a print through these same channels.
 | Defect alert | A defect holds for a monitor's consecutive count | A snapshot, the score and whether the print was paused, cancelled or left running. A pause or cancel that failed is called out |
 | Fault warning | A camera drops or freezes, a watching monitor has no camera, or a printer's state can't be read while its monitor watches | Which one, and whether the monitor has stopped watching or can no longer pause the print |
 | Recovery | A faulted camera or printer has stayed healthy | Sent quietly where the channel has a way to, as the [channels](#channels) say |
+| Plugin notice | A [plugin](plugins.md) granted `alert:send` sends one | Its own title and text and no snapshot, sent quietly like a recovery |
 
 A monitor set to **Alert only** says so in the alert, so you know the print is still running. A
 pause or cancel is tried up to three times in 45 seconds before it's reported as failed. An
@@ -64,6 +65,10 @@ A monitor's [cooldown](monitoring.md#monitor-settings) holds back its whole resp
 defect, the pause or cancel included. Pushes with the same outcome are also at least 30 seconds
 apart for each monitor, whatever the cooldown, so a pause that worked is still pushed straight
 after one that failed.
+
+A name or message longer than a service takes is cut with an ellipsis. Pushover takes a 250
+character title and a 1024 character message, Telegram a 1024 character caption, Discord 2000
+characters and ntfy 4096 bytes.
 
 Channels are sent to together and each gets 30 seconds to answer. One that doesn't is reported as
 failed and holds up neither the others nor the monitor.

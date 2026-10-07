@@ -191,6 +191,8 @@ class FakePlatform:
         return socket
 
     async def http(self, method: str, url: str, **kwargs: Any) -> tuple[int, Any]:
+        if hasattr(kwargs.get("data"), "__aiter__"):
+            kwargs["data"] = b"".join([chunk async for chunk in kwargs["data"]])
         self.http_calls.append((method, url))
         self.http_requests.append({"method": method, "url": url, **kwargs})
         hostname = urlparse(url).hostname or ""
@@ -205,6 +207,10 @@ class FakePlatform:
             await asyncio.sleep(self.action_delay_s)
         if self.reject_actions and method == "POST" and "/api/job" in url:
             raise RuntimeError("printer refused")
+        if method == "POST" and ("/api/job" in url or "/api/printer/" in url):
+            return 204, ""
+        if method == "POST" and url.endswith("/api/files/local"):
+            return 201, {"files": {}, "done": True, "effectiveSelect": True, "effectivePrint": True}
         return 200, {"state": self.device_status, "progress": {"completion": 40.0}, "job": {"file": {"name": "benchy.gcode"}}}
 
     async def encode_jpeg(self, rgb: np.ndarray) -> bytes | None:

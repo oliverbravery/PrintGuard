@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..adapters import multipart_form
-from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, webcam_url
+from .base import DeviceAction, DeviceState, DeviceStatus, Heater, HttpFn, IntegrationAdapter, require_reply, webcam_url
 
 _UPLOAD_TIMEOUT_S = 180.0
 _API_PORTS = (5000,)
@@ -88,7 +88,11 @@ class OctoPrintAdapter(IntegrationAdapter):
         )
 
     async def send(self, http: HttpFn, config: dict[str, Any], action: DeviceAction) -> None:
-        """Issues pause/resume/cancel through /api/job."""
+        """Issues pause/resume/cancel through /api/job, which answers 204 with no body.
+
+        Raises:
+            RuntimeError: If OctoPrint rejects the command or answers with anything but 204.
+        """
         payload = (
             {"command": "cancel"}
             if action is DeviceAction.CANCEL
@@ -100,11 +104,14 @@ class OctoPrintAdapter(IntegrationAdapter):
             headers=self._headers(config),
             json=payload,
         )
-        if status >= 400:
-            raise RuntimeError(f"OctoPrint rejected {action.value}: HTTP {status}")
+        require_reply("OctoPrint", action.value, status, status == 204)
 
     async def heat(self, http: HttpFn, config: dict[str, Any], heater: str, target: float) -> None:
-        """Sets the first tool's or the bed's target through /api/printer/tool or /api/printer/bed."""
+        """Sets the first tool's or the bed's target through /api/printer/tool or /api/printer/bed, which answer 204.
+
+        Raises:
+            RuntimeError: If OctoPrint rejects the target or answers with anything but 204.
+        """
         path, payload = (
             ("tool", {"command": "target", "targets": {"tool0": target}})
             if heater == "nozzle"
@@ -116,8 +123,7 @@ class OctoPrintAdapter(IntegrationAdapter):
             headers=self._headers(config),
             json=payload,
         )
-        if status >= 400:
-            raise RuntimeError(f"OctoPrint rejected the {heater} target: HTTP {status}")
+        require_reply("OctoPrint", f"the {heater} target", status, status == 204)
 
     async def print_file(self, http: HttpFn, config: dict[str, Any], filename: str, data: bytes) -> None:
         """Uploads to local storage through /api/files/local, selected and printing.
@@ -127,7 +133,8 @@ class OctoPrintAdapter(IntegrationAdapter):
         permission.
 
         Raises:
-            RuntimeError: If OctoPrint refuses the file or does not start it.
+            RuntimeError: If OctoPrint refuses the file, does not answer with
+                its 201 upload reply, or does not start the print.
         """
         headers, body = multipart_form({"select": "true", "print": "true"}, "file", filename, data, "application/octet-stream")
         status, stored = await http(
@@ -137,9 +144,8 @@ class OctoPrintAdapter(IntegrationAdapter):
             data=body,
             timeout=_UPLOAD_TIMEOUT_S,
         )
-        if status >= 400:
-            raise RuntimeError(f"OctoPrint rejected {filename}: HTTP {status}")
-        if isinstance(stored, dict) and stored.get("effectivePrint") is False:
+        require_reply("OctoPrint", filename, status, status == 201 and isinstance(stored, dict) and "effectivePrint" in stored)
+        if not stored["effectivePrint"]:
             raise RuntimeError(f"OctoPrint stored {filename} but did not start printing it")
 
     async def cameras(self, http: HttpFn, config: dict[str, Any]) -> list[dict[str, Any]]:

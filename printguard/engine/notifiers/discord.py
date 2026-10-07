@@ -9,10 +9,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .base import HttpFn, NotifierAdapter, multipart_form
-
+from .base import HttpFn, NotifierAdapter, multipart_form, truncated
 
 SUPPRESS_NOTIFICATIONS = 1 << 12
+CONTENT_LIMIT = 2000
 
 
 class DiscordNotifier(NotifierAdapter):
@@ -38,9 +38,12 @@ class DiscordNotifier(NotifierAdapter):
     }
 
     async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
-        """Executes the webhook with payload_json and an optional file part, suppressing notifications when not urgent."""
+        """Executes the webhook with payload_json and an optional file part, suppressing notifications when not urgent.
+
+        The message is cut to the 2000 characters Discord takes.
+        """
         url = str(config["webhook_url"]).strip()
-        payload = {"content": f"**{title}**\n{body}", **({} if urgent else {"flags": SUPPRESS_NOTIFICATIONS})}
+        payload = {"content": truncated(f"**{title}**\n{body}", CONTENT_LIMIT), **({} if urgent else {"flags": SUPPRESS_NOTIFICATIONS})}
         if image:
             headers, data = multipart_form({"payload_json": json.dumps(payload)}, "files[0]", "snapshot.jpg", image)
             status, _ = await http("POST", url, headers=headers, data=data, timeout=15.0)

@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import HttpFn, NotifierAdapter, multipart_form
+from .base import HttpFn, NotifierAdapter, multipart_form, truncated
+
+CAPTION_LIMIT = 1024
+TEXT_LIMIT = 4096
 
 
 class TelegramNotifier(NotifierAdapter):
@@ -32,15 +35,18 @@ class TelegramNotifier(NotifierAdapter):
     }
 
     async def send(self, http: HttpFn, config: dict[str, Any], title: str, body: str, image: bytes | None, *, urgent: bool = True) -> None:
-        """Calls sendPhoto with a multipart upload, or sendMessage without, silently when not urgent."""
+        """Calls sendPhoto with a multipart upload, or sendMessage without, silently when not urgent.
+
+        The message is cut to the 1024 characters a photo's caption takes, or the 4096 a text message does.
+        """
         api = f"https://api.telegram.org/bot{config['bot_token']}"
         text = f"{title}\n{body}"
         if image:
-            fields = {"chat_id": str(config["chat_id"]), "caption": text, **({} if urgent else {"disable_notification": "true"})}
+            fields = {"chat_id": str(config["chat_id"]), "caption": truncated(text, CAPTION_LIMIT), **({} if urgent else {"disable_notification": "true"})}
             headers, payload = multipart_form(fields, "photo", "snapshot.jpg", image)
             status, resp = await http("POST", f"{api}/sendPhoto", headers=headers, data=payload, timeout=15.0)
         else:
-            status, resp = await http("POST", f"{api}/sendMessage", json={"chat_id": config["chat_id"], "text": text, **({} if urgent else {"disable_notification": True})}, timeout=15.0)
+            status, resp = await http("POST", f"{api}/sendMessage", json={"chat_id": config["chat_id"], "text": truncated(text, TEXT_LIMIT), **({} if urgent else {"disable_notification": True})}, timeout=15.0)
         if status >= 400:
             detail = resp.get("description") if isinstance(resp, dict) else None
             raise RuntimeError(f"Telegram rejected the alert: {detail or f'HTTP {status}'}")
