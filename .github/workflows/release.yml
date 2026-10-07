@@ -267,7 +267,7 @@ jobs:
 
   follow-up:
     name: reporter follow-up
-    needs: [version, docker, publish, pages]
+    needs: [version, publish]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
