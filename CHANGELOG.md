@@ -34,6 +34,8 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   hub on, so behind a proxy that ends TLS send `X-Forwarded-Proto`. A request with no `Host` header,
   an `Origin` header that can't be read, or an engine or camera publish WebSocket with no `Origin`
   is refused.
+- A name with letters outside ASCII in `PRINTGUARD_ORIGINS`, such as `müller.example`, matches the
+  punycode a browser sends.
 - The hub won't start when `state.json` is there but can't be read, or when the data directory
   can't be created or written, such as with the wrong owner on it. The log names the directory, or
   the nearest one that exists, and its owner. An unreadable file used to start an empty hub.
@@ -51,7 +53,15 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - A plugin's request or WebSocket doesn't follow redirects, and its sign-in endpoints must be
   https, with a plain host that has no login, backslash or percent-encoded name in it. An installed
   plugin that signs in over plain http is removed when the hub starts.
-- A plugin that signs in to a service on your own network needs Reach your own network.
+- A plugin that signs in at an address on your own network needs Reach your own network to install
+  or to open its sign-in page.
+- A plugin's address pattern matches the path on its own, and one without a `?` covers any query
+  string.
+- Site-local and multicast addresses count as your own network for plugins.
+- A printer, alert channel or MQTT setting of the wrong type is refused, and `mqtt` refuses a field
+  it doesn't have.
+- A notification sent through the API or by a plugin is refused when its title or text isn't text.
+- Adding a camera whose device, path or address isn't text is refused.
 - A plugin that lists a local address written as `127.1`, `0x7f.0.0.1` or one long number, or a
   wildcard over a local suffix such as `*.local` or `*.lan`, needs Reach your own network to
   install. One already installed without it stays installed, off and with its data, until you
@@ -102,6 +112,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   anything over 65535 are refused, and so is turning the Home Assistant bridge on with no host.
 - The test alert carries a picture, so a channel that can't take one shows up at setup.
 - Sliced files over 32 MB upload without the 3D toolpath or a drawn preview.
+- A sliced file with nothing in it is refused.
 - A 3mf is refused when its files unpack to more than 512 MB between them, including one that
   understates its size, when any member is compressed any way but stored or deflate, when it's
   damaged, and when the gcode of its plate is empty. A binary gcode file with no gcode in it is
@@ -129,7 +140,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 - The interactive API docs pages are gone, so the hub no longer loads Swagger UI or ReDoc from a
   CDN. The schema is at `/api/v1/openapi.json`.
 - `POST /api/v1/classify` and the MCP `classify_frame` tool refuse a frame over 32 MB or 50
-  megapixels.
+  megapixels, and take a JPEG or a PNG only.
 - PrusaLink takes a Username, for a Raspberry Pi set up with one other than `maker`.
 - Empty values in the camera and print details read "none".
 - Removing a camera, printer, monitor, print or API token that doesn't exist is an error, where it
@@ -302,7 +313,14 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   full report every 5 seconds. It reads the printer on threads of its own, so inference doesn't
   hold it up, and a printer that never reports says to check the serial number.
 - A Bambu upload starts the print, where it could hang after sending the file.
-- Bambu H2C, H2D and H2S printers start an uploaded print.
+- Bambu H2C, H2D and H2S printers start an uploaded print. Every model outside the X1, P1 and A1
+  series is handed the file the same way, which I haven't tested on a P2S, X2D or H2D Pro.
+- A malformed report from a Bambu printer no longer leaves it showing a stale state for up to a
+  minute.
+- A different Centauri Carbon at a previous one's address connects without restarting PrintGuard.
+- A Moonraker webcam whose host name contains `snapshot` or `webrtc` is read from the right
+  address. One set to Janus with no snapshot URL, an iframe or jMuxer is no longer registered as a
+  camera that can't open.
 - A Bambu printer whose last job failed reads as idle, and it can start a print from the library
   after a cancelled or failed job.
 - A large 3mf sent to a Bambu printer is no longer cut off after five minutes, and the printer gets
@@ -505,6 +523,19 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   from source. It works on macOS when the app's path contains `&` or `<`.
 - The macOS app reports its version.
 - Only the standard image is tagged `latest`, so a GPU image can't take the default tag.
+- A change of inference runtime, or installing, removing or changing a plugin, finishes when the
+  dashboard tab closes or the request times out part way.
+- A browser camera that declares under one frame a second no longer drops its connection.
+- MediaMTX is still restarted after a crash when the hub couldn't tie it to its own lifetime.
+- An answer from one plugin to another is labelled with the channel it was asked on.
+- A monitor whose camera has dropped shows No signal under the Defect detected banner, not behind
+  it.
+- Glass is tinted for the background picture on show when a plugin changes or clears it quickly.
+- Saving or deleting a custom theme no longer flashes the old theme.
+- Setting the nozzle target no longer locks the bed target while the printer answers.
+- The update dialog loads its changelog once the hub is back if it was opened while reconnecting.
+- The history chart shows the date at each end when it spans more than a day, and a single minute
+  of history is drawn as a line across its minute.
 
 ### Security
 
@@ -556,6 +587,13 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
   lists a file twice is refused.
 - `state.json` is never readable by other accounts while it's being saved.
 - The REST API checks the token before it reads a request body.
+- A request to `/api/v1/classify` can't make the hub listen for a network stream and stall
+  detection, since only a JPEG or PNG is read.
+- A query string can't stand in for part of the path in a plugin's address pattern, so a plugin
+  allowed `/bot*/sendMessage` reaches that endpoint only.
+- A plugin's request can't set a `Host` header to reach another site on the same server.
+- The hub talks to its own MediaMTX directly when `HTTP_PROXY` is set, so the stream server's login
+  never goes to the proxy.
 
 ## [2.5.0] - 2026-09-21
 
