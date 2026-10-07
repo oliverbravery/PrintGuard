@@ -331,6 +331,19 @@ test("opening the history asks only for the snapshots near the screen", async ({
   await expect.poll(asked).toContain("s89");
 });
 
+test("a history chart spanning more than a day dates the ends of its axis", async ({ page }) => {
+  await dashboard(page, { statsMonitorId: "m1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · history" });
+  const bucket = (t: number) => ({ t, n: 10, sum: 4.5, min: 0.4, max: 0.5, defects: 0, watched: 60 });
+  const twoDays = 2 * 86_400;
+  const ends = sheet.getByRole("img", { name: "Defect frames per period" }).locator("xpath=following-sibling::div[1]/span");
+  await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_000 + twoDays, buckets: [bucket(1_700_000_000), bucket(1_700_000_000 + twoDays)], snaps: [], alerts: [], stats: {} });
+  await sheet.getByRole("button", { name: "all", exact: true }).click();
+
+  const [first, last] = await ends.allTextContents();
+  expect(first).not.toBe(last);
+});
+
 test("after a hub restart the alerts tile still counts the snapshots that were kept", async ({ page }) => {
   await dashboard(page, { statsMonitorId: "m1" });
   const snaps = [1, 2, 3].map((index) => ({ id: `s${index}`, ts: 1_700_000_000 - index, score: 0.9, action: "failed" }));

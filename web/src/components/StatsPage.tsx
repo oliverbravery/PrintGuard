@@ -75,6 +75,10 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
   }, [monitor.id, reconnecting, alertsKept]);
 
   const grouped = useMemo(() => (history ? groupBuckets(history.buckets, period, history.now) : []), [history, period]);
+  const day = (ts: number) => new Date(ts * 1000).toDateString();
+  const withinOneDay = grouped.length > 0 && day(grouped[0].t) === day(grouped[grouped.length - 1].t);
+  const axisTime = (ts: number) =>
+    withinOneDay ? clock(ts) : new Date(ts * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const stats = history?.stats ?? {};
   const snaps = useMemo(
     () => [...(history?.snaps ?? [])].sort((a, b) => (sortByScore ? b.score - a.score : b.ts - a.ts)),
@@ -119,8 +123,8 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
             <RiskBandChart data={grouped} span={GROUP_S[period]} threshold={monitor.threshold} />
             <DefectBars data={grouped} span={GROUP_S[period]} />
             <div className="mt-1 flex justify-between">
-              <span className="label">{clock(grouped[0].t)}</span>
-              <span className="label">{clock(grouped[grouped.length - 1].t)}</span>
+              <span className="label">{axisTime(grouped[0].t)}</span>
+              <span className="label">{axisTime(grouped[grouped.length - 1].t)}</span>
             </div>
           </>
         )}
