@@ -29,7 +29,7 @@ import pytest
 import websockets
 from fakes import redirected_socket
 
-from printguard.engine import vision
+from printguard.engine import reports, vision
 from printguard.server.inference import (
     Inference,
     OnnxInference,
@@ -109,8 +109,18 @@ async def test_the_login_the_bundled_server_is_given_is_one_the_engine_scrubs(tm
     platform = ServerPlatform(Path("models"), tmp_path, "http://mediamtx:9997", "rtsp://mediamtx:8554", None, ("printguard", "per-launch-pass"))
     await platform.close()
 
-    assert {"printguard", "per-launch-pass"} <= platform.secrets
+    assert "per-launch-pass" in platform.secrets
     assert platform.mediamtx.rtsp_url("cam") == "rtsp://printguard:per-launch-pass@mediamtx:8554/cam"
+
+
+async def test_the_bundled_servers_user_name_is_not_scrubbed_from_a_log_line_naming_a_printguard_logger(tmp_path: Path) -> None:
+    platform = ServerPlatform(Path("models"), tmp_path, "http://mediamtx:9997", "rtsp://mediamtx:8554", None, ("printguard", "per-launch-pass"))
+    await platform.close()
+    line = "INFO printguard.server.platform: rtsp://printguard:per-launch-pass@mediamtx:8554/cam"
+
+    scrubbed = reports.scrub(line, set(platform.secrets), standalone_below=reports.MESSAGE_STANDALONE_BELOW)
+
+    assert scrubbed == f"INFO printguard.server.platform: rtsp://printguard:{reports.REDACTED}@mediamtx:8554/cam"
 
 
 async def test_runtimes_agree_on_classification() -> None:
@@ -893,6 +903,29 @@ def test_a_camera_whose_stream_has_no_decoder_goes_offline_with_the_reason(tmp_p
     assert child.stdout.strip() == "False no decoder for this stream"
 
 
+SDP_STREAM = b"v=0\no=- 0 0 IN IP4 127.0.0.1\ns=x\nc=IN IP4 127.0.0.1\nt=0 0\nm=video 41000 RTP/AVP 96\na=rtpmap:96 H264/90000"
+
+
+async def test_a_stream_description_posted_as_an_image_is_refused_without_listening_for_its_stream() -> None:
+    """FFmpeg read an SDP body as a stream to receive, bound its UDP port and held a worker thread about 20 seconds."""
+    started = time.monotonic()
+
+    assert await ServerPlatform.decode_jpeg(SimpleNamespace(), SDP_STREAM) is None
+    assert time.monotonic() - started < 2
+
+
+@pytest.mark.parametrize("image_format", ["JPEG", "PNG"])
+async def test_a_jpeg_and_a_png_are_decoded(image_format: str) -> None:
+    from PIL import Image
+
+    encoded = io.BytesIO()
+    Image.new("RGB", (64, 48), (0, 0, 255)).save(encoded, image_format)
+
+    frame = await ServerPlatform.decode_jpeg(SimpleNamespace(), encoded.getvalue())
+
+    assert frame.shape == (48, 64, 3) and frame[0, 0, 2] > 200
+
+
 async def test_an_image_with_more_pixels_than_the_cap_is_refused_before_it_is_decoded(monkeypatch: pytest.MonkeyPatch) -> None:
     """A 2 MB JPEG of 12000x12000 pixels grew the hub from 386 MB to 1.6 GB."""
     from PIL import Image
@@ -1053,6 +1086,30 @@ def test_a_live_view_listener_that_never_answers_fails_the_push_instead_of_stall
         push.close()
 
     assert isinstance(outcomes[0], av.error.FFmpegError), "the push never gave up on a listener that does not answer"
+
+
+def test_a_browser_camera_recording_slower_than_a_frame_a_second_is_still_pushed() -> None:
+    """Its rate rounded down to 0 and the divide by it closed the publish socket with 1011."""
+    from printguard.server.publish import ChunkStream, remux
+
+    recording = io.BytesIO()
+    with av.open(recording, "w", format="matroska") as container:
+        stream = container.add_stream("mjpeg", rate=Fraction(1, 2))
+        stream.width, stream.height, stream.pix_fmt = 64, 48, "yuvj420p"
+        frame = av.VideoFrame.from_ndarray(np.zeros((48, 64, 3), dtype=np.uint8), format="rgb24")
+        for pts in range(3):
+            frame.pts = pts
+            for packet in stream.encode(frame):
+                container.mux(packet)
+    chunks = ChunkStream()
+    chunks.feed(recording.getvalue())
+    chunks.feed(None)
+    with socket.socket() as unused:
+        unused.bind(("127.0.0.1", 0))
+        nobody_listening = f"rtsp://127.0.0.1:{unused.getsockname()[1]}/cam"
+
+        with pytest.raises(av.error.FFmpegError):
+            remux(chunks, nobody_listening)
 
 
 def test_a_browser_camera_push_to_a_listener_that_never_answers_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:

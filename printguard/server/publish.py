@@ -83,7 +83,7 @@ def remux(source: ChunkStream, rtsp_url: str) -> None:
     with av.open(source, mode="r") as recording:
         video = recording.streams.video[0]
         rate = video.guessed_rate or video.average_rate
-        fps = int(rate) if rate and 0 < rate <= 60 else 30
+        fps = int(rate) if rate and 1 <= rate <= 60 else 30
         step = RTP_CLOCK // fps
         clock = Fraction(1, RTP_CLOCK)
         with av.open(rtsp_url, mode="w", format="rtsp", options={"rtsp_transport": "tcp", "timeout": str(PUSH_TIMEOUT_US)}) as push:

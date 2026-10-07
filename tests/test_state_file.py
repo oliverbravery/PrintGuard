@@ -189,6 +189,17 @@ def test_a_state_file_the_hub_may_not_read_says_whose_it_has_to_be(tmp_path, mon
         state_file_in(tmp_path).load()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows refuses to read a directory with a PermissionError")
+def test_a_state_file_that_is_a_directory_stops_the_hub_saying_so(tmp_path) -> None:
+    """Docker makes a directory of a file it is told to mount that is not there, and the hub ended on a bare IsADirectoryError."""
+    (tmp_path / "state.json").mkdir()
+
+    with pytest.raises(RuntimeError, match="state.json could not be read .*Is a directory.*belongs to ") as raised:
+        state_file_in(tmp_path).load()
+
+    assert str(tmp_path) in str(raised.value)
+
+
 @needs_an_unprivileged_user
 def test_a_damaged_state_file_in_a_directory_the_hub_may_not_write_stops_the_hub_with_the_owner_named(tmp_path) -> None:
     """A bare PermissionError from the rename does not tell anyone whose the directory has to be."""

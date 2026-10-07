@@ -415,16 +415,23 @@ class MqttBridge:
         for another, so up to COMMANDS_IN_FLIGHT run at once. A burst for one
         target still runs in the order it arrived, so pause then resume cannot
         be reversed.
+
+        Raises:
+            aiomqtt.MqttError: If the broker drops the session, as itself and not
+                in the group the task group wraps it in, so the warning gives the reason.
         """
         slots = asyncio.Semaphore(COMMANDS_IN_FLIGHT)
         targets: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-        async with asyncio.TaskGroup() as running:
-            async for message in client.messages:
-                command = route_command(str(message.topic), bytes(message.payload).decode("utf-8", "ignore"), self._state.get("monitors", []))
-                if command is None:
-                    continue
-                await slots.acquire()
-                running.create_task(self._run_command(command, slots, targets[command["id"]]))
+        try:
+            async with asyncio.TaskGroup() as running:
+                async for message in client.messages:
+                    command = route_command(str(message.topic), bytes(message.payload).decode("utf-8", "ignore"), self._state.get("monitors", []))
+                    if command is None:
+                        continue
+                    await slots.acquire()
+                    running.create_task(self._run_command(command, slots, targets[command["id"]]))
+        except ExceptionGroup as dropped:
+            raise dropped.exceptions[0] from None
 
     async def _run_command(self, command: dict[str, Any], slots: asyncio.Semaphore, target: asyncio.Lock) -> None:
         try:

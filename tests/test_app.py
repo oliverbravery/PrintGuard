@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -494,6 +495,35 @@ async def test_failed_startup_stops_the_streaming_server(monkeypatch, tmp_path) 
             pass
 
     streamer.stop.assert_awaited_once()
+
+
+async def test_a_proxy_in_the_environment_is_never_sent_the_hubs_calls_to_its_own_streaming_server(tmp_path, monkeypatch) -> None:
+    """With HTTP_PROXY set and no NO_PROXY, the proxy was sent the login the bundled server answers to."""
+    proxy = socket.create_server(("127.0.0.1", 0))
+    proxy.setblocking(False)
+    with socket.create_server(("127.0.0.1", 0)) as unused:
+        streaming_server = f"http://127.0.0.1:{unused.getsockname()[1]}"
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PRINTGUARD_PLUGINS", "off")
+    monkeypatch.setenv("MEDIAMTX_API", streaming_server)
+    monkeypatch.setenv("MEDIAMTX_HLS", streaming_server)
+    monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{proxy.getsockname()[1]}")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    app = create_app()
+
+    try:
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8000") as client,
+        ):
+            with pytest.raises(httpx.ConnectError):
+                await app.state.engine.platform.mediamtx.list_paths()
+            assert (await client.get("/hls/camera-one/index.m3u8")).status_code == 502
+        with pytest.raises(BlockingIOError):
+            proxy.accept()
+    finally:
+        proxy.close()
 
 
 class StubRuntime:
@@ -1044,6 +1074,21 @@ async def test_an_origin_entry_with_a_trailing_dot_still_names_the_hub(monkeypat
         assert (await client.get("/api/health", headers={"host": "hub.example.com"})).status_code == 200
         assert (await client.get("/api/health", headers={"host": "hub.example.com."})).status_code == 200
         upload = await client.post("/api/prints?filename=a.stl", content=b"solid", headers={"host": "printguard:8000", "origin": "https://hub.example.com"})
+        assert upload.status_code == 400, "the origin was refused, where the file should have been"
+
+
+@pytest.mark.parametrize(
+    ("listed", "sent"),
+    [("https://drucker.müller.example", "drucker.xn--mller-kva.example"), ("https://Straße.example", "xn--strae-oqa.example")],
+)
+async def test_an_internationalised_origin_entry_names_the_hub_the_way_a_browser_sends_it(monkeypatch, listed: str, sent: str) -> None:
+    """It was taken as written, which no browser sends, so the name was refused with nothing logged."""
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", listed)
+    app = create_app()
+    app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/api/health", headers={"host": sent})).status_code == 200
+        upload = await client.post("/api/prints?filename=a.stl", content=b"solid", headers={"host": "printguard:8000", "origin": f"https://{sent}"})
         assert upload.status_code == 400, "the origin was refused, where the file should have been"
 
 
