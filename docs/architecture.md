@@ -161,7 +161,7 @@ Every command may carry a `req_id`, echoed on the responding event so the UI can
 pending requests. A command that succeeds ends with a `state` event carrying that `req_id`,
 or with its own event for the four that only read, and one that fails ends with an `error`,
 an unknown command included. `camera.remove`, `printer.update`, `printer.remove`,
-`monitor.remove` and `print.remove` are `FINISHING_COMMANDS`. Each runs as a task `Engine._finishing`
+`monitor.remove` and `print.remove` are `FINISHING_COMMANDS`. Each runs as a task `Engine._background`
 holds, so it finishes when the socket that sent it closes or its request times out. An id nothing matches fails a remove as it does an update, apart
 from `plugin.remove`, and a monitor or camera patch is refused for a setting it doesn't have or
 a value its setting doesn't take, where a number out of range is clamped. `camera.add` refuses a source whose device, path or address isn't text. A heater target is the
@@ -171,8 +171,8 @@ no text of its own, as a timeout does, is reported by its type.
 `printer.test`, `notify.test` and `report.send` succeed as commands whatever they find, and
 carry the outcome as `ok` in their own event. `review.send` and `review.retry` only start the
 upload, so their `review_sent` follows the closing `state` under the same `req_id`. Both are refused while
-`settings.feedback` is `off`, and a request for a print that is already uploading joins that
-upload, so it is answered by it and no frame goes twice.
+`settings.feedback` is `off`. A request for a print that is already uploading replaces its
+choices and is answered by that upload, and a frame already sent is not sent again.
 
 Events, engine to UI:
 

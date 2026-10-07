@@ -125,4 +125,4 @@ then keeps only alert frames, for the risk history, and never prompts.
 
 Switching it off also settles the prints the hub already holds. A print waiting for a review or
 waiting to send is dismissed, and every frame that isn't an alert is deleted from the hub. A
-print that is uploading stops after the frame it's on. Frames already sent stay in the inbox. Nothing is sent while it is off, and **Send** says so.
+print that is uploading stops after the frame it's on. Frames already sent stay in the inbox. Nothing is sent while it is off, and **Send** says so. A frame the hub can't delete is reported as a warning, and the switch still takes effect.

@@ -171,11 +171,10 @@ class Engine:
         self.startup_warnings: list[str] = []
         self.dropped_ids: set[str] = set()
         self._tasks: list[asyncio.Task[None]] = []
-        self._finishing: set[asyncio.Task[None]] = set()
+        self._background: set[asyncio.Task[None]] = set()
         self._attach_tasks: dict[str, asyncio.Task[None]] = {}
         self._detaching: set[str] = set()
         self._reconciles: dict[str, asyncio.Lock] = {}
-        self._reconcile_tasks: set[asyncio.Task[None]] = set()
         self._starting: set[str] = set()
         self._adding: set[Any] = set()
         self._registering = asyncio.Lock()
@@ -341,7 +340,7 @@ class Engine:
         carry out. The cameras stay registered, so a command still in flight
         that saves on its way out writes every one of them.
         """
-        background = (*self._tasks, *self._sends.values(), *self._reconcile_tasks, *self._finishing)
+        background = (*self._tasks, *self._sends.values(), *self._background)
         for task in background:
             task.cancel()
         for camera in self.cameras.values():
@@ -496,10 +495,28 @@ class Engine:
         carries on without its issuer, which a socket that closes or a request
         that times out has stopped waiting for.
         """
-        task = asyncio.ensure_future(work)
-        self._finishing.add(task)
-        task.add_done_callback(self._finishing.discard)
-        await asyncio.shield(task)
+        await asyncio.shield(self._hold("a command", work))
+
+    def _hold(self, what: str, work: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
+        """Runs work in the background, holding its task so ``stop`` can cancel it and reporting it if it fails.
+
+        Args:
+            what: The work, as a failure is reported.
+            work: The coroutine to run.
+
+        Returns:
+            The task running it.
+        """
+        task = asyncio.create_task(work)
+        self._background.add(task)
+
+        def finished(done: asyncio.Task[None]) -> None:
+            self._background.discard(done)
+            if not done.cancelled() and done.exception():
+                self.report_failure(what, done.exception())
+
+        task.add_done_callback(finished)
+        return task
 
     async def _dispatch(self, message: dict[str, Any]) -> None:
         """Runs a command, then closes it with the state event its issuer waits on.
@@ -900,8 +917,9 @@ class Engine:
         after the frame in flight, since those choices are no longer the ones
         to send, and one dismissed before its turn is not sent at all. A print
         whose monitor was removed meanwhile is deleted with the rest of that
-        monitor's. A request for a print already uploading joins the upload, so
-        every one of them is answered by it.
+        monitor's. A print submitted afresh carries over the frames already
+        sent that it still keeps, and the upload goes on under the new choices
+        and answers every request made for it, so no frame goes twice.
         """
         submission = review.submission or {}
         try:
@@ -923,12 +941,14 @@ class Engine:
             for frame in review.unsent():
                 frame_details = {"frame": frame["id"], "label": submission["labels"][frame["id"]], "kind": frame["kind"], "score": frame["score"], "ts": frame["ts"]}
                 taken = await self._send_frame(frame_key(review.id, frame["id"]), {**print_details, **frame_details})
-                if review.submission is not submission:
+                chosen = review.submission
+                if chosen is not None and frame["id"] in chosen["labels"]:
+                    if taken:
+                        chosen["sent"].append(frame["id"])
+                    else:
+                        del chosen["labels"][frame["id"]]
+                if chosen is not submission:
                     break
-                if taken:
-                    submission["sent"].append(frame["id"])
-                else:
-                    del submission["labels"][frame["id"]]
             else:
                 if submission["sent"]:
                     review.status = "sent"
@@ -952,6 +972,10 @@ class Engine:
             self._sends.pop(review.id, None)
             del self._send_requests[review.id]
             self.save()
+        if review.status == "queued" and review.submission is not submission:
+            for req_id in requesters:
+                self._start_send(review, req_id)
+            return
         for req_id in requesters:
             self.emit({"event": "review_sent", **review.public(), "ok": review.status == "sent", "req_id": req_id})
         self.emit(self.state_event())
@@ -1299,9 +1323,7 @@ class Engine:
         return True
 
     def _schedule_reconcile(self, printer: Printer) -> None:
-        task = asyncio.create_task(self.reconcile_printer_cameras(printer))
-        self._reconcile_tasks.add(task)
-        task.add_done_callback(self._reconcile_tasks.discard)
+        self._hold(f"listing the cameras of '{printer.name}'", self.reconcile_printer_cameras(printer))
 
     async def _move_camera(self, camera: Camera, source: dict[str, Any]) -> None:
         """Releases a camera's source and attaches it again at a new address.
@@ -1618,10 +1640,11 @@ class Engine:
         self._reply({"event": "review", **review.public(), "frames": review.frames, "req_id": message.get("req_id")})
 
     async def _cmd_review_send(self, message: dict[str, Any]) -> None:
-        """Sends the frames a reviewer chose, or joins the upload of a print already being sent.
+        """Records the frames a reviewer chose and starts uploading them.
 
-        A second request for a print that is uploading keeps the first one's
-        choices, so no frame goes twice, and is answered when that upload ends.
+        A request for a print that is already uploading replaces the choices
+        and is answered when that upload ends, and a frame already sent is not
+        sent again.
 
         Raises:
             LookupError: If there is no such review.
@@ -1629,10 +1652,6 @@ class Engine:
                 or already sent, or no frame is left to send.
         """
         self._require_feedback_on()
-        review = self.reviews.get(message["id"])
-        if review is not None and review.id in self._sends and review.status == "queued":
-            self._start_send(review, message.get("req_id"))
-            return
         review = self.reviews.submit(
             message["id"],
             failures=set(message.get("failures") or []),
@@ -1725,7 +1744,7 @@ class Engine:
             await self._switch_runtime(settings)
         self.settings = {**self.settings, **{key: settings[key] for key in patch}}
         if patch.get("feedback") == "off":
-            await self.reviews.stop_asking()
+            await self._tidy_up("delete the frames kept for review", self.reviews.stop_asking())
         logger.info("settings updated: %s", sorted(patch))
 
     async def _switch_runtime(self, settings: dict[str, Any]) -> None:
@@ -2290,8 +2309,8 @@ class Engine:
             return
         plugin.enabled = False
         plugin.failure = reason
-        asyncio.ensure_future(self.sockets.drop_for(plugin_id))
-        asyncio.ensure_future(self._reload_plugins())
+        self._hold(f"closing the sockets of plugin {plugin.manifest['name']}", self.sockets.drop_for(plugin_id))
+        self._hold(f"reloading the plugins after {plugin.manifest['name']} stopped", self._reload_plugins())
         self.emit({"event": "error", "message": f"plugin {plugin.manifest['name']} stopped: {reason}"})
         self._sync()
 

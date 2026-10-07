@@ -145,6 +145,13 @@ def stored_review(record: dict[str, Any]) -> Review:
     return Review(**record)
 
 
+def _raise_first(outcomes: list[Any]) -> None:
+    """Raises the first failure among gathered results, so one that failed does not hide the others having run."""
+    for outcome in outcomes:
+        if isinstance(outcome, Exception):
+            raise outcome
+
+
 def frame_key(review_id: str, frame_id: str) -> str:
     """The file store key a kept frame's JPEG lives under."""
     return f"review-{review_id}-{frame_id}.jpg"
@@ -265,6 +272,9 @@ class ReviewLibrary:
     def submit(self, review_id: str, failures: set[str], removed: set[str], printer: str) -> Review:
         """Records the reviewer's choices for a finished print, ready to send.
 
+        Frames an earlier send already got into the inbox, and that are still
+        chosen, stay sent.
+
         Args:
             review_id: The review being sent.
             failures: Ids of the frames that show a failure. Every other kept frame is good.
@@ -283,7 +293,8 @@ class ReviewLibrary:
         labels = {frame["id"]: "failure" if frame["id"] in failures else "good" for frame in review.frames if frame["id"] not in removed}
         if not labels:
             raise ValueError("there are no frames left to send")
-        review.submission = {"labels": labels, "printer": printer, "sent": [], "code": None, "retry_at": None}
+        sent = [frame_id for frame_id in (review.submission or {}).get("sent", []) if frame_id in labels]
+        review.submission = {"labels": labels, "printer": printer, "sent": sent, "code": None, "retry_at": None}
         review.status = "queued"
         return review
 
@@ -306,13 +317,19 @@ class ReviewLibrary:
 
         The alert frames stay because the risk history shows them. A print
         still running loses the frames kept so far and is dismissed when it
-        ends, and so does a frame that was still being stored.
+        ends, and so does a frame that was still being stored. Every print is
+        settled and every file is tried even when one cannot be deleted.
+
+        Raises:
+            OSError: If a frame's file could not be deleted, once all the rest were.
         """
         self._stops += 1
-        for review in list(self._reviews.values()):
+        reviews = list(self._reviews.values())
+        for review in reviews:
             if review.status in ("ready", "queued"):
                 review.submission, review.status = None, "dismissed"
-            await self._drop(review, [frame for frame in review.frames if frame["kind"] != "alert"])
+        outcomes = await asyncio.gather(*(self._drop(review, [frame for frame in review.frames if frame["kind"] != "alert"]) for review in reviews), return_exceptions=True)
+        _raise_first(outcomes)
 
     def due(self, now: float) -> list[Review]:
         """The queued reviews whose retry time has passed, or whose send was cut short before it set one."""
@@ -359,10 +376,14 @@ class ReviewLibrary:
         review.frames.append({"id": frame_id, **record, "size": size})
 
     async def _drop(self, review: Review, frames: list[dict[str, Any]]) -> None:
-        """Forgets frames before deleting their files, so two drops that overlap cannot trip over each other."""
+        """Forgets frames before deleting their files, so two drops that overlap cannot trip over each other.
+
+        Raises:
+            OSError: If a file could not be deleted, once the rest were tried.
+        """
         review.frames = [kept for kept in review.frames if kept not in frames]
-        for frame in frames:
-            await self._platform.files.remove(frame_key(review.id, frame["id"]))
+        outcomes = await asyncio.gather(*(self._platform.files.remove(frame_key(review.id, frame["id"])) for frame in frames), return_exceptions=True)
+        _raise_first(outcomes)
 
     async def _discard(self, review: Review) -> None:
         """Forgets a review before deleting its files, so two prints that begin together cannot both evict it."""

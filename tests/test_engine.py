@@ -3304,7 +3304,7 @@ async def test_a_print_is_not_sent_while_the_review_switch_is_off(monkeypatch, c
     assert not uploads and ("POST", f"{feedback.ENDPOINT}/register") not in platform.http_calls, "frames reached the inbox with feedback off"
 
 
-async def test_a_second_send_for_a_print_that_is_uploading_joins_it(monkeypatch) -> None:
+async def test_a_second_send_during_an_upload_is_answered_by_that_upload(monkeypatch) -> None:
     monkeypatch.setattr(reviews, "SPACED_START_S", 0.2)
     platform = FakePlatform(infer_s=0.02, failing=True)
     uploads = _slow_inbox(platform, monkeypatch)
@@ -3315,11 +3315,12 @@ async def test_a_second_send_for_a_print_that_is_uploading_joins_it(monkeypatch)
         await asyncio.sleep(0.15)
         await engine.handle({"cmd": "review.send", "id": review["id"], "failures": frames, "req_id": "second"})
         await asyncio.sleep(0.2 * len(frames) + 0.5)
+        state = engine.state_event()
 
     answers = {event["req_id"]: (event["ok"], event["sent"]) for event in _of(events, "review_sent") if event.get("req_id")}
     assert answers == {"first": (True, len(frames)), "second": (True, len(frames))}, "the second request was not answered by the upload in flight"
     assert sorted(upload["frame"] for upload in uploads) == sorted(frames), "a frame was uploaded twice"
-    assert not _of(events, "error")
+    assert not _of(events, "error") and state["reviews"][0]["status"] == "sent"
 
 
 async def test_a_print_whose_monitor_is_gone_is_dropped_with_a_message_and_not_left_sending(monkeypatch) -> None:
@@ -3490,6 +3491,36 @@ async def test_switching_feedback_off_keeps_only_alert_frames_and_asks_nothing()
     assert review["status"] == "dismissed", "a finished print does not wait for a review nobody asked for"
 
 
+async def test_switching_feedback_off_holds_when_a_kept_frame_cannot_be_deleted(monkeypatch) -> None:
+    monkeypatch.setattr(reviews, "SPACED_START_S", 0.1)
+    platform = FakePlatform(infer_s=0.02)
+    remove = platform.files.remove
+    stuck: list[str] = []
+
+    async def remove_unless_stuck(key: str) -> None:
+        if not stuck:
+            stuck.append(key)
+        if key == stuck[0]:
+            raise PermissionError(f"cannot delete {key}")
+        await remove(key)
+
+    async with running_engine(platform, camera_fps=[10.0, 10.0]) as (engine, events):
+        await asyncio.sleep(0.5)
+        for monitor_id in list(engine.monitors):
+            await engine.handle({"cmd": "monitor.update", "id": monitor_id, "patch": {"enabled": False}})
+        monkeypatch.setattr(platform.files, "remove", remove_unless_stuck)
+        await engine.handle({"cmd": "settings.update", "patch": {"feedback": "off"}, "req_id": "off"})
+        state = next(event for event in reversed(events) if event.get("event") == "state" and event.get("req_id") == "off")
+        saved = platform.state["settings"]["feedback"]
+        statuses = [review["status"] for review in engine.state_event()["reviews"]]
+
+    assert not [event for event in _of(events, "error") if event.get("req_id") == "off"], "the switch was refused although it took effect"
+    assert state["settings"]["feedback"] == saved == "off", "the switch took effect in memory but was never saved or announced"
+    assert statuses == ["dismissed", "dismissed"]
+    assert [event["message"] for event in _of(events, "warning")] == [f"Could not delete the frames kept for review: cannot delete {stuck[0]}"]
+    assert list(platform.files.blobs) == [stuck[0]], "one frame that cannot go left the others behind"
+
+
 async def test_switching_feedback_off_settles_the_prints_that_already_ended(monkeypatch) -> None:
     monkeypatch.setattr(reviews, "SPACED_START_S", 0.1)
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.05)
@@ -3560,7 +3591,7 @@ async def test_cancelling_a_send_stops_after_the_frame_in_flight(monkeypatch) ->
     assert not outcome["ok"] and cancelled["status"] == "dismissed" and cancelled["chosen"] == 0, "a cancelled print ended up sent"
 
 
-async def test_a_second_send_during_an_upload_replaces_the_first(monkeypatch) -> None:
+async def test_a_second_send_during_an_upload_replaces_the_choices_and_repeats_no_frame(monkeypatch) -> None:
     monkeypatch.setattr(reviews, "SPACED_START_S", 0.1)
     monkeypatch.setattr(engine_module, "STATE_TICK_S", 0.05)
     platform = FakePlatform(infer_s=0.02)
@@ -3577,7 +3608,7 @@ async def test_a_second_send_during_an_upload_replaces_the_first(monkeypatch) ->
     assert len(ids) >= 5 and not _of(events, "error")
     assert {upload["frame"] for upload in uploads} == set(ids[:3]), "a frame the second send left out was uploaded anyway"
     assert [upload["frame"] for upload in uploads[:2]] == ids[:2], "the first send stops after the frame in flight"
-    assert [(upload["frame"], upload["label"]) for upload in uploads[2:]] == [(ids[0], "failure"), (ids[1], "good"), (ids[2], "good")], "the second send's choices are the ones sent"
+    assert [upload["frame"] for upload in uploads[2:]] == [ids[2]], "a frame that was already sent went again"
     assert (final["status"], final["sent"], final["chosen"]) == ("sent", 3, 3)
 
 
@@ -3789,6 +3820,23 @@ async def test_plugin_installs_from_a_file_without_its_code_in_the_snapshot() ->
     assert record["digests"]["plugin.js"] == hashlib.sha256(PLUGIN_JS.encode()).hexdigest()
     snapshot = json.dumps(next(e for e in events if e.get("event") == "state" and e.get("plugins")))
     assert PLUGIN_JS not in snapshot, "plugin source rode along in the state snapshot"
+
+
+async def test_the_work_a_failed_plugin_starts_is_held_and_ended_with_the_engine(monkeypatch) -> None:
+    platform = FakePlatform(infer_s=0.02)
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        await install_demo(engine)
+        stalled = asyncio.Event()
+
+        async def never_closes(plugin_id: str) -> None:
+            await stalled.wait()
+
+        monkeypatch.setattr(engine.sockets, "drop_for", never_closes)
+        engine.plugin_failed("demo", "ran out of fuel")
+        await asyncio.sleep(0)
+
+    pending = [task for task in asyncio.all_tasks() if task is not asyncio.current_task() and not task.done()]
+    assert pending == [], "a task the engine started outlived it"
 
 
 async def test_a_manifest_stored_by_an_older_version_comes_back_in_todays_shape() -> None:
