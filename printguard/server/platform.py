@@ -37,7 +37,7 @@ from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
 from .plugins import WasmPluginRuntime
 from .publish import H264Push
-from .state_file import StateFile, data_directory_refused
+from .state_file import StateFile, prepare_data_directory
 
 FPS_SAMPLE_FRAMES = 25
 FPS_SAMPLE_S = 5.0
@@ -722,11 +722,8 @@ class ServerPlatform:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
         self.host = deployment(update_asset is not None)
-        try:
-            data_dir.mkdir(parents=True, exist_ok=True)
-            self.files = DiskFileStore(data_dir / "prints")
-        except PermissionError as exc:
-            raise data_directory_refused(data_dir, f"{exc.filename} could not be created", exc) from None
+        prepare_data_directory(data_dir)
+        self.files = DiskFileStore(data_dir / "prints")
         self._model_dir = model_dir
         self._inference: Inference | None = None
         self.workers = 1

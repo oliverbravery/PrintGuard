@@ -290,6 +290,7 @@ and overwrites it each time.
 | Won't parse, isn't a JSON object, or has a section of the wrong type, such as `monitors` holding text | Is moved to `state.json.corrupt` and the hub starts empty |
 | The hub's user may not read, or may not move aside when it is damaged | [Stops the hub](troubleshooting.md#starting-up) with a log line naming the data directory and its owner, which has to be that user |
 | Holds a camera, printer, monitor, print, review, plugin or API token record of the wrong shape | Loads without that record, which is logged and shown as a startup warning, `A saved camera (name) could not be read and was dropped`, and gone from the file at the next save |
+| Holds a number that is NaN or infinite, which a 2.5 hub could be sent over REST | Loads without that number, which is logged, and the file is kept as it is until the next save |
 | Holds a setting of the wrong kind, such as `mqtt` set to `null` or a `feedback` that is neither `ask` nor `off` | Loads with that setting at its default, which is logged and shown as a startup warning, `The saved mqtt setting could not be used, so it was reset` |
 
 | Install | Data directory |
@@ -332,7 +333,7 @@ services:
 
 | Needs | Because |
 |---|---|
-| The data directory and everything in it owned by that user | The hub writes `state.json` and `prints/` there. It stops at start if it can't read `state.json` or create `prints/`, and a directory it can read but not write raises a dashboard warning at the first save. Saves are written in the background, so a slow disk never holds up a camera |
+| The data directory and everything in it owned by that user | The hub writes `state.json` and `prints/` there. It stops at start if it can't read `state.json` or write to the directory, naming the directory and its owner in the log. A disk that fills or goes read-only later raises a dashboard warning at the next save. Saves are written in the background, so a slow disk never holds up a camera |
 | The host's `video` group in `group_add` | A [passed-in camera](cameras.md#cameras-plugged-into-the-hub) is readable by that group only. `getent group video` gives the number |
 | The host's `render` group in `group_add` | The same for `/dev/dri` on the [Intel image](hardware.md#intel-gpu). `getent group render` gives the number |
 
