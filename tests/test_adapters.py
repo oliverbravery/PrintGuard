@@ -1059,13 +1059,17 @@ def test_bambu_upload_does_not_wait_on_the_data_channels_tls_shutdown(monkeypatc
     ("product", "url"),
     [
         ("Bambu Lab P1S", "file:///sdcard/benchy.3mf"),
+        ("Bambu Lab A1 mini", "file:///sdcard/benchy.3mf"),
         ("Bambu Lab H2D", "ftp:///benchy.3mf"),
+        ("Bambu Lab H2D Pro", "ftp:///benchy.3mf"),
+        ("Bambu Lab P2S", "ftp:///benchy.3mf"),
+        ("Bambu Lab X2D", "ftp:///benchy.3mf"),
         ("Bambu Lab H2S", "ftp:///benchy.3mf"),
         ("Bambu Lab H2C", "ftp:///benchy.3mf"),
         ("", "file:///sdcard/benchy.3mf"),
     ],
 )
-async def test_bambu_hands_the_h2_series_an_ftp_url(bambu_printers, monkeypatch, product: str, url: str) -> None:
+async def test_bambu_hands_only_the_x1_p1_and_a1_series_a_path_on_the_sd_card(bambu_printers, monkeypatch, product: str, url: str) -> None:
     from test_gcode import sliced_3mf
 
     monkeypatch.setattr(FakeBambuPrinter, "version_modules", [{"name": "esp32", "product_name": ""}, {"name": "ota", "product_name": product}])
