@@ -37,7 +37,7 @@ from .inference import Inference
 from .mediamtx import MediaMTX, pull_source
 from .plugins import WasmPluginRuntime
 from .publish import H264Push
-from .state_file import StateFile, data_directory_refused
+from .state_file import StateFile, prepare_data_directory
 
 FPS_SAMPLE_FRAMES = 25
 FPS_SAMPLE_S = 5.0
@@ -722,11 +722,8 @@ class ServerPlatform:
         self.version = metadata.version("printguard")
         self.update_asset = update_asset
         self.host = deployment(update_asset is not None)
-        try:
-            data_dir.mkdir(parents=True, exist_ok=True)
-            self.files = DiskFileStore(data_dir / "prints")
-        except PermissionError as exc:
-            raise data_directory_refused(data_dir, f"{exc.filename} could not be created", exc) from None
+        prepare_data_directory(data_dir)
+        self.files = DiskFileStore(data_dir / "prints")
         self._model_dir = model_dir
         self._inference: Inference | None = None
         self.workers = 1
@@ -736,7 +733,7 @@ class ServerPlatform:
         self.assets = vision.assets_from_dicts(meta, protos)
         self._client = httpx.AsyncClient(follow_redirects=True)
         self.mediamtx = MediaMTX(mediamtx_api, mediamtx_rtsp, self._client, mediamtx_login)
-        self.secrets = frozenset(url_secrets(mediamtx_api) | url_secrets(mediamtx_rtsp))
+        self.secrets = frozenset(url_secrets(mediamtx_api) | url_secrets(mediamtx_rtsp) | set(mediamtx_login or ()))
         self._sources: dict[str, AVSource] = {}
         self._closing: dict[str, AVSource] = {}
         self._notices: list[Notice] = []
@@ -749,7 +746,11 @@ class ServerPlatform:
             logger.warning("plugins are disabled by PRINTGUARD_PLUGINS=off")
 
     async def configure(self, settings: dict[str, Any]) -> None:
-        """Selects the requested inference runtime."""
+        """Selects the requested inference runtime.
+
+        The runtime it replaces is closed once every frame already sent to it
+        has come back, including one a ``classify`` call made outside the scheduler.
+        """
         runtime = settings["inference_runtime"]
         inference = await asyncio.to_thread(Inference, self._model_dir, runtime)
         previous = self._inference
@@ -757,6 +758,7 @@ class ServerPlatform:
         self.workers = inference.workers
         self.inference_device = inference.device
         if previous is not None:
+            await previous.drained()
             previous.close()
         self._notices += [Notice(message) for message in inference.skipped]
         logger.info(
@@ -908,6 +910,7 @@ class ServerPlatform:
         The path is removed for every URL camera without asking how its address
         would be opened today: a printer can change its webcam to one that can
         no longer be pulled, and the path was added for the address before.
+        ``remove_path`` knows whether it ever added one.
         """
         av_source = self._sources.pop(camera_id, None)
         if av_source:

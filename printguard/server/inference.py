@@ -331,10 +331,24 @@ class Inference:
         self.runtime = selected.runtime
         self.device = selected.device
         self._pool = ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="inference")
+        self._running = 0
+        self._idle = asyncio.Event()
+        self._idle.set()
 
     async def run(self, tensor: np.ndarray) -> np.ndarray:
         """Returns the model embedding for one preprocessed frame."""
-        return await asyncio.get_running_loop().run_in_executor(self._pool, self._selected.run, tensor)
+        self._running += 1
+        self._idle.clear()
+        try:
+            return await asyncio.get_running_loop().run_in_executor(self._pool, self._selected.run, tensor)
+        finally:
+            self._running -= 1
+            if not self._running:
+                self._idle.set()
+
+    async def drained(self) -> None:
+        """Waits until every frame sent to ``run`` has come back, so closing cannot cut one short."""
+        await self._idle.wait()
 
     def close(self) -> None:
         """Releases the selected model runtime and its worker threads."""

@@ -89,10 +89,30 @@ def keep_url(sent: Any, stored: Any, scrubbed: Callable[[str], str] = scrub_url)
     return stored if is_url(stored) and sent == scrubbed(stored) else sent
 
 
-def _address(config: dict[str, Any]) -> tuple[Any, ...]:
-    """Where a config points, with an absent port read as the default one, so typing it is not a move."""
-    port = config.get("port") or 1883
-    return tuple(port if field == "port" else config.get(field) for field in ADDRESS_FIELDS)
+def address_moved(stored: dict[str, Any], config: dict[str, Any]) -> bool:
+    """Whether a config points somewhere other than the stored one does.
+
+    A port left blank means the one the broker's ``tls`` setting implies, 8883
+    with it and 1883 without, so typing the port already in effect is not a
+    move. Neither config naming a port is not one either, whatever ``tls`` is,
+    since a switch alone leaves the user at the same broker. Any other port, or
+    another host or URL, is.
+
+    Args:
+        stored: The config the engine holds.
+        config: The config a client sent.
+
+    Returns:
+        True when a stored secret may not be presented at the new address.
+    """
+    if any(config.get(field) != stored.get(field) for field in ADDRESS_FIELDS if field != "port"):
+        return True
+    return bool(stored.get("port") or config.get("port")) and port_in_effect(stored) != port_in_effect(config)
+
+
+def port_in_effect(config: dict[str, Any]) -> int:
+    """The port a config connects to, which is the one the MQTT bridge dials."""
+    return config.get("port") or (8883 if config.get("tls") else 1883)
 
 
 def keep_stored(config: dict[str, Any], stored: dict[str, Any], secrets: Mapping[str, str]) -> dict[str, Any]:
@@ -122,6 +142,6 @@ def keep_stored(config: dict[str, Any], stored: dict[str, Any], secrets: Mapping
     unscrubbed = {key: keep_url(value, stored.get(key)) for key, value in config.items()}
     merged = {**unscrubbed, **kept, **cleared}
     held = sorted(key for key, value in kept.items() if value)
-    if held and _address(merged) != _address(stored):
+    if held and address_moved(stored, merged):
         raise ValueError(f"send {' and '.join(secrets[key].partition(' (')[0] for key in held)} again, since a stored secret is only kept for the address it was saved with")
     return merged

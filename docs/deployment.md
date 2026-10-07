@@ -56,16 +56,16 @@ flowchart LR
 Cameras that PrintGuard pulls from, and printers it talks to, need no published ports at
 all. The compose file publishes `8000` and `8554`, so add `"1935:1935"` for an RTMP push.
 
-Ports `8554` and `1935` take no login. Anyone who can reach them can read any camera's stream
-by its id and publish a stream of their own, because cameras push to the hub that way. Remove `"8554:8554"` from the compose file if no camera pushes to the hub.
+Ports `8554` and `1935` take no login to publish, because cameras push to the hub that way, so anyone who can reach them can publish a stream of their own.
+Reading a stream from them needs a login the hub makes up each time it starts, so nobody else can watch a camera from there. Remove `"8554:8554"` from the compose file if no camera pushes to the hub.
 
 The desktop app listens on the same three ports on every interface of the computer it runs on,
 so the same rule applies to it on a network you don't trust.
 
 On the desktop app `9997` and `8888` are that computer's own loopback, which a web page open in
-its browser can reach. The MediaMTX control API on `9997` only answers a login the hub makes up
-each time it starts and passes to MediaMTX in its environment, so it is never on disk. Neither
-port sends CORS headers, so a page from another origin can't read a reply from them.
+its browser can reach, including one that points a name at it. The MediaMTX control API on `9997` and the HLS muxer on `8888`
+only answer a login the hub makes up each time it starts and passes to MediaMTX in its environment, so it is never on disk.
+Neither port sends CORS headers either.
 
 ## Choosing an approach
 
@@ -190,14 +190,14 @@ host or forwards it. Tailscale, Cloudflare and oauth2-proxy all do one or the ot
 
 The hub also rejects any WebSocket, print upload or camera stream request a browser sends from an
 `Origin` that is not the address the request was for, with the same scheme and port, or one listed in
-`PRINTGUARD_ORIGINS`. Behind a proxy that ends TLS, send `X-Forwarded-Proto` so the scheme matches. An upload or stream
+`PRINTGUARD_ORIGINS`. Behind a proxy that ends TLS, send `X-Forwarded-Proto` so the scheme matches. It can be `http`, `https`, `ws` or `wss`, and a value that is none of those only stops the hub matching its own address, so a listed origin still gets in. An upload or stream
 request with no `Origin`, which is what a script sends, is let through. A WebSocket with none is refused,
 since every browser sends one and only the dashboard opens them. An `Origin` that isn't a valid
 address is refused too, with a `403` or by closing the WebSocket. An auth proxy checks the session cookie,
 and the browser attaches that cookie to sockets opened by other sites too, so this is what stops
 a signed-in user's other tabs from driving the engine.
 
-The dashboard and its files carry `X-Frame-Options: SAMEORIGIN` and a `frame-ancestors 'self'` policy, so no other site can frame the hub and click through it.
+The dashboard and its files carry `X-Frame-Options: SAMEORIGIN` and a `frame-ancestors 'self'` policy, so no other site can frame the hub and click through it. An origin listed in `PRINTGUARD_ORIGINS` can frame it too, such as a Home Assistant panel, and with one listed the hub sends the `frame-ancestors` policy alone, since `X-Frame-Options` can't name more than one origin.
 
 ## Plugins
 
@@ -229,9 +229,9 @@ Install only plugins you trust as far as the permissions you grant them, and pre
 | No router port-forwards for `8000`, `8554` or `1935` | The hub has no authentication of its own |
 | Only admit people you would hand the printer to | There are no per-user roles, so anyone who authenticates sees every camera and controls every printer. They can replace a saved key or password but can't read one back, since [no stored secret leaves the hub](api.md#the-resource-model) |
 | Bind ports to `127.0.0.1` when a proxy on the same host is the only client | Keeps the app unreachable except through the proxy |
-| Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback, and the hub proxies HLS out through `:8000`. The control API only answers the hub's own login, but the HLS muxer takes none |
+| Leave `9997` and `8888` unpublished | The MediaMTX control API and HLS muxer bind to loopback, and the hub proxies HLS out through `:8000`. Both only answer the hub's own login |
 | List in `PRINTGUARD_ORIGINS` only the addresses you open the hub at | Every name in it is one a web page may reach the hub under. See [host and origin checking](#host-and-origin-checking) |
-| Publish `8554` and `1935` only to a network you trust, or not at all | The streaming server takes no login. Anyone who can reach those ports can watch any camera's stream and publish one of their own. A hub that only pulls from its cameras needs neither port published |
+| Publish `8554` and `1935` only to a network you trust, or not at all | The streaming server takes no login to publish. Anyone who can reach those ports can publish a stream of their own, and reading one needs the hub's own login. A hub that only pulls from its cameras needs neither port published |
 | Serve over HTTPS if you issue API tokens | Bearer tokens must never travel in clear. See [API & MCP](api.md) |
 | Grant a plugin nothing you would not grant its author | Especially **Control printers** and **Authorise every request**. `PRINTGUARD_PLUGINS=off` is the way back from a lockout |
 | Keep the image current | `latest` moves on every release |
@@ -290,6 +290,7 @@ and overwrites it each time.
 | Won't parse, isn't a JSON object, or has a section of the wrong type, such as `monitors` holding text | Is moved to `state.json.corrupt` and the hub starts empty |
 | The hub's user may not read, or may not move aside when it is damaged | [Stops the hub](troubleshooting.md#starting-up) with a log line naming the data directory and its owner, which has to be that user |
 | Holds a camera, printer, monitor, print, review, plugin or API token record of the wrong shape | Loads without that record, which is logged and shown as a startup warning, `A saved camera (name) could not be read and was dropped`, and gone from the file at the next save. A monitor bound to a printer that was dropped loses that link, with a warning |
+| Holds a number that is NaN or infinite, which a 2.5 hub could be sent over REST | Loads without that number, which is logged, and the file is kept as it is until the next save |
 | Holds a setting of the wrong kind, such as `mqtt` set to `null` or a `feedback` that is neither `ask` nor `off` | Loads with that setting at its default, which is logged and shown as a startup warning, `The saved mqtt setting could not be used, so it was reset` |
 
 | Install | Data directory |
@@ -332,7 +333,7 @@ services:
 
 | Needs | Because |
 |---|---|
-| The data directory and everything in it owned by that user | The hub writes `state.json` and `prints/` there. It stops at start if it can't read `state.json` or create `prints/`, and a directory it can read but not write raises a dashboard warning at the first save. Saves are written in the background, so a slow disk never holds up a camera |
+| The data directory and everything in it owned by that user | The hub writes `state.json` and `prints/` there. It stops at start if it can't read `state.json` or write to the directory, naming the directory and its owner in the log. A disk that fills or goes read-only later raises a dashboard warning at the next save. Saves are written in the background, so a slow disk never holds up a camera |
 | The host's `video` group in `group_add` | A [passed-in camera](cameras.md#cameras-plugged-into-the-hub) is readable by that group only. `getent group video` gives the number |
 | The host's `render` group in `group_add` | The same for `/dev/dri` on the [Intel image](hardware.md#intel-gpu). `getent group render` gives the number |
 

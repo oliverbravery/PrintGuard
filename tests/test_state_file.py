@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from printguard.server.events import encode_event
 from printguard.server.platform import ServerPlatform
 from printguard.server.state_file import StateFile
 
@@ -208,10 +209,56 @@ def test_a_data_directory_the_hub_may_not_write_stops_the_hub_with_the_owner_nam
     monkeypatch.setenv("PRINTGUARD_PLUGINS", "off")
     tmp_path.chmod(0o500)
     try:
-        with pytest.raises(RuntimeError, match="prints could not be created .*belongs to .*belong to the user the hub runs as"):
+        with pytest.raises(RuntimeError, match="could not be created .*belongs to .*belong to the user the hub runs as"):
             ServerPlatform(Path("models"), tmp_path, "http://localhost:9997", "rtsp://localhost:8554")
     finally:
         tmp_path.chmod(0o700)
+
+
+@needs_an_unprivileged_user
+def test_a_data_directory_that_already_holds_prints_but_cannot_be_written_stops_the_hub(tmp_path, monkeypatch) -> None:
+    """It used to start and only warn at the first save, with the settings already lost."""
+    monkeypatch.setenv("PRINTGUARD_PLUGINS", "off")
+    (tmp_path / "prints").mkdir()
+    tmp_path.chmod(0o500)
+    try:
+        with pytest.raises(RuntimeError, match="could not be created .*belongs to .*belong to the user the hub runs as") as raised:
+            ServerPlatform(Path("models"), tmp_path, "http://localhost:9997", "rtsp://localhost:8554")
+    finally:
+        tmp_path.chmod(0o700)
+
+    assert str(tmp_path) in str(raised.value)
+    assert list(tmp_path.iterdir()) == [tmp_path / "prints"]
+
+
+@needs_an_unprivileged_user
+def test_a_data_directory_that_cannot_be_created_names_the_owner_of_the_parent_that_exists(tmp_path, monkeypatch) -> None:
+    """The owner of the directory itself was asked for, and a missing one raised FileNotFoundError."""
+    monkeypatch.setenv("PRINTGUARD_PLUGINS", "off")
+    tmp_path.chmod(0o500)
+    try:
+        with pytest.raises(RuntimeError, match=f"{tmp_path / 'data'} does not exist and {tmp_path} belongs to .*belong to the user the hub runs as"):
+            ServerPlatform(Path("models"), tmp_path / "data", "http://localhost:9997", "rtsp://localhost:8554")
+    finally:
+        tmp_path.chmod(0o700)
+
+
+def test_a_state_file_holding_numbers_that_are_not_finite_loads_without_them_and_is_kept(tmp_path, caplog) -> None:
+    """A 2.5 hub took NaN over REST, and a state holding one could not be sent to any dashboard."""
+    (tmp_path / "state.json").write_text(
+        '{"settings": {"mqtt": {"keepalive": NaN, "host": "broker"}, "notifiers": {"ntfy": {"config": {"timeout": Infinity}}}},'
+        ' "monitors": [{"id": "m", "thresholds": [1, -1e999]}]}'
+    )
+    with caplog.at_level("WARNING"):
+        state = state_file_in(tmp_path).load()
+
+    assert state == {
+        "settings": {"mqtt": {"host": "broker"}, "notifiers": {"ntfy": {"config": {}}}},
+        "monitors": [{"id": "m", "thresholds": [1, None]}],
+    }
+    encode_event({"event": "state", "state": state})
+    assert "state.settings.mqtt.keepalive" in caplog.text and "state.monitors[0].thresholds[1]" in caplog.text
+    assert (tmp_path / "state.json").exists() and not (tmp_path / "state.json.corrupt").exists()
 
 
 async def test_stopping_the_hub_writes_the_state_still_queued(tmp_path, monkeypatch) -> None:

@@ -203,3 +203,13 @@ async def test_a_snapshot_whose_file_is_gone_is_a_tool_error_that_names_no_path(
         assert str(tmp_path) not in str(refused.value)
     finally:
         await engine.stop()
+
+
+async def test_the_settings_tool_takes_the_same_typed_keys_as_the_rest_route() -> None:
+    engine, mcp, _ = await _server()
+    try:
+        schema = (await mcp.get_tool("update_settings")).parameters["properties"]
+        assert {"notifiers", "mqtt", "inference_runtime", "preheat", "fault_grace_s", "update_check", "feedback"} <= set(schema)
+        assert schema["fault_grace_s"]["anyOf"][0]["type"] == "number" and schema["feedback"]["anyOf"][0]["enum"] == ["ask", "off"]
+    finally:
+        await engine.stop()

@@ -191,7 +191,7 @@ request, this API included, until that name is in
 | `POST` | `/prints?filename=` | Upload a sliced file of up to 512 MB as the raw request body. `name`, a comma-separated `printer_ids` and first layer `nozzle` and `bed` temperatures are optional. A file with nothing in it, or a 3mf holding a member compressed with anything but stored or deflate, is refused |
 | `PATCH` | `/prints/{id}` | Rename a print file or change the printers it is tagged for |
 | `DELETE` | `/prints/{id}` | Remove a print file |
-| `PATCH` | `/settings` | Update `notifiers`, `mqtt`, `inference_runtime` or `preheat`. Each one you send replaces the stored one, [keeping the secrets a read left out](#the-resource-model). No other setting can be changed here |
+| `PATCH` | `/settings` | Update `notifiers`, `mqtt`, `inference_runtime`, `preheat`, `fault_grace_s`, `update_check` or `feedback`. Each one you send replaces the stored one, [keeping the secrets a read left out](#the-resource-model). A value of the wrong type is a `422`. The theme, layout and plugin catalogue are the dashboard's own and can't be changed here |
 | `POST` | `/notifiers/test` | `{"provider", "config"}`, sends a test alert. A secret left out or blank is filled in from the saved channel, [for the address it was saved with](#the-resource-model) |
 
 </details>
@@ -205,7 +205,7 @@ The bodies the manage routes take. Every field is optional on a `PATCH`.
 | Camera update | `name`, `brightness`, `contrast`, `sharpness`, `rotation` of 0, 90, 180 or 270, `detect_fps`, and `crop` as `{"x", "y", "w", "h"}` in shares of the frame, where the whole frame clears it |
 | Printer | `name`, `provider`, `config` |
 | Print file update | `name`, `printer_ids` |
-| Settings | `notifiers` keyed by channel id, [`mqtt`](#home-assistant), `inference_runtime` of `auto`, `litert` or `onnx`, and `preheat` as a list of `{"name", "nozzle", "bed"}` |
+| Settings | `notifiers` keyed by channel id, [`mqtt`](#home-assistant), `inference_runtime` of `auto`, `litert` or `onnx`, `preheat` as a list of `{"name", "nozzle", "bed"}`, `fault_grace_s` in seconds (30 to 900, a number outside that is moved to the nearest end), `update_check` as true or false and `feedback` as `ask` or `off` |
 
 `GET /state` lists each printer service and alert channel under `integrations` and `notifiers`,
 with the config fields it takes.
@@ -384,7 +384,7 @@ forms save under the same rules:
 | A secret field left out or blank | Keeps the stored value |
 | An address unchanged from how you read it | Keeps the stored address, credentials included |
 | A secret field as `null` | Clears it, which is how to remove the MQTT password |
-| A changed `base_url`, `host`, `port` or `url` without the secrets | Answers `400` with `send API key again, since a stored secret is only kept for the address it was saved with`, naming the fields as the dashboard labels them. The ntfy topic URL and the Discord webhook are themselves the secret, so a new one replaces the old |
+| A changed `base_url`, `host`, `port` or `url` without the secrets. A blank broker port is `8883` with TLS and `1883` without, so typing that one isn't a change | Answers `400` with `send API key again, since a stored secret is only kept for the address it was saved with`, naming the fields as the dashboard labels them. The ntfy topic URL and the Discord webhook are themselves the secret, so a new one replaces the old |
 | A printer with a different `provider` | Keeps nothing of the old config, so send the new one whole. A config field the provider does not declare is dropped |
 | An address holding `[redacted]` | Answers `400` with `the address has a hidden part, type it in full` |
 | An address that isn't a valid URL | Answers `400`, since it could not be redacted afterwards |

@@ -65,7 +65,7 @@ flowchart LR
 |---|---|
 | `/api/ws` | The engine socket the dashboard speaks the protocol over |
 | `/api/publish/{path}` | A second WebSocket taking a browser's camera recording, which [`server/publish.py`](../printguard/server/publish.py) remuxes into MediaMTX over RTSP |
-| `/hls/{path}` | A proxy to MediaMTX's HLS, served as fMP4 segments (`hlsVariant: fmp4`, not the low-latency variant), which also wakes a sleeping camera source for the viewer. A request from another origin is refused and MediaMTX's CORS headers are dropped, so neither a page on another site nor a plugin page can pull a feed |
+| `/hls/{path}` | A proxy to MediaMTX's HLS, which reads it with the hub's own login, served as fMP4 segments (`hlsVariant: fmp4`, not the low-latency variant), which also wakes a sleeping camera source for the viewer. A request from another origin is refused and MediaMTX's CORS headers are dropped, so neither a page on another site nor a plugin page can pull a feed |
 | `/api/health` | `{ok, version}`, never cached, used by the image's health check |
 | `/api/prints`, `/api/prints/inspect`, `/api/prints/{id}/gcode`, `/api/prints/{id}/thumbnail` | The dashboard's print library upload, pre-upload inspection, gcode viewer and previews |
 | `/plugins/{id}/{path}` | A plugin's own routes, answered from its sandbox |
@@ -94,7 +94,7 @@ for the hub:
 | `plugin_runtime` | A `PluginRuntime`, or `None` with `PRINTGUARD_PLUGINS=off` |
 | `secrets` | Credentials the deployment holds outside the engine's state, such as the login in `MEDIAMTX_API`, which the engine scrubs from every message and report |
 | `files` | A `FileStore` |
-| `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count |
+| `configure(settings)` | Selects LiteRT, ONNX Runtime or the faster local benchmark, and measures its worker count. A runtime it replaces is closed once every frame already on it has come back, including one from `classify` |
 | `take_notices()` | What the hub has worked around since the last call, as `Notice` records: an accelerator passed over for the CPU, and a camera whose live view cannot publish or has come back. The hub meets these on its own threads, so the engine collects them on its ticker and raises each as a `warning`, and reads the ones from loading the model once at start into `startup_warnings` |
 | `infer(rgb)` | `vision.preprocess`, the selected LiteRT or ONNX Runtime model, then `vision.classify` |
 | `discover_cameras()` | V4L2, AVFoundation or DirectShow capture devices, plus the MediaMTX path list |
@@ -239,7 +239,7 @@ No stored secret is in the snapshot, so no transport is sent one.
 | A secret field left out or blank | Keeps the stored value |
 | A secret field as `null` | Clears it |
 | An address as the snapshot shows it | Keeps the stored address with its login |
-| A changed `base_url`, `host`, `port` or `url` while a secret is being kept | Refuses with `send <field label> again, since a stored secret is only kept for the address it was saved with` |
+| A changed `base_url`, `host`, `port` or `url` while a secret is being kept. A blank broker port is the one in effect, `8883` with TLS and `1883` without, so typing it or switching TLS with the port blank isn't a change | Refuses with `send <field label> again, since a stored secret is only kept for the address it was saved with` |
 | A printer with a different `provider` | Keeps nothing of the old config, so the patch carries the new one whole. A config field the provider does not declare is dropped |
 | An address holding `[redacted]` | Refuses with `the address has a hidden part, type it in full` |
 
@@ -783,8 +783,8 @@ for development and packaging.
 |---|---|---|
 | `MODEL_DIR` | The model, its metadata and prototypes | `models/` |
 | `STATIC_DIR` | The built dashboard the hub serves | `web/dist` |
-| `MEDIAMTX_BINARY` | The MediaMTX binary the hub supervises, 1.19.0 or newer. The hub starts it with a random login for its control API, which `mediamtx.yml` grants to nobody. Unset, the hub expects one already running | Unset |
-| `MEDIAMTX_CONFIG` | The config that binary starts with. The hub adds its API login as the second entry of `authInternalUsers`, so a config of your own has to declare exactly one user there, as `mediamtx.yml` does. A second one would be overwritten | `mediamtx.yml` |
+| `MEDIAMTX_BINARY` | The MediaMTX binary the hub supervises, 1.19.0 or newer. The hub starts it with a random login for its control API and for reading streams, which `mediamtx.yml` grants to nobody. Unset, the hub expects one already running | Unset |
+| `MEDIAMTX_CONFIG` | The config that binary starts with. The hub adds its login as the second entry of `authInternalUsers`, so a config of your own has to declare exactly one user there, as `mediamtx.yml` does. A second one would be overwritten | `mediamtx.yml` |
 | `MEDIAMTX_API`, `MEDIAMTX_RTSP`, `MEDIAMTX_HLS` | Where MediaMTX's control API, RTSP and HLS listeners are. If a MediaMTX you run yourself wants a login for its API, put it in the URL as `http://user:pass@host:9997`, and a login in `MEDIAMTX_RTSP` is scrubbed the same way | `http://localhost:9997`, `rtsp://localhost:8554`, `http://localhost:8888` |
 | `UPDATE_ASSET` | The release asset this deployment updates with. Setting it marks the hub as the desktop app | Unset, and the platform's installer in the desktop app |
 | `PRINTGUARD_VARIANT` | The image variant suffix reported in `host`, set from the image build arg | Empty |

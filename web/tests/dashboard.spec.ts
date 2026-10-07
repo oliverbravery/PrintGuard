@@ -2056,6 +2056,29 @@ test("the broker form refuses an empty host and asks for the password again when
   await expect(save).toBeEnabled();
 });
 
+test("the broker password follows the port in effect, so typing it or switching TLS keeps it and another port asks again", async ({ page }) => {
+  const broker = { enabled: true, host: "broker.lan", tls: true, username: "pg" };
+  const state = engine({ settings: { ...engine().settings, mqtt: broker }, secrets_set: { notifiers: {}, mqtt: ["password"] } });
+  await dashboard(page, { engine: state, dialog: "settings", settingsTab: "mqtt" });
+  await page.getByRole("tab", { name: "Home Assistant" }).click();
+  const save = page.getByRole("button", { name: "Save broker settings" });
+  const port = page.getByLabel("Broker port");
+  const retype = page.getByText("Retype Password, since the address changed.");
+
+  await port.fill("8883");
+  await expect(retype).toBeHidden();
+  await expect(save).toBeEnabled();
+
+  await port.fill("1883");
+  await expect(retype).toBeVisible();
+  await expect(save).toBeDisabled();
+
+  await port.fill("");
+  await page.getByText("Use TLS").click();
+  await expect(retype).toBeHidden();
+  await expect(save).toBeEnabled();
+});
+
 test("the broker password is kept by an unrelated broker edit, replaced when typed and removed by Clear", async ({ page }) => {
   const broker = { enabled: true, host: "broker.lan", port: 1883, username: "pg" };
   const state = engine({ settings: { ...engine().settings, mqtt: broker }, secrets_set: { notifiers: {}, mqtt: ["password"] } });

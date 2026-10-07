@@ -23,7 +23,7 @@ import pytest
 from fakes import FakePlatform
 
 from printguard.engine import engine as engine_module
-from printguard.engine import feedback, logs, oauth, plugins, reports, reviews, vision, watchdog
+from printguard.engine import credentials, feedback, logs, oauth, plugins, reports, reviews, vision, watchdog
 from printguard.engine.engine import EVENT_LOG_LEVELS, Engine
 from printguard.engine.integrations import INTEGRATIONS, DeviceState, DeviceStatus
 from printguard.engine.notifiers import NOTIFIERS
@@ -6338,6 +6338,57 @@ async def test_typing_the_default_broker_port_is_not_a_changed_address() -> None
 
         assert not _of(events, "error")
         assert engine.settings["mqtt"] == {"host": "broker", "port": 1883, "password": "mqtt-PASS-77b1e0"}
+
+
+@pytest.mark.parametrize(
+    ("stored", "sent", "moved"),
+    [
+        ({}, {}, False),
+        ({}, {"tls": True}, False),
+        ({"tls": True}, {}, False),
+        ({"tls": True}, {"tls": True, "port": 8883}, False),
+        ({"tls": True}, {"tls": True, "port": 1883}, True),
+        ({"tls": True}, {"port": 1883}, True),
+        ({"tls": True}, {"port": 8883}, False),
+        ({}, {"port": 1883}, False),
+        ({}, {"port": 8883}, True),
+        ({}, {"tls": True, "port": 8883}, True),
+        ({"port": 1883}, {}, False),
+        ({"tls": True, "port": 8883}, {"tls": True}, False),
+        ({"tls": True, "port": 8883}, {}, True),
+        ({"tls": True, "port": 8883}, {"tls": True, "port": 8884}, True),
+        ({"port": 1884}, {}, True),
+        ({"port": 1884}, {"port": 1884}, False),
+        ({}, {"host": "elsewhere.example"}, True),
+        ({}, {"base_url": "http://elsewhere.example"}, True),
+        ({}, {"url": "https://elsewhere.example/topic"}, True),
+    ],
+)
+def test_an_address_moves_with_its_host_url_or_the_port_actually_dialled(stored: dict, sent: dict, moved: bool) -> None:
+    """A blank port is the one the broker's tls setting implies, and a tls switch with the port left blank is the same broker."""
+    assert credentials.address_moved({"host": "broker.lan", **stored}, {"host": "broker.lan", **sent}) is moved
+
+
+async def test_the_broker_password_is_kept_only_when_the_port_dialled_is_the_one_stored() -> None:
+    platform = FakePlatform(infer_s=0.02)
+    seeded = {"host": "broker.lan", "tls": True, "password": "broker-PASS-9"}
+    async with running_engine(platform, camera_fps=[]) as (engine, events):
+        for patch in (
+            {"tls": True, "port": 8883},
+            {"tls": False},
+            {"tls": True},
+        ):
+            await engine.handle({"cmd": "settings.update", "patch": {"mqtt": seeded}})
+            await engine.handle({"cmd": "settings.update", "patch": {"mqtt": {"host": "broker.lan", **patch, "password": ""}}})
+            assert not _of(events, "error"), patch
+            assert engine.settings["mqtt"]["password"] == "broker-PASS-9", patch
+        await engine.handle({"cmd": "settings.update", "patch": {"mqtt": seeded}})
+        await engine.handle({"cmd": "settings.update", "patch": {"mqtt": {"host": "broker.lan", "tls": True, "port": 1883, "password": ""}}})
+
+    assert [event["message"] for event in _of(events, "error")] == [
+        "send Password again, since a stored secret is only kept for the address it was saved with"
+    ]
+    assert "port" not in engine.settings["mqtt"], "a port other than the one in effect was saved with the stored password"
 
 
 async def test_a_kept_secret_is_refused_for_an_address_that_changed() -> None:

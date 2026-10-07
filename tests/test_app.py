@@ -41,21 +41,31 @@ async def test_web_static_files_revalidate_html_and_cache_hashed_assets(tmp_path
     assert "etag" in html.headers and "etag" in asset.headers
 
 
-async def test_the_dashboard_and_its_files_cannot_be_framed_by_another_site(tmp_path, monkeypatch) -> None:
-    """The dashboard frames its own sandbox pages, so the hub's own origin stays allowed."""
+@pytest.mark.parametrize(
+    ("listed", "policy", "legacy_header"),
+    [
+        ("", "frame-ancestors 'self'", "SAMEORIGIN"),
+        ("https://ha.example.com:443, http://hass.local:8123", "frame-ancestors 'self' http://hass.local:8123 https://ha.example.com", None),
+    ],
+)
+async def test_the_dashboard_and_its_files_are_framed_only_by_the_hub_and_the_origins_listed(
+    tmp_path, monkeypatch, listed: str, policy: str, legacy_header: str | None
+) -> None:
+    """The dashboard frames its own sandbox pages, and X-Frame-Options cannot name a second origin, so it goes when one is listed."""
     (tmp_path / "assets").mkdir()
     (tmp_path / "index.html").write_text("<html></html>")
     (tmp_path / "plugin-sandbox.html").write_text("<html></html>")
     (tmp_path / "assets" / "index-abc123.js").write_text("export {}")
     monkeypatch.setenv("STATIC_DIR", str(tmp_path))
+    monkeypatch.setenv("PRINTGUARD_ORIGINS", listed)
     app = create_app()
     app.state.engine = SimpleNamespace(platform=SimpleNamespace(version="2.6.0", plugin_runtime=None))
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         for path in ("/", "/assets/index-abc123.js", "/plugin-sandbox.html"):
             response = await client.get(path)
-            assert response.headers["x-frame-options"] == "SAMEORIGIN", path
-            assert response.headers["content-security-policy"] == "frame-ancestors 'self'", path
+            assert response.headers.get("x-frame-options") == legacy_header, path
+            assert response.headers["content-security-policy"] == policy, path
 
 
 async def test_the_hub_serves_no_interactive_api_pages_and_no_root_schema(monkeypatch) -> None:
@@ -135,9 +145,10 @@ async def handshake_answer(app, path: str, headers: dict[str, str]) -> str:
 class Tab:
     """Plays a browser tab on one of the hub's sockets, a frame at a time."""
 
-    def __init__(self, app, path: str = "/api/ws") -> None:
+    def __init__(self, app, path: str = "/api/ws", headers: dict[str, str] | None = None) -> None:
         self._app = app
         self._path = path
+        self._headers = headers or {"host": "test", "origin": "http://test"}
         self._inbound: asyncio.Queue[dict] = asyncio.Queue()
         self._sent: list[dict] = []
         self._inbound.put_nowait({"type": "websocket.connect"})
@@ -150,7 +161,7 @@ class Tab:
             "raw_path": self._path.encode(),
             "root_path": "",
             "query_string": b"",
-            "headers": [(b"host", b"test"), (b"origin", b"http://test")],
+            "headers": [(name.encode(), value.encode()) for name, value in self._headers.items()],
             "subprotocols": [],
         }
         self._socket = asyncio.ensure_future(self._app(scope, self._inbound.get, self._keep))
@@ -696,8 +707,8 @@ async def test_an_upload_the_engine_never_finishes_adding_leaves_no_file(tmp_pat
     app.state.engine = engine
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            with pytest.raises(TimeoutError):
-                await client.post("/api/prints?filename=benchy.gcode", content=PRUSA, headers={"origin": "http://test"})
+            late = await client.post("/api/prints?filename=benchy.gcode", content=PRUSA, headers={"origin": "http://test"})
+            assert late.status_code == 504 and "took too long" in late.json()["detail"]
         assert not engine.prints.values() and not list(tmp_path.iterdir())
     finally:
         await engine.stop()
@@ -960,6 +971,49 @@ async def test_an_origin_is_the_hubs_own_only_with_the_scheme_and_port_it_was_as
     async with named_hub(monkeypatch) as (_app, client, _told):
         headers = {"host": host, "origin": origin, **extra}
         assert (await client.post("/api/prints?filename=a.stl", content=b"solid", headers=headers)).status_code == answered
+
+
+PROXIED_SOCKET_CASES = [
+    ({}, "http://test", True),
+    ({"x-forwarded-proto": "ws"}, "http://test", True),
+    ({"x-forwarded-proto": "wss"}, "https://test", True),
+    ({"x-forwarded-proto": "wss"}, "http://test", False),
+    ({"x-forwarded-proto": "https"}, "https://test", True),
+    ({"x-forwarded-proto": "HTTPS"}, "https://test", True),
+    ({"x-forwarded-proto": "https,http"}, "https://test", True),
+    ({"x-forwarded-proto": "https,http"}, "http://test", False),
+    ({"x-forwarded-proto": "gopher"}, "http://test", False),
+    ({"x-forwarded-proto": "gopher"}, "https://hub.example.com", False),
+]
+
+
+@pytest.mark.parametrize("listed", [False, True])
+@pytest.mark.parametrize("path", ["/api/ws", "/api/publish/cam"])
+@pytest.mark.parametrize(("forwarded", "origin", "own"), PROXIED_SOCKET_CASES)
+async def test_a_socket_is_let_in_by_the_scheme_a_proxy_forwards_whatever_word_it_uses(
+    monkeypatch, forwarded: dict[str, str], origin: str, own: bool, path: str, listed: bool
+) -> None:
+    """Traefik sends ws or wss on an upgrade, and a value that is no scheme can only fail the hub's own origin."""
+    from fakes import FakePlatform
+
+    from printguard.engine.engine import Engine
+
+    monkeypatch.setattr(app_module, "remux", lambda source, url: [None for _chunk in iter(lambda: source.read(1), b"")])
+    if listed:
+        monkeypatch.setenv("PRINTGUARD_ORIGINS", "https://hub.example.com")
+    engine = Engine(FakePlatform())
+    await engine.start()
+    app = create_app()
+    app.state.engine = engine
+    try:
+        for asked, expected in ((origin, own or (listed and origin == "https://hub.example.com")), ("https://hub.example.com", listed)):
+            async with Tab(app, path, {"host": "test", "origin": asked, **forwarded}) as tab:
+                async with asyncio.timeout(2):
+                    while not tab._sent:
+                        await asyncio.sleep(0.01)
+                assert (tab._sent[0]["type"] == "websocket.accept") is expected, (asked, forwarded, listed)
+    finally:
+        await engine.stop()
 
 
 @pytest.mark.parametrize("origin", ["http://test:abc", "http://test:99999", "http://[::1"])

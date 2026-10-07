@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -44,14 +46,64 @@ def data_directory_refused(directory: Path, problem: str, cause: OSError) -> Run
     Returns:
         The error to raise, saying whose the directory is and whose it has to be.
     """
+    existing = next(parent for parent in (directory, *directory.parents) if parent.exists())
     try:
-        owner = directory.owner()
+        owner = existing.owner()
     except (KeyError, NotImplementedError):
-        owner = f"uid {directory.stat().st_uid}"
+        owner = f"uid {existing.stat().st_uid}"
+    whose = f"{directory} belongs to {owner}" if existing == directory else f"{directory} does not exist and {existing} belongs to {owner}"
     return RuntimeError(
         f"{problem} ({cause}), so the hub cannot start. "
-        f"{directory} belongs to {owner}, and it and the files in it have to belong to the user the hub runs as"
+        f"{whose}, and the data directory and the files in it have to belong to the user the hub runs as"
     )
+
+
+def prepare_data_directory(directory: Path) -> None:
+    """Creates the data directory and checks the hub can write to it.
+
+    A directory the hub can read but not write would otherwise only show at
+    the first save, with the settings already lost.
+
+    Args:
+        directory: The data directory.
+
+    Raises:
+        RuntimeError: If it cannot be created or written to, saying whose it has to be.
+    """
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        tempfile.TemporaryFile(dir=directory).close()
+    except OSError as exc:
+        raise data_directory_refused(directory, f"{exc.filename} could not be created", exc) from None
+
+
+def drop_non_finite(value: Any, path: str, dropped: list[str]) -> None:
+    """Removes every NaN and infinity from parsed JSON, in place.
+
+    A dashboard cannot be sent one, so a hub that kept it would break every
+    socket it opened. A key holding one is deleted and a list item becomes null.
+
+    Args:
+        value: Parsed JSON of any shape.
+        path: Where ``value`` sits in the document, for the report.
+        dropped: Receives the path of each number that was removed.
+    """
+    if isinstance(value, dict):
+        entries = list(value.items())
+    elif isinstance(value, list):
+        entries = list(enumerate(value))
+    else:
+        return
+    for key, item in entries:
+        here = f"{path}.{key}" if isinstance(value, dict) else f"{path}[{key}]"
+        if isinstance(item, float) and not math.isfinite(item):
+            dropped.append(here)
+            if isinstance(value, dict):
+                del value[key]
+            else:
+                value[key] = None
+        else:
+            drop_non_finite(item, here, dropped)
 
 
 class StateFile:
@@ -94,6 +146,10 @@ class StateFile:
             for section, expected in STATE_SECTIONS.items():
                 if section in state and not isinstance(state[section], expected):
                     raise ValueError(f"its {section} are {type(state[section]).__name__}")
+            dropped: list[str] = []
+            drop_non_finite(state, "state", dropped)
+            if dropped:
+                logger.warning("%s held numbers that are not finite, so the hub dropped them: %s", self._path, ", ".join(dropped))
             return state
         except FileNotFoundError:
             return {}
