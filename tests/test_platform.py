@@ -1088,6 +1088,30 @@ def test_a_live_view_listener_that_never_answers_fails_the_push_instead_of_stall
     assert isinstance(outcomes[0], av.error.FFmpegError), "the push never gave up on a listener that does not answer"
 
 
+def test_a_browser_camera_recording_slower_than_a_frame_a_second_is_still_pushed() -> None:
+    """Its rate rounded down to 0 and the divide by it closed the publish socket with 1011."""
+    from printguard.server.publish import ChunkStream, remux
+
+    recording = io.BytesIO()
+    with av.open(recording, "w", format="matroska") as container:
+        stream = container.add_stream("mjpeg", rate=Fraction(1, 2))
+        stream.width, stream.height, stream.pix_fmt = 64, 48, "yuvj420p"
+        frame = av.VideoFrame.from_ndarray(np.zeros((48, 64, 3), dtype=np.uint8), format="rgb24")
+        for pts in range(3):
+            frame.pts = pts
+            for packet in stream.encode(frame):
+                container.mux(packet)
+    chunks = ChunkStream()
+    chunks.feed(recording.getvalue())
+    chunks.feed(None)
+    with socket.socket() as unused:
+        unused.bind(("127.0.0.1", 0))
+        nobody_listening = f"rtsp://127.0.0.1:{unused.getsockname()[1]}/cam"
+
+        with pytest.raises(av.error.FFmpegError):
+            remux(chunks, nobody_listening)
+
+
 def test_a_browser_camera_push_to_a_listener_that_never_answers_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:
     """The remux had no timeout, so a MediaMTX that accepted and never replied held its thread for good."""
     from printguard.server.publish import ChunkStream, remux
