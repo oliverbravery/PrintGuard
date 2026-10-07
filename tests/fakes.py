@@ -207,6 +207,10 @@ class FakePlatform:
             await asyncio.sleep(self.action_delay_s)
         if self.reject_actions and method == "POST" and "/api/job" in url:
             raise RuntimeError("printer refused")
+        if method == "POST" and ("/api/job" in url or "/api/printer/" in url):
+            return 204, ""
+        if method == "POST" and url.endswith("/api/files/local"):
+            return 201, {"files": {}, "done": True, "effectiveSelect": True, "effectivePrint": True}
         return 200, {"state": self.device_status, "progress": {"completion": 40.0}, "job": {"file": {"name": "benchy.gcode"}}}
 
     async def encode_jpeg(self, rgb: np.ndarray) -> bytes | None:
