@@ -97,7 +97,7 @@ export function StatsPage({ monitor }: { monitor: Monitor }) {
           <StatTile label="peak" value={pct(stats.max)} />
           <StatTile label="defect rate" value={`${(stats.defect_pct ?? 0).toFixed(0)}%`} />
           <StatTile label="frames" value={String(stats.inferences ?? 0)} />
-          <StatTile label="alerts" value={String(stats.alerts ?? 0)} />
+          <StatTile label="alerts" value={String(Math.max(stats.alerts ?? 0, snaps.length))} />
           <StatTile label="watch time" value={duration(stats.watch_min ?? 0)} />
         </div>
       </div>

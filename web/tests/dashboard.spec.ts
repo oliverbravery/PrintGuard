@@ -245,6 +245,16 @@ test("one kept frame is not called frames on the tile or in the review sheet", a
   await expect(page.getByRole("dialog", { name: "Prusa · review" }).getByText("PrintGuard kept 1 frame from this print.")).toBeVisible();
 });
 
+test("the review's answer buttons sit in a group named by their question and the printer model has a name", async ({ page }) => {
+  await dashboard(page, { engine: engine({ reviews: [review()] }), reviewId: "r1" });
+  const sheet = page.getByRole("dialog", { name: "Prusa · review" });
+  const question = sheet.getByRole("group", { name: "Did this print finish fine?" });
+  await expect(question.getByRole("button")).toHaveText(["Yes", "No, it failed"]);
+
+  await question.getByRole("button", { name: "Yes" }).click();
+  await expect(sheet.getByRole("textbox", { name: "Printer model" })).toBeVisible();
+});
+
 test("a review answered before its frames arrive still marks the alert frames, and a frame left out can be put back", async ({ page }) => {
   const asked = () => page.evaluate(() => (window as any).__sent.filter((c: any) => c.cmd === "review.get").length);
   const picture = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
@@ -309,6 +319,13 @@ test("opening the history asks only for the snapshots near the screen", async ({
 
   await sheet.getByRole("button", { name: /Snapshot at 90% risk/ }).last().scrollIntoViewIfNeeded();
   await expect.poll(asked).toContain("s89");
+});
+
+test("after a hub restart the alerts tile still counts the snapshots that were kept", async ({ page }) => {
+  await dashboard(page, { statsMonitorId: "m1" });
+  const snaps = [1, 2, 3].map((index) => ({ id: `s${index}`, ts: 1_700_000_000 - index, score: 0.9, action: "failed" }));
+  await emit(page, { event: "history", monitor_id: "m1", now: 1_700_000_100, buckets: [], snaps, alerts: [], stats: { alerts: 0, snaps: 3 } });
+  await expect(page.getByText("alerts", { exact: true }).locator("xpath=preceding-sibling::div")).toHaveText("3");
 });
 
 test("a failure card at the narrowest phone keeps its time and score inside the card", async ({ page }) => {
@@ -594,6 +611,24 @@ test("a heater target the printer refuses goes back to what the printer has", as
   await emit(page, { event: "error", message: "the printer refused 250", req_id: (await sent(page, "printer.heat")).req_id });
   await expect(target).toBeEnabled();
   await expect(target).toHaveValue("0");
+});
+
+test("a monitor name or heater target typed and left with Escape is still saved", async ({ page }) => {
+  const heater = { actual: 21, target: 0 };
+  const printer = {
+    id: "p1", name: "MK4", provider: "octoprint", config: {}, online: true,
+    device_state: { status: "idle", progress: 0, job: null, remaining_s: null, nozzle: heater, bed: heater },
+  };
+  await dashboard(page, { engine: engine({ printers: [printer], monitors: [monitor({ printer_id: "p1" })] }), detailId: "m1" });
+  const panel = page.getByRole("dialog", { name: "Prusa" });
+  await panel.getByRole("textbox", { name: "Name" }).fill("Bench");
+  await panel.getByRole("spinbutton", { name: "nozzle target" }).fill("215");
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+
+  const commands = () => page.evaluate(() => (window as any).__sent.map((c: any) => [c.cmd, c.patch ?? c.nozzle]));
+  expect(await commands()).toEqual(expect.arrayContaining([["monitor.update", { name: "Bench" }], ["printer.heat", 215]]));
+  expect(await commands()).toHaveLength(2);
 });
 
 test("the register form keeps what was typed when the printer is refused and clears once it is added", async ({ page }) => {
@@ -1033,6 +1068,53 @@ test("an upload the hub refuses stays in the sheet with what was typed, and clos
   await page.route(route, (request) => request.fulfill({ json: {} }));
   await page.getByRole("button", { name: "Upload", exact: true }).click();
   await expect(name).toBeHidden();
+});
+
+test("discarding or closing the sheet while a file uploads cancels the request", async ({ page }) => {
+  await page.addInitScript(() => {
+    const win = window as any;
+    const abort = XMLHttpRequest.prototype.abort;
+    win.__aborts = 0;
+    XMLHttpRequest.prototype.abort = function () {
+      win.__aborts++;
+      abort.call(this);
+    };
+  });
+  await stagePrint(page);
+  await page.route(/\/api\/prints\?/, () => {});
+  const upload = page.getByRole("button", { name: "Upload", exact: true });
+  const aborts = () => page.evaluate(() => (window as any).__aborts);
+  const stage = () => page.evaluate(() => (window as any).__pg.getState().stagePrints([new File(["G1 Z0.2\n"], "cube.gcode")]));
+
+  const sentCount = () => page.evaluate(() => (window as any).__uploads.length);
+  await upload.click();
+  await expect.poll(sentCount).toBe(1);
+  await page.getByRole("button", { name: "Discard" }).click();
+  await expect.poll(aborts).toBe(1);
+  expect(await page.evaluate(() => (window as any).__pg.getState().uploads)).toEqual([]);
+
+  await stage();
+  await upload.click();
+  await expect.poll(sentCount).toBe(2);
+  await page.getByRole("button", { name: "Cancel uploads" }).click();
+  await expect.poll(aborts).toBe(2);
+  expect(await page.evaluate(() => (window as any).__pg.getState().uploads)).toEqual([]);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("a sliced temperature cleared in the upload sheet says why Upload is off", async ({ page }) => {
+  await stagePrint(page);
+  const upload = page.getByRole("button", { name: "Upload", exact: true });
+  const nozzle = page.getByRole("spinbutton", { name: "nozzle" });
+  await expect(upload).toBeEnabled();
+  await nozzle.fill("");
+  await expect(page.getByText("Upload needs nozzle between 1 and 350 °C")).toBeVisible();
+  await expect(upload).toBeDisabled();
+  await expect(nozzle).not.toHaveAttribute("placeholder", "none");
+
+  await nozzle.fill("215");
+  await expect(page.getByText("Upload needs")).toBeHidden();
+  await expect(upload).toBeEnabled();
 });
 
 test("a preview that fails to draw on upload leaves nothing behind, and the file is read once", async ({ page }) => {
@@ -1682,7 +1764,7 @@ test("a hub that never answers the connection is tried again", async ({ page }) 
   });
   await page.goto("/");
   await expect.poll(() => page.evaluate(() => (window as any).__dialled)).toBe(1);
-  await page.clock.fastForward(12_000);
+  await page.clock.runFor(12_000);
   await expect.poll(() => page.evaluate(() => (window as any).__dialled)).toBe(2);
 });
 
@@ -1707,6 +1789,35 @@ test("a preset temperature can be cleared and retyped, and pause is off for a pa
   await nozzle.blur();
   await page.evaluate(() => (window as any).__pg.getState().flushUpdates());
   expect((await sent(page, "settings.update")).patch.preheat).toEqual([{ name: "PLA", nozzle: 210, bed: 60 }]);
+});
+
+test("a page that was frozen for longer than the silence limit does not drop a hub that kept talking", async ({ page }) => {
+  await page.clock.install();
+  await page.addInitScript(() => {
+    const win = window as any;
+    win.__dialled = 0;
+    win.WebSocket = class {
+      static OPEN = 1;
+      readyState = 1;
+      onopen: (() => void) | null = null;
+      constructor(url: string) {
+        if (!url.endsWith("/api/ws")) return;
+        win.__dialled++;
+        setTimeout(() => this.onopen?.(), 0);
+      }
+      close() {}
+      send() {}
+    };
+  });
+  await page.goto("/");
+  await expect.poll(() => page.evaluate(() => (window as any).__dialled)).toBe(1);
+  await page.clock.fastForward(12_000);
+  await page.clock.runFor(2_000);
+  expect(await page.evaluate(() => (window as any).__dialled)).toBe(1);
+
+  await page.clock.runFor(11_000);
+  await page.clock.runFor(2_000);
+  expect(await page.evaluate(() => (window as any).__dialled)).toBe(2);
 });
 
 test("pause, resume and cancel are each enabled only when the printer's state allows them", async ({ page }) => {
