@@ -104,7 +104,7 @@ const gateState = () =>
 
 const hubCount = async (hub: string) => (await gateState()).rows.find(({ scope, key }) => scope === "hub" && key === hub)?.n;
 
-const NEW = { bytes: 10, uploads: 1, day: new Date().toISOString().slice(0, 10) };
+const NEW = { bytes: 10, uploads: 1, day: new Date().toISOString().slice(0, 10), recountBeganAt: 0 };
 
 const code = async (response: Response) => ((await response.json()) as { code: string }).code;
 
@@ -357,14 +357,14 @@ describe("two requests for one frame at once", () => {
     const token = await issueToken(env.TOKEN_SECRET);
     const hub = token.split(".")[0];
     const key = `${hub}/aaaaaaaaaaaa/${frameId(7600)}.jpg`;
-    await env.GATE.getByName("gate").reserve(hub, "unrelated-network", key, JPEG.byteLength);
+    const counted = (await env.GATE.getByName("gate").reserve(hub, "unrelated-network", key, JPEG.byteLength)) as Reservation;
 
     const retried = await upload(token, "203.0.113.64", frameId(7600));
 
     expect(retried.status).toBe(429);
     expect(await code(retried)).toBe("rate_limited");
     expect(await env.FRAMES.head(key)).toBeNull();
-    await env.GATE.getByName("gate").release(hub, "unrelated-network", key, { bytes: JPEG.byteLength, uploads: 1, day: NEW.day });
+    await env.GATE.getByName("gate").release(hub, "unrelated-network", key, counted);
   });
 
   it("leaves an object that is already in the bucket as it is and counts nothing for the send", async () => {
@@ -480,6 +480,25 @@ describe("the gate", () => {
     expect(await gate.reserve("hub", "network", "first", 100)).toEqual({ ...NEW, bytes: 100 });
     await gate.recount(0);
     expect(await gate.reserve("hub", "network", "third", FRAME_BYTES_MAX)).toEqual({ ...NEW, bytes: FRAME_BYTES_MAX });
+  });
+
+  it("keeps what a recount found when a frame reserved before it began is released", async () => {
+    const duringTheListing = env.GATE.getByName("released-during-recount");
+    const early = (await duringTheListing.reserve("hub", "network", "early", 100)) as Reservation;
+    await duringTheListing.beginRecount(0);
+    const late = (await duringTheListing.reserve("hub", "network", "late", 30)) as Reservation;
+    await duringTheListing.release("hub", "network", "early", early);
+    await duringTheListing.release("hub", "network", "late", late);
+    await duringTheListing.recount(500);
+    expect(await duringTheListing.storedBytes()).toBe(500);
+
+    const afterTheListing = env.GATE.getByName("released-after-recount");
+    const slow = (await afterTheListing.reserve("hub", "network", "slow", 100)) as Reservation;
+    await afterTheListing.beginRecount(0);
+    await afterTheListing.recount(500);
+    await afterTheListing.release("hub", "network", "slow", slow);
+    expect(await afterTheListing.storedBytes()).toBe(500);
+    expect(await afterTheListing.reserve("hub", "network", "slow", 100)).toMatchObject({ bytes: 100, uploads: 1 });
   });
 });
 
