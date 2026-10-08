@@ -11,7 +11,7 @@ The format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 
 ### Changed
 
-- The image and the desktop apps are built with current versions of the GitHub Actions they use. PrintGuard itself behaves the same as 2.6.0.
+- The image and the desktop apps are built on Node 26 and with current versions of the GitHub Actions they use. PrintGuard itself behaves the same as 2.6.0.
 
 ## [2.6.0] - 2026-10-08
 
